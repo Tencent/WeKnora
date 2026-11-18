@@ -184,7 +184,7 @@ const endpoint = '/api/v1/me/browser'
 const controller = new AbortController()
 let revision = 0
 let alive = true, timer: ReturnType<typeof setTimeout> | undefined, expiry: ReturnType<typeof setTimeout> | undefined, pairExpires = 0
-const MIN_EXTENSION_VERSION = '0.3.1'
+const MIN_EXTENSION_VERSION = '0.4.1'
 const EXTENSION_STORES = [
   { label: 'localBrowser.storeInstall', url: 'https://chromewebstore.google.com/detail/hhcmgoofomhgciiibhipgmgkgnoenaoi' },
   { label: 'localBrowser.edgeStoreInstall', url: 'https://microsoftedge.microsoft.com/addons/detail/browserskill/emacgiaaaiojkkpkddmmdfhmokgmnikg' },

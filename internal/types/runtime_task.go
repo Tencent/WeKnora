@@ -53,32 +53,34 @@ const (
 // Raw payloads and results are deliberately excluded because they may contain
 // document content, signed object URLs, or connector credentials.
 type RuntimeTaskInfo struct {
-	ID              string              `json:"id"`
-	Queue           string              `json:"queue"`
-	Type            string              `json:"type"`
-	State           RuntimeTaskState    `json:"state"`
+	// ErrorCategory is a heuristic summary; raw upstream errors are not sent to the assistant.
+	ErrorCategory   string              `json:"error_category,omitempty" extensions:"x-agent"`
+	ID              string              `json:"id" extensions:"x-agent"`
+	Queue           string              `json:"queue" extensions:"x-agent"`
+	Type            string              `json:"type" extensions:"x-agent"`
+	State           RuntimeTaskState    `json:"state" extensions:"x-agent"`
 	AllowedActions  []RuntimeTaskAction `json:"allowed_actions"`
 	LastError       string              `json:"last_error,omitempty"`
-	LastFailedAt    *time.Time          `json:"last_failed_at,omitempty"`
-	NextProcessAt   *time.Time          `json:"next_process_at,omitempty"`
-	StartedAt       *time.Time          `json:"started_at,omitempty"`
-	CompletedAt     *time.Time          `json:"completed_at,omitempty"`
-	Deadline        *time.Time          `json:"deadline,omitempty"`
-	EnqueuedAt      *time.Time          `json:"enqueued_at,omitempty"`
-	Retried         int                 `json:"retried"`
-	MaxRetry        int                 `json:"max_retry"`
-	IsOrphaned      bool                `json:"is_orphaned,omitempty"`
+	LastFailedAt    *time.Time          `json:"last_failed_at,omitempty" extensions:"x-agent"`
+	NextProcessAt   *time.Time          `json:"next_process_at,omitempty" extensions:"x-agent"`
+	StartedAt       *time.Time          `json:"started_at,omitempty" extensions:"x-agent"`
+	CompletedAt     *time.Time          `json:"completed_at,omitempty" extensions:"x-agent"`
+	Deadline        *time.Time          `json:"deadline,omitempty" extensions:"x-agent"`
+	EnqueuedAt      *time.Time          `json:"enqueued_at,omitempty" extensions:"x-agent"`
+	Retried         int                 `json:"retried" extensions:"x-agent"`
+	MaxRetry        int                 `json:"max_retry" extensions:"x-agent"`
+	IsOrphaned      bool                `json:"is_orphaned,omitempty" extensions:"x-agent"`
 	Worker          string              `json:"worker,omitempty"`
-	TenantID        uint64              `json:"tenant_id,omitempty"`
-	KnowledgeBaseID string              `json:"knowledge_base_id,omitempty"`
-	KnowledgeID     string              `json:"knowledge_id,omitempty"`
-	TaskID          string              `json:"task_id,omitempty"`
+	TenantID        uint64              `json:"tenant_id,omitempty" extensions:"x-agent"`
+	KnowledgeBaseID string              `json:"knowledge_base_id,omitempty" extensions:"x-agent"`
+	KnowledgeID     string              `json:"knowledge_id,omitempty" extensions:"x-agent"`
+	TaskID          string              `json:"task_id,omitempty" extensions:"x-agent"`
 	SourceID        string              `json:"source_id,omitempty"`
 	TargetID        string              `json:"target_id,omitempty"`
 	SourceKBID      string              `json:"source_kb_id,omitempty"`
 	TargetKBID      string              `json:"target_kb_id,omitempty"`
-	DataSourceID    string              `json:"data_source_id,omitempty"`
-	SyncLogID       string              `json:"sync_log_id,omitempty"`
+	DataSourceID    string              `json:"data_source_id,omitempty" extensions:"x-agent"`
+	SyncLogID       string              `json:"sync_log_id,omitempty" extensions:"x-agent"`
 	KnowledgeCount  int                 `json:"knowledge_count,omitempty"`
 }
 

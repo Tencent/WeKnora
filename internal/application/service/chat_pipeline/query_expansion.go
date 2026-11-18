@@ -201,6 +201,11 @@ var stopwords = map[string]struct{}{
 // Question words in Chinese
 var questionWords = regexp.MustCompile(`^(什么是|什么|如何|怎么|怎样|为什么|为何|哪个|哪些|谁|何时|何地|请问|请告诉我|帮我|我想知道|我想了解)`)
 
+var (
+	quotedPhrasePattern = regexp.MustCompile(`["'"'「」『』]([^"'"'「」『』]+)["'"'「」『』]`)
+	delimiterPattern    = regexp.MustCompile(`[,，;；、。！？!?\s]+`)
+)
+
 func extractKeywords(text string) []string {
 	words := tokenize(text)
 	keywords := make([]string, 0, len(words))
@@ -216,8 +221,7 @@ func extractKeywords(text string) []string {
 func extractPhrases(text string) []string {
 	// Extract quoted content
 	var phrases []string
-	re := regexp.MustCompile(`["'"'「」『』]([^"'"'「」『』]+)["'"'「」『』]`)
-	matches := re.FindAllStringSubmatch(text, -1)
+	matches := quotedPhrasePattern.FindAllStringSubmatch(text, -1)
 	for _, m := range matches {
 		if len(m) > 1 && len(m[1]) > 2 {
 			phrases = append(phrases, m[1])
@@ -228,8 +232,7 @@ func extractPhrases(text string) []string {
 
 func splitByDelimiters(text string) []string {
 	// Split by common delimiters
-	re := regexp.MustCompile(`[,，;；、。！？!?\s]+`)
-	parts := re.Split(text, -1)
+	parts := delimiterPattern.Split(text, -1)
 	var result []string
 	for _, p := range parts {
 		p = strings.TrimSpace(p)

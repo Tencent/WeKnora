@@ -1,0 +1,4 @@
+// JSON wrappers are byte slices in Go; document them as JSON objects. Fields
+// holding arrays override this with a swaggertype tag.
+replace github.com/Tencent/WeKnora/internal/types.JSON object
+replace encoding/json.RawMessage object

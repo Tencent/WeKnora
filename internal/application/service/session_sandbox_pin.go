@@ -25,8 +25,10 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/application/service/sandboxalloc"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -65,10 +67,27 @@ func (p SandboxPin) TenantOr(sessionTenantID uint64) uint64 {
 	return sessionTenantID
 }
 
+// SessionPlacer records a session's placement and its pin on first use, and
+// reads it back without placing.
+type SessionPlacer interface {
+	Place(ctx context.Context, req sandboxalloc.PlaceRequest) (allocation.Assignment, error)
+	Lookup(ctx context.Context, sessionID string) (allocation.Assignment, bool, error)
+}
+
 // SessionSandboxPinner is the only place session sandbox pins are read or
 // written. Centralising it is what keeps the four entry points consistent.
 type SessionSandboxPinner struct {
-	db *gorm.DB
+	db     *gorm.DB
+	placer SessionPlacer
+}
+
+// WithPlacer attaches the allocation service. Without one the pinner behaves
+// exactly as before (no assignment rows; every session per-session).
+func (p *SessionSandboxPinner) WithPlacer(placer SessionPlacer) *SessionSandboxPinner {
+	if p != nil {
+		p.placer = placer
+	}
+	return p
 }
 
 // NewSessionSandboxPinner returns a pinner over the sessions table.
@@ -79,9 +98,51 @@ func NewSessionSandboxPinner(db *gorm.DB) *SessionSandboxPinner {
 // Read returns the pinned backend, or the zero pin when the session has no
 // live sandbox. Note the pin is an optimistic hint: the sandbox may have been
 // reclaimed out of band (see Clear).
+//
+// Once a placer is attached, a recorded assignment is the address (C15). The
+// pin column is only its projection and may still lack a legacy owner tenant.
+// A released assignment is returned too: cleanup and inventory still have to
+// find the machine at its original address.
 func (p *SessionSandboxPinner) Read(ctx context.Context, sessionID string) (SandboxPin, error) {
+	if p != nil && p.placer != nil {
+		a, ok, err := p.placer.Lookup(ctx, sessionID)
+		if err != nil {
+			return SandboxPin{}, err
+		}
+		if ok {
+			return SandboxPin{ConfigID: a.ConfigID, TenantID: a.ConfigTenantID}, nil
+		}
+	}
 	pinned, _, err := p.read(ctx, sessionID)
 	return pinned, err
+}
+
+// placeAndResolve records the placement for candidate and returns the
+// manager of the WINNING config (C1). candidateMgr is reused only when the
+// winner is exactly the candidate.
+func (p *SessionSandboxPinner) placeAndResolve(
+	ctx context.Context, resolver sandbox.TenantSandboxResolver, fallback sandbox.Manager,
+	policy WorkspaceSandboxPolicy, sessionID string, candidate SandboxPin, candidateMgr sandbox.Manager,
+) (sandbox.Manager, SandboxPin, error) {
+	sessionTenant, ok := types.SandboxTenantIDFromContext(ctx)
+	if !ok || sessionTenant == 0 {
+		return nil, SandboxPin{}, fmt.Errorf("sandbox: placing session %s needs its tenant", sessionID)
+	}
+	a, err := p.placer.Place(ctx, sandboxalloc.PlaceRequest{
+		SessionTenantID: sessionTenant, SessionID: sessionID,
+		ConfigTenantID: candidate.TenantID, ConfigID: candidate.ConfigID,
+	})
+	if err != nil {
+		return nil, SandboxPin{}, err
+	}
+	winner := SandboxPin{ConfigID: a.ConfigID, TenantID: a.ConfigTenantID}
+	if winner.ConfigID == candidate.ConfigID && winner.TenantOr(sessionTenant) == candidate.TenantOr(sessionTenant) {
+		return candidateMgr, winner, nil
+	}
+	mgr, err := resolveTenantSandboxForConfig(
+		ctx, resolver, fallback, winner.TenantOr(sessionTenant), winner.ConfigID, policy,
+	)
+	return mgr, winner, err
 }
 
 // read additionally reports whether the session row exists at all, which Pin
@@ -236,8 +297,28 @@ func resolveSandboxForExecution(
 		return resolveLiteSandbox(ctx, policy, tenantID, agentConfigID, o), SandboxPin{}, nil
 	}
 
+	if pinner != nil && pinner.placer != nil && strings.TrimSpace(sessionID) != "" {
+		// A placed session runs on its assignment's config (C1). Resolving it
+		// here, instead of reading the pin and placing again, keeps the common
+		// path at one query.
+		a, placed, err := pinner.placer.Lookup(ctx, sessionID)
+		if err != nil {
+			return nil, SandboxPin{}, err
+		}
+		if placed {
+			if a.Released() {
+				return nil, SandboxPin{}, fmt.Errorf("sandbox: session %s is being deleted: %w",
+					sessionID, sandbox.ErrSandboxSessionDeleted)
+			}
+			pin := SandboxPin{ConfigID: a.ConfigID, TenantID: a.ConfigTenantID}
+			mgr, err := resolveTenantSandboxForConfig(ctx, resolver, fallback, pin.TenantID, pin.ConfigID, policy)
+			return mgr, pin, err
+		}
+	}
+
 	if pinner != nil && strings.TrimSpace(sessionID) != "" {
-		pinned, err := pinner.Read(ctx, sessionID)
+		// Not placed: Read would only repeat the lookup above.
+		pinned, _, err := pinner.read(ctx, sessionID)
 		if err != nil {
 			return nil, SandboxPin{}, err
 		}
@@ -269,6 +350,10 @@ func resolveSandboxForExecution(
 				}
 				pinned.TenantID = owner
 			}
+			if proven && pinner.placer != nil {
+				return pinner.placeAndResolve(ctx, resolver, fallback, policy, sessionID,
+					SandboxPin{ConfigID: pinned.ConfigID, TenantID: owner}, mgr)
+			}
 			return mgr, pinned, err
 		}
 	}
@@ -299,6 +384,11 @@ func resolveSandboxForExecution(
 	}
 	if pinner == nil || strings.TrimSpace(sessionID) == "" {
 		return mgr, pin, nil
+	}
+	if pinner.placer != nil {
+		// The placement transaction writes the pin; the legacy Pin CAS below
+		// is only for deployments without the allocation service.
+		return pinner.placeAndResolve(ctx, resolver, fallback, policy, sessionID, pin, mgr)
 	}
 
 	winner, err := pinner.Pin(ctx, sessionID, pin)

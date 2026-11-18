@@ -64,3 +64,37 @@ func TestPrepareShellEnvironmentOnHostUsesLocalSkillsAndWorkspace(t *testing.T) 
 	_, hasInput := env["WEKNORA_SESSION_INPUT_DIR"]
 	require.False(t, hasInput)
 }
+
+// layoutEnvManager is a sandbox that only advertises a workspace layout.
+// The embedded Manager stays nil: PrepareShellEnvironment asks for the
+// layout and does not execute a command.
+type layoutEnvManager struct {
+	sandbox.Manager
+	layout sandbox.WorkspaceLayout
+}
+
+func (m layoutEnvManager) SessionWorkspaceLayout(context.Context, string) (sandbox.WorkspaceLayout, error) {
+	return m.layout, nil
+}
+
+func newShellEnvManager(t *testing.T, layout sandbox.WorkspaceLayout) *Manager {
+	t.Helper()
+	m := NewManager(&ManagerConfig{Enabled: true, AllowedSkills: []string{"pdf"}}, layoutEnvManager{layout: layout})
+	m.WithTenantSource(NewTenantSkillSource([]*types.TenantSkillEntity{
+		{Name: "pdf", Status: types.SkillStatusReady, Enabled: true},
+	}, nil))
+	require.NoError(t, m.Initialize(context.Background()))
+	return m
+}
+
+func TestPrepareShellEnvironmentUsesSharedSessionPaths(t *testing.T) {
+	l, err := sandbox.UserWorkspaceLayout("0f8fad5b-d9cb-469f-a165-70867728950e")
+	require.NoError(t, err)
+	m := newShellEnvManager(t, l)
+	_, env, err := m.PrepareShellEnvironment(
+		context.Background(), "0f8fad5b-d9cb-469f-a165-70867728950e", "pdf", "true", nil)
+	require.NoError(t, err)
+	require.Equal(t, l.OutputDir, env[artifactOutputEnvVar])
+	require.Equal(t, l.OutputDir, env[artifactHistoryEnvVar])
+	require.Equal(t, l.InputDir, env[sessionInputEnvVar])
+}

@@ -66,12 +66,9 @@ func (a RerankAPI) HTTPServed() bool {
 type ScoreScale string
 
 const (
-	// ScoreProbability is a 0..1 relevance score. Every protocol but NIM
-	// returns one.
+	// ScoreProbability is a 0..1 relevance score.
 	ScoreProbability ScoreScale = "probability"
-	// ScoreLogit is an unbounded log-odds value that may be negative. NIM
-	// returns one, so a threshold tuned for probabilities rejects almost
-	// everything on that vendor.
+	// ScoreLogit is an unbounded log-odds value that may be negative.
 	ScoreLogit ScoreScale = "logit"
 )
 

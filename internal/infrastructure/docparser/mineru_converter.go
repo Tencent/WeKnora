@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -32,16 +31,17 @@ var (
 )
 
 // MinerUReader calls a self-hosted MinerU API to read/convert documents.
-// MinerU >= 4.0 is driven through the V1 API; older servers through the
+// MinerU 4.0.x uses V1 Jobs, 4.1 uses V1 Tasks, and older servers use the
 // legacy /file_parse endpoint. The protocol is detected per request, so an
 // in-place MinerU upgrade needs no configuration change.
 type MinerUReader struct {
 	endpoint string
 	timeout  time.Duration
-	apiKey   string // V1 only: the server's --api-key
+	apiKey   string // server --api-key (V1), or the gateway key when a legacy endpoint sits behind auth
 	tier     string // V1 only: flash, basic, standard, advanced; "" = server default
 	// Legacy (<= 3.x) only; MinerU 4.0 dropped these request parameters.
 	backend       string // "pipeline", "vlm-*", "hybrid-*"
+	effort        string // legacy hybrid: medium or high; "" = server default
 	vlmServerURL  string // vLLM server URL for vlm-http-client / hybrid-http-client
 	formulaEnable bool
 	tableEnable   bool
@@ -64,6 +64,7 @@ func NewMinerUReader(overrides map[string]string) *MinerUReader {
 		apiKey:        strings.TrimSpace(overrides["mineru_server_api_key"]),
 		tier:          resolveMinerUTier(overrides["mineru_tier"]),
 		backend:       stringOr(overrides["mineru_model"], "pipeline"),
+		effort:        resolveMinerUEffort(overrides["mineru_effort"]),
 		vlmServerURL:  overrides["mineru_vlm_server_url"],
 		formulaEnable: parseBoolOr(overrides["mineru_enable_formula"], true),
 		tableEnable:   parseBoolOr(overrides["mineru_enable_table"], true),
@@ -81,6 +82,15 @@ func resolveMinerUTier(raw string) string {
 		return tier
 	}
 	return ""
+}
+
+func resolveMinerUEffort(raw string) string {
+	switch effort := strings.ToLower(strings.TrimSpace(raw)); effort {
+	case "medium", "high":
+		return effort
+	default:
+		return ""
+	}
 }
 
 func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
@@ -104,14 +114,14 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	protocol, err := detectMinerUProtocol(ctx, utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
 		Timeout:      mineruV1APITimeout,
 		MaxRedirects: 5,
-	}), c.endpoint)
+	}), c.endpoint, c.apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("MinerU protocol detection: %w", err)
 	}
 
-	if protocol == minerUProtocolV1 {
+	if protocol != minerUProtocolLegacy {
 		logger.Infof(ctx, "[MinerU] Parsing file=%s size=%d via %s (V1 API)", req.FileName, len(content), c.endpoint)
-		return c.readV1(ctx, req)
+		return c.readV1(ctx, req, protocol)
 	}
 
 	logger.Infof(ctx, "[MinerU] Parsing file=%s size=%d via %s (legacy /file_parse)",
@@ -141,9 +151,15 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 	}, nil
 }
 
-func (c *MinerUReader) readV1(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+func (c *MinerUReader) readV1(
+	ctx context.Context, req *types.ReadRequest, protocol minerUProtocol,
+) (*types.ReadResult, error) {
 	client := newMinerUV1Client(c.endpoint, c.apiKey, c.timeout)
-	mdContent, imageRefs, contentList, err := client.ParseWithLayout(ctx, req.FileContent,
+	parse := client.ParseWithLayout
+	if protocol == minerUProtocolTasks {
+		parse = (&minerUTasksClient{client}).ParseWithLayout
+	}
+	mdContent, imageRefs, contentList, err := parse(ctx, req.FileContent,
 		minerUUploadFileName(req.FileName, req.FileType),
 		minerUV1ParseOptions{Tier: c.tier, OCRMode: c.parseMethod})
 	if err != nil {
@@ -288,6 +304,9 @@ func (c *MinerUReader) callFileParse(
 	if c.language != "" {
 		fields["lang_list"] = c.language
 	}
+	if c.effort != "" && strings.HasPrefix(c.backend, "hybrid-") {
+		fields["effort"] = c.effort
+	}
 	if c.vlmServerURL != "" && (strings.HasPrefix(c.backend, "vlm-http-client") || strings.HasPrefix(c.backend, "hybrid-http-client")) {
 		fields["server_url"] = c.vlmServerURL
 	}
@@ -312,6 +331,13 @@ func (c *MinerUReader) callFileParse(
 		return "", nil, nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
+	// Legacy MinerU servers (<= 3.x) do not require an API key themselves, but
+	// deployments commonly sit behind an authenticating gateway (NewAPI/OneAPI
+	// etc.). When a key is configured, attach it so the request survives the
+	// gateway, matching the V1 path's behaviour.
+	if c.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 
 	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
 		Timeout:      c.timeout,
@@ -324,19 +350,23 @@ func (c *MinerUReader) callFileParse(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", nil, nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, string(respBody))
+		preview := readErrorPreview(resp.Body)
+		return "", nil, nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, preview)
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readCapped(resp.Body, maxResultResponseBytes)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("read response body: %w", err)
 	}
 
 	// Dump raw response for debugging (truncate if too large)
 	rawStr := string(respBody)
-	if len(rawStr) > 4000 {
-		logger.Infof(context.Background(), "[MinerU] Raw response (truncated to 4000 chars): %s ...", rawStr[:4000])
+	if len(rawStr) > rawResponseLogBytes {
+		logger.Infof(
+			context.Background(),
+			"[MinerU] Raw response (truncated to %d chars): %s",
+			rawResponseLogBytes, rawResponsePreview(rawStr),
+		)
 	} else {
 		logger.Infof(context.Background(), "[MinerU] Raw response: %s", rawStr)
 	}
@@ -432,9 +462,9 @@ func validateMinerUOutboundURL(rawURL string) error {
 	return nil
 }
 
-// PingMinerU checks if the self-hosted MinerU service is reachable. For
-// MinerU 4.0 it also verifies the configured API key, since /v1/health itself
-// is served without authentication.
+// PingMinerU checks if the self-hosted MinerU service is reachable. For V1
+// it also probes an authenticated route (Jobs list in 4.0, usage in 4.1), since
+// /v1/health itself is public unless behind an authenticating gateway.
 func PingMinerU(endpoint, apiKey string) (bool, string) {
 	endpoint = strings.TrimRight(endpoint, "/")
 	if endpoint == "" {
@@ -449,15 +479,20 @@ func PingMinerU(endpoint, apiKey string) (bool, string) {
 	})
 	ctx := context.Background()
 
-	protocol, err := detectMinerUProtocol(ctx, client, endpoint)
+	protocol, err := detectMinerUProtocol(ctx, client, endpoint, apiKey)
 	if err != nil {
 		return false, fmt.Sprintf("MinerU 服务不可用: %v", err)
 	}
 	if protocol == minerUProtocolV1 {
 		return pingMinerUV1Auth(ctx, client, endpoint, apiKey)
 	}
+	if protocol == minerUProtocolTasks {
+		// Health, models and tiers are public in 4.1; usage is a read-only
+		// authenticated route. GET /v1/tasks is not a listing/auth probe.
+		return pingMinerUAuth(ctx, client, endpoint+"/v1/usage", apiKey)
+	}
 
-	resp, err := client.Get(endpoint + "/docs")
+	resp, err := pingMinerULegacy(ctx, client, endpoint, apiKey)
 	if err != nil {
 		return false, fmt.Sprintf("MinerU 服务不可达: %v", err)
 	}
@@ -468,10 +503,28 @@ func PingMinerU(endpoint, apiKey string) (bool, string) {
 	return true, ""
 }
 
+// pingMinerULegacy probes a legacy MinerU server's /docs endpoint. Like the
+// V1 probe, it attaches the configured API key so a server sitting behind an
+// authenticating gateway is still reachable.
+func pingMinerULegacy(ctx context.Context, client *http.Client, endpoint, apiKey string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/docs", nil)
+	if err != nil {
+		return nil, fmt.Errorf("构建请求失败: %v", err)
+	}
+	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	return client.Do(req)
+}
+
 // pingMinerUV1Auth hits an authenticated V1 endpoint: a server started with
 // --api-key answers 401 when the key is missing or wrong.
 func pingMinerUV1Auth(ctx context.Context, client *http.Client, endpoint, apiKey string) (bool, string) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/v1/parse/jobs?limit=1", nil)
+	return pingMinerUAuth(ctx, client, endpoint+"/v1/parse/jobs?limit=1", apiKey)
+}
+
+func pingMinerUAuth(ctx context.Context, client *http.Client, probeURL, apiKey string) (bool, string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, probeURL, nil)
 	if err != nil {
 		return false, fmt.Sprintf("构建请求失败: %v", err)
 	}
@@ -488,6 +541,9 @@ func pingMinerUV1Auth(ctx context.Context, client *http.Client, endpoint, apiKey
 			return false, "MinerU 服务已启用鉴权，请配置 API Key"
 		}
 		return false, "MinerU API Key 无效"
+	}
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Sprintf("MinerU 鉴权检查返回状态 %d，无法验证 API Key", resp.StatusCode)
 	}
 	return true, ""
 }

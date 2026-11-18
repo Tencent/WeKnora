@@ -35,6 +35,9 @@ type authSession struct {
 	// Extra carries surface-specific context values (e.g. the authenticated
 	// embed channel) that must be visible on both surfaces like the rest.
 	Extra map[types.ContextKey]any
+	// AuthSource is how Principal was verified (types.AuthSource*). Required
+	// for every principal-bearing session.
+	AuthSource string
 }
 
 // applyAuthSession writes the session onto BOTH context surfaces of the
@@ -66,6 +69,9 @@ func applyAuthSession(c *gin.Context, s authSession) {
 	}
 	c.Set(types.PrincipalContextKey.String(), s.Principal)
 	ctx = types.WithPrincipal(ctx, s.Principal)
+	if s.AuthSource != "" {
+		set(types.PrincipalAuthSourceContextKey, s.AuthSource)
+	}
 	if s.Role != "" {
 		set(types.TenantRoleContextKey, s.Role)
 	}

@@ -1,0 +1,49 @@
+// Fields the assistant just filled glow briefly so the user sees what changed.
+@keyframes assistant-page-filled {
+  0%, 60% {
+    box-shadow: 0 0 0 2px var(--td-brand-color-focus), 0 0 0 1px var(--td-brand-color);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent, 0 0 0 1px transparent;
+  }
+}
+
+.assistant-page-filled {
+  border-radius: var(--td-radius-default);
+  animation: assistant-page-filled 2s ease-out;
+}
+
+// The lines the assistant changed inside a text field, laid over the field.
+@keyframes assistant-page-range {
+  0%, 55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.assistant-page-range {
+  position: fixed;
+  z-index: 6000;
+  border-left: 2px solid var(--td-brand-color);
+  background: var(--td-brand-color-light);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  animation: assistant-page-range 2.6s ease-out forwards;
+}
+
+:root[theme-mode='dark'] .assistant-page-range {
+  mix-blend-mode: screen;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-page-range {
+    animation: none;
+  }
+
+  .assistant-page-filled {
+    animation-duration: 0.01s;
+    outline: 2px solid var(--td-brand-color);
+  }
+}

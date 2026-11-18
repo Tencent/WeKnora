@@ -1,10 +1,37 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestNormalizeToolCallIDPreservesDistinctIDs(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		left  string
+		right string
+	}{
+		{"different punctuation", "call/a", "call?a"},
+		{"safe and unsafe", "call/a", "call_a"},
+		{"different unicode", "call_甲", "call_乙"},
+		{"long unsafe IDs", strings.Repeat("a", 80) + "/", strings.Repeat("a", 80) + "?"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			left := NormalizeToolCallID(tc.left, "search", 0)
+			right := NormalizeToolCallID(tc.right, "search", 0)
+			assert.NotEqual(t, left, right, "distinct provider IDs must not collapse during sanitization")
+			for _, pair := range [][2]string{{tc.left, left}, {tc.right, right}} {
+				assert.NotEmpty(t, pair[1])
+				assert.LessOrEqual(t, len(pair[1]), maxToolCallIDLen)
+				assert.NotRegexp(t, validIDChars, pair[1])
+				assert.Equal(t, pair[1], NormalizeToolCallID(pair[0], "search", 0), "must be deterministic")
+				assert.Equal(t, pair[1], NormalizeToolCallID(pair[1], "search", 0), "must be idempotent")
+			}
+		})
+	}
+}
 
 func TestNormalizeToolCallID(t *testing.T) {
 	t.Run("normal ID unchanged", func(t *testing.T) {

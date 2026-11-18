@@ -8,6 +8,7 @@ import (
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/base"
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/commonmark"
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/table"
+	"golang.org/x/net/html"
 )
 
 var (
@@ -18,13 +19,6 @@ var (
 	// fencedCodeBlockPattern matches CommonMark fenced code blocks so HTML
 	// <table> examples inside them are left untouched.
 	fencedCodeBlockPattern = regexp.MustCompile("(?s)(?:```|~~~)[^\\n]*\\n.*?(?:```|~~~)")
-
-	// htmlLayoutAttrPattern matches presentational HTML attributes that carry
-	// no semantic value (text-align styles, CSS classes, sizing). Structural
-	// attributes like rowspan/colspan are intentionally excluded.
-	htmlLayoutAttrPattern = regexp.MustCompile(
-		`(?is)\s+(?:style|class|align|valign|width|height|bgcolor)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)`,
-	)
 
 	// htmlSpanAttrPattern detects rowspan/colspan values greater than 1, which
 	// Markdown tables cannot represent; such tables keep their HTML form
@@ -130,8 +124,40 @@ func indexInsideSpans(pos int, spans [][]int) bool {
 
 // stripHTMLLayoutAttrs removes presentational attributes from an HTML fragment
 // while preserving structural attributes (rowspan/colspan) and text content.
-func stripHTMLLayoutAttrs(html string) string {
-	return htmlLayoutAttrPattern.ReplaceAllString(html, "")
+func stripHTMLLayoutAttrs(fragment string) string {
+	// Tokenize so text, comments and values of semantic attributes cannot be
+	// mistaken for layout attributes. Keep text and comments verbatim.
+	tokenizer := html.NewTokenizer(strings.NewReader(fragment))
+	var out strings.Builder
+	for {
+		kind := tokenizer.Next()
+		raw := string(tokenizer.Raw())
+		if kind == html.ErrorToken {
+			out.WriteString(raw)
+			return out.String()
+		}
+		if kind != html.StartTagToken && kind != html.SelfClosingTagToken {
+			out.WriteString(raw)
+			continue
+		}
+		token := tokenizer.Token()
+		attrs := token.Attr[:0]
+		changed := false
+		for _, attr := range token.Attr {
+			switch attr.Key {
+			case "style", "class", "align", "valign", "width", "height", "bgcolor":
+				changed = true
+			default:
+				attrs = append(attrs, attr)
+			}
+		}
+		if changed {
+			token.Attr = attrs
+			out.WriteString(token.String())
+		} else {
+			out.WriteString(raw)
+		}
+	}
 }
 
 // splitHTMLTableRows puts each table row on its own line. The chunker splits

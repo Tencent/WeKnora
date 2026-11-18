@@ -93,3 +93,61 @@ func TestShellRejectsStdinWhenTheCommandWouldExecuteIt(t *testing.T) {
 	require.True(t, result.Success)
 	require.Equal(t, 2, executor.calls)
 }
+
+func TestShellStdinProgramFollowsWrappersAndInlineScripts(t *testing.T) {
+	programs := []string{
+		"true && bash",
+		"env bash",
+		"env -S bash",
+		"command bash",
+		"nice bash",
+		"bash -c bash",
+		"bash -c 'true && bash'",
+		`python3 -c 'import sys; exec(sys.stdin.read())'`,
+		"osascript",
+		"source /dev/stdin",
+		". /dev/stdin",
+		"bash /dev/stdin",
+		"python3 /dev/fd/0",
+		"php",
+		"lua -",
+		"tclsh",
+		"Rscript -",
+	}
+	for _, command := range programs {
+		require.Truef(t, shellStdinIsProgram(command), "stdin of %q is a program", command)
+	}
+	data := []string{
+		"cat",
+		"python3 script.py",
+		"bash -c cat",
+		"bash -c 'grep -n pat'",
+		`IFS= read -r first; printf '%s\n' "$first"; cat`,
+		"cat /dev/stdin",
+		"source env.sh",
+		"php tool.php",
+		"lua -e 'print(1)'",
+	}
+	for _, command := range data {
+		require.Falsef(t, shellStdinIsProgram(command), "stdin of %q is data", command)
+	}
+}
+
+func TestShellRejectsStdinExecutedThroughAWrapper(t *testing.T) {
+	executor := &fakeShellExecutor{}
+	tool := NewShellExecTool(executor, nil)
+	hidden, err := json.Marshal(ShellExecInput{Command: "env bash", Stdin: "rm -rf /\n"})
+	require.NoError(t, err)
+	result, err := tool.Execute(shellExecTestContext(), hidden)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Contains(t, result.Error, "rm_root")
+	require.Zero(t, executor.calls)
+
+	copied, err := json.Marshal(ShellExecInput{Command: "bash -c cat", Stdin: "rm -rf /\n"})
+	require.NoError(t, err)
+	result, err = tool.Execute(shellExecTestContext(), copied)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, 1, executor.calls)
+}

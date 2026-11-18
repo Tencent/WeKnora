@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -149,6 +150,10 @@ type mcpCatalogServer struct {
 	service  *types.MCPService
 	tools    []*MCPTool
 	status   string
+	// reload asks the next snapshot to read the saved directory again, after
+	// a re-list replaced it. The current tools stay until then, so references
+	// already handed to the model keep resolving.
+	reload bool
 }
 
 type mcpServerSummary struct {
@@ -265,11 +270,15 @@ func (c *MCPCatalog) snapshot(ctx context.Context, id string, live bool) ([]*MCP
 	}
 	entry.mu.Lock()
 	service, loaded, status := entry.service, entry.tools, entry.status
+	reload := live || status != "ready"
+	// A reload asked for only because a re-list replaced the saved directory
+	// must not take away tools that were working: they stay listed while the
+	// new directory loads, and if loading fails.
+	refreshOnly := !reload && entry.reload
 	entry.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, status, err
 	}
-	reload := live || status != "ready"
 	if c.lookup != nil {
 		current, err := c.lookup(ctx, c.tenantID, id)
 		if err != nil || current == nil || current.ID != id {
@@ -283,14 +292,26 @@ func (c *MCPCatalog) snapshot(ctx context.Context, id string, live bool) ([]*MCP
 		if !current.UpdatedAt.Equal(service.UpdatedAt) {
 			// Re-read the saved directory with the new service row. Do not
 			// treat a documentation edit as an upstream refresh.
-			reload = true
+			reload, refreshOnly = true, false
 		}
 		service = current
 	}
-	if reload {
-		entry.store(service, nil, "loading")
+	if reload || refreshOnly {
+		entry.mu.Lock()
+		entry.reload = false
+		entry.mu.Unlock()
+		if !refreshOnly {
+			entry.store(service, nil, "loading")
+		}
+		previous := loaded
 		var err error
 		loaded, err = c.load(ctx, service, live)
+		if err != nil && refreshOnly {
+			entry.mu.Lock()
+			entry.reload = true
+			entry.mu.Unlock()
+			return previous, status, nil
+		}
 		if err != nil {
 			status = "error"
 			if isAuthorizationRequired(err) {
@@ -324,13 +345,44 @@ func (c *MCPCatalog) visibleTools(ctx context.Context, id string, tools []*MCPTo
 	if err != nil {
 		return nil, fmt.Errorf("MCP tool permissions are temporarily unavailable")
 	}
+	offered, err := c.offeredTools(ctx, id, tools)
+	if err != nil {
+		return nil, fmt.Errorf("MCP tool permissions are temporarily unavailable")
+	}
 	visible := make([]*MCPTool, 0, len(tools))
 	for _, tool := range tools {
-		if policies[tool.mcpTool.Name] {
+		if policies[tool.mcpTool.Name] && offered(tool) {
 			visible = append(visible, tool)
 		}
 	}
 	return visible, nil
+}
+
+// offeredTools reports which tools the run's access level offers at all: a
+// read-only run is not shown tools that change data.
+func (c *MCPCatalog) offeredTools(ctx context.Context, id string, tools []*MCPTool) (func(*MCPTool) bool, error) {
+	level := types.AccessLevelFromContext(ctx)
+	if level != types.AssistantAccessReadOnly {
+		return func(*MCPTool) bool { return true }, nil
+	}
+	definitions := make([]*types.MCPTool, 0, len(tools))
+	for _, tool := range tools {
+		definitions = append(definitions, tool.mcpTool)
+	}
+	risks := make(map[string]policy.Risk, len(tools))
+	if ranker, ok := c.gate.(interface {
+		ToolRisks(context.Context, uint64, string, []*types.MCPTool) (map[string]policy.Risk, error)
+	}); ok {
+		var err error
+		if risks, err = ranker.ToolRisks(ctx, c.tenantID, id, definitions); err != nil {
+			return nil, err
+		}
+	} else {
+		for _, definition := range definitions {
+			risks[definition.Name] = approval.DeclaredRisk(definition)
+		}
+	}
+	return func(tool *MCPTool) bool { return policy.Offered(level, risks[tool.mcpTool.Name]) }, nil
 }
 
 func (c *MCPCatalog) checkEnabled(ctx context.Context, tool *MCPTool) error {
@@ -348,6 +400,18 @@ func (c *MCPCatalog) checkEnabled(ctx context.Context, tool *MCPTool) error {
 		return fmt.Errorf("MCP tool is no longer available or enabled; rediscover its definition")
 	}
 	return nil
+}
+
+// markForReload makes the next snapshot of a server read its saved directory
+// again instead of reusing the tools loaded earlier in this engine.
+func (c *MCPCatalog) markForReload(id string) {
+	entry := c.servers[id]
+	if entry == nil {
+		return
+	}
+	entry.mu.Lock()
+	entry.reload = true
+	entry.mu.Unlock()
 }
 
 func (s *mcpCatalogServer) store(service *types.MCPService, tools []*MCPTool, status string) {

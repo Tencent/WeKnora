@@ -2,6 +2,8 @@ package chatpipeline
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -92,6 +94,65 @@ func TestExpandedEvidenceFailsClosedAndPreservesPlainSources(t *testing.T) {
 	require.Equal(t, "plain", got[0].ID)
 }
 
+// Merge scoping keeps a sibling's image Markdown out of the merged Content and
+// ImageInfo, yet the prompt renders the sibling's raw citation body, so an
+// answer may cite that image. The handle must therefore survive in the
+// persisted reference (what the message-file proxy authorizes from), not only
+// in the in-memory citation sources (#5069).
+func TestCitationSourceImageHandleSurvivesReferencePersistence(t *testing.T) {
+	const siblingHandle = "SiBlInGpIcTuRe00000000"
+	hit := &types.Chunk{
+		ID:              "hit",
+		KnowledgeID:     "doc",
+		KnowledgeBaseID: "kb",
+		Content:         "Hit body.",
+		ParentChunkID:   "p",
+		ChunkType:       types.ChunkTypeText,
+		IsEnabled:       true,
+	}
+	sibling := &types.Chunk{
+		ID:              "sibling",
+		KnowledgeID:     "doc",
+		KnowledgeBaseID: "kb",
+		Content:         "Sibling body\n\n![diagram](resource://" + siblingHandle + ")",
+		ParentChunkID:   "p",
+		ChunkType:       types.ChunkTypeText,
+		IsEnabled:       true,
+		ChunkIndex:      1,
+	}
+	repo := &expandChunkRepo{
+		chunks: map[string]*types.Chunk{
+			"hit": hit,
+			"p":   {ID: "p", ChunkType: types.ChunkTypeParentText},
+		},
+		children: map[string][]*types.Chunk{"p": {hit, sibling}},
+	}
+	p := &PluginMerge{chunkRepo: repo}
+	// The merged result mirrors resolveParentChunks' output for a text hit:
+	// parent content pruned of the sibling's image Markdown, ImageInfo scoped
+	// to the matched child (empty here), ContentRewritten set.
+	merged := &types.SearchResult{
+		ID:               "hit",
+		KnowledgeID:      "doc",
+		KnowledgeBaseID:  "kb",
+		Content:          "Hit body.\n\nSibling body",
+		ContentRewritten: true,
+	}
+	p.attachCitationSources(context.Background(), []*types.SearchResult{merged})
+
+	exposed := false
+	for _, source := range merged.CitationSources {
+		if source.ID == "sibling" {
+			exposed = strings.Contains(source.Content, types.BuildResourcePath(siblingHandle))
+		}
+	}
+	require.True(t, exposed, "scenario must expose the sibling image body to the model")
+
+	raw, err := json.Marshal(types.References{merged})
+	require.NoError(t, err)
+	require.Contains(t, string(raw), types.BuildResourcePath(siblingHandle))
+}
+
 func TestModelHandlesReferenceTheActualExpandedChild(t *testing.T) {
 	a := &types.SearchResult{
 		ID:              "opening",
@@ -128,9 +189,9 @@ func TestModelHandlesReferenceTheActualExpandedChild(t *testing.T) {
 		},
 	}
 	messages, registry := prepareMessagesWithModelContext(context.Background(), manage)
-	require.Contains(t, messages[1].Content, `<chunk id="c2"`)
-	require.Contains(t, registry.DecodeOutputText(`<ref id="c2"/>`), `chunk_id="later"`)
-	require.Contains(t, registry.DecodeOutputText(`<ref id="c1"/>`), `chunk_id="opening"`)
+	require.Contains(t, messages[1].Content, `<chunk id="chunk://2"`)
+	require.Contains(t, registry.DecodeOutputText(`<ref id="chunk://2"/>`), `chunk_id="later"`)
+	require.Contains(t, registry.DecodeOutputText(`<ref id="chunk://1"/>`), `chunk_id="opening"`)
 	manage.MergeResult[0].CitationSources = nil
 	messages, _ = prepareMessagesWithModelContext(context.Background(), manage)
 	require.NotContains(t, messages[1].Content, rendered)

@@ -26,7 +26,9 @@ type fakeListService struct {
 	gotPageSize int
 }
 
-func (f *fakeListService) GetSessionsByTenant(_ context.Context, page, pageSize int) ([]sdk.Session, int, error) {
+func (f *fakeListService) GetSessionsByTenant(
+	_ context.Context, page, pageSize int, _ ...sdk.SessionListOptions,
+) ([]sdk.Session, int, error) {
 	f.gotPage = page
 	f.gotPageSize = pageSize
 	return f.items, f.total, f.err
@@ -209,7 +211,9 @@ type pagedSessionSvc struct {
 	pageSize int
 }
 
-func (p *pagedSessionSvc) GetSessionsByTenant(_ context.Context, page, pageSize int) ([]sdk.Session, int, error) {
+func (p *pagedSessionSvc) GetSessionsByTenant(
+	_ context.Context, page, pageSize int, _ ...sdk.SessionListOptions,
+) ([]sdk.Session, int, error) {
 	p.calls = append(p.calls, page)
 	p.pageSize = pageSize
 	start := (page - 1) * pageSize

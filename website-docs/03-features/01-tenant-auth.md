@@ -347,7 +347,7 @@ flowchart LR
 
 | 能力 | 说明 |
 | --- | --- |
-| `retrieve` | 读取 / 搜索知识库数据（KB 列表、知识详情、hybrid-search 等） |
+| `retrieve` | 读取 / 搜索知识库数据（KB 列表、知识详情、hybrid-search、共享 KB 清单发现等） |
 | `chat` | 会话流：创建 session、knowledge-chat / agent-chat、加载与删除消息 |
 | `read_agents` | 列出与查看 Agent（不含创建修改） |
 | `ingest` | 写内容：上传文档、编辑 chunk / FAQ / 标签 / Wiki、批量删除与移动知识 |

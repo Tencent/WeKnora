@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -144,4 +145,23 @@ func TestCreateAgentQueryEventOmitsZeroTimestamps(t *testing.T) {
 	assert.False(t, hasUserID)
 	assert.False(t, hasUserAt)
 	assert.False(t, hasAssistantAt)
+}
+
+func TestQueryEventMarksApprovalResumeGeneration(t *testing.T) {
+	resumes := []*types.AgentResume{nil, {Prompt: &types.AgentPrompt{ID: "approval", ToolCallID: "blocked"}}}
+	for _, resume := range resumes {
+		recorder := &completionEventRecorder{}
+		h := &Handler{streamManager: recorder}
+		h.writeAgentQueryEvent(
+			context.Background(), "session", "user", time.Time{}, &types.Message{ID: "answer"}, resume,
+		)
+		require.Len(t, recorder.events, 1)
+		data := recorder.events[0].Data
+		if resume == nil {
+			require.NotContains(t, data, "resume_pending_id")
+		} else {
+			require.Equal(t, "approval", data["resume_pending_id"])
+			require.Equal(t, "blocked", data["resume_tool_call_id"])
+		}
+	}
 }

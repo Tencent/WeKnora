@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/middleware"
@@ -236,6 +237,13 @@ type fakeSandboxConfigService struct {
 	deleteTenantID uint64
 	deleteID       string
 	deleteForce    bool
+
+	machines      []service.UserMachineView
+	listErr       error
+	releaseErr    error
+	releaseTenant uint64
+	releaseConfig string
+	releaseDigest string
 }
 
 func (s *fakeSandboxConfigService) Create(
@@ -290,6 +298,21 @@ func (s *fakeSandboxConfigService) Inventory(
 	return service.SandboxInventory{}, nil
 }
 
+func (s *fakeSandboxConfigService) ListUserMachines(
+	context.Context, uint64, string,
+) ([]service.UserMachineView, error) {
+	return s.machines, s.listErr
+}
+
+func (s *fakeSandboxConfigService) ReleaseUserMachine(
+	_ context.Context, tenantID uint64, configID, digest string,
+) error {
+	s.releaseTenant = tenantID
+	s.releaseConfig = configID
+	s.releaseDigest = digest
+	return s.releaseErr
+}
+
 func (s *fakeSandboxConfigService) WorkspaceScriptsDisabled(
 	context.Context,
 	uint64,
@@ -341,4 +364,65 @@ func TestSandboxConfigRoutesAreHiddenOnLiteDesktop(t *testing.T) {
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sandbox-configs", strings.NewReader(`{"name":"x"}`)))
 	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestListAndReleaseUserSandboxes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &fakeSandboxConfigService{machines: []service.UserMachineView{{
+		Digest: "d-1", OwnerTenantID: 7, OwnerID: "u-1", LiveSessions: 2,
+	}}}
+	h := &SandboxConfigHandler{service: svc}
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(types.TenantIDContextKey.String(), uint64(7))
+		c.Next()
+	})
+	r.GET("/sandbox-configs/:id/user-sandboxes", h.ListUserSandboxes)
+	r.POST("/sandbox-configs/:id/user-sandboxes/:digest/release", h.ReleaseUserSandbox)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sandbox-configs/cfg-a/user-sandboxes", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"digest":"d-1"`)
+	require.Contains(t, w.Body.String(), `"owner_id":"u-1"`)
+
+	svc.releaseErr = service.ErrUserSandboxBusy
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sandbox-configs/cfg-a/user-sandboxes/d-1/release", nil))
+	require.Equal(t, http.StatusConflict, w.Code)
+	require.JSONEq(t, `{"success":false,"error":"USER_SANDBOX_BUSY"}`, w.Body.String())
+	require.Equal(t, uint64(7), svc.releaseTenant)
+	require.Equal(t, "cfg-a", svc.releaseConfig)
+	require.Equal(t, "d-1", svc.releaseDigest)
+
+	svc.releaseErr = nil
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sandbox-configs/cfg-a/user-sandboxes/d-1/release", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.JSONEq(t, `{"success":true}`, w.Body.String())
+}
+
+func TestCordonAndInFlightCreateMapToLocked(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, err := range []error{
+		repository.ErrSandboxConfigCordoned,
+		service.ErrSandboxConfigCreatesInFlight,
+	} {
+		router := gin.New()
+		router.DELETE("/sandbox-configs/:id", func(c *gin.Context) {
+			if !respondSandboxConfigRefusal(c, err) {
+				t.Fatal("expected a locked refusal")
+			}
+		})
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/sandbox-configs/cfg-a", nil))
+		require.Equal(t, http.StatusLocked, w.Code)
+		var payload struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+		require.Equal(t, "sandbox_config_cordoned", payload.Error.Code)
+	}
 }

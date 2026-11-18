@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
 	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -35,6 +37,21 @@ import (
 const (
 	maxAttachmentUploadsPerRequest = 5
 	maxAttachmentUploadTotalBytes  = int64(100 * 1024 * 1024)
+
+	// maxQARequestBodyBytes caps the JSON body of a chat request before the
+	// reader touches it.
+	//
+	// The body carries up to maxAttachmentUploadsPerRequest inline
+	// base64 attachments whose decoded total may reach
+	// maxAttachmentUploadTotalBytes; base64 inflates that by 4/3, so the
+	// largest legal body is about 134 MiB. That bound is only enforced after
+	// decoding, which means an unbounded read buffers the whole body first —
+	// and /knowledge-chat and /agent-chat are reachable by anonymous embed
+	// visitors, so one request could allocate as much memory as the process
+	// will surrender. Cap the read 2 MiB above the encoded maximum so a legal
+	// request is never refused for its envelope, while the per-attachment and
+	// total checks above stay the authority on what may be decoded.
+	maxQARequestBodyBytes = maxAttachmentUploadTotalBytes*4/3 + 2*1024*1024
 )
 
 // qaRequestContext holds all the common data needed for QA requests
@@ -71,6 +88,8 @@ type qaRequestContext struct {
 	attachmentMetas       types.MessageAttachments // Metadata-only view of attachmentIDs for the persisted user message
 	suggestionAttribution *types.SuggestionAttribution
 	questionOrigin        *types.QuestionOrigin
+	pageContext           *types.PageContext
+	assistantAccess       types.AssistantAccessLevel
 	// resourceRewriter turns internal storage references in the outbound stream
 	// into directly loadable URLs when the caller asks for `resource_urls=public`.
 	// Disabled (a pass-through) in the default handle mode.
@@ -99,13 +118,28 @@ type qaRequestContext struct {
 	// turnLeaseHeld records that executeQA already took the send-side turn
 	// lease for this request, so the QA service does not take a second one.
 	turnLeaseHeld bool
+	// resume continues a suspended run on assistantMessage instead of
+	// starting a turn.
+	resume *types.AgentResume
 }
 
 // buildQARequest converts the qaRequestContext into a types.QARequest for service invocation.
 // steerSink rides along when the caller set one, so agent runs drain mid-run
 // message injections at round boundaries.
+// calledWithAPIKey reports an X-API-Key caller; the prompt endpoints are
+// closed to API keys, so such a caller cannot answer a question.
+func calledWithAPIKey(ctx context.Context) bool {
+	_, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	return ok
+}
+
 func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 	imageURLs, imageDescription := extractImageURLsAndOCRText(rc.images)
+	interactive := !calledWithAPIKey(rc.ctx)
+	mode := types.RunModeUnattended
+	if interactive {
+		mode = types.RunModeAttended
+	}
 	req := &types.QARequest{
 		Session:             rc.session,
 		Query:               rc.query,
@@ -126,7 +160,14 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		LocalBrowserEnabled: rc.localBrowserEnabled,
 		Attachments:         rc.attachments,
 		QuestionOrigin:      rc.questionOrigin,
+		PageContext:         rc.pageContext,
+		AssistantAccess:     rc.assistantAccess,
 		TurnLeaseHeld:       rc.turnLeaseHeld,
+		// Only a caller that can answer the prompt later may leave the run
+		// suspended; an API-key caller would get a turn with no answer.
+		Suspendable: interactive,
+		Mode:        mode,
+		Resume:      rc.resume,
 	}
 	if rc.steerSink != nil {
 		req.SteerSink = rc.steerSink
@@ -168,10 +209,19 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, errors.NewBadRequestError(errors.ErrInvalidSessionID.Error())
 	}
 
-	// Parse request body
+	// Parse request body. Cap the reader first: ShouldBindJSON buffers the
+	// whole body before decoding, and the attachment limits below are applied
+	// after base64 decoding, so nothing else bounds this read.
+	if c.Request.Body != nil {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxQARequestBodyBytes)
+	}
 	var request CreateKnowledgeQARequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.Error(ctx, "Failed to parse request data", err)
+		var tooLarge *http.MaxBytesError
+		if stderrors.As(err, &tooLarge) {
+			return nil, nil, errors.NewBadRequestError("request body is too large")
+		}
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
 
@@ -237,6 +287,9 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		logger.Errorf(ctx, "Failed to get session, session ID: %s, error: %v", sessionID, err)
 		return nil, nil, errors.NewNotFoundError("Session not found")
 	}
+	if session.Kind == types.SessionKindAutomation {
+		return nil, nil, errors.NewForbiddenError("automation conversations do not accept manual messages")
+	}
 
 	// Get custom agent if agent_id is provided. Backend resolves shared agent from share relation (no client-provided tenant).
 	customAgent, effectiveTenantID, sharedAgentReadOnly := h.resolveAgent(ctx, c, request.AgentID, request.AgentSourceTenantID)
@@ -250,11 +303,11 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, err
 	}
 
-	// The built-in wiki fixer is invoked from a KB page, not from a tenant's
-	// regular agent picker. When the KB is shared, run it in the source tenant
-	// only if the caller has edit permission, so KB-scoped models/tools resolve
-	// without granting viewers write capability.
-	if customAgent != nil && customAgent.ID == types.BuiltinWikiFixerID {
+	// KB-anchored built-in agents (wiki fixer, assistant) are opened from a KB
+	// page, not from a tenant's regular agent picker. When the KB is shared,
+	// run them in the source tenant only if the caller has edit permission, so
+	// KB-scoped models/tools resolve without granting viewers write capability.
+	if types.RunsInSharedKBWorkspace(customAgent) {
 		if scopedAgent, scopedTenantID := h.resolveWikiFixerTenantScope(
 			ctx,
 			customAgent,
@@ -482,6 +535,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		attachmentMetas:       attachmentMetas,
 		suggestionAttribution: request.SuggestionAttribution,
 		questionOrigin:        request.QuestionOrigin,
+		pageContext:           request.PageContext,
+		assistantAccess:       request.AssistantAccess,
 		reqAgentEnabled:       request.AgentEnabled,
 		reqAgentID:            request.AgentID,
 		resourceRewriter:      resourceRewriter,
@@ -718,6 +773,11 @@ type sseStreamContext struct {
 	// mode releases on completion (the pipeline returns before the stream
 	// finishes); agent mode releases when AgentQA returns.
 	releaseTurn func()
+	// turnUsage holds the provider's token usage carried on the stream's
+	// final answer event, so completeQuickAnswerTurn can report it on the
+	// complete event and persist it with the message (issue #3865). Nil for
+	// turns that never received usage (stop, failure, usage-less providers).
+	turnUsage *types.TokenUsage
 }
 
 // setupSSEStream sets up the SSE streaming context
@@ -742,6 +802,9 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 	// borrowed tenant above drives everything else, because DeleteSession tears
 	// that sandbox down from a request that only knows the session's tenant.
 	baseCtx = types.WithSandboxTenantID(baseCtx, reqCtx.session.TenantID)
+	// Attachment analysis and title generation run before the QA service.
+	// Give all asynchronous work the same business conversation identity.
+	baseCtx = types.WithSessionID(baseCtx, reqCtx.session.ID)
 
 	// An agent that opted out of long-term memory has to be opted out of the
 	// write path too, not just recall. The two run from different contexts:
@@ -755,7 +818,21 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 	}
 
 	eventBus := event.NewEventBus()
-	asyncCtx, cancel := context.WithCancel(logger.CloneContext(baseCtx))
+	asyncCtx, cancelCause := context.WithCancelCause(logger.CloneContext(baseCtx))
+	// Detach HTTP cancellation, but keep the turn's lease-loss signal: once
+	// admission is lost another session may rebuild the shared machine.
+	propagateLeaseLoss := func() {
+		if cause := context.Cause(baseCtx); stderrors.Is(cause, admission.ErrLeaseLost) {
+			cancelCause(cause)
+		}
+	}
+	stopLeaseWatch := context.AfterFunc(baseCtx, propagateLeaseLoss)
+	// An already-lost lease must cancel QA before any async work starts.
+	propagateLeaseLoss()
+	cancel := func() {
+		stopLeaseWatch()
+		cancelCause(context.Canceled)
+	}
 
 	streamCtx := &sseStreamContext{
 		eventBus:         eventBus,
@@ -805,7 +882,11 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 		reqCtx.userMessageID,
 		reqCtx.userCreatedAt,
 		reqCtx.assistantMessage,
+		reqCtx.resume,
 	)
+	if reqCtx.resume != nil {
+		h.writeRunResumedEvent(reqCtx.ctx, reqCtx.sessionID, reqCtx.assistantMessage.ID, reqCtx.resume.Prompt.ID)
+	}
 
 	// Setup stop event handler
 	h.setupStopEventHandler(eventBus, reqCtx.sessionID, reqCtx.session.TenantID, reqCtx.assistantMessage, cancel)
@@ -828,10 +909,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 	// Generate title if needed
 	if generateTitle && reqCtx.session.Title == "" {
 		// Use the same model as the conversation for title generation
-		modelID := ""
-		if reqCtx.customAgent != nil && reqCtx.customAgent.Config.ModelID != "" {
-			modelID = reqCtx.customAgent.Config.ModelID
-		}
+		modelID := reqCtx.titleModelID()
 		logger.Infof(reqCtx.ctx, "Session has no title, starting async title generation, session ID: %s, model: %s", reqCtx.sessionID, modelID)
 		h.sessionService.GenerateTitleAsync(asyncCtx, reqCtx.session, reqCtx.query, modelID, eventBus)
 	}
@@ -864,10 +942,17 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 
-	// Validate request parameters
-	if request.Query == "" {
+	// Validate request parameters. A request needs a text query, a query
+	// image, or both: an image alone searches by visual similarity.
+	if request.Query == "" && request.QueryImage == "" {
 		logger.Error(ctx, "Query content is empty")
 		c.Error(errors.NewBadRequestError("Query content cannot be empty"))
+		return
+	}
+	queryImage, queryImageType, imageErr := decodeQueryImage(request.QueryImage)
+	if imageErr != nil {
+		logger.Warnf(ctx, "Rejected query image: %v", imageErr)
+		_ = c.Error(errors.NewBadRequestError(imageErr.Error()))
 		return
 	}
 
@@ -919,6 +1004,8 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	opts.QueryImage = queryImage
+	opts.QueryImageMediaType = queryImageType
 
 	logger.Infof(
 		ctx,
@@ -952,6 +1039,58 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	})
 }
 
+// maxQueryImageBytes bounds a query image so one request cannot turn into a
+// large embed call. Multimodal embedding models work on far smaller images.
+const maxQueryImageBytes = 8 << 20 // 8 MiB
+
+// queryImageMediaTypes are the image types a multimodal embedder accepts.
+var queryImageMediaTypes = map[string]string{
+	"image/png":  ".png",
+	"image/jpeg": ".jpg",
+	"image/webp": ".webp",
+	"image/gif":  ".gif",
+}
+
+// decodeQueryImage decodes a base64 or data-URI query image and reports its
+// MIME type. An empty value means "no image". Anything undecodable, too large,
+// or not a supported image type is an error: silently dropping it would run a
+// text search the caller did not ask for.
+func decodeQueryImage(raw string) ([]byte, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, "", nil
+	}
+	mediaType := ""
+	if strings.HasPrefix(raw, "data:") {
+		header, payload, ok := strings.Cut(raw, ",")
+		if !ok {
+			return nil, "", fmt.Errorf("query_image data URI is missing its payload")
+		}
+		if !strings.HasSuffix(header, ";base64") {
+			return nil, "", fmt.Errorf("query_image data URI must be base64 encoded")
+		}
+		mediaType = strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64")
+		raw = payload
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, "", fmt.Errorf("query_image is not valid base64: %w", err)
+	}
+	if len(decoded) == 0 {
+		return nil, "", fmt.Errorf("query_image decoded to no bytes")
+	}
+	if len(decoded) > maxQueryImageBytes {
+		return nil, "", fmt.Errorf("query_image exceeds %d bytes", maxQueryImageBytes)
+	}
+	if mediaType == "" {
+		mediaType = http.DetectContentType(decoded)
+	}
+	if _, ok := queryImageMediaTypes[mediaType]; !ok {
+		return nil, "", fmt.Errorf("query_image must be one of png, jpeg, webp or gif, got %q", mediaType)
+	}
+	return decoded, mediaType, nil
+}
+
 // knowledgeSearchOptions validates the retrieval overrides of a
 // knowledge-search request.
 func knowledgeSearchOptions(request *SearchKnowledgeRequest) (*types.KnowledgeSearchOptions, error) {
@@ -968,12 +1107,13 @@ func knowledgeSearchOptions(request *SearchKnowledgeRequest) (*types.KnowledgeSe
 		return nil, err
 	}
 	return &types.KnowledgeSearchOptions{
-		VectorThreshold:      request.VectorThreshold,
-		KeywordThreshold:     request.KeywordThreshold,
-		MatchCount:           request.MatchCount,
-		DisableKeywordsMatch: request.DisableKeywordsMatch,
-		DisableVectorMatch:   request.DisableVectorMatch,
-		Rerank:               request.Rerank,
+		VectorThreshold:       request.VectorThreshold,
+		KeywordThreshold:      request.KeywordThreshold,
+		MatchCount:            request.MatchCount,
+		DisableKeywordsMatch:  request.DisableKeywordsMatch,
+		DisableVectorMatch:    request.DisableVectorMatch,
+		ParentSlotAggregation: request.ParentSlotAggregation,
+		Rerank:                request.Rerank,
 	}, nil
 }
 
@@ -986,7 +1126,7 @@ func knowledgeSearchOptions(request *SearchKnowledgeRequest) (*types.KnowledgeSe
 // @Param        session_id  path      string                   true  "会话ID"
 // @Param        request     body      CreateKnowledgeQARequest true  "问答请求"
 // @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
-// @Success      200         {object}  map[string]interface{}   "问答结果（SSE流）"
+// @Success      200         {string}  string  "SSE 事件流"
 // @Failure      400         {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1016,7 +1156,7 @@ func (h *Handler) KnowledgeQA(c *gin.Context) {
 // @Param        session_id  path      string                   true  "会话ID"
 // @Param        request     body      CreateKnowledgeQARequest true  "问答请求"
 // @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
-// @Success      200         {object}  map[string]interface{}   "问答结果（SSE流）"
+// @Success      200         {string}  string  "SSE 事件流"
 // @Failure      400         {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1185,23 +1325,23 @@ func (h *Handler) rejectIfSessionRewinding(ctx context.Context, sessionID string
 	return errors.NewInternalServerError(err.Error())
 }
 
-func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (func(), bool) {
+func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (context.Context, func(), bool) {
 	noop := func() {}
 	if reqCtx == nil {
-		return noop, true
+		return ctx, noop, true
 	}
 	type sessionTurnHolder interface {
-		HoldSandboxTurn(context.Context, string, string) (func(), error)
+		HoldSandboxTurn(context.Context, string, string) (context.Context, func(), error)
 	}
 	holder, ok := h.sessionService.(sessionTurnHolder)
 	if !ok {
-		return noop, true
+		return ctx, noop, true
 	}
 	configID := ""
 	if reqCtx.customAgent != nil {
 		configID = reqCtx.customAgent.Config.SandboxConfigID
 	}
-	release, err := holder.HoldSandboxTurn(ctx, reqCtx.sessionID, configID)
+	turnCtx, release, err := holder.HoldSandboxTurn(ctx, reqCtx.sessionID, configID)
 	if err == nil {
 		// The QA service reads this off the built request and skips its own
 		// hold, so the send path opens and closes the lease exactly once.
@@ -1217,13 +1357,16 @@ func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (fun
 		} else {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": reqCtx.sessionID})
 		}
-		return noop, false
+		return ctx, noop, false
+	}
+	if turnCtx == nil {
+		turnCtx = ctx
 	}
 	if release == nil {
 		release = noop
 	}
 	var once sync.Once
-	return func() { once.Do(release) }, true
+	return turnCtx, func() { once.Do(release) }, true
 }
 
 // executeQA is the unified execution flow for both KnowledgeQA and AgentQA modes.
@@ -1237,7 +1380,9 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	// This is a pure UI memo (no behavioural effect) and runs in a goroutine
 	// to avoid adding a DB round-trip to TTFB. Use WithoutCancel so a fast
 	// client disconnect doesn't drop the write.
-	go h.persistLastRequestState(ctx, reqCtx, mode)
+	if reqCtx.resume == nil {
+		go h.persistLastRequestState(ctx, reqCtx, mode)
+	}
 
 	if mode == qaModeAgent {
 		if err := h.rejectIfOtherAgentRunLive(ctx, reqCtx); err != nil {
@@ -1257,11 +1402,19 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		}
 		return
 	}
+	// A new message moves on from any prompt still waiting for an answer.
+	// Its run is closed first so the history this turn loads is well formed.
+	if reqCtx.resume == nil {
+		h.supersedeSuspendedRuns(ctx, sessionID)
+	}
 
-	releaseQATurn, held := h.holdQATurn(ctx, reqCtx)
+	ctx, releaseQATurn, held := h.holdQATurn(ctx, reqCtx)
 	if !held {
 		return
 	}
+	// setupSSEStream clones reqCtx.ctx. The turn's admission members have to
+	// be on that context or a detached tool call waits on its own hold.
+	reqCtx.ctx = ctx
 
 	// Agent mode: emit agent query event before message creation
 	if mode == qaModeAgent {
@@ -1336,8 +1489,6 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	// Normal mode: register completion handler on EventAgentFinalAnswer
 	// (Agent mode handles completion in the defer block instead)
 	if mode == qaModeNormal {
-		var completionHandled bool
-
 		// Persist the pipeline's retrieval/attachment stages so a reloaded
 		// conversation redraws the timeline it showed while streaming, including
 		// turns that searched and cited nothing.
@@ -1356,30 +1507,15 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			return nil
 		})
 
-		streamCtx.eventBus.On(event.EventAgentFinalAnswer, func(ctx context.Context, evt event.Event) error {
-			data, ok := evt.Data.(event.AgentFinalAnswerData)
-			if !ok {
-				return nil
-			}
-			streamCtx.assistantMessage.Content += data.Content
-			if data.IsFallback {
-				streamCtx.assistantMessage.IsFallback = true
-			}
-			if data.Truncated {
-				markQuickAnswerTruncated(streamCtx.assistantMessage)
-			}
-			if data.Done {
-				if completionHandled {
-					return nil
-				}
-				completionHandled = true
+		completionHandled := h.registerQuickAnswerCompletionHandler(
+			streamCtx, sessionID, reqCtx.query, reqCtx.userMessageID, reqCtx.session.TenantID,
+		)
 
-				logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
-				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
-				h.completeQuickAnswerTurn(updateCtx, streamCtx, reqCtx.query, reqCtx.userMessageID)
-			}
-			return nil
-		})
+		// A failed pipeline never streams EventAgentFinalAnswer with Done=true,
+		// so the turn would otherwise end with an empty, incomplete assistant
+		// row: the live UI shows the error event, but a refresh renders a blank
+		// bubble and the SSE stream never closes (issue #4145).
+		h.registerQuickAnswerFailureHandler(streamCtx, completionHandled, reqCtx.session.TenantID)
 	}
 
 	// Execute QA asynchronously
@@ -1405,6 +1541,11 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			if mode == qaModeAgent {
 				if streamCtx.releaseTurn != nil {
 					streamCtx.releaseTurn()
+				}
+				if streamCtx.streamHandler != nil {
+					if suspension := streamCtx.streamHandler.Suspension(); suspension != nil && suspension.Detached {
+						return // The new owner controls persistence and the live-run marker.
+					}
 				}
 				// Use WithoutCancel so a user-triggered stop (which cancels
 				// asyncCtx) doesn't also cancel the GORM UPDATE that persists
@@ -1971,19 +2112,107 @@ func (h *Handler) completeQuickAnswerTurn(
 	if streamCtx.eventBus != nil {
 		// MessageID is what handleComplete keys on. Leave FinalAnswer empty:
 		// KnowledgeQA already accumulated the answer on the message, and
-		// handleComplete would append FinalAnswer a second time.
+		// handleComplete would append FinalAnswer a second time. Usage rides
+		// along when the stream's final answer event carried it: handleComplete
+		// both persists it on the message and reports it in the complete event.
+		// Only set it when present — a typed-nil pointer would travel as a
+		// non-nil interface and read as "usage reported" downstream.
+		completeData := event.AgentCompleteData{
+			MessageID: streamCtx.assistantMessage.ID,
+		}
+		if streamCtx.turnUsage != nil {
+			completeData.Usage = streamCtx.turnUsage
+		}
 		_ = streamCtx.eventBus.Emit(ctx, event.Event{
 			Type:      event.EventAgentComplete,
 			SessionID: streamCtx.assistantMessage.SessionID,
-			Data: event.AgentCompleteData{
-				MessageID: streamCtx.assistantMessage.ID,
-			},
+			Data:      completeData,
 		})
 	}
 	h.completeStreamAssistantMessage(ctx, streamCtx, query, userMessageID)
 	if streamCtx.releaseTurn != nil {
 		streamCtx.releaseTurn()
 	}
+}
+
+// quickAnswerFailureContent is persisted when a pipeline error carries no
+// message, so the failed turn does not save an empty answer.
+const quickAnswerFailureContent = "Failed to generate the answer"
+
+// registerQuickAnswerCompletionHandler completes the KnowledgeQA turn when the
+// stream's final answer event arrives, accumulating answer text, fallback and
+// truncation flags onto the assistant message and forwarding the provider's
+// token usage (issue #3865) to completeQuickAnswerTurn. Returns the shared
+// completion flag the failure handler must honor so a turn cannot complete
+// twice.
+func (h *Handler) registerQuickAnswerCompletionHandler(
+	streamCtx *sseStreamContext, sessionID, query, userMessageID string, sessionTenantID uint64,
+) *bool {
+	completionHandled := new(bool)
+	streamCtx.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.AgentFinalAnswerData)
+		if !ok {
+			return nil
+		}
+		streamCtx.assistantMessage.Content += data.Content
+		if data.IsFallback {
+			streamCtx.assistantMessage.IsFallback = true
+		}
+		if data.Truncated {
+			markQuickAnswerTruncated(streamCtx.assistantMessage)
+		}
+		if usage, ok := data.Usage.(*types.TokenUsage); ok && usage != nil {
+			streamCtx.turnUsage = usage
+		}
+		if data.Done {
+			if *completionHandled {
+				return nil
+			}
+			*completionHandled = true
+
+			logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
+			updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, sessionTenantID)
+			h.completeQuickAnswerTurn(updateCtx, streamCtx, query, userMessageID)
+		}
+		return nil
+	})
+	return completionHandled
+}
+
+// registerQuickAnswerFailureHandler completes and persists the assistant
+// message when the quick-answer pipeline reports EventError. The empty query
+// keeps the failed turn out of the chat-history index, follow-up suggestions
+// and memory writes — only the visible error text belongs in history.
+func (h *Handler) registerQuickAnswerFailureHandler(
+	streamCtx *sseStreamContext, completionHandled *bool, sessionTenantID uint64,
+) {
+	streamCtx.eventBus.On(event.EventError, func(ctx context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.ErrorData)
+		if !ok || *completionHandled {
+			return nil
+		}
+		*completionHandled = true
+
+		errorContent := strings.TrimSpace(data.Error)
+		if errorContent == "" {
+			errorContent = quickAnswerFailureContent
+		}
+		msg := streamCtx.assistantMessage
+		// Keep any partial answer the stream produced before failing and
+		// append the error, so a reload shows both instead of losing the text.
+		if remaining := strings.TrimSpace(msg.Content); remaining != "" {
+			msg.Content += "\n\n" + errorContent
+		} else {
+			msg.Content = errorContent
+		}
+
+		updateCtx := context.WithValue(
+			context.WithoutCancel(ctx),
+			types.TenantIDContextKey, sessionTenantID,
+		)
+		h.completeQuickAnswerTurn(updateCtx, streamCtx, "", "")
+		return nil
+	})
 }
 
 // sessionTenantInfoContext makes the tenant info match the session owner (the
@@ -2013,7 +2242,23 @@ func (h *Handler) sessionTenantInfoContext(ctx context.Context) (context.Context
 func (h *Handler) completeStreamAssistantMessage(
 	ctx context.Context, streamCtx *sseStreamContext, query, userMessageID string,
 ) {
-	if err := h.completeAssistantMessage(ctx, streamCtx.assistantMessage, query, userMessageID); err != nil {
+	if streamCtx.streamHandler != nil {
+		if suspension := streamCtx.streamHandler.Suspension(); suspension != nil && suspension.Detached {
+			return
+		}
+	}
+	persist := func() error {
+		return h.completeAssistantMessage(ctx, streamCtx.assistantMessage, query, userMessageID)
+	}
+	if streamCtx.streamHandler != nil && streamCtx.streamHandler.Suspension() != nil {
+		// The turn is not over: indexing, memory and follow-ups run when the
+		// resumed run completes.
+		persist = func() error {
+			streamCtx.assistantMessage.UpdatedAt = time.Now()
+			return h.messageService.UpdateMessage(ctx, streamCtx.assistantMessage)
+		}
+	}
+	if err := persist(); err != nil {
 		if streamCtx.streamHandler != nil {
 			_ = streamCtx.streamHandler.handleError(ctx, event.Event{
 				ID: uuid.New().String(), Type: event.EventError, SessionID: streamCtx.assistantMessage.SessionID,
@@ -2040,6 +2285,7 @@ func (h *Handler) completeAssistantMessage(
 		logger.Errorf(ctx, "Failed to persist assistant message %s: %v", assistantMessage.ID, err)
 		return err
 	}
+	h.ackBackgroundNotices(ctx, assistantMessage)
 
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.

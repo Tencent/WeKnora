@@ -30,7 +30,12 @@ const DesktopEnsureUnsupportedExit = 2
 // a BYO image without a desktop.
 const DesktopEnsureUnsupportedMarker = "WEKNORA_DESKTOP_UNSUPPORTED"
 
-var desktopReadyLine = regexp.MustCompile(`^READY ([A-Za-z0-9]{32})$`)
+// DesktopNoFreeScreenMarker is wk-display claim when every seat is busy.
+// ensure.sh forwards it on stderr. The caller must not reset the shared
+// websockify in response: that listener carries every other session's desktop.
+const DesktopNoFreeScreenMarker = "WEKNORA_NO_FREE_SCREEN"
+
+var desktopReadyLine = regexp.MustCompile(`^READY ([A-Za-z0-9]{32})(?: ([0-9]{1,2}))?$`)
 
 // DesktopEnsureCmd starts the desktop listeners (or takes the image script's
 // fast path) and prints READY <secret> on stdout. Invoking DesktopStartScript
@@ -42,18 +47,27 @@ func DesktopEnsureCmd() string { return desktopEnsureScript }
 // DesktopEnsureCmd run rebuilds it instead of taking its fast path.
 func DesktopResetListenersCmd() string { return desktopResetListenersScript }
 
-// ParseDesktopEnsureSecret requires stdout to be exactly one READY line.
-// ensure.sh promises that; a last-non-empty-line parser would accept
+// ParseDesktopEnsure requires stdout to be exactly one READY line:
+// "READY <secret>" or "READY <secret> <token>". The token is the seat number
+// (0 is the shared :0 screen); it is empty for images that predate seats.
+// ensure.sh promises a single line; a last-non-empty-line parser would accept
 // "garbage\nREADY <secret>" and dial, hiding the leak behind a 401/502.
 // A single trailing newline (printf) is allowed; nothing else is.
-func ParseDesktopEnsureSecret(stdout string) (string, bool) {
+func ParseDesktopEnsure(stdout string) (secret, token string, ok bool) {
 	s := strings.ReplaceAll(stdout, "\r\n", "\n")
 	s = strings.TrimSuffix(s, "\n")
 	m := desktopReadyLine.FindStringSubmatch(s)
 	if m == nil {
-		return "", false
+		return "", "", false
 	}
-	return m[1], true
+	return m[1], m[2], true
+}
+
+// ParseDesktopEnsureSecret is ParseDesktopEnsure without the token, for
+// callers that have not been switched over yet.
+func ParseDesktopEnsureSecret(stdout string) (string, bool) {
+	secret, _, ok := ParseDesktopEnsure(stdout)
+	return secret, ok
 }
 
 // IsDesktopEnsureUnsupported is the BYO-image miss: exit 2 plus the

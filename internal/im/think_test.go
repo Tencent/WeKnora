@@ -34,6 +34,16 @@ func TestStripThinkBlocks(t *testing.T) {
 			input: "<think>still streaming",
 			want:  "",
 		},
+		{
+			name:  "literal sign in fenced code block",
+			input: "Example:\n\n```text\n<think>not reasoning</think>\n```\n\nDone.",
+			want:  "Example:\n\n```text\n<think>not reasoning</think>\n```\n\nDone.",
+		},
+		{
+			name:  "literal sign in inline code span",
+			input: "Use `<think>draft</think>` in the prompt.",
+			want:  "Use `<think>draft</think>` in the prompt.",
+		},
 	}
 
 	for _, tt := range tests {

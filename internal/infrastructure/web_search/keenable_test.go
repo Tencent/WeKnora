@@ -44,7 +44,7 @@ func TestKeenableProvider_Search_Keyless(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	results, err := p.Search(ctx, "hello", 2, true)
+	results, err := p.Search(ctx, types.WebSearchRequest{Query: "hello", MaxResults: 2, IncludeDate: true})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestKeenableProvider_Search_SnippetMapping(t *testing.T) {
 	p := &KeenableProvider{client: srv.Client(), baseURL: srv.URL}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	results, err := p.Search(ctx, "q", 5, false)
+	results, err := p.Search(ctx, types.WebSearchRequest{Query: "q", MaxResults: 5})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestKeenableProvider_Search_Keyed(t *testing.T) {
 	p := &KeenableProvider{client: srv.Client(), baseURL: srv.URL, apiKey: "keen_test"}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := p.Search(ctx, "hi", 5, false); err != nil {
+	if _, err := p.Search(ctx, types.WebSearchRequest{Query: "hi", MaxResults: 5}); err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 }
@@ -126,7 +126,7 @@ func TestKeenableProvider_Search_ErrorStatus(t *testing.T) {
 	p := &KeenableProvider{client: srv.Client(), baseURL: srv.URL}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := p.Search(ctx, "x", 5, false); err == nil {
+	if _, err := p.Search(ctx, types.WebSearchRequest{Query: "x", MaxResults: 5}); err == nil {
 		t.Fatal("expected an error for a non-200 response")
 	}
 }
@@ -136,7 +136,7 @@ func TestKeenableProvider_Name(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewKeenableProvider (keyless): %v", err)
 	}
-	if p.Name() != "keenable" {
-		t.Errorf("Name() = %q, want keenable", p.Name())
+	if name := p.(*KeenableProvider).Name(); name != "keenable" {
+		t.Errorf("Name() = %q, want keenable", name)
 	}
 }

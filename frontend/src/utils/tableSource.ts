@@ -2,7 +2,7 @@ import { findNormalizedMatches, normalizeForMatch, normalizeWithPositions, type 
 
 export type TableSourceMatch = TextMatch & { page: number; quote: string }
 type Column = { text: string; ends: number[] }
-type Row = { text: string; page: number; start: number; norm: string; pos: number[] }
+type Row = { text: string; page: number; start: number; norm: string; pos: number[]; endPos: number[] }
 type Step = { row: number; hits: TableSourceMatch[] }
 
 function columns(scope: string): Column[] {
@@ -81,8 +81,7 @@ export function findTableSource(pages: string[], scope: string): TableSourceMatc
           if (size < 2 || size > row.norm.length) continue
           const hits = findNormalizedMatches(row.norm, column.text.slice(offset, end))
           if (hits.length !== 1) continue
-          const hit = hits[0]!, start = row.pos[hit.start]!, last = row.pos[hit.end - 1]!
-          const finish = last + (row.text.codePointAt(last)! > 0xffff ? 2 : 1)
+          const hit = hits[0]!, start = row.pos[hit.start]!, finish = row.endPos[hit.end - 1]!
           return { end, hit: { page: row.page, start: row.start + start, end: row.start + finish, quote: row.text.slice(start, finish) } }
         }
         return null

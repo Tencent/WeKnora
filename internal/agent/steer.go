@@ -70,6 +70,7 @@ func (e *AgentEngine) drainSteerMessages(
 		}
 		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: types.SteerMessageContent(content)})
 		state.PendingSteerMessages = append(state.PendingSteerMessages, userMessageID)
+		e.recordSteerMessage(userMessageID, content)
 		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        generateEventID("injected"),
 			Type:      event.EventUserMessageInjected,

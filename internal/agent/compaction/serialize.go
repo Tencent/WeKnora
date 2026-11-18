@@ -31,11 +31,12 @@ func serializeConversation(messages []chat.Message) string {
 	var parts []string
 	for i := range messages {
 		msg := &messages[i]
+		text := messageText(*msg)
 		switch msg.Role {
 		case "system":
 			continue
 		case "user":
-			if content := truncate(msg.Content, textMaxChars); content != "" {
+			if content := truncate(text, textMaxChars); content != "" {
 				parts = append(parts, "[User]: "+content)
 			}
 		case "assistant":
@@ -43,14 +44,14 @@ func serializeConversation(messages []chat.Message) string {
 				parts = append(parts,
 					"[Assistant thinking]: "+truncate(msg.ReasoningContent, textMaxChars))
 			}
-			if msg.Content != "" {
-				parts = append(parts, "[Assistant]: "+truncate(msg.Content, textMaxChars))
+			if text != "" {
+				parts = append(parts, "[Assistant]: "+truncate(text, textMaxChars))
 			}
 			if calls := serializeToolCalls(msg.ToolCalls); calls != "" {
 				parts = append(parts, "[Assistant tool calls]: "+calls)
 			}
 		case "tool":
-			if content := truncate(msg.Content, toolResultMaxChars); content != "" {
+			if content := truncate(text, toolResultMaxChars); content != "" {
 				parts = append(parts, fmt.Sprintf("[Tool result %s]: %s", msg.Name, content))
 			}
 		}
@@ -143,16 +144,33 @@ func rawArchive(messages []chat.Message, budget int, estimator *agenttoken.Estim
 }
 
 func archiveLine(msg *chat.Message) string {
+	text := messageText(*msg)
 	switch msg.Role {
 	case "user":
-		return fmt.Sprintf("- User: %s\n", truncate(msg.Content, 500))
+		return fmt.Sprintf("- User: %s\n", truncate(text, 500))
 	case "assistant":
 		if calls := serializeToolCalls(msg.ToolCalls); calls != "" {
-			return fmt.Sprintf("- Assistant [%s]: %s\n", calls, truncate(msg.Content, 500))
+			return fmt.Sprintf("- Assistant [%s]: %s\n", calls, truncate(text, 500))
 		}
-		return fmt.Sprintf("- Assistant: %s\n", truncate(msg.Content, 500))
+		return fmt.Sprintf("- Assistant: %s\n", truncate(text, 500))
 	case "tool":
-		return fmt.Sprintf("- Tool[%s]: %s\n", msg.Name, truncate(msg.Content, 500))
+		return fmt.Sprintf("- Tool[%s]: %s\n", msg.Name, truncate(text, 500))
 	}
 	return ""
+}
+
+// messageText follows the providers' preference for multipart content. The
+// sanitizer can move a compaction summary's text into MultiContent while
+// retaining its Kind, so scalar Content alone is not a complete transcript.
+func messageText(msg chat.Message) string {
+	if len(msg.MultiContent) == 0 {
+		return msg.Content
+	}
+	var text strings.Builder
+	for _, part := range msg.MultiContent {
+		if part.Type == "text" {
+			text.WriteString(part.Text)
+		}
+	}
+	return text.String()
 }

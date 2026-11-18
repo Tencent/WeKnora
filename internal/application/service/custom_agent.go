@@ -101,16 +101,11 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 	agent.CreatedAt = time.Now()
 	agent.UpdatedAt = time.Now()
 
-	// Ensure agent mode is set for user-created agents
-	if agent.Config.AgentMode == "" {
-		agent.Config.AgentMode = types.AgentModeQuickAnswer
-	}
-
 	// Cannot create built-in agents
 	agent.IsBuiltin = false
 
 	// Set defaults
-	agent.EnsureDefaults()
+	agent.EnsureCreationDefaults()
 	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
 		return nil, err
 	}

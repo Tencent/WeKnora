@@ -113,6 +113,8 @@ type QAPair struct {
 
 NDCG 核心计算（`metric/ndcg.go`）：
 
+理想排序使用去重后的全部相关文档，最多取前 k 个，不受实际召回数量限制。v0.9.0 修正了少量召回时分母偏小的问题；比较升级前后的结果时，应在同一版本重新运行基线评估。
+
 ```go
 // DCG = sum((2^rel_i - 1) / log2(i+2))，rel 为 0/1
 dcg += (math.Pow(2, float64(relevance)) - 1) / math.Log2(float64(i+2))
@@ -142,6 +144,8 @@ for i, predID := range ids {
 | ROUGE-L | `rougel` | `metric/rouge.go` | 最长公共子序列（LCS）F1 |
 
 BLEU 核心（`metric/bleu.go`）：修正 n-gram 精度的加权几何平均乘以简短惩罚 `bp * exp(sum(w_i * log(p_i)))`。ROUGE 取 F1：`F1 = 2PR / (P + R + 1e-8)`（`metric/rouge_score.go`）。
+
+未开启平滑时，任何权重大于零的 n-gram 精度为零，BLEU 都应为零。v0.9.0 修正了跳过这些零精度项导致分数偏高的问题。
 
 ## 接口与执行参考
 

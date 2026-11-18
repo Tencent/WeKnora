@@ -6,6 +6,8 @@
  * axios interceptor; both planes call {@link refreshAccessTokenShared}.
  */
 
+import { getApiBaseUrl } from './api-base'
+
 const AUTH_STORAGE_KEYS = [
   'weknora_token',
   'weknora_refresh_token',
@@ -18,11 +20,44 @@ const AUTH_STORAGE_KEYS = [
   'weknora_memberships',
 ] as const
 
-let isRefreshing = false
-let failedQueue: Array<{
-  resolve: (token: string) => void
-  reject: (error: unknown) => void
-}> = []
+type AuthSession = {
+  generation: number
+  accessToken: string | null
+  refreshToken: string | null
+}
+
+let sessionGeneration = 0
+let activeRefresh: { session: AuthSession; promise: Promise<string> } | null = null
+
+export class AuthSessionChangedError extends Error {
+  constructor() {
+    super('Authentication session changed during token refresh')
+    this.name = 'AuthSessionChangedError'
+  }
+}
+
+/** Detach pending refreshes when the local session is explicitly ended. */
+export function invalidateAuthRefresh() {
+  sessionGeneration += 1
+  activeRefresh = null
+}
+
+function sameSession(a: AuthSession, b: AuthSession): boolean {
+  return a.generation === b.generation
+    && a.accessToken === b.accessToken
+    && a.refreshToken === b.refreshToken
+}
+
+function assertCurrentSession(session: AuthSession) {
+  if (activeRefresh?.session !== session || session.generation !== sessionGeneration) {
+    throw new AuthSessionChangedError()
+  }
+  // Storage may have changed in another tab, without running our logout hook.
+  if (localStorage.getItem('weknora_refresh_token') !== session.refreshToken
+    || localStorage.getItem('weknora_token') !== session.accessToken) {
+    throw new AuthSessionChangedError()
+  }
+}
 
 export type TokenRefreshResult = {
   success: boolean
@@ -58,19 +93,26 @@ export function isStreamAuthError(err: unknown): boolean {
 
 export function isEmbedPage(): boolean {
   if (typeof window === 'undefined') return false
-  return window.location.pathname.startsWith('/embed/')
+  return window.location.pathname.startsWith(`${getApiBaseUrl()}/embed/`)
 }
 
 export function redirectToLogin() {
   if (typeof window === 'undefined') return
-  if (window.location.pathname === '/login') return
+  const loginPath = `${getApiBaseUrl()}/login`
+  if (window.location.pathname === loginPath) return
   if (isEmbedPage()) return
-  window.location.href = '/login'
+  window.location.href = loginPath
 }
 
 export function clearAuthStorage() {
+  invalidateAuthRefresh()
   for (const key of AUTH_STORAGE_KEYS) {
-    localStorage.removeItem(key)
+    try {
+      localStorage.removeItem(key)
+    } catch {
+      // Storage may be unavailable. Still attempt the remaining keys and
+      // allow callers to reject waiting requests and redirect to login.
+    }
   }
 }
 
@@ -79,27 +121,16 @@ export function forceReloginRedirect() {
   redirectToLogin()
 }
 
-function processQueue(error: unknown, token: string | null = null) {
-  failedQueue.forEach(({ resolve, reject }) => {
-    if (error) {
-      reject(error)
-    } else {
-      resolve(token as string)
-    }
-  })
-  failedQueue = []
-}
-
 async function defaultRefresh(refreshToken: string): Promise<TokenRefreshResult> {
   const { refreshToken: refreshTokenAPI } = await import('../api/auth/index')
   return refreshTokenAPI(refreshToken)
 }
 
 /**
- * Refresh the access token, de-duplicated across all callers.
+ * Refresh the access token, de-duplicated within the current session.
  *
- * Resolves with the new access token. On failure it has already cleared
- * credentials and redirected to /login.
+ * Only a still-current session can persist tokens or clear credentials on
+ * failure. Superseded callers reject without changing the replacement session.
  */
 export async function refreshAccessTokenShared(
   options: RefreshAccessTokenOptions = {},
@@ -107,46 +138,63 @@ export async function refreshAccessTokenShared(
   const messages = { ...defaultMessages, ...options.messages }
   const refresh = options.refresh ?? defaultRefresh
 
-  if (isRefreshing) {
-    return new Promise<string>((resolve, reject) => {
-      failedQueue.push({ resolve, reject })
-    })
-  }
-
-  isRefreshing = true
-  const storedRefreshToken = localStorage.getItem('weknora_refresh_token')
-
-  if (!storedRefreshToken) {
-    clearAuthStorage()
-    const noRefreshTokenError = new Error(messages.pleaseRelogin)
-    processQueue(noRefreshTokenError, null)
-    isRefreshing = false
-    redirectToLogin()
-    throw noRefreshTokenError
-  }
-
+  let session: AuthSession
   try {
-    const response = await refresh(storedRefreshToken)
-
-    if (!response.success || !response.data?.token) {
-      throw new Error(response.message || messages.tokenRefreshFailed)
+    session = {
+      generation: sessionGeneration,
+      accessToken: localStorage.getItem('weknora_token'),
+      refreshToken: localStorage.getItem('weknora_refresh_token'),
     }
-
-    const { token, refreshToken: newRefreshToken } = response.data
-    localStorage.setItem('weknora_token', token)
-    if (newRefreshToken) {
-      localStorage.setItem('weknora_refresh_token', newRefreshToken)
-    }
-    processQueue(null, token)
-    return token
-  } catch (refreshError) {
-    clearAuthStorage()
-    processQueue(refreshError, null)
-    redirectToLogin()
-    throw refreshError
-  } finally {
-    isRefreshing = false
+  } catch (error) {
+    forceReloginRedirect()
+    throw error
   }
+
+  if (activeRefresh && sameSession(activeRefresh.session, session)) {
+    return activeRefresh.promise
+  }
+
+  const promise = (async () => {
+    // Install the attempt before running code that can fail synchronously.
+    await Promise.resolve()
+    let committing = false
+    try {
+      assertCurrentSession(session)
+      if (!session.refreshToken) throw new Error(messages.pleaseRelogin)
+      const response = await refresh(session.refreshToken)
+      assertCurrentSession(session)
+      if (!response.success || !response.data?.token) {
+        throw new Error(response.message || messages.tokenRefreshFailed)
+      }
+
+      const { token, refreshToken: newRefreshToken } = response.data
+      committing = true
+      localStorage.setItem('weknora_token', token)
+      if (newRefreshToken) localStorage.setItem('weknora_refresh_token', newRefreshToken)
+      return token
+    } catch (error) {
+      if (error instanceof AuthSessionChangedError) throw error
+      if (activeRefresh?.session !== session || session.generation !== sessionGeneration) {
+        throw new AuthSessionChangedError()
+      }
+      if (!committing) {
+        try {
+          assertCurrentSession(session)
+        } catch (sessionError) {
+          if (sessionError instanceof AuthSessionChangedError) throw sessionError
+          // Inaccessible storage keeps the existing fail-closed cleanup policy.
+        }
+      }
+      clearAuthStorage()
+      redirectToLogin()
+      throw error
+    } finally {
+      // An old attempt must never release a replacement session's refresh lock.
+      if (activeRefresh?.session === session) activeRefresh = null
+    }
+  })()
+  activeRefresh = { session, promise }
+  return promise
 }
 
 /**
@@ -191,6 +239,5 @@ export async function runStreamWithAuthRetry<T>(options: {
 
 /** Reset module locks between unit tests. */
 export function resetAuthRefreshStateForTests() {
-  isRefreshing = false
-  failedQueue = []
+  invalidateAuthRefresh()
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -236,5 +237,55 @@ func TestFetchAllFromCursorReFetchesAndReconcilesDeletions(t *testing.T) {
 	items, _, err = c.FetchAllFromCursor(context.Background(), cfg, cfg.ResourceIDs, next)
 	if err != nil || len(items) != 1 || !items[0].IsDeleted {
 		t.Fatalf("full sync deletion: %#v, %v", items, err)
+	}
+}
+
+// An oversized upload is a per-file failure: healthy siblings advance, the
+// failed revision remains retryable, and a later smaller replacement recovers.
+func TestIncrementalOversizedFileDoesNotBlockHealthyDocuments(t *testing.T) {
+	c, api, cfg, a, _ := twoFolderFixture(t)
+	cfg.Settings = map[string]interface{}{"include_uploaded_files": true}
+	large := node{
+		ID: "large", WorkspaceID: "space", Name: "large.pptx", Type: "FILE",
+		Category: "DOCUMENT", Extension: "pptx", ModifiedTime: "r1",
+	}
+	healthy := syncDocument()
+	api.nodes["a"] = []node{large, healthy}
+	api.dlErrors = map[string]error{"large": fmt.Errorf("declared body exceeds limit: %w", errDocumentTooLarge)}
+	var cursor *types.SyncCursor
+	for _, revision := range []string{"r1", "r2"} {
+		healthy.ModifiedTime = revision
+		api.nodes["a"] = []node{large, healthy}
+		items, next, err := c.FetchIncremental(context.Background(), cfg, cursor)
+		var partial *datasource.PartialFetchError
+		if !errors.As(err, &partial) {
+			t.Fatalf("expected partial fetch, got %v", err)
+		}
+		byID := make(map[string]types.FetchedItem, len(items))
+		for _, item := range items {
+			byID[item.ExternalID] = item
+		}
+		if len(items) != 2 || byID["large"].Metadata["error_reason_code"] != "dingtalk_document_too_large" ||
+			len(byID["doc"].Content) == 0 {
+			t.Fatalf("unexpected items: %#v", items)
+		}
+		state, err := decodeCursor(next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.Resources[a]["doc"] != revision || state.Resources[a]["large"] != "" {
+			t.Fatalf("unsafe cursor: %#v", state)
+		}
+		cursor = next
+	}
+	delete(api.dlErrors, "large")
+	api.downloads = map[string][]byte{"large": []byte("PK\x03\x04slides")}
+	items, next, err := c.FetchIncremental(context.Background(), cfg, cursor)
+	if err != nil || len(items) != 1 || items[0].ExternalID != "large" || len(items[0].Content) == 0 {
+		t.Fatalf("recovery: %#v, %v", items, err)
+	}
+	state, err := decodeCursor(next)
+	if err != nil || state.Resources[a]["large"] != "r1" {
+		t.Fatalf("recovery cursor: %#v, %v", state, err)
 	}
 }

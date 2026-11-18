@@ -20,5 +20,7 @@ as evidence of a successful request or as the golden response.
 All other responses in `client_test.go` are synthetic local fixtures for error
 handling and mapping. Values outside the probability range check that the wire
 client preserves numbers; they do not claim such values are produced by a
-particular model. Score interpretation and model limits are provider settings,
-not inferred from this fixture.
+particular model. The guide documents probability scores for Qwen3 rerankers
+and logits for some other models. The Qwen3 4B catalog entry declares its score
+scale and batch limit explicitly. Custom models use the existing per-model
+compatibility settings for their own score scale.

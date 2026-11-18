@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -53,6 +54,16 @@ func NewQdrantRetrieveEngineRepository(client *qdrant.Client, indexCfg *types.In
 // getCollectionName returns the collection name for a specific dimension
 func (q *qdrantRepository) getCollectionName(dimension int) string {
 	return fmt.Sprintf("%s_%d", q.collectionBaseName, dimension)
+}
+
+// matchesCollectionName accepts only names generated for a positive dimension.
+func (q *qdrantRepository) matchesCollectionName(collectionName string) bool {
+	suffix, ok := strings.CutPrefix(collectionName, q.collectionBaseName+"_")
+	if !ok {
+		return false
+	}
+	dimension, err := strconv.Atoi(suffix)
+	return err == nil && dimension > 0 && suffix == strconv.Itoa(dimension)
 }
 
 // collectionExists reports whether the dimension-specific collection is
@@ -313,8 +324,8 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 	for _, embedding := range embeddingList {
 		embeddingDB := toQdrantVectorEmbedding(embedding, additionalParams)
 		if len(embeddingDB.Embedding) == 0 {
-			log.Warnf("[Qdrant] Skipping empty embedding for chunk ID: %s", embedding.ChunkID)
-			continue
+			return fmt.Errorf("empty embedding vector for chunk ID: %s (source ID: %s)",
+				embedding.ChunkID, embedding.SourceID)
 		}
 
 		dimension := len(embeddingDB.Embedding)
@@ -325,11 +336,6 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 		}
 		pointsByDimension[dimension] = append(pointsByDimension[dimension], point)
 		log.Debugf("[Qdrant] Added chunk ID %s to batch request (dimension: %d)", embedding.ChunkID, dimension)
-	}
-
-	if len(pointsByDimension) == 0 {
-		log.Warn("[Qdrant] No valid points to save after filtering")
-		return nil
 	}
 
 	// Save points to each dimension-specific collection
@@ -507,9 +513,7 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 	var updateErr error
 	// Update in all matching collections
 	for _, collectionName := range collections {
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(q.collectionBaseName) ||
-			collectionName[:len(q.collectionBaseName)] != q.collectionBaseName {
+		if !q.matchesCollectionName(collectionName) {
 			continue
 		}
 
@@ -596,9 +600,7 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 	var updateErr error
 	// Update in all matching collections
 	for _, collectionName := range collections {
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(q.collectionBaseName) ||
-			collectionName[:len(q.collectionBaseName)] != q.collectionBaseName {
+		if !q.matchesCollectionName(collectionName) {
 			continue
 		}
 
@@ -796,9 +798,7 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 	// Search in all matching collections
 	for _, collectionName := range collections {
 		log.Debugf("[Qdrant] Checking collection: %s", collectionName)
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(q.collectionBaseName) ||
-			collectionName[:len(q.collectionBaseName)] != q.collectionBaseName {
+		if !q.matchesCollectionName(collectionName) {
 			log.Debugf("[Qdrant] Skipping collection %s (doesn't match base name %s)", collectionName, q.collectionBaseName)
 			continue
 		}

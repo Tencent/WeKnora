@@ -37,7 +37,7 @@ func pipelineError(ctx context.Context, stage, action string, fields map[string]
 func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 	chatManage *types.ChatManage,
 ) (chat.Chat, *chat.ChatOptions, error) {
-	chatModel, err := modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	chatModel, err := modelService.GetChatModel(chatManage.ChatModelContext(ctx), chatManage.ChatModelID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)
 		return nil, nil, err

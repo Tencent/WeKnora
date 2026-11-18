@@ -31,13 +31,13 @@ func TestPrepareMessagesWithModelContextUsesChunkCentricContext(t *testing.T) {
 	messages, refs := prepareMessagesWithModelContext(context.Background(), manage)
 	require.Len(t, messages, 2)
 	require.Contains(t, messages[0].Content, "Source handling protocol")
-	require.Contains(t, messages[1].Content, `<document id="d1" kb="b1" title="Doc">`)
-	require.Contains(t, messages[1].Content, `<chunk id="c1" index="1" view="full">`)
-	require.Contains(t, messages[1].Content, `<chunk id="c2" index="2" view="full">`)
+	require.Contains(t, messages[1].Content, `<document id="doc://1" kb="kb://1" title="Doc">`)
+	require.Contains(t, messages[1].Content, `<chunk id="chunk://1" index="1" view="full">`)
+	require.Contains(t, messages[1].Content, `<chunk id="chunk://2" index="2" view="full">`)
 	require.False(t, strings.Contains(messages[1].Content, "chunk-1"))
 	require.Equal(t,
 		`<kb doc="Doc" chunk_id="chunk-1" kb_id="kb-1" />`,
-		refs.DecodeOutputText(`<ref id="c1"/>`),
+		refs.DecodeOutputText(`<ref id="chunk://1"/>`),
 	)
 }
 
@@ -66,8 +66,8 @@ func TestPrepareMessagesWithModelContextReplacesSystemPromptContextAndHistoryCit
 	messages, refs := prepareMessagesWithModelContext(context.Background(), manage)
 	messages = refs.EncodeMessages(messages)
 	require.NotContains(t, messages[0].Content, rendered)
-	require.Contains(t, messages[0].Content, `<chunk id="c1"`)
-	require.Contains(t, messages[2].Content, `<ref id="c2"/>`)
+	require.Contains(t, messages[0].Content, `<chunk id="chunk://1"`)
+	require.Contains(t, messages[2].Content, `<ref id="chunk://2"/>`)
 	require.NotContains(t, messages[2].Content, "old-chunk")
 }
 
@@ -88,11 +88,11 @@ func TestPrepareMessagesWithModelContextKeepsWebSeparateFromChunks(t *testing.T)
 
 	messages, refs := prepareMessagesWithModelContext(context.Background(), manage)
 	require.Contains(t, messages[1].Content, `<retrieval type="web" mode="search" trust="untrusted">`)
-	require.Contains(t, messages[1].Content, `<page id="w1" title="Example">`)
-	require.NotContains(t, messages[1].Content, `<chunk id="c1"`)
+	require.Contains(t, messages[1].Content, `<page id="url://1" title="Example">`)
+	require.NotContains(t, messages[1].Content, `<chunk id="chunk://1"`)
 	require.Equal(t,
 		`<web url="https://example.com/page" title="Example" />`,
-		refs.DecodeOutputText(`<ref id="w1"/>`),
+		refs.DecodeOutputText(`<ref id="url://1"/>`),
 	)
 }
 
@@ -111,7 +111,7 @@ func TestPrepareMessagesWithModelContextCompactsHistoryWithoutCurrentRetrieval(t
 	messages, refs := prepareMessagesWithModelContext(context.Background(), manage)
 	messages = refs.EncodeMessages(messages)
 	require.Contains(t, messages[0].Content, "Source handling protocol")
-	require.Contains(t, messages[2].Content, `<ref id="w1"/>`)
+	require.Contains(t, messages[2].Content, `<ref id="url://1"/>`)
 	require.NotContains(t, messages[2].Content, "https://example.com/old")
 }
 
@@ -133,9 +133,9 @@ func TestPrepareMessagesWithModelContextSuppressesCitationsWhenDisabled(t *testi
 
 	messages, refs := prepareMessagesWithModelContext(context.Background(), manage)
 	require.Contains(t, messages[0].Content, "Source citations are disabled")
-	require.Contains(t, messages[1].Content, `<chunk id="c1"`)
+	require.Contains(t, messages[1].Content, `<chunk id="chunk://1"`)
 	require.NotContains(t, messages[1].Content, "chunk-1")
-	require.Equal(t, "answer ", refs.DecodeOutputText(`answer <ref id="c1"/>`))
+	require.Equal(t, "answer ", refs.DecodeOutputText(`answer <ref id="chunk://1"/>`))
 }
 
 // A truncated ranked list must reach the model context view: this is the text

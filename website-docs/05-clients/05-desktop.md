@@ -8,6 +8,9 @@ WeKnora Lite 桌面应用基于 [Wails v2](https://wails.io)，在桌面进程�
 
 v0.8.3 起，macOS 桌面版可在工具箱安装、升级并运行本机技能，详见[本机技能](../03-features/22-skills-sandbox.md#在-lite-桌面版安装本机技能)。
 
+
+v0.9.0 默认临时会话目录使用 `~/.weknora/sessions/session-*`。本机删除和扩大沙箱访问范围的操作可触发审批，卡片会说明命令、路径和影响。此审批与偏好中的 `approval_mode=auto` 不是同一配置；`ask`、`full` 仍不是可选的全局模式。详见[本机沙箱](../03-features/22-skills-sandbox.md#lite-host)。
+
 ## 总体架构 {#_1-总体架构}
 
 桌面应用由三部分组成（均在同一进程内）：

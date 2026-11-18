@@ -63,6 +63,10 @@ func (t *MCPRegisteredTool) Execute(ctx context.Context, args json.RawMessage) (
 			current.authWaitTimeoutSeconds,
 		)
 		target.registeredName = t.Name()
+		target.serverInstructions = current.serverInstructions
+		target.serverVersion = current.serverVersion
+		target.savedAt = current.savedAt
+		target.revalidate = current.revalidate
 		return target.Execute(ctx, args)
 	}
 	return mcpDiscoveryFailure(
@@ -291,5 +295,48 @@ func (r *ToolRegistry) RefreshMCPTools(ctx context.Context) {
 			r.RegisterTool(&MCPRegisteredTool{MCPTool: bound, catalog: c, ref: mcpToolRef(tool)})
 			r.deferred[ToolCallMCPTool] = false
 		}
+	}
+}
+
+// MCPExposureSnapshot preserves definitions that were described but have not
+// been called yet. Call history alone cannot restore this deferred tool state.
+// References contain a schema hash; no credentials or remote definitions are saved.
+func (r *ToolRegistry) MCPExposureSnapshot() []string {
+	if r == nil {
+		return nil
+	}
+	c := r.mcpCatalog()
+	if c == nil {
+		return nil
+	}
+	refs := []string{}
+	c.described.Range(func(key, _ any) bool {
+		if ref, ok := key.(string); ok {
+			refs = append(refs, ref)
+		}
+		return true
+	})
+	sort.Strings(refs)
+	return refs
+}
+
+// RestoreMCPExposure restores exposure only. Refresh and execution still check
+// the current principal, enabled policy, service configuration and schema hash.
+func (r *ToolRegistry) RestoreMCPExposure(refs []string) {
+	if r == nil {
+		return
+	}
+	c := r.mcpCatalog()
+	if c == nil {
+		return
+	}
+	for _, ref := range refs {
+		if len(ref) != len("mcpt_")+sha256.Size*2 || !strings.HasPrefix(ref, "mcpt_") {
+			continue
+		}
+		if _, err := hex.DecodeString(strings.TrimPrefix(ref, "mcpt_")); err != nil {
+			continue
+		}
+		c.historyRefs.Store(ref, true)
 	}
 }

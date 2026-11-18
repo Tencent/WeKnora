@@ -3,7 +3,9 @@ import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { marked } from 'marked'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
+import { registerUnsavedChanges } from '@/utils/unsavedChanges'
 import { useUIStore } from '@/stores/ui'
+import { resolvePreferredKnowledgeBaseId } from '@/utils/manualKnowledgeDraft'
 import {
   getKnowledgeDetails,
   getKnowledgeBaseById,
@@ -17,6 +19,7 @@ import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 import { sanitizeHTML, safeMarkdownToHTML, hydrateProtectedFileImages } from '@/utils/security'
 import { continueListOnEnter, countContent, indentOnTab } from '@/utils/markdownEditing'
 import { useI18n } from 'vue-i18n'
+import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue'
 
 interface KnowledgeBaseOption {
   label: string
@@ -59,6 +62,12 @@ const uploadConfirmStore = useUploadConfirmStore()
 const organizationStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
 const { t } = useI18n()
+// The assistant fills the open editor; the user saves the result.
+const assistantActions = computed(() => ['continue', 'outline', 'polish', 'summarize'].map(action => ({
+  key: action,
+  label: t(`manualEditor.assistant.${action}`),
+  query: t(`manualEditor.assistant.prompts.${action}`),
+})))
 
 const visible = computed({
   get: () => uiStore.manualEditorVisible,
@@ -88,6 +97,10 @@ const contentLoading = ref(false)
 const saving = ref(false)
 const savingAction = ref<ManualStatus>('draft')
 const lastUpdatedAt = ref<string>('')
+// Closing and reopening the drawer starts a new visit, even for the same ID.
+// Reads from an older visit must never replace the current editable document.
+let loadVersion = 0
+const isCurrentLoad = (version: number) => version === loadVersion && visible.value
 
 // ---------- view mode ----------
 type ViewMode = 'edit' | 'split' | 'preview'
@@ -596,11 +609,12 @@ const lastUpdatedText = computed(() =>
   lastUpdatedAt.value ? t('manualEditor.status.lastUpdated', { time: lastUpdatedAt.value }) : '',
 )
 
-const loadKnowledgeBases = async () => {
+const loadKnowledgeBases = async (version: number) => {
   kbLoading.value = true
   try {
     // ensureKnowledgeBases 同时刷新自己的与共享的知识库快照。
     await chatResources.ensureKnowledgeBases()
+    if (!isCurrentLoad(version)) return
     const sharedKbs = organizationStore.sharedKnowledgeBases
 
     const isDocumentKb = (type?: string) => !type || type === 'document'
@@ -625,6 +639,9 @@ const loadKnowledgeBases = async () => {
     kbOptions.value = list
 
     if (mode.value === 'create') {
+      // Explicit kbId (KB-page callers) keeps the historical force-insert path.
+      // Chat preferences are soft: only select an id already in the writable
+      // candidate list, otherwise fall back to list[0].
       const presetKbId = uiStore.manualEditorKBId
       if (presetKbId) {
         const exists = list.find((item) => item.value === presetKbId)
@@ -636,14 +653,18 @@ const loadKnowledgeBases = async () => {
         }
         form.kbId = presetKbId
       } else {
-        form.kbId = list[0]?.value ?? ''
+        form.kbId = resolvePreferredKnowledgeBaseId(
+          uiStore.manualEditorPreferredKbIds,
+          list.map((item) => item.value),
+        )
       }
     }
   } catch (error) {
+    if (!isCurrentLoad(version)) return
     console.error('[ManualEditor] Failed to load knowledge base list:', error)
     kbOptions.value = []
   } finally {
-    kbLoading.value = false
+    if (isCurrentLoad(version)) kbLoading.value = false
   }
 }
 
@@ -672,13 +693,14 @@ const parseManualMetadata = (
   return null
 }
 
-const loadKnowledgeContent = async () => {
+const loadKnowledgeContent = async (version: number) => {
   if (!currentKnowledgeId.value) {
     return
   }
   contentLoading.value = true
   try {
     const res: any = await getKnowledgeDetails(currentKnowledgeId.value)
+    if (!isCurrentLoad(version)) return
     const data: KnowledgeDetailResponse | undefined = res?.data
     if (!data) {
       MessagePlugin.error(t('manualEditor.error.fetchDetailFailed'))
@@ -706,10 +728,11 @@ const loadKnowledgeContent = async () => {
       })
     }
   } catch (error) {
+    if (!isCurrentLoad(version)) return
     console.error('[ManualEditor] Failed to load manual knowledge:', error)
     MessagePlugin.error(t('manualEditor.error.fetchDetailFailed'))
   } finally {
-    contentLoading.value = false
+    if (isCurrentLoad(version)) contentLoading.value = false
   }
 }
 
@@ -733,23 +756,30 @@ const generateDefaultTitle = () => {
   return `${t('manualEditor.defaultTitlePrefix')}-${new Date().toLocaleString()}`
 }
 
-const initialize = async () => {
+const initialize = async (version: number) => {
   resetForm()
-  await loadKnowledgeBases()
+  await loadKnowledgeBases(version)
+  if (!isCurrentLoad(version)) return
 
   if (mode.value === 'edit') {
-    await loadKnowledgeContent()
+    await loadKnowledgeContent(version)
   } else {
     const presetKbId = uiStore.manualEditorKBId
     if (presetKbId) {
       form.kbId = presetKbId
-    } else if (!form.kbId && kbOptions.value.length) {
-      form.kbId = kbOptions.value[0].value
+    } else {
+      // Re-resolve preferences against the loaded candidates (resetForm may have
+      // left form.kbId empty; do not re-apply a preferred id missing from the list).
+      form.kbId = resolvePreferredKnowledgeBaseId(
+        uiStore.manualEditorPreferredKbIds,
+        kbOptions.value.map((item) => item.value),
+      )
     }
     form.title = form.title || generateDefaultTitle()
     form.content = form.content || ''
   }
 
+  if (!isCurrentLoad(version)) return
   initialLoaded.value = true
   markPristine()
 }
@@ -876,6 +906,7 @@ const markPristine = () => {
   pristineSnapshot.value = snapshot()
 }
 const isDirty = () => initialLoaded.value && snapshot() !== pristineSnapshot.value
+onBeforeUnmount(registerUnsavedChanges(() => visible.value && isDirty()))
 
 const handleClose = () => {
   if (!isDirty()) {
@@ -898,10 +929,15 @@ const handleClose = () => {
 }
 
 watch(visible, async (val) => {
+  const version = ++loadVersion
+  kbLoading.value = false
+  contentLoading.value = false
   if (val) {
     await nextTick()
-    await initialize()
+    if (!isCurrentLoad(version)) return
+    await initialize(version)
     await nextTick()
+    if (!isCurrentLoad(version)) return
     const length = form.content ? form.content.length : 0
     setSelectionRange(length, length)
   } else {
@@ -910,6 +946,7 @@ watch(visible, async (val) => {
 })
 
 onBeforeUnmount(() => {
+  ++loadVersion
   editorAreaObserver?.disconnect()
   editorAreaObserver = null
 })
@@ -1048,6 +1085,8 @@ onBeforeUnmount(() => {
             </template>
           </div>
           <div class="editor-toolbar__view">
+            <AssistantActionsButton :label="$t('manualEditor.assistant.button')"
+              :title="$t('manualEditor.assistant.tooltip')" :actions="assistantActions" @mousedown.prevent />
             <t-tooltip placement="top-right" :show-arrow="false">
               <template #content>
                 <div class="shortcut-sheet">
@@ -1109,7 +1148,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="editor-pane editor-pane--preview" v-show="showPreview">
-            <div ref="previewRoot" class="preview-container" v-html="previewHTML" />
+            <div ref="previewRoot" class="preview-container" data-assistant-ignore v-html="previewHTML" />
           </div>
         </div>
 

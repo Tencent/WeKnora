@@ -100,7 +100,7 @@ func TestOIDCTokenExchangeBlocksRedirectToInternalURL(t *testing.T) {
 
 	svc := &userService{}
 	cfg := &config.OIDCAuthConfig{TokenEndpoint: server.URL, ClientID: "client-id", ClientSecret: "client-secret"}
-	_, err := svc.exchangeOIDCCode(context.Background(), cfg, "code", "https://app.example/callback")
+	_, err := svc.exchangeOIDCCode(context.Background(), cfg, "code", "https://app.example/callback", "")
 	if err == nil || !strings.Contains(err.Error(), secutils.ErrSSRFRedirectBlocked.Error()) {
 		t.Fatalf("exchangeOIDCCode error = %v, want redirect SSRF block", err)
 	}
@@ -117,7 +117,7 @@ func TestOIDCErrorsDoNotEchoSecrets(t *testing.T) {
 
 	svc := &userService{}
 	cfg := &config.OIDCAuthConfig{TokenEndpoint: server.URL, ClientID: "client-id", ClientSecret: "client-secret"}
-	_, err := svc.exchangeOIDCCode(context.Background(), cfg, "code", "https://app.example/callback")
+	_, err := svc.exchangeOIDCCode(context.Background(), cfg, "code", "https://app.example/callback", "")
 	if err == nil {
 		t.Fatalf("exchangeOIDCCode returned nil error")
 	}

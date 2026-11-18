@@ -26,15 +26,17 @@ const (
 var readDocumentTool = BaseTool{
 	name: ToolReadDocument,
 	description: "Read a document from the knowledge bases in scope: its metadata plus chunks in document order.\n" +
-		"id is a dN document handle (reads a page of chunks starting at offset) or a cN chunk handle (reads that " +
-		"chunk; set context to include neighbouring chunks on each side).\n" +
-		"query finds passages inside the document: matching chunks come back with one chunk of context on each " +
-		"side. By default query is case-insensitive and split on whitespace: a chunk matches when it contains " +
-		"every word, in any order. Set regex=true to match query as one POSIX regular expression instead. " +
+		"id is a doc://N document handle (reads a page of chunks starting at offset) or a chunk://N chunk handle " +
+		"(reads that chunk; set context to include neighbouring chunks on each side).\n" +
+		"query finds passages inside the document: matching chunks come back with up to one chunk of context on each " +
+		"side when it fits the output budget. By default query is case-insensitive and split on whitespace: " +
+		"a chunk matches when it contains every word, in any order. Set regex=true to match query as one " +
+		"POSIX regular expression instead. " +
 		"When a query result is truncated, repeat it with offset=next_offset to get the following matches.\n" +
 		"Page through long documents with offset and limit: offset counts chunks in reading order from 0 and is " +
-		"not a chunk index, so continue with the returned next_offset, and use id=cN with context to read around " +
-		"a specific chunk. A page holds fewer than limit chunks when they would exceed the output size budget; " +
+		"not a chunk index, so continue with the returned next_offset, and use id=chunk://N with context " +
+		"to read around a specific chunk. A page holds fewer than limit chunks when they would exceed " +
+		"the output size budget; " +
 		"next_offset always points at the first chunk not yet returned. Reading a long document end to end " +
 		"costs many calls, so prefer query or search_knowledge to locate the relevant part first.",
 	schema: json.RawMessage(`{
@@ -42,7 +44,7 @@ var readDocumentTool = BaseTool{
   "properties": {
     "id": {
       "type": "string",
-      "description": "dN document handle or cN chunk handle from retrieval results or the runtime context",
+      "description": "doc://N document handle or chunk://N chunk handle from retrieval results or the runtime context",
       "minLength": 1
     },
     "offset": {
@@ -66,7 +68,7 @@ var readDocumentTool = BaseTool{
     },
     "context": {
       "type": "integer",
-      "description": "Neighbouring chunks to include on each side of a cN chunk (default 0, max 5)",
+      "description": "Neighbouring chunks to include on each side of a chunk://N chunk (default 0, max 5)",
       "minimum": 0,
       "maximum": 5
     }
@@ -124,8 +126,10 @@ func (t *ReadDocumentTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 	id := strings.TrimSpace(input.ID)
 	if id == "" {
-		return &types.ToolResult{Success: false, Error: "id is required (a dN document handle or a cN chunk handle)"},
-			fmt.Errorf("missing id")
+		return &types.ToolResult{
+			Success: false,
+			Error:   "id is required (a doc://N document handle or a chunk://N chunk handle)",
+		}, fmt.Errorf("missing id")
 	}
 	if t.knowledgeService == nil || t.chunkService == nil {
 		return &types.ToolResult{Success: false, Error: "document services are unavailable"},
@@ -202,7 +206,8 @@ func (t *ReadDocumentTool) resolveTarget(ctx context.Context, id string) (*types
 	}
 	chunk, err := t.chunkService.GetChunkByIDOnly(ctx, id)
 	if err != nil || chunk == nil {
-		return nil, nil, fmt.Errorf("id %s is neither a document (dN) nor a chunk (cN) in the current scope", id)
+		return nil, nil, fmt.Errorf(
+			"id %s is neither a document (doc://N) nor a chunk (chunk://N) in the current scope", id)
 	}
 	authorizedChunk, authErr := authorizeChunkInSearchTargets(
 		ctx, t.searchTargets, id, t.chunkService, t.knowledgeService,
@@ -319,8 +324,8 @@ func (t *ReadDocumentTool) readPage(
 			},
 		}, nil
 	}
-	chunks = fitChunksToBudget(chunks, OutputBudget(ctx)*4/5)
 	enrichChunkImageInfo(ctx, t.chunkService.GetRepository(), t.tenantFor(knowledge), chunks)
+	chunks = fitChunksToBudget(chunks, OutputBudget(ctx)*4/5)
 
 	rows := make([]readChunkRow, 0, len(chunks))
 	for _, c := range chunks {
@@ -421,10 +426,15 @@ func (t *ReadDocumentTool) readByQuery(
 	// rows in the middle; the header and tags take the remaining share.
 	budget := OutputBudget(ctx) * 4 / 5
 	used := 0
-	emit := func(row readChunkRow) {
+	// The model renders text in XML elements. Budget for the escaped
+	// strings, including markup-heavy content such as courseware tables.
+	escapedRunes := func(text string) int {
+		return utf8.RuneCountInString(xmlEscape(text))
+	}
+	emit := func(row readChunkRow, cost int) {
 		rows = append(rows, row)
 		emitted[row.chunk.ID] = true
-		used += utf8.RuneCountInString(row.chunk.Content) + readDocumentChunkOverhead
+		used += cost
 	}
 
 scan:
@@ -445,27 +455,34 @@ scan:
 				prev = c
 				continue
 			}
-			haystack := enrichChunkContent(c)
+			content := enrichChunkContent(c)
+			haystack := content
 			if q := faqStandardQuestion(c); q != "" {
 				haystack += "\n" + q
 			}
 			if matchesAll(matchers, haystack) {
-				if matchCount >= readDocumentMaxMatches || used >= budget {
+				snippet := extractChunkMatchSnippet(c, matchers)
+				cost := readDocumentRowCost(c, content) + escapedRunes(snippet)
+				// Keep the first match even if it is oversized so the cursor advances.
+				if matchCount >= readDocumentMaxMatches || (matchCount > 0 && used+cost > budget) {
 					truncated = true
 					nextOffset = position
 					break scan
 				}
 				matchCount++
 				if prev != nil && !emitted[prev.ID] {
-					emit(readChunkRow{chunk: prev, role: "context_before"})
+					prevCost := readDocumentRowCost(prev, enrichChunkContent(prev))
+					if used+prevCost+cost <= budget {
+						emit(readChunkRow{chunk: prev, role: "context_before"}, prevCost)
+					}
 				}
 				if !emitted[c.ID] {
-					emit(readChunkRow{chunk: c, role: "match", snippet: extractChunkMatchSnippet(c, matchers)})
+					emit(readChunkRow{chunk: c, role: "match", snippet: snippet}, cost)
 				}
 				forceNext = true
 			} else if forceNext {
-				if !emitted[c.ID] && used < budget {
-					emit(readChunkRow{chunk: c, role: "context_after"})
+				if cost := readDocumentRowCost(c, content); !emitted[c.ID] && used+cost <= budget {
+					emit(readChunkRow{chunk: c, role: "context_after"}, cost)
 				}
 				forceNext = false
 			}
@@ -491,6 +508,20 @@ scan:
 	}, nil
 }
 
+func readDocumentRowCost(chunk *types.Chunk, content string) int {
+	cost := utf8.RuneCountInString(xmlEscape(content)) + readDocumentChunkOverhead
+	// FAQ answers render from metadata even with question-only indexing.
+	if chunk.ChunkType == types.ChunkTypeFAQ {
+		if meta, err := chunk.FAQMetadata(); err == nil && meta != nil {
+			cost += utf8.RuneCountInString(xmlEscape(meta.StandardQuestion)) + len("      <question></question>\n")
+			for _, answer := range meta.Answers {
+				cost += utf8.RuneCountInString(xmlEscape(answer)) + len("      <answer></answer>\n")
+			}
+		}
+	}
+	return cost
+}
+
 // fitChunksToBudget keeps the leading chunks whose rendered size fits in
 // budget runes. The model sees the result rendered from Data, which the
 // registry's Output truncation never reaches, so a page must be bounded here;
@@ -498,7 +529,7 @@ scan:
 func fitChunksToBudget(chunks []*types.Chunk, budget int) []*types.Chunk {
 	used := 0
 	for i, c := range chunks {
-		used += utf8.RuneCountInString(c.Content) + readDocumentChunkOverhead
+		used += readDocumentRowCost(c, enrichChunkContent(c))
 		if used > budget && i > 0 {
 			return chunks[:i]
 		}
@@ -570,13 +601,48 @@ func (t *ReadDocumentTool) buildData(
 		"knowledge_base_id": knowledge.KnowledgeBaseID,
 		"knowledge_title":   strings.TrimSpace(knowledge.Title),
 		// Keep citation identities when chunks are omitted from SSE/history.
-		"chunk_ids":       chunkIDs,
-		"source_chunk_id": sourceChunkID,
-		"total_chunks":    total,
-		"fetched_chunks":  len(formatted),
-		"chunks":          formatted,
-		"document":        documentInfo(knowledge, total),
+		"resource_references": readDocumentResourceReferences(rows),
+		"chunk_ids":           chunkIDs,
+		"source_chunk_id":     sourceChunkID,
+		"total_chunks":        total,
+		"fetched_chunks":      len(formatted),
+		"chunks":              formatted,
+		"document":            documentInfo(knowledge, total),
 	}
+}
+
+// readDocumentResourceReferences retains only the canonical resources in the
+// returned passages. Chunk bodies and raw tool output are stripped for history,
+// but the message-file proxy still needs this evidence alongside the document
+// and KB identities. Current sharing and live resource bindings are checked
+// independently when the image is requested.
+func readDocumentResourceReferences(rows []readChunkRow) []map[string]interface{} {
+	var refs []map[string]interface{}
+	seen := make(map[string]bool)
+	add := func(reference string) {
+		handle, ok := types.ParseResourcePath(reference)
+		if !ok {
+			return
+		}
+		canonical := types.BuildResourcePath(handle)
+		if seen[canonical] {
+			return
+		}
+		seen[canonical] = true
+		refs = append(refs, map[string]interface{}{"url": canonical})
+	}
+	for _, row := range rows {
+		for _, ref := range types.ScanResourceReferences(row.chunk.Content) {
+			add(ref)
+		}
+		var images []types.ImageInfo
+		if json.Unmarshal([]byte(row.chunk.ImageInfo), &images) == nil {
+			for _, image := range images {
+				add(image.URL)
+			}
+		}
+	}
+	return refs
 }
 
 func (t *ReadDocumentTool) buildOutput(

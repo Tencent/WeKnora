@@ -50,7 +50,8 @@ This will log an issue for human review or automated maintenance.`,
     "suspected_knowledge_ids": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Optional list of short dN document IDs from the <sources> block that you suspect are causing the pollution or error."
+      "description": "Optional list of doc://N document handles from the <sources> `+
+				`block that you suspect are causing the pollution or error."
     }
   },
   "required": ["slug", "issue_type", "description"]
@@ -129,4 +130,9 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 		Success: true,
 		Output:  fmt.Sprintf("Successfully flagged issue for %s. A maintenance ticket has been created for review.", slug),
 	}, nil
+}
+
+// ApprovalGrant scopes a session-wide approval to the run's knowledge bases.
+func (t *wikiFlagIssueTool) ApprovalGrant(ctx context.Context, _ json.RawMessage) (string, string) {
+	return wikiApprovalGrant(ctx, t.Name(), t.kbIDs)
 }

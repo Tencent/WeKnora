@@ -24,11 +24,5 @@ func newDeepInfraProvider() *Definition {
 		URLPatterns:     []string{"api.deepinfra.com/v1/inference"},
 		DefaultBaseURLs: map[types.ModelType]string{types.ModelTypeRerank: DeepInfraRerankBaseURL},
 		ModelTypes:      []types.ModelType{types.ModelTypeRerank},
-		Compat: VendorCompat{Rerank: api.RerankCompat{
-			// The official reranker guide specifies relevance probabilities,
-			// not logits. The 4B model's batch limit is in its catalog entry:
-			// https://api.deepinfra.com/models/Qwen/Qwen3-Reranker-4B
-			ScoreScale: api.Ptr(api.ScoreProbability),
-		}},
 	}
 }

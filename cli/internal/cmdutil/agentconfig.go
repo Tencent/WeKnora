@@ -111,7 +111,8 @@ func GenerateAgentSkeleton(w io.Writer) error {
 #   weknora agent create "My Agent" --model <id> --config-file <this-file>
 # Hot-path flags on the create command override values set here.
 
-# Operating mode: "quick-answer" or "smart-reasoning"
+# Operating mode: "quick-answer" or "smart-reasoning".
+# Empty uses the server default, smart-reasoning.
 agent_mode: ""
 
 # System prompt for the agent (also settable via --system-prompt[-file])

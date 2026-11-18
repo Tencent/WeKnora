@@ -1,4 +1,5 @@
 import base64
+import codecs
 from html import escape
 from io import BytesIO
 import os
@@ -12,6 +13,7 @@ from ebooklib import epub
 from PIL import Image
 
 from docreader.parser.epub_parser import EPUBParser
+from docreader.parser.parser import Parser
 from docreader.parser.registry import registry
 
 
@@ -166,7 +168,76 @@ def _epub_with_literal_path_characters(
     return output.getvalue(), expected.getvalue()
 
 
+def _epub_with_encoded_chapter(encoding: str, *, missing_navigation: bool) -> bytes:
+    declaration = "UTF-16" if encoding.startswith("utf-16") else "UTF-8"
+    chapter = (
+        f'<?xml version="1.0" encoding="{declaration}"?>'
+        '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Encoding</title>'
+        '</head><body><h1>Unicode chapter</h1><p>Café 中文 日本語</p>'
+        '<img alt="diagram" src="../images/pic.png"/></body></html>'
+    ).encode(encoding)
+    if encoding == "utf-16-le":
+        chapter = codecs.BOM_UTF16_LE + chapter
+    elif encoding == "utf-16-be":
+        chapter = codecs.BOM_UTF16_BE + chapter
+
+    output = BytesIO()
+    with zipfile.ZipFile(BytesIO(_minimal_epub_bytes())) as original:
+        with zipfile.ZipFile(output, "w") as archive:
+            for entry in original.infolist():
+                if missing_navigation and entry.filename.endswith("toc.ncx"):
+                    continue
+                payload = (
+                    chapter
+                    if entry.filename.endswith("chapter_01.xhtml")
+                    else original.read(entry)
+                )
+                archive.writestr(entry, payload)
+    return output.getvalue()
+
+
 class EPUBParserTest(unittest.TestCase):
+    def test_zip_recovery_decodes_unicode_chapters(self):
+        for encoding in ("utf-8", "utf-8-sig", "utf-16-le", "utf-16-be"):
+            for extract_images in (False, True):
+                with self.subTest(encoding=encoding, extract_images=extract_images):
+                    content = _epub_with_encoded_chapter(
+                        encoding, missing_navigation=True
+                    )
+                    with self.assertLogs(
+                        "docreader.parser.epub_parser", level="WARNING"
+                    ) as logs:
+                        document = Parser().parse_file(
+                            "unicode.epub",
+                            "epub",
+                            content,
+                            engine_overrides={"extract_images": extract_images},
+                        )
+                    self.assertTrue(
+                        any("trying ZIP fallback" in line for line in logs.output)
+                    )
+                    self.assertIn("Unicode chapter", document.content)
+                    self.assertIn("Café 中文 日本語", document.content)
+                    self.assertNotIn("\ufffd", document.content)
+                    self.assertEqual(len(document.images), int(extract_images))
+                    for image_path in document.images:
+                        self.assertIn(f"![diagram]({image_path})", document.content)
+
+    def test_ebooklib_path_decodes_unicode_chapters(self):
+        for encoding in ("utf-8", "utf-8-sig", "utf-16-le", "utf-16-be"):
+            with self.subTest(encoding=encoding):
+                parser = EPUBParser(file_name="unicode.epub", file_type="epub")
+                with patch.object(
+                    parser, "_parse_epub_fallback", wraps=parser._parse_epub_fallback
+                ) as fallback:
+                    document = parser.parse(
+                        _epub_with_encoded_chapter(
+                            encoding, missing_navigation=False
+                        )
+                    )
+                fallback.assert_not_called()
+                self.assertIn("Café 中文 日本語", document.content)
+
     def assert_literal_path_image_bytes(self, *, use_fallback: bool):
         cases = (
             ("Text#1/chapter.xhtml", "../images/pic.png",
@@ -353,6 +424,61 @@ class EPUBParserTest(unittest.TestCase):
         )
 
         self.assertEqual(document.content.count("Body of one."), 1)
+
+    def test_chapter_markdown_keeps_block_structure(self):
+        content = _epub_with_chapter_body(
+            "<p>It was night.</p><hr/><p>Morning came.</p>"
+            "<blockquote><p>A quoted line.</p></blockquote><p>After the quote.</p>"
+            "<ul><li>parent<ul><li>child</li></ul></li></ul>"
+            "<pre>def total(items):\n\n    return sum(items)\n</pre>"
+            "<table><tr><th>Name</th><th>Qty</th></tr>"
+            "<tr><td>Apple</td><td>3</td></tr></table>"
+            "<p>After the table.</p>"
+        )
+        for use_fallback in (False, True):
+            with self.subTest(use_fallback=use_fallback):
+                parser = EPUBParser(file_name="structured.epub", file_type="epub")
+                if use_fallback:
+                    with patch(
+                        "docreader.parser.epub_parser.epub.read_epub",
+                        side_effect=ValueError("exercise ZIP fallback"),
+                    ):
+                        document = parser.parse(content)
+                else:
+                    with patch.object(parser, "_parse_epub_fallback") as fallback:
+                        document = parser.parse(content)
+                    fallback.assert_not_called()
+
+                # Directly above "---", a paragraph becomes a setext heading.
+                self.assertIn("It was night.\n\n---\n\nMorning came.", document.content)
+                # Directly below a quote, a paragraph joins the quote.
+                self.assertIn("> A quoted line.\n\nAfter the quote.", document.content)
+                self.assertIn("* parent\n  + child", document.content)
+                self.assertIn(
+                    "```\ndef total(items):\n\n    return sum(items)\n```",
+                    document.content,
+                )
+                # Directly below a table, GFM reads a line as another row.
+                self.assertIn("| Apple | 3 |\n\nAfter the table.", document.content)
+
+
+def _epub_with_chapter_body(body: str) -> bytes:
+    """Write an EPUB with a single chapter whose body is ``body``."""
+    book = epub.EpubBook()
+    book.set_identifier("structured-epub")
+    book.set_title("Structured EPUB")
+    book.set_language("en")
+
+    chapter = epub.EpubHtml(title="Chapter", file_name="text/chapter.xhtml", lang="en")
+    chapter.content = f"<html><body><h1>Chapter</h1>{body}</body></html>"
+    book.add_item(chapter)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", chapter]
+
+    output = BytesIO()
+    epub.write_epub(output, book)
+    return output.getvalue()
 
 
 def _ordered_epub_bytes(

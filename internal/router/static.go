@@ -36,9 +36,14 @@ func serveFrontendStatic(r *gin.Engine) {
 			c.Next()
 			return
 		}
+		// Gin resolves registered routes before middleware; preserve their auth and handlers.
+		if c.FullPath() != "" {
+			c.Next()
+			return
+		}
 		path := c.Request.URL.Path
 		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/health") || strings.HasPrefix(path, "/swagger/") ||
-			strings.HasPrefix(path, "/r/") || path == "/files" {
+			strings.HasPrefix(path, "/mcp/") || strings.HasPrefix(path, "/r/") || path == "/files" {
 			c.Next()
 			return
 		}

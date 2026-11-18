@@ -21,6 +21,10 @@ type MessageService interface {
 	// GetRecentMessagesBySession gets recent messages of a session
 	GetRecentMessagesBySession(ctx context.Context, sessionID string, limit int) ([]*types.Message, error)
 
+	// GetRecentUserMessages returns a session's latest user messages, oldest
+	// first. The role filter runs before the limit.
+	GetRecentUserMessages(ctx context.Context, sessionID string, limit int) ([]*types.Message, error)
+
 	// GetMessagesBySessionBeforeTime gets messages before a specific time of a session
 	GetMessagesBySessionBeforeTime(
 		ctx context.Context, sessionID string, beforeTime time.Time, limit int,
@@ -58,6 +62,14 @@ type MessageService interface {
 	// GetChatHistoryKBStats returns statistics about the chat history knowledge base (indexed message count, etc.)
 	GetChatHistoryKBStats(ctx context.Context) (*types.ChatHistoryKBStats, error)
 
+	// UpdateChatHistoryConfig serializes configuration changes with indexing and cleanup.
+	// KnowledgeBaseID is managed internally; a model change requires an empty index.
+	UpdateChatHistoryConfig(ctx context.Context, config *types.ChatHistoryConfig) (*types.ChatHistoryConfig, error)
+
+	// ClearChatHistoryIndex pauses indexing and removes only the current workspace's
+	// chat-history knowledge, chunks and retrieval indexes, preserving conversations.
+	ClearChatHistoryIndex(ctx context.Context) (*types.ChatHistoryKBStats, error)
+
 	// GetSessionArtifacts returns every skill-produced MessageArtifact
 	// recorded against any assistant message of the session. Used to power
 	// the frontend "download files generated in this session" drawer and
@@ -88,6 +100,9 @@ type MessageRepository interface {
 	GetMessagesBySession(ctx context.Context, sessionID string, page int, pageSize int) ([]*types.Message, error)
 	// GetRecentMessagesBySession gets recent messages of a session
 	GetRecentMessagesBySession(ctx context.Context, sessionID string, limit int) ([]*types.Message, error)
+	// GetRecentUserMessages returns a session's latest user messages, oldest
+	// first. The role filter runs before the limit.
+	GetRecentUserMessages(ctx context.Context, sessionID string, limit int) ([]*types.Message, error)
 	// GetMessagesBySessionBeforeTime gets messages before a specific time of a session
 	GetMessagesBySessionBeforeTime(
 		ctx context.Context, sessionID string, beforeTime time.Time, limit int,

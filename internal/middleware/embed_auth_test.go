@@ -181,6 +181,10 @@ func (f *fakeTenantService) GetTenantByIDForUser(
 	return f.tenant, nil
 }
 
+func (f *fakeTenantService) SetChatHistoryConfig(context.Context, uint64, *types.ChatHistoryConfig) error {
+	panic("unexpected chat history configuration write")
+}
+
 func (f *fakeTenantService) GetWeKnoraCloudCredentials(ctx context.Context) *types.WeKnoraCloudCredentials {
 	return nil
 }
@@ -549,4 +553,8 @@ func TestEmbedAuthHostAllowlist(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (f *fakeTenantService) UpdateTenantProfile(context.Context, uint64, *string, *string) (*types.Tenant, error) {
+	panic("unexpected UpdateTenantProfile call")
 }

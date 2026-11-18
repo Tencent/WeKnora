@@ -3,6 +3,7 @@ import { defineComponent } from 'vue'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import { useSettingsStore } from '@/stores/settings'
 import { autoSetup, userInfoFromApi } from '@/api/auth'
 import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
@@ -141,6 +142,12 @@ const router = createRouter({
           path: "toolbox/:section?",
           name: "toolbox",
           component: () => import("../views/toolbox/Toolbox.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
+        },
+        {
+          path: "automations/:automationId?",
+          name: "automationList",
+          component: () => import("../views/automation/AutomationList.vue"),
           meta: { requiresInit: true, requiresAuth: true }
         },
         {
@@ -399,6 +406,15 @@ router.beforeEach(async (to, from, next) => {
   }
 
   next()
+})
+
+router.beforeResolve((to, from) => {
+  if ((to.name === 'globalCreatChat' || to.name === 'kbCreatChat') && to.fullPath !== from.fullPath) {
+    const settingsStore = useSettingsStore()
+    const references = settingsStore.consumeNewChatReferences()
+    if (references) settingsStore.setNewChatReferences(references.kbIds, references.fileIds)
+    else settingsStore.clearChatReferences()
+  }
 })
 
 router.afterEach((to) => {

@@ -21,8 +21,8 @@ const (
 	LegacyTruncatePromptTokens = 511
 	// ExtraScoreScale overrides the vendor rerank score scale for one row.
 	// A self-hosted gateway serves whatever reranker was deployed behind it
-	// and the two families disagree: BGE-class models answer a 0..1
-	// probability, Qwen3-Reranker-class models an unbounded score. A vendor
-	// can only state what its own documentation shows.
+	// and normalization depends on the serving configuration, not the
+	// model family. Already-normalized 0..1 relevance uses probability;
+	// raw logits use logit. A vendor can only state its documented default.
 	ExtraScoreScale = "score_scale"
 )

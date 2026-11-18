@@ -358,3 +358,16 @@ func TestMergeSandboxConfigForUpdateDoesNotMutateInputs(t *testing.T) {
 	require.Equal(t, "old-e2b", existing.E2B.APIKey,
 		"merge must not mutate the stored config")
 }
+
+func TestMergeSandboxConfigForUpdateKeepsAllocationPolicyWhenOmitted(t *testing.T) {
+	existing := &TenantSandboxConfig{AllocationMode: SandboxAllocationUser, UserSandboxEmptyRetentionDays: 30}
+	out := MergeSandboxConfigForUpdate(&TenantSandboxConfig{}, existing)
+	require.Equal(t, SandboxAllocationUser, out.AllocationMode)
+	require.Equal(t, 30, out.UserSandboxEmptyRetentionDays)
+}
+
+func TestMergeSandboxConfigForUpdateHonoursExplicitSessionMode(t *testing.T) {
+	existing := &TenantSandboxConfig{AllocationMode: SandboxAllocationUser}
+	out := MergeSandboxConfigForUpdate(&TenantSandboxConfig{AllocationMode: SandboxAllocationSession}, existing)
+	require.Equal(t, SandboxAllocationSession, out.AllocationMode)
+}

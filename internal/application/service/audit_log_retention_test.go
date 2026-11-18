@@ -255,6 +255,7 @@ func TestAuditLogRetentionRunner_PurgesOnTickerCadence(t *testing.T) {
 	svc := &purgeCountingService{}
 	r := retentionRunnerWithImmediateStartup(svc, 30)
 
+	r.started.Store(true)
 	go r.runLoopWithoutStartupDelay()
 	time.Sleep(100 * time.Millisecond)
 	r.Stop()

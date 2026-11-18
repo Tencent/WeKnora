@@ -1,6 +1,6 @@
 <template>
   <t-dialog v-model:visible="dialogVisible" :footer="false" :header="false" :close-btn="false" width="640px" top="10vh"
-    destroy-on-close class="cmdk-dialog" @close="handleClose" @opened="onDialogOpened">
+    :close-on-esc="!settingsVisible" destroy-on-close class="cmdk-dialog" @close="handleClose" @opened="onDialogOpened">
     <div class="cmdk" @keydown="onKeyDown">
       <!-- Input row -->
       <div class="cmdk__input-row">
@@ -19,11 +19,24 @@
         <span v-if="loading" class="cmdk__input-spinner">
           <t-loading size="small" />
         </span>
-        <t-tooltip :content="t('commandPalette.retrieval')" placement="bottom">
-          <button type="button" class="cmdk__icon-btn" :class="{ active: drawerVisible }" @click="drawerVisible = true">
+        <t-popup v-model:visible="settingsVisible" trigger="click" placement="bottom-right"
+          overlay-class-name="cmdk-settings-popup" :overlay-inner-style="{ padding: '0' }" :z-index="3100">
+          <button type="button" class="cmdk__icon-btn" :class="{ active: settingsVisible }"
+            :title="t('commandPalette.retrieval')" :aria-label="t('retrievalSettings.title')"
+            aria-haspopup="dialog" :aria-expanded="settingsVisible">
             <t-icon name="setting" size="16px" />
           </button>
-        </t-tooltip>
+          <template #content>
+            <div class="cmdk-settings-popover" role="dialog" :aria-label="t('retrievalSettings.title')"
+              @keydown.stop @keydown.esc.prevent="settingsVisible = false">
+              <button type="button" class="cmdk__icon-btn cmdk-settings-popover__close"
+                :aria-label="t('commandPalette.hotkey.esc')" @click="settingsVisible = false">
+                <t-icon name="close" size="16px" />
+              </button>
+              <RetrievalSettings />
+            </div>
+          </template>
+        </t-popup>
         <button type="button" class="cmdk__icon-btn" :aria-label="t('commandPalette.hotkey.esc')" @click="handleClose">
           <t-icon name="close" size="16px" />
         </button>
@@ -122,15 +135,23 @@
               @hover="selectItemAt($event)" />
           </ResultGroup>
 
+          <div v-if="!loading && searchFailures.length" class="cmdk__search-error" role="alert">
+            <p v-if="searchFailures.includes('knowledge')">{{ t('commandPalette.errors.knowledge') }}</p>
+            <p v-if="searchFailures.includes('messages')">{{ t('commandPalette.errors.messages') }}</p>
+            <t-button variant="outline" size="small" @keydown.enter.exact.stop @click="retrySearch">
+              {{ t('common.retry') }}
+            </t-button>
+          </div>
+
           <!-- No results -->
-          <div v-if="!loading && !hasAnyResults && hasSearched" class="cmdk__empty">
+          <div v-if="!loading && !searchFailures.length && !hasAnyResults && hasSearched" class="cmdk__empty">
             <p>{{ t('commandPalette.empty.noResults') }}</p>
             <div class="cmdk__empty-actions">
               <t-button theme="primary" variant="outline" size="small" @click="askAi">
                 <template #icon><t-icon name="chat" size="14px" /></template>
                 {{ t('commandPalette.empty.askAi') }}
               </t-button>
-              <t-button variant="outline" size="small" @click="drawerVisible = true">
+              <t-button variant="outline" size="small" @click="settingsVisible = true">
                 <template #icon><t-icon name="setting" size="14px" /></template>
                 {{ t('commandPalette.empty.adjustRetrieval') }}
               </t-button>
@@ -150,16 +171,15 @@
       </div>
     </div>
 
-    <!-- Retrieval settings drawer (layered on top of the palette) -->
-    <t-drawer v-model:visible="drawerVisible" :header="t('retrievalSettings.title')" size="420px" :footer="false"
-      :close-on-overlay-click="true" class="cmdk-retrieval-drawer">
-      <RetrievalSettings />
-    </t-drawer>
   </t-dialog>
+  <t-drawer v-if="sourceTarget" :visible="true" :header="t('chat.referenceSourceView')" :footer="false"
+    size="min(960px, 100vw)" @close="sourceTarget = null">
+    <ChatReferenceSourceView :target="sourceTarget" :active="true" @unavailable="openSourceDocument" />
+  </t-drawer>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
@@ -175,6 +195,10 @@ import ResultItem from './GlobalCommandPalette/ResultItem.vue'
 import RetrievalSettings from '@/views/settings/RetrievalSettings.vue'
 import type { MessageSearchGroupItem } from '@/api/chat-history'
 
+import type { ReferenceSourceTarget } from '@/utils/referenceSources'
+
+const ChatReferenceSourceView = defineAsyncComponent(() => import('./ChatReferenceSourceView.vue'))
+const sourceTarget = ref<ReferenceSourceTarget | null>(null)
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
@@ -194,7 +218,7 @@ const activeKbScope = ref<{ id: string; name: string } | null>(null)
 const scopeDismissed = ref(false) // user clicked ✕, remember for this session
 
 const {
-  query, loading, hasSearched,
+  query, loading, hasSearched, searchFailures, retrySearch,
   fileGroups, messageGroups, kbMatches,
   knowledgeBases,
   agentMatches, sessionMatches,
@@ -205,7 +229,7 @@ const {
   agentsEnabled: () => deploymentCapabilities.isSupported('agents'),
 })
 
-const drawerVisible = ref(false)
+const settingsVisible = ref(false)
 const inputRef = ref<HTMLInputElement | null>(null)
 const scrollRef = ref<HTMLElement | null>(null)
 
@@ -400,22 +424,35 @@ const openChunk = (item: FlatChunkItem) => {
   commandPaletteStore.pushRecent(query.value)
   commandPaletteStore.closePalette()
   if (!item.file.kbId) return
+  sourceTarget.value = {
+    chunkId: item.chunk.id,
+    knowledgeId: item.file.knowledgeId,
+    knowledgeBaseId: item.file.kbId,
+    title: item.file.title,
+    content: item.chunk.content,
+  }
+}
+
+const openSourceDocument = () => {
+  const target = sourceTarget.value
+  sourceTarget.value = null
+  if (!target?.knowledgeBaseId) return
   const currentKbId = typeof route.params.kbId === 'string' ? route.params.kbId : ''
   // If the user is already on this KB page, router.push to the same path+query
   // is a no-op (vue-router dedupes identical navigations), so the document
   // auto-open logic never fires. Dispatch a global event that KnowledgeBase.vue
   // listens for instead; this also avoids reloading the KB list on every click.
-  if (currentKbId === item.file.kbId) {
+  if (currentKbId === target.knowledgeBaseId) {
     window.dispatchEvent(
       new CustomEvent('weknora:open-knowledge', {
-        detail: { kbId: item.file.kbId, knowledgeId: item.file.knowledgeId },
+        detail: { kbId: target.knowledgeBaseId, knowledgeId: target.knowledgeId },
       }),
     )
     return
   }
   router.push({
-    path: `/platform/knowledge-bases/${item.file.kbId}`,
-    query: { knowledge_id: item.file.knowledgeId },
+    path: `/platform/knowledge-bases/${target.knowledgeBaseId}`,
+    query: { knowledge_id: target.knowledgeId },
   })
 }
 
@@ -499,6 +536,12 @@ const shortcutFor = (flatIndex: number): number | undefined => {
 }
 
 const onKeyDown = (e: KeyboardEvent) => {
+  if (e.isComposing || e.keyCode === 229) return
+  if (settingsVisible.value && e.key === 'Escape') {
+    e.preventDefault()
+    settingsVisible.value = false
+    return
+  }
   if (e.key === 'ArrowDown') {
     e.preventDefault()
     moveSelection(1)
@@ -519,6 +562,8 @@ const onKeyDown = (e: KeyboardEvent) => {
       item.run({ cmd: false })
     }
   } else if (e.key === 'Enter') {
+    // Let native buttons handle ordinary Enter; modified Enter remains a palette shortcut.
+    if (!e.metaKey && !e.ctrlKey && (e.target as Element | null)?.closest('button')) return
     e.preventDefault()
     primaryActionForSelected({ cmd: e.metaKey || e.ctrlKey })
   } else if (e.key === 'Escape') {
@@ -542,7 +587,7 @@ const onInputKeyDown = (e: KeyboardEvent) => {
 }
 
 const handleClose = () => {
-  drawerVisible.value = false
+  settingsVisible.value = false
   commandPaletteStore.closePalette()
 }
 
@@ -578,8 +623,11 @@ const onGlobalKey = (e: KeyboardEvent) => {
 // `onDialogOpened` once the dialog's enter animation has finished — doing it
 // here in a plain `nextTick` is too early for t-dialog (the input may not be
 // attached to the document yet, so `.focus()` silently no-ops).
+watch(() => route.fullPath, () => { sourceTarget.value = null })
+
 watch(open, (val) => {
   if (val) {
+    sourceTarget.value = null
     query.value = initialQuery.value || ''
     selectedKey.value = null
     // Infer KB scope from current route. Reset scopeDismissed on each open so
@@ -599,7 +647,7 @@ watch(open, (val) => {
   } else {
     clearResults()
     query.value = ''
-    drawerVisible.value = false
+    settingsVisible.value = false
     activeKbScope.value = null
   }
 })
@@ -772,6 +820,12 @@ onUnmounted(() => {
   padding: 6px 4px;
 }
 
+.cmdk__search-error {
+  padding: 12px;
+  color: var(--td-text-color-secondary);
+  p { margin: 0 0 8px; }
+}
+
 .cmdk__empty {
   display: flex;
   flex-direction: column;
@@ -860,9 +914,24 @@ onUnmounted(() => {
   }
 }
 
-.cmdk-retrieval-drawer {
-  .section-header {
-    font-weight: 600;
-  }
+.cmdk-settings-popover {
+  position: relative;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(680px, calc(100dvh - 140px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+  padding: 12px 14px 14px;
+  &__close { position: absolute; top: 12px; right: 12px; }
+}
+</style>
+
+<style lang="less">
+.cmdk-settings-popup .t-popup__content {
+  border-radius: var(--app-radius-xl);
+  background: var(--td-bg-color-container);
+  border: 0.5px solid var(--td-component-stroke);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.03), 0 2px 4px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
 }
 </style>

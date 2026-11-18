@@ -1,6 +1,9 @@
 <template>
   <div class="embed-page" :style="pageStyle">
-    <div v-if="loadError" class="embed-error">{{ loadError }}</div>
+    <div v-if="loadError" class="embed-error">
+      <p>{{ loadError }}</p>
+      <t-button :loading="bootstrapping" @click="retryBootstrap">{{ $t('embedPublish.historyRetry') }}</t-button>
+    </div>
     <template v-else-if="config">
       <header v-if="sessionId" class="embed-header">
         <span class="embed-header__badge" :style="badgeStyle">
@@ -16,7 +19,18 @@
           shape="square"
           size="small"
           class="embed-header__action"
-          :disabled="!chatHasMessages"
+          :title="$t('embedPublish.history')"
+          :aria-label="$t('embedPublish.history')"
+          @click="historyVisible = true"
+        >
+          <template #icon><t-icon name="history" /></template>
+        </t-button>
+        <t-button
+          variant="text"
+          shape="square"
+          size="small"
+          class="embed-header__action"
+          :disabled="!chatHasMessages || sessionBusy"
           :title="$t('embedPublish.newChat')"
           :aria-label="$t('embedPublish.newChat')"
           @click="handleNewChat"
@@ -25,7 +39,43 @@
         </t-button>
       </header>
 
+      <t-alert v-if="historyError && !historyVisible" theme="warning" :message="historyError" />
+      <t-drawer
+        v-model:visible="historyVisible"
+        :header="$t('embedPublish.history')"
+        placement="right"
+        size="320px"
+        :footer="false"
+        :close-btn="true"
+        :close-on-esc-keydown="true"
+        :close-on-overlay-click="true"
+      >
+        <t-alert v-if="historyError" theme="warning" :message="historyError" />
+        <p class="embed-history__hint">{{ $t('embedPublish.historyHint') }}</p>
+        <p v-if="sessionHistory.length === 0" class="embed-history__hint">{{ $t('embedPublish.historyEmpty') }}</p>
+        <nav class="embed-history" :aria-label="$t('embedPublish.history')">
+          <button
+            v-for="entry in sessionHistory"
+            :key="entry.id"
+            type="button"
+            :class="['embed-history__item', { 'is-current': entry.id === sessionId }]"
+            :aria-current="entry.id === sessionId ? 'page' : undefined"
+            :disabled="sessionBusy || entry.id === sessionId"
+            @click="handleHistorySelect(entry.id)"
+          >
+            <span class="embed-history__title">{{ entry.title || $t('embedPublish.historyUntitled') }}</span>
+            <time :datetime="new Date(entry.updatedAt).toISOString()">{{ new Date(entry.updatedAt).toLocaleString() }}</time>
+          </button>
+        </nav>
+        <t-popconfirm :content="$t('embedPublish.historyClearConfirm')" @confirm="handleClearHistory">
+          <t-button theme="danger" variant="outline" :disabled="sessionBusy || sessionHistory.length === 0">
+            {{ $t('embedPublish.historyClear') }}
+          </t-button>
+        </t-popconfirm>
+      </t-drawer>
+
       <EmbedChatView
+        :key="sessionId"
         v-if="sessionId"
         :session-id="sessionId"
         :session-sig="sessionSig"
@@ -42,8 +92,8 @@
         :agent-image-upload-enabled="config.agent_image_upload_enabled === true"
         :use-session-header-title="useSessionHeaderTitle"
         :host-context="hostContext"
-        @session-title="sessionTitle = $event"
-        @messages-state="chatHasMessages = $event"
+        @session-title="handleSessionTitle"
+        @messages-state="handleMessagesState"
       />
       <div v-else class="embed-loading">{{ $t('embedPublish.loading') }}</div>
     </template>
@@ -65,6 +115,7 @@ const route = useRoute()
 const channelId = ref(String(route.params.channelId || ''))
 const sessionTitle = ref('')
 const chatHasMessages = ref(false)
+const historyVisible = ref(false)
 
 const {
   token,
@@ -77,6 +128,14 @@ const {
   bootstrapping,
   hostContext,
   startNewSession,
+  retryBootstrap,
+  sessionHistory,
+  sessionBusy,
+  historyError,
+  switchHistorySession,
+  clearSessionHistory,
+  rememberCurrentSession,
+  setSessionHasMessages,
 } = useEmbedBridge(channelId)
 
 // An embed visitor has no Bearer/tenant credentials, so every protected file in
@@ -93,13 +152,28 @@ watchEffect(() => {
 
 onUnmounted(() => setDefaultProtectedFileAccess(null))
 
-const handleNewChat = () => {
-  // The current session is already empty — reuse it instead of spawning yet
-  // another blank session (which would otherwise pile up server-side).
+const handleNewChat = async () => {
   if (!chatHasMessages.value) return
-  sessionTitle.value = ''
-  startNewSession()
+  await startNewSession()
 }
+const handleHistorySelect = async (id: string) => {
+  if (await switchHistorySession(id)) historyVisible.value = false
+}
+const handleClearHistory = async () => {
+  if (await clearSessionHistory()) historyVisible.value = false
+}
+const handleSessionTitle = (title: string) => {
+  sessionTitle.value = title
+  rememberCurrentSession(title)
+}
+const handleMessagesState = (hasMessages: boolean) => {
+  chatHasMessages.value = hasMessages
+  setSessionHasMessages(hasMessages)
+}
+watch(sessionId, (id) => {
+  sessionTitle.value = sessionHistory.value.find(entry => entry.id === id)?.title || ''
+  chatHasMessages.value = false
+}, { flush: 'sync' })
 
 const kbIds = computed(() => config.value?.knowledge_base_ids ?? [])
 
@@ -258,6 +332,29 @@ watch(headerTitle, (title) => {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+}
+
+.embed-history {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 20px;
+
+  &__hint { color: var(--td-text-color-secondary); font-size: var(--app-text-sm); }
+  &__item {
+    display: grid;
+    gap: 6px;
+    padding: 12px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: var(--app-radius-lg);
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-primary);
+    text-align: start;
+    cursor: pointer;
+    &.is-current { border-color: var(--td-brand-color); }
+    &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 2px; }
+    time { color: var(--td-text-color-secondary); font-size: var(--app-text-xs); }
+  }
+  &__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
 .embed-error,

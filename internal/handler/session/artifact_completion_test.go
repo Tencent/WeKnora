@@ -124,3 +124,62 @@ func TestCompletionResolvesNameToLatestKnownVersion(t *testing.T) {
 	require.NotContains(t, message.Content, old.URL)
 	require.NotContains(t, message.Content, "sandbox:")
 }
+
+type delegatedArtifactCatalog struct {
+	interfaces.ResourceCatalog
+	owners map[string]string
+}
+
+func (c *delegatedArtifactCatalog) Bind(_ context.Context, ref, _, owner, _ string) error {
+	c.owners[ref] = owner
+	return nil
+}
+
+func TestCompletionAttachesDelegatedFilesWithoutParentSandbox(t *testing.T) {
+	for _, withCollector := range []bool{false, true} {
+		name := "without_collector"
+		if withCollector {
+			name = "with_collector"
+		}
+		t.Run(name, func(t *testing.T) {
+			files := types.MessageArtifacts{
+				{
+					URL: "resource://" + strings.Repeat("a", 22), FileName: "report.md", FileType: ".md",
+					SourcePath: "collaboration://child-a/workspace/output/report.md",
+				},
+				{
+					URL: "resource://" + strings.Repeat("b", 22), FileName: "report.md", FileType: ".md",
+					SourcePath: "collaboration://child-b/workspace/output/report.md",
+				},
+			}
+			stream := &completionEventRecorder{}
+			message := &types.Message{ID: "parent-answer"}
+			catalog := &delegatedArtifactCatalog{owners: map[string]string{}}
+			var collector *service.ArtifactCollector
+			if withCollector {
+				collector = service.NewArtifactCollector(
+					nil, nil, completionHistory{}, catalog, service.ArtifactCollectorConfig{},
+				)
+			}
+			h := NewAgentStreamHandler(
+				context.Background(), "parent", message.ID, "req", 1, time.Now(),
+				message, stream, nil, collector, nil, nil,
+			)
+			answer := "[A](" + files[0].URL + ")\n\n[B](" + files[1].URL + ")"
+			require.NoError(t, h.handleComplete(context.Background(), event.Event{
+				Data: event.AgentCompleteData{MessageID: message.ID, FinalAnswer: answer, Artifacts: files},
+			}))
+			require.Equal(t, files, message.Artifacts, "persist both children even when their filenames coincide")
+			require.Equal(t, answer, message.Content, "keep each exact reference and the model's prose")
+			if withCollector {
+				for _, f := range files {
+					require.Equal(t, message.ID, catalog.owners[f.URL])
+				}
+			}
+			require.NoError(t, h.publishCompletion(context.Background()))
+			last := stream.events[len(stream.events)-1]
+			require.Equal(t, answer, last.Data["final_content"])
+			require.Equal(t, publicArtifactViews(files), last.Data["artifacts"])
+		})
+	}
+}

@@ -259,7 +259,7 @@ func (h *TenantInvitationHandler) ListTenantInvitations(c *gin.Context) {
 // @Produce      json
 // @Param        id       path  string                   true  "空间 ID"
 // @Param        request  body  createInvitationRequest  true  "邀请请求"
-// @Success      201  {object}  map[string]interface{}
+// @Success      201  {object}  handler.DataResponse{data=types.TenantInvitationResponse}
 // @Security     Bearer
 // @Router       /tenants/{id}/invitations [post]
 func (h *TenantInvitationHandler) CreateInvitation(c *gin.Context) {
@@ -390,7 +390,7 @@ func (h *TenantInvitationHandler) autoAcceptInvitationAndRespond(
 // @Produce      json
 // @Param        id      path  string  true  "空间 ID"
 // @Param        inv_id  path  string  true  "邀请 ID"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.SuccessResponse
 // @Security     Bearer
 // @Router       /tenants/{id}/invitations/{inv_id} [delete]
 func (h *TenantInvitationHandler) RevokeInvitation(c *gin.Context) {
@@ -667,7 +667,7 @@ func (h *TenantInvitationHandler) AcceptMyInvitationByToken(c *gin.Context) {
 // @Tags         我的邀请
 // @Produce      json
 // @Param        inv_id  path  string  true  "邀请 ID"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.SuccessResponse
 // @Security     Bearer
 // @Router       /me/invitations/{inv_id}/decline [post]
 func (h *TenantInvitationHandler) DeclineMyInvitation(c *gin.Context) {

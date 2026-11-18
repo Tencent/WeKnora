@@ -30,9 +30,21 @@ func TestSanitizeMessages(t *testing.T) {
 		}
 		result := SanitizeMessages(messages)
 		require.Len(t, result, 1)
+		var images []string
+		var text strings.Builder
+		for _, part := range result[0].MultiContent {
+			if part.Type == "image_url" && part.ImageURL != nil {
+				images = append(images, part.ImageURL.URL)
+			}
+			if part.Type == "text" {
+				text.WriteString(part.Text)
+			}
+		}
 		assert.Equal(t, []string{
 			"data:image/png;base64,MQ==", "data:image/png;base64,Mg==", "data:image/png;base64,Mw==",
-		}, result[0].Images)
+		}, images)
+		assert.Equal(t, "image one\n\nimage two\n\n", text.String())
+		assert.Empty(t, result[0].Images, "images are represented once in MultiContent")
 		assert.Len(t, first, 1, "merging must not append into the caller's slice")
 	})
 

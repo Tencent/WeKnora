@@ -8,6 +8,8 @@ export interface LayoutPlacement extends GraphPoint {
   center: GraphPoint
   stationary?: boolean
   degree?: number
+  // BFS distance from the component representative. Shelf pages leave this unset.
+  depth?: number
 }
 export interface GraphCluster extends GraphPoint, GraphBounds {
   slugs: string[]
@@ -269,6 +271,7 @@ export function buildGraphLayout(
   const goldenAngle = Math.PI * (3 - Math.sqrt(5))
   const clusters: GraphCluster[] = []
   const seeds = new Map<string, GraphPoint>()
+  const depthBySlug = new Map<string, number>()
   const cellSize = 500
   const cells = new Map<string, GraphCluster[]>()
   const keysFor = (bounds: GraphBounds) => {
@@ -282,8 +285,8 @@ export function buildGraphLayout(
     const representative = [...slugs].sort((a, b) => adjacency.get(b)!.size - adjacency.get(a)!.size || (a < b ? -1 : 1))[0]!
     // Seed a spanning tree from the best-connected page. Branches follow
     // their parent direction, so chains and trees are not born as disks.
-    const local = new Map<string, GraphPoint & { heading: number }>()
-    local.set(representative, { x: 0, y: 0, heading: 0 })
+    const local = new Map<string, GraphPoint & { heading: number; depth: number }>()
+    local.set(representative, { x: 0, y: 0, heading: 0, depth: 0 })
     const queue = [representative]
     for (let cursor = 0; cursor < queue.length; cursor++) {
       const parentSlug = queue[cursor]!
@@ -292,13 +295,19 @@ export function buildGraphLayout(
       children.forEach((slug, i) => {
         const heading = parent.heading + (cursor === 0 ? i * goldenAngle : ((i + 0.5) / children.length - 0.5) * Math.PI * 0.8)
         const distance = 150 + (children.length > 6 ? Math.sqrt(i) * 30 : (i % 3) * 12)
-        local.set(slug, { x: parent.x + Math.cos(heading) * distance, y: parent.y + Math.sin(heading) * distance, heading })
+        local.set(slug, {
+          x: parent.x + Math.cos(heading) * distance, y: parent.y + Math.sin(heading) * distance,
+          heading, depth: parent.depth + 1,
+        })
         queue.push(slug)
       })
     }
     const mean = { x: 0, y: 0 }
     for (const point of local.values()) { mean.x += point.x / local.size; mean.y += point.y / local.size }
-    for (const [slug, point] of local) seeds.set(slug, { x: point.x - mean.x, y: point.y - mean.y })
+    for (const [slug, point] of local) {
+      seeds.set(slug, { x: point.x - mean.x, y: point.y - mean.y })
+      depthBySlug.set(slug, point.depth)
+    }
     const extent = graphPointBounds(slugs.map(slug => seeds.get(slug)!))
     // Room for repulsion and the caption; this is spacing, not a force limit.
     const padding = 160
@@ -331,7 +340,7 @@ export function buildGraphLayout(
     for (const slug of cluster.slugs) {
       const point = seeds.get(slug)!
       placements.set(slug, { x: center.x + point.x, y: center.y + point.y,
-        center, degree: adjacency.get(slug)!.size })
+        center, degree: adjacency.get(slug)!.size, depth: depthBySlug.get(slug) })
     }
     right = Math.max(right, cluster.right)
     bottom = Math.max(bottom, cluster.bottom)
@@ -382,7 +391,7 @@ export function buildGraphLayout(
         const anchor = prior.get(slug) ?? (neighbor ? prior.get(neighbor)! : center)
         const angle = i * Math.PI * (3 - Math.sqrt(5))
         const point = prior.has(slug) ? anchor : { x: anchor.x + Math.cos(angle) * 90, y: anchor.y + Math.sin(angle) * 90 }
-        placements.set(slug, { ...point, center, degree: adjacency.get(slug)!.size })
+        placements.set(slug, { ...point, center, degree: adjacency.get(slug)!.size, depth: depthBySlug.get(slug) })
       })
     }
     for (const [slug, point] of prior) {
@@ -391,6 +400,46 @@ export function buildGraphLayout(
     }
   }
   return { placements, sections: prior.size ? [] : sections, clusters: prior.size ? [] : clusters }
+}
+
+// Top overview level draws every fetched page. Below that, shelves stay off
+// the canvas and only the upper spanning tree is shown.
+export const GRAPH_DETAIL_MAX = 3
+
+/** Slugs drawn for an overview detail level.
+ * Level 0 is each component's representative and its anchors. Levels 1 and 2
+ * add non-shelf pages whose spanning-tree depth is within the level. The top
+ * level is every placement. A negative level clamps to the anchor set.
+ */
+export function graphDetailSlugs(
+  clusters: readonly GraphCluster[],
+  placements: ReadonlyMap<string, LayoutPlacement>,
+  level: number,
+): Set<string> {
+  if (level >= GRAPH_DETAIL_MAX) return new Set(placements.keys())
+  const visible = new Set<string>()
+  for (const cluster of clusters) {
+    visible.add(cluster.representative)
+    for (const anchor of cluster.anchors) visible.add(anchor)
+  }
+  if (level <= 0) return visible
+  for (const [slug, placement] of placements) {
+    if (placement.stationary || (placement.depth ?? Infinity) > level) continue
+    visible.add(slug)
+  }
+  return visible
+}
+
+/** Smallest overview level that includes this placement. Shelves need full detail. */
+export function graphDetailLevelForSlug(
+  clusters: readonly GraphCluster[],
+  placements: ReadonlyMap<string, LayoutPlacement>,
+  slug: string,
+): number {
+  for (let level = 0; level <= GRAPH_DETAIL_MAX; level++) {
+    if (graphDetailSlugs(clusters, placements, level).has(slug)) return level
+  }
+  return GRAPH_DETAIL_MAX
 }
 
 export interface ForceNode extends GraphPoint {

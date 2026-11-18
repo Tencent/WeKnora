@@ -13,9 +13,10 @@ import (
 )
 
 type stubKnowledgeBaseService struct {
-	kb      *types.KnowledgeBase
-	results []*types.SearchResult
-	err     error
+	kb            *types.KnowledgeBase
+	results       []*types.SearchResult
+	err           error
+	getKBPanicIDs map[string]bool
 }
 
 func (s *stubKnowledgeBaseService) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) (*types.KnowledgeBase, error) {
@@ -26,7 +27,12 @@ func (s *stubKnowledgeBaseService) GetKnowledgeBaseByID(context.Context, string)
 	return s.kb, nil
 }
 
-func (s *stubKnowledgeBaseService) GetKnowledgeBaseByIDOnly(context.Context, string) (*types.KnowledgeBase, error) {
+func (s *stubKnowledgeBaseService) GetKnowledgeBaseByIDOnly(
+	_ context.Context, id string,
+) (*types.KnowledgeBase, error) {
+	if s.getKBPanicIDs[id] {
+		panic("test: knowledge base lookup panicked")
+	}
 	return s.kb, nil
 }
 
@@ -194,4 +200,54 @@ func TestQueryKnowledgeGraph_ReportsConfiguredEntityAndRelationTypes(t *testing.
 	require.True(t, ok)
 	assert.ElementsMatch(t, []string{"合同", "审批流程", "法务部门"}, graphConfig["nodes"])
 	assert.ElementsMatch(t, []string{"属于", "审批", "管理"}, graphConfig["relations"])
+}
+
+func TestQueryKnowledgeGraph_MissingKnowledgeBaseDoesNotPanic(t *testing.T) {
+	tool := NewQueryKnowledgeGraphTool(&stubKnowledgeBaseService{})
+
+	args, err := json.Marshal(QueryKnowledgeGraphInput{
+		KnowledgeBaseIDs: []string{"kb-deleted"},
+		Query:            "Acme",
+	})
+	require.NoError(t, err)
+
+	result, err := tool.Execute(context.Background(), args)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Contains(t, result.Output, "knowledge base kb-deleted not found")
+	errs, ok := result.Data["errors"].([]string)
+	require.True(t, ok)
+	require.Len(t, errs, 1)
+	require.Contains(t, errs[0], "knowledge base kb-deleted not found")
+}
+
+func TestQueryKnowledgeGraph_WorkerPanicIsContained(t *testing.T) {
+	// The failing KB and a healthy KB are queried together: a panic in one
+	// worker must not prevent the other KB from contributing results.
+	tool := NewQueryKnowledgeGraphTool(&stubKnowledgeBaseService{
+		kb: &types.KnowledgeBase{ID: "kb-healthy", ExtractConfig: &types.ExtractConfig{
+			Enabled: true, Nodes: []*types.GraphNode{{Name: "Acme"}},
+		}},
+		getKBPanicIDs: map[string]bool{"kb-panics": true},
+		results: []*types.SearchResult{{
+			ID: "healthy-hit", KnowledgeID: "doc-healthy",
+			Content: "healthy result", Score: 0.9,
+		}},
+	})
+
+	args, err := json.Marshal(QueryKnowledgeGraphInput{
+		KnowledgeBaseIDs: []string{"kb-panics", "kb-healthy"},
+		Query:            "Acme",
+	})
+	require.NoError(t, err)
+
+	result, err := tool.Execute(context.Background(), args)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Contains(t, result.Output, errGraphQueryPanicked.Error())
+	require.Contains(t, result.Output, "healthy result")
+	errs, ok := result.Data["errors"].([]string)
+	require.True(t, ok)
+	require.Len(t, errs, 1)
+	require.Contains(t, errs[0], errGraphQueryPanicked.Error())
 }
