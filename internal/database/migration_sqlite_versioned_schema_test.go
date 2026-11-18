@@ -63,7 +63,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"knowledges":            {"pending_subtasks_count", "profile"},                         // 000056, 000101
 	"knowledge_bases":       {"profile_config", "generated_profile"},                       // 000101
 	// 000034/085/097/105/119
-	"messages": {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint", "run_state"},
+	"messages": {"attachments", "usage", "run_budget", "sandbox_checkpoint", "context_checkpoint", "run_state"},
 	"sessions": {
 		"kind",
 		"parent_session_id", "forked_from_message_id", "fork_bootstrap", // 000097

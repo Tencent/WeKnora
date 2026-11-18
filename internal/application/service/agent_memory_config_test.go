@@ -90,3 +90,29 @@ func TestAgentConfigUnsetMCPModeIsNoneForSharedRuns(t *testing.T) {
 		}
 	}
 }
+func TestAgentConfigCarriesRunContractAndRequestOverrides(t *testing.T) {
+	svc := &sessionService{
+		cfg:                   &config.Config{},
+		webSearchProviderRepo: &sharedAgentWebSearchRepo{},
+	}
+	req := &types.QARequest{
+		Session:       &types.Session{ID: "session-1", TenantID: 1},
+		MaxRunTokens:  90000,
+		MaxRunSeconds: 120,
+		CustomAgent: &types.CustomAgent{
+			TenantID: 1,
+			Config: types.CustomAgentConfig{
+				MaxIterations:   5,
+				MaxRunTokens:    120000,
+				MaxRunSeconds:   300,
+				MaxWriteActions: 12,
+			},
+		},
+	}
+
+	agentConfig, err := svc.buildAgentConfig(t.Context(), req, &types.Tenant{ID: 1}, 1)
+	require.NoError(t, err)
+	require.Equal(t, 90000, agentConfig.MaxRunTokens, "a request override wins for this turn")
+	require.Equal(t, 120, agentConfig.MaxRunSeconds)
+	require.Equal(t, 12, agentConfig.MaxWriteActions, "zero does not erase the agent setting")
+}

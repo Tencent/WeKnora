@@ -2,6 +2,8 @@ package types
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +15,9 @@ const (
 	AgentPromptKindToolApproval = "tool_approval"
 	AgentPromptKindMCPOAuth     = "mcp_oauth"
 	AgentPromptKindAskUser      = "ask_user"
+	// AgentPromptKindBudget asks whether to extend a paused run's budget,
+	// finish it from existing evidence, or cancel it.
+	AgentPromptKindBudget = "budget_pause"
 )
 
 // Lifecycle states of an AgentPrompt. Transitions are compare-and-set on the
@@ -191,6 +196,73 @@ type ResumableAgentRequest struct {
 	AssistantAccess AssistantAccessLevel `json:"assistant_access,omitempty"`
 	UserMessageID   string               `json:"user_message_id,omitempty"`
 	Language        string               `json:"language,omitempty"`
+}
+
+// BudgetPausePromptRequest is the Request of an AgentPromptKindBudget.
+// Only a positive extension is accepted; finishing or canceling uses the
+// action field without a new allowance.
+type BudgetPausePromptRequest struct {
+	Reason             string        `json:"reason"`
+	Limit              RunBudget     `json:"limit"`
+	Used               RunBudgetUsed `json:"used"`
+	SuggestedExtension RunBudget     `json:"suggested_extension"`
+}
+
+// BudgetPausePromptResponse answers a budget pause. action is extend, finish
+// or cancel. Extension, when action is extend, is added to the paused run's
+// allowance without changing its original configured limit.
+type BudgetPausePromptResponse struct {
+	Action    string    `json:"action"`
+	Extension RunBudget `json:"extension,omitempty"`
+}
+
+// ValidateBudgetPauseResponse is the broker validator for budget pauses.
+func ValidateBudgetPauseResponse(_ json.RawMessage, response json.RawMessage) error {
+	var r BudgetPausePromptResponse
+	if err := json.Unmarshal(response, &r); err != nil {
+		return fmt.Errorf("invalid budget pause response: %w", err)
+	}
+	switch r.Action {
+	case "extend":
+		if r.Extension.MaxTotalTokens < 0 || r.Extension.MaxWallTimeSec < 0 || r.Extension.MaxWriteActions < 0 {
+			return errors.New("budget extension cannot be negative")
+		}
+		if r.Extension.MaxTotalTokens == 0 && r.Extension.MaxWallTimeSec == 0 && r.Extension.MaxWriteActions == 0 {
+			return errors.New("budget extension must add at least one limit")
+		}
+	case "finish", "cancel":
+		r.Extension = RunBudget{}
+	default:
+		return errors.New("budget pause action must be extend, finish, or cancel")
+	}
+	return nil
+}
+
+// BudgetPauseRequest is the durable request the engine hands to a prompt
+// adapter when a run reaches a contract boundary. Snapshot is the exact run
+// state to resume; it is deliberately opaque to the prompt adapter.
+type BudgetPauseRequest struct {
+	TenantID           uint64
+	UserID             string
+	SessionID          string
+	AssistantMessageID string
+	RequestID          string
+	Reason             RunStopReason
+	Limit              RunBudget
+	Used               RunBudgetUsed
+	SuggestedExtension RunBudget
+	Snapshot           []byte
+	SnapshotVersion    int
+}
+
+// BudgetPauseDecision is the answer to a budget pause. An empty Action means
+// the adapter could not obtain an answer and the run must stop deterministically.
+type BudgetPauseDecision struct {
+	PromptID  string
+	Action    string
+	Extension RunBudget
+	Reason    string
+	Suspended *PromptSuspension
 }
 
 // ToolApprovalPromptRequest is the Request of an AgentPromptKindToolApproval.

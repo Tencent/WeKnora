@@ -122,6 +122,7 @@ func (r *Runtime) Spawn(ctx context.Context, s Scope, key, name, agentID, config
 		if err := reserveInput(g, len(query)+len(config)); err != nil {
 			return err
 		}
+		runBudgetTurnID := g.RunBudgetTurnID
 		g.Members = append(
 			g.Members,
 			&Member{
@@ -130,7 +131,9 @@ func (r *Runtime) Spawn(ctx context.Context, s Scope, key, name, agentID, config
 				AgentID:    agentID,
 				SessionID:  session,
 				ConfigJSON: config,
-				Runs:       []*Run{{ID: runID, State: "queued", Query: query}},
+				Runs: []*Run{{
+					ID: runID, State: "queued", Query: query, RunBudgetTurnID: runBudgetTurnID,
+				}},
 			},
 		)
 		g.Requests[key] = id
@@ -188,7 +191,9 @@ func (r *Runtime) Send(
 				return errors.New("maximum 16 child agents per task")
 			}
 			m.Inherited = false
-			m.Runs = append(m.Runs, &Run{ID: id, State: "queued", Query: query})
+			m.Runs = append(m.Runs, &Run{
+				ID: id, State: "queued", Query: query, RunBudgetTurnID: g.RunBudgetTurnID,
+			})
 		} else {
 			g.NextSequence++
 			kind := "message"
@@ -695,7 +700,10 @@ func (r *Runtime) execute(serverCtx context.Context, w Work) {
 			}
 		}
 		if len(followups) > 0 && g.Status == "active" && !v.CancelRequested && len(m.Runs) < 8 {
-			m.Runs = append(m.Runs, &Run{ID: uuid.NewString(), State: "queued", Query: strings.Join(followups, "\n\n")})
+			m.Runs = append(m.Runs, &Run{
+				ID: uuid.NewString(), State: "queued", Query: strings.Join(followups, "\n\n"),
+				RunBudgetTurnID: g.RunBudgetTurnID,
+			})
 		}
 		// Plain messages remain available to subsequent turns. Followup messages
 		// have now been converted into work and must not create another turn.

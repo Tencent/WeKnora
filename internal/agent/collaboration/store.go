@@ -81,6 +81,22 @@ type Group struct {
 	Requests           map[string]string
 	NextSequence       int64
 	Deadline           time.Time
+	// RunBudget is the shared, cumulative allowance for the parent and every
+	// child execution in this collaboration. Nil is uncapped.
+	RunBudget *types.RunBudgetUsage `json:"run_budget,omitempty"`
+	// RunBudgetTurnID fences a per-turn account from a previous human turn.
+	RunBudgetTurnID string `json:"run_budget_turn_id,omitempty"`
+	// RunBudgetStartedAt is the active clock origin; waiting for a human does
+	// not extend it when the run is resumed.
+	RunBudgetStartedAt time.Time `json:"run_budget_started_at,omitempty"`
+	// BudgetReservations and BudgetActuals are keyed per model/tool operation.
+	// Actual replaces a reservation once settled; unsettled keys stay reserved.
+	BudgetReservations map[string]types.RunBudgetUsed `json:"budget_reservations,omitempty"`
+	BudgetActuals      map[string]types.RunBudgetUsed `json:"budget_actuals,omitempty"`
+	// BudgetExtensions records each owner decision that added capacity. The
+	// key makes a retried resume idempotent instead of granting the allowance
+	// twice.
+	BudgetExtensions map[string]types.RunBudget `json:"budget_extensions,omitempty"`
 }
 
 // Member is a named child task with its execution history and incoming mailbox.
@@ -126,6 +142,8 @@ type Run struct {
 	PromptID          string `json:"prompt_id,omitempty"`
 	MessageID         string `json:"message_id,omitempty"`
 	UserMessageID     string `json:"user_message_id,omitempty"`
+	// RunBudgetTurnID pins this execution to its parent turn's shared account.
+	RunBudgetTurnID string `json:"run_budget_turn_id,omitempty"`
 }
 
 // MarshalJSON preserves private ownership for persistence; model projections omit it.
@@ -183,6 +201,301 @@ type Store struct {
 
 // NewStore wraps a database connection for collaboration persistence.
 func NewStore(db *gorm.DB) *Store { return &Store{db: db} }
+
+// ErrRunBudgetExhausted means a child cannot start without exceeding the
+// parent-owned shared contract. It is distinct from a storage failure.
+var ErrRunBudgetExhausted = errors.New("collaboration run budget exhausted")
+
+// chargedBudget returns actual usage once an operation settles, otherwise its
+// reservation. Keeping the maps separate makes retries idempotent and releases
+// worst-case request headroom when the provider reports the real amount.
+func chargedBudget(g *Group, key string) types.RunBudgetUsed {
+	// Once an operation settles, actual usage is authoritative. A worst-case
+	// request reservation must be released even when the response used less.
+	if actual, ok := g.BudgetActuals[key]; ok {
+		return actual
+	}
+	return g.BudgetReservations[key]
+}
+
+func chargedBudgetTotal(g *Group) types.RunBudgetUsed {
+	var total types.RunBudgetUsed
+	keys := map[string]struct{}{}
+	for k := range g.BudgetReservations {
+		keys[k] = struct{}{}
+	}
+	for k := range g.BudgetActuals {
+		keys[k] = struct{}{}
+	}
+	for k := range keys {
+		used := chargedBudget(g, k)
+		total.TotalTokens += used.TotalTokens
+		total.WallTimeSec += used.WallTimeSec
+		total.WriteActions += used.WriteActions
+	}
+	return total
+}
+
+// SetCollaborationRunBudget initializes the one cumulative account shared by
+// the parent and its children. Repeating it for the same turn is idempotent;
+// a later human turn starts a fresh account instead of inheriting an exhausted
+// predecessor.
+func (s *Store) SetCollaborationRunBudget(
+	ctx context.Context, scope Scope, turnID string, usage *types.RunBudgetUsage,
+) error {
+	if turnID == "" || usage == nil {
+		return ErrScope
+	}
+	return s.Change(ctx, scope, func(g *Group) error {
+		if g.RunBudgetTurnID == turnID && g.RunBudget != nil {
+			// Re-attaching the same turn must not erase reservations, actuals,
+			// or an owner-granted extension.
+			return nil
+		}
+		g.RunBudgetTurnID = turnID
+		g.RunBudget = &types.RunBudgetUsage{Limit: usage.Limit}
+		g.RunBudgetStartedAt = time.Now()
+		g.BudgetReservations = map[string]types.RunBudgetUsed{}
+		g.BudgetActuals = map[string]types.RunBudgetUsed{}
+		g.BudgetExtensions = map[string]types.RunBudget{}
+		return nil
+	})
+}
+
+// RunBudgetAccount is the durable identity and charged usage of one
+// collaboration turn. Children use the same account as their parent.
+type RunBudgetAccount struct {
+	TurnID string
+	Usage  types.RunBudgetUsage
+}
+
+// SharedRunBudget returns the account for a turn. Nil means the collaboration
+// has no explicit run contract or the account belongs to another turn.
+func (s *Store) SharedRunBudget(ctx context.Context, scope Scope, turnID string) (*types.RunBudgetUsage, error) {
+	account, err := s.RunBudgetAccount(ctx, scope, turnID)
+	if err != nil || account == nil {
+		return nil, err
+	}
+	return &account.Usage, nil
+}
+
+// RunBudgetAccount returns the account identity together with current usage.
+func (s *Store) RunBudgetAccount(ctx context.Context, scope Scope, turnID string) (*RunBudgetAccount, error) {
+	g, err := s.Read(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	if g.RunBudget == nil || (turnID != "" && g.RunBudgetTurnID != "" && g.RunBudgetTurnID != turnID) {
+		return nil, nil
+	}
+	usage := *g.RunBudget
+	usage.Used = chargedBudgetTotal(g)
+	usage.Used.WallTimeSec = max(usage.Used.WallTimeSec, 0)
+	if !g.RunBudgetStartedAt.IsZero() {
+		accountElapsed := max(int(time.Since(g.RunBudgetStartedAt)/time.Second), 0)
+		if usage.Used.WallTimeSec == 0 {
+			usage.Used.WallTimeSec = accountElapsed
+		} else {
+			usage.Used.WallTimeSec = min(usage.Used.WallTimeSec, accountElapsed)
+		}
+	}
+	return &RunBudgetAccount{TurnID: g.RunBudgetTurnID, Usage: usage}, nil
+}
+
+// ExcludeWallTime removes interactive wait time from the account's active
+// clock. It is additive and idempotent only because the caller passes the
+// measured interval once per wait.
+func (s *Store) ExcludeWallTime(ctx context.Context, scope Scope, turnID string, wait time.Duration) error {
+	if turnID == "" || wait <= 0 {
+		return nil
+	}
+	return s.Change(ctx, scope, func(g *Group) error {
+		if g.RunBudgetTurnID != turnID || g.RunBudgetStartedAt.IsZero() {
+			return nil
+		}
+		g.RunBudgetStartedAt = g.RunBudgetStartedAt.Add(wait)
+		return nil
+	})
+}
+
+// ExtendBudget adds capacity to the existing turn account and clears the
+// exhausted condition without resetting any reservations or actuals.
+func (s *Store) ExtendBudget(
+	ctx context.Context, scope Scope, turnID, extensionKey string, extension types.RunBudget,
+) error {
+	if turnID == "" || extensionKey == "" || !extension.Active() {
+		return ErrScope
+	}
+	return s.Change(ctx, scope, func(g *Group) error {
+		if g.RunBudgetTurnID != turnID || g.RunBudget == nil {
+			return ErrRunBudgetExhausted
+		}
+		if g.BudgetExtensions == nil {
+			g.BudgetExtensions = map[string]types.RunBudget{}
+		}
+		if _, applied := g.BudgetExtensions[extensionKey]; applied {
+			return nil
+		}
+		g.BudgetExtensions[extensionKey] = extension
+		if extension.MaxTotalTokens > 0 {
+			if g.RunBudget.Limit.MaxTotalTokens > 0 {
+				g.RunBudget.Limit.MaxTotalTokens += extension.MaxTotalTokens
+			} else {
+				g.RunBudget.Limit.MaxTotalTokens = chargedBudgetTotal(g).TotalTokens + extension.MaxTotalTokens
+			}
+		}
+		if extension.MaxWallTimeSec > 0 {
+			if g.RunBudget.Limit.MaxWallTimeSec > 0 {
+				g.RunBudget.Limit.MaxWallTimeSec += extension.MaxWallTimeSec
+			} else {
+				elapsed := int(time.Since(g.RunBudgetStartedAt) / time.Second)
+				g.RunBudget.Limit.MaxWallTimeSec = elapsed + extension.MaxWallTimeSec
+			}
+		}
+		if extension.MaxWriteActions > 0 {
+			if g.RunBudget.Limit.MaxWriteActions > 0 {
+				g.RunBudget.Limit.MaxWriteActions += extension.MaxWriteActions
+			} else {
+				g.RunBudget.Limit.MaxWriteActions = chargedBudgetTotal(g).WriteActions + extension.MaxWriteActions
+			}
+		}
+		return nil
+	})
+}
+
+// StoreBudgetSink adapts this Store to an engine-facing shared account. The
+// store is already scoped to one collaboration.
+type StoreBudgetSink struct {
+	Store *Store
+	Scope Scope
+}
+
+// ExcludeWallTime keeps approval/budget waits outside the shared active-time
+// allowance. ownerKey is accepted for the engine's optional-clock interface.
+func (s StoreBudgetSink) ExcludeWallTime(
+	ctx context.Context, turnID, ownerKey string, wait time.Duration,
+) error {
+	_ = ownerKey
+	if s.Store == nil {
+		return nil
+	}
+	return s.Store.ExcludeWallTime(ctx, s.Scope, turnID, wait)
+}
+
+// ReserveBudget mirrors one atomic reservation into this sink's account.
+func (s StoreBudgetSink) ReserveBudget(
+	ctx context.Context, turnID, key string, reserved types.RunBudgetUsed,
+) error {
+	if s.Store == nil {
+		return nil
+	}
+	return s.Store.ReserveBudget(ctx, s.Scope, turnID, key, reserved)
+}
+
+// SettleBudget mirrors one operation's actual usage into this sink's account.
+func (s StoreBudgetSink) SettleBudget(
+	ctx context.Context, turnID, key string, actual types.RunBudgetUsed,
+) error {
+	if s.Store == nil {
+		return nil
+	}
+	return s.Store.SettleBudget(ctx, s.Scope, turnID, key, actual)
+}
+
+// ExtendBudget adds only a continuation's extra allowance; the existing
+// reservation ledger remains intact.
+func (s StoreBudgetSink) ExtendBudget(
+	ctx context.Context, turnID, extensionKey string, extension types.RunBudget,
+) error {
+	if s.Store == nil {
+		return nil
+	}
+	return s.Store.ExtendBudget(ctx, s.Scope, turnID, extensionKey, extension)
+}
+
+// UsageBudget returns the account with active wall time included.
+func (s StoreBudgetSink) UsageBudget(ctx context.Context, turnID string) (types.RunBudgetUsage, error) {
+	if s.Store == nil {
+		return types.RunBudgetUsage{}, nil
+	}
+	account, err := s.Store.RunBudgetAccount(ctx, s.Scope, turnID)
+	if err != nil || account == nil {
+		return types.RunBudgetUsage{}, err
+	}
+	return account.Usage, nil
+}
+
+// ReserveBudget reserves one idempotent operation. The key is typically
+// "<child>/<round>/model" or "<child>/<round>/tool/<call-id>". Reservations are
+// checked and written under the aggregate CAS, so parallel children cannot
+// jointly overspend.
+func (s *Store) ReserveBudget(
+	ctx context.Context, scope Scope, turnID, key string, reserved types.RunBudgetUsed,
+) error {
+	if key == "" || turnID == "" {
+		return ErrScope
+	}
+	return s.Change(ctx, scope, func(g *Group) error {
+		if g.Status != "active" {
+			return ErrClosed
+		}
+		if g.RunBudgetTurnID != turnID || g.RunBudget == nil || !g.RunBudget.Limit.Active() {
+			return nil
+		}
+		if g.BudgetReservations == nil {
+			g.BudgetReservations = map[string]types.RunBudgetUsed{}
+		}
+		if old, ok := g.BudgetReservations[key]; ok {
+			reserved.TotalTokens = max(reserved.TotalTokens, old.TotalTokens)
+			reserved.WallTimeSec = max(reserved.WallTimeSec, old.WallTimeSec)
+			reserved.WriteActions = max(reserved.WriteActions, old.WriteActions)
+		}
+		previous := g.BudgetReservations[key]
+		g.BudgetReservations[key] = reserved
+		after := chargedBudgetTotal(g)
+		if g.RunBudget.Limit.MaxTotalTokens > 0 && after.TotalTokens > g.RunBudget.Limit.MaxTotalTokens {
+			g.BudgetReservations[key] = previous
+			return ErrRunBudgetExhausted
+		}
+		elapsed := int(time.Since(g.RunBudgetStartedAt) / time.Second)
+		if g.RunBudget.Limit.MaxWallTimeSec > 0 &&
+			elapsed+after.WallTimeSec > g.RunBudget.Limit.MaxWallTimeSec {
+			g.BudgetReservations[key] = previous
+			return ErrRunBudgetExhausted
+		}
+		// A child at the exact write limit may still run a no-cost read batch;
+		// the next mutating reservation is rejected here.
+		if g.RunBudget.Limit.MaxWriteActions > 0 && after.WriteActions > g.RunBudget.Limit.MaxWriteActions {
+			g.BudgetReservations[key] = previous
+			return ErrRunBudgetExhausted
+		}
+		return nil
+	})
+}
+
+// SettleBudget records actual usage for an already-reserved key. Repeating the
+// same settlement is idempotent, and actual can replace the worst-case request
+// reservation (downward as well as upward).
+func (s *Store) SettleBudget(ctx context.Context, scope Scope, turnID, key string, actual types.RunBudgetUsed) error {
+	if key == "" || turnID == "" {
+		return ErrScope
+	}
+	return s.Change(ctx, scope, func(g *Group) error {
+		if g.RunBudgetTurnID != turnID || g.RunBudget == nil {
+			return nil
+		}
+		if g.BudgetActuals == nil {
+			g.BudgetActuals = map[string]types.RunBudgetUsed{}
+		}
+		previous := g.BudgetActuals[key]
+		g.BudgetActuals[key] = types.RunBudgetUsed{
+			TotalTokens:  max(previous.TotalTokens, actual.TotalTokens),
+			WallTimeSec:  max(previous.WallTimeSec, actual.WallTimeSec),
+			WriteActions: max(previous.WriteActions, actual.WriteActions),
+		}
+		return nil
+	})
+}
 
 // Ensure creates a scoped group if absent and verifies access to an existing group.
 func (s *Store) Ensure(ctx context.Context, scope Scope) error {
