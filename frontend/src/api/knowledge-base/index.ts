@@ -360,6 +360,7 @@ export function createKnowledgeBase(data: {
     extraction_granularity?: 'focused' | 'standard' | 'exhaustive';
     content_instructions?: string;
     extraction_instructions?: string;
+    taxonomy?: WikiTaxonomyConfig;
   };
   indexing_strategy?: {
     vector_enabled: boolean;
@@ -393,6 +394,7 @@ export function updateKnowledgeBase(id: string, data: {
       extraction_granularity?: 'focused' | 'standard' | 'exhaustive';
       content_instructions?: string;
       extraction_instructions?: string;
+      taxonomy?: WikiTaxonomyConfig;
     };
     auto_tag_config?: { enabled: boolean; model_id?: string; max_tags?: number; skip_if_tagged?: boolean };
     profile_config?: KnowledgeBaseProfileConfig;
@@ -405,6 +407,11 @@ export function updateKnowledgeBase(id: string, data: {
   }
 }) {
   return put(`/api/v1/knowledge-bases/${id}`, data);
+}
+
+export interface WikiTaxonomyConfig {
+  categories: { name: string; description?: string }[];
+  fallback?: string;
 }
 
 /** Opt-in automatic generation of the knowledge-base description. */

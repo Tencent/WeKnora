@@ -1475,6 +1475,7 @@ type WikiBatchContext struct {
 	// pre-resolved ids and never races on folder creation. Read-only during
 	// reduce.
 	PlannedFolderID map[string]string
+	CustomTaxonomy  bool
 
 	// identityClaims is the Lite-mode and Redis-error fallback for identity
 	// reservations. Map workers in one batch run concurrently even though Lite
@@ -2924,7 +2925,7 @@ func wikiPromptPurpose(promptTpl string) string {
 		return "wiki_summary"
 	case agent.WikiKnowledgeExtractPrompt:
 		return "wiki_knowledge_extract"
-	case agent.WikiTaxonomyPlanPrompt:
+	case agent.WikiTaxonomyPlanPrompt, agent.WikiCustomTaxonomyPlanPrompt:
 		return "wiki_taxonomy_plan"
 	case agent.WikiDeduplicationPrompt:
 		return "wiki_deduplication"

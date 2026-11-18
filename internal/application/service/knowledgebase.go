@@ -136,6 +136,11 @@ func (s *knowledgeBaseService) GetRepository() interfaces.KnowledgeBaseRepositor
 func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb *types.KnowledgeBase,
 ) (*types.KnowledgeBase, error) {
+	if kb.WikiConfig != nil {
+		if err := kb.WikiConfig.Taxonomy.Validate(); err != nil {
+			return nil, apperrors.NewBadRequestError(err.Error())
+		}
+	}
 	// Generate UUID and set creation timestamps
 	if kb.ID == "" {
 		kb.ID = uuid.New().String()
@@ -597,6 +602,11 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	config *types.KnowledgeBaseConfig,
 	vlmConfig *types.VLMConfig,
 ) (*types.KnowledgeBase, error) {
+	if config != nil && config.WikiConfig != nil {
+		if err := config.WikiConfig.Taxonomy.Validate(); err != nil {
+			return nil, apperrors.NewBadRequestError(err.Error())
+		}
+	}
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
 		return nil, errors.New("knowledge base ID cannot be empty")
@@ -644,7 +654,11 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			kb.FAQConfig = config.FAQConfig
 		}
 		if config.WikiConfig != nil {
-			kb.WikiConfig = config.WikiConfig
+			wiki := *config.WikiConfig
+			if wiki.Taxonomy == nil && kb.WikiConfig != nil {
+				wiki.Taxonomy = kb.WikiConfig.Taxonomy
+			}
+			kb.WikiConfig = &wiki
 		}
 		if config.AutoTagConfig != nil {
 			config.AutoTagConfig.Normalize()

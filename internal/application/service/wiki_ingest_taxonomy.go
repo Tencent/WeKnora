@@ -43,6 +43,9 @@ func (s *wikiIngestService) planBatchTaxonomy(
 	if len(items) == 0 {
 		return nil
 	}
+	if kb.WikiConfig.HasCustomTaxonomy() {
+		return s.planCustomTaxonomy(ctx, chatModel, items, kb.WikiConfig.Taxonomy)
+	}
 
 	// Existing folders anchor reuse. Errors (e.g. a dialect without the query)
 	// just mean the plan designs a fresh tree — no fatal dependency.
@@ -74,15 +77,9 @@ func (s *wikiIngestService) planBatchTaxonomy(
 			tree = wikiTaxonomyEmptyTreeHint
 		}
 
-		var itemsBlock strings.Builder
-		for _, it := range chunk {
-			fmt.Fprintf(&itemsBlock, "- slug: %s | title: %s | type: %s | about: %s\n",
-				it.slug, it.title, it.pageType, previewText(it.about, 120))
-		}
-
 		raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiTaxonomyPlanPrompt, map[string]string{
 			"ExistingTaxonomy": tree,
-			"Items":            itemsBlock.String(),
+			"Items":            formatTaxonomyItems(chunk),
 			"Language":         lang,
 		})
 		if err != nil {
@@ -95,6 +92,48 @@ func (s *wikiIngestService) planBatchTaxonomy(
 			result[slug] = clean
 			if len(clean) > 0 {
 				existing = append(existing, clean) // feed forward so later chunks converge
+			}
+		}
+	}
+	return result
+}
+
+func formatTaxonomyItems(items []wikiTaxonomyItem) string {
+	var block strings.Builder
+	for _, item := range items {
+		fmt.Fprintf(&block, "- slug: %s | title: %s | type: %s | about: %s\n",
+			item.slug, item.title, item.pageType, previewText(item.about, 120))
+	}
+	return block.String()
+}
+
+func (s *wikiIngestService) planCustomTaxonomy(
+	ctx context.Context, chatModel chat.Chat, items []wikiTaxonomyItem, taxonomy *types.WikiTaxonomyConfig,
+) map[string][]string {
+	categories := make([]types.WikiTaxonomyCategory, 0, len(taxonomy.Categories))
+	allowed := make(map[string][]string, len(taxonomy.Categories))
+	for _, category := range taxonomy.Categories {
+		category.Name = strings.TrimSpace(category.Name)
+		categories = append(categories, category)
+		allowed[category.Name] = []string{category.Name}
+	}
+	categoryJSON, _ := json.Marshal(categories)
+	fallback := []string{taxonomy.FallbackName()}
+	result := make(map[string][]string, len(items))
+	for start := 0; start < len(items); start += wikiTaxonomyPlanChunkSize {
+		chunk := items[start:min(start+wikiTaxonomyPlanChunkSize, len(items))]
+		raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCustomTaxonomyPlanPrompt, map[string]string{
+			"Categories": string(categoryJSON),
+			"Items":      formatTaxonomyItems(chunk),
+		})
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: custom taxonomy plan call failed (%d items): %v", len(chunk), err)
+		}
+		assignments := parseTaxonomyAssignments(raw)
+		for _, item := range chunk {
+			result[item.slug] = fallback
+			if path := assignments[item.slug]; len(path) == 1 && allowed[path[0]] != nil {
+				result[item.slug] = allowed[path[0]]
 			}
 		}
 	}
@@ -116,7 +155,7 @@ func (s *wikiIngestService) resolvePlannedFolders(
 	pathCache := make(map[string]string) // "a/b" -> folder id
 	out := make(map[string]string, len(planned))
 	for slug, path := range planned {
-		clean := types.CleanWikiCategoryPath(path)
+		clean := types.TrimWikiFolderSegments(path)
 		if len(clean) == 0 {
 			continue
 		}

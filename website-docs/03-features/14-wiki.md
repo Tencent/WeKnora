@@ -267,6 +267,21 @@ TypeWikiFinalize = "wiki:finalize"
 | `standard`（默认） | 主题 + 被实质性讨论（一段/多条/2-3 句以上）的实体概念 |
 | `exhaustive` | 穷举所有命名事物与公认概念 |
 
+#### 自定义分类
+
+在启用 Wiki 的知识库编辑页填写「Wiki 自定义分类」。配置是一个 JSON 数组，每项包含 `name`（目录名）和可选的 `description`（说明适用范围）。
+
+```json
+[
+  {"name": "操作系统升级", "description": "操作系统生命周期与版本升级"},
+  {"name": "设备卸载", "description": "替换或退役设备时的卸载与清理"}
+]
+```
+
+新生成的实体和概念会归入匹配的一级目录。无法匹配时使用「未匹配时的目录」，默认名为 `Uncategorized`。已有页面保留原有位置，清空配置即可恢复自动分类。业务术语及其含义可填写在同一编辑页的 Wiki 抽取指令中。
+
+API 对应字段为 `wiki_config.taxonomy`，支持 `categories` 和可选的 `fallback`。最多可配置 30 个分类，每个名称最长 80 个字符且不能包含路径分隔符，描述最长 240 个字符。提交 `{"categories":[]}` 可恢复自动分类。
+
 #### 并发与批处理
 
 `WikiConfig` 相关参数（`internal/types/wiki_page.go`）：

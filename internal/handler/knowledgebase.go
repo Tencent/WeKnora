@@ -1126,8 +1126,15 @@ func applyKnowledgeBasePatch(
 	if kb.WikiConfig != nil {
 		wiki = *kb.WikiConfig
 	}
-	if err := merge("wiki_config", &wiki); err != nil {
+	wikiPatch := struct {
+		*types.WikiConfig
+		Taxonomy *types.WikiTaxonomyConfig `json:"taxonomy"`
+	}{WikiConfig: &wiki}
+	if err := merge("wiki_config", &wikiPatch); err != nil {
 		return out, err
+	}
+	if wikiPatch.Taxonomy != nil {
+		wiki.Taxonomy = wikiPatch.Taxonomy
 	}
 	if _, ok := sections["wiki_config"]; ok && string(sections["wiki_config"]) != "null" {
 		cfg.WikiConfig = &wiki

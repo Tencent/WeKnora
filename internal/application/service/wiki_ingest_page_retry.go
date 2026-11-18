@@ -42,6 +42,7 @@ func (s *wikiIngestService) wikiPageRetryContext(kbID string, previous *WikiBatc
 	fresh.ExtractionInstructions = previous.ExtractionInstructions
 	fresh.ExtractionGranularity = previous.ExtractionGranularity
 	fresh.PlannedFolderID = previous.PlannedFolderID
+	fresh.CustomTaxonomy = previous.CustomTaxonomy
 	return fresh
 }
 

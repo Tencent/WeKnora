@@ -3,8 +3,11 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 )
@@ -548,6 +551,8 @@ type WikiConfig struct {
 	ContentInstructions string `yaml:"content_instructions,omitempty" json:"content_instructions,omitempty" extensions:"x-agent=wiki_content_instructions,x-agent-detail,x-agent-max-bytes=4000"`
 	// ExtractionInstructions tells page extraction which concepts to keep. The output format stays fixed.
 	ExtractionInstructions string `yaml:"extraction_instructions,omitempty" json:"extraction_instructions,omitempty" extensions:"x-agent=wiki_extraction_instructions,x-agent-detail,x-agent-max-bytes=4000"`
+	// Taxonomy restricts automatic placement of newly generated entity and concept pages.
+	Taxonomy *WikiTaxonomyConfig `yaml:"taxonomy,omitempty" json:"taxonomy,omitempty"`
 
 	// Wiki ingest concurrency is two-level:
 	//   1. batch-level: multiple batches per KB run concurrently in the wiki
@@ -586,6 +591,68 @@ type WikiConfig struct {
 	// this knob trades a single KB's peak throughput for cross-KB fairness.
 	// Set it >= the wiki pool size to effectively disable the cap.
 	IngestMaxInflight int `yaml:"ingest_max_inflight" json:"ingest_max_inflight,omitempty"`
+}
+
+// WikiTaxonomyConfig defines the top-level folders the Wiki ingester may assign.
+// An empty category list restores automatic folder planning.
+type WikiTaxonomyConfig struct {
+	Categories []WikiTaxonomyCategory `yaml:"categories" json:"categories" maxItems:"30"`
+	// Fallback names the folder for unmatched pages. Empty uses Uncategorized.
+	Fallback string `yaml:"fallback,omitempty" json:"fallback,omitempty" maxLength:"80"`
+}
+
+// WikiTaxonomyCategory is an allowed folder and its business scope.
+type WikiTaxonomyCategory struct {
+	Name        string `yaml:"name" json:"name" maxLength:"80"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty" maxLength:"240"`
+}
+
+// HasCustomTaxonomy reports whether automatic folder planning is overridden.
+func (c *WikiConfig) HasCustomTaxonomy() bool {
+	return c != nil && c.Taxonomy != nil && len(c.Taxonomy.Categories) > 0
+}
+
+// FallbackName returns the configured or default folder for unmatched pages.
+func (c *WikiTaxonomyConfig) FallbackName() string {
+	if name := strings.TrimSpace(c.Fallback); name != "" {
+		return name
+	}
+	return "Uncategorized"
+}
+
+// Validate bounds the model input and checks that every name identifies a distinct folder.
+func (c *WikiTaxonomyConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+	if len(c.Categories) > 30 {
+		return fmt.Errorf("wiki taxonomy supports at most 30 categories")
+	}
+	validName := func(name string) bool {
+		return name != "" && utf8.RuneCountInString(name) <= 80 &&
+			!strings.ContainsAny(name, "/／|｜") && !strings.ContainsFunc(name, unicode.IsControl)
+	}
+	fallback := c.FallbackName()
+	if !validName(fallback) {
+		return fmt.Errorf("wiki taxonomy fallback must be a folder name of at most 80 characters")
+	}
+	names := []string{fallback}
+	for i, category := range c.Categories {
+		name := strings.TrimSpace(category.Name)
+		if !validName(name) {
+			return fmt.Errorf("wiki taxonomy category %d must have a folder name of at most 80 characters", i+1)
+		}
+		for _, existing := range names {
+			if strings.EqualFold(existing, name) {
+				return fmt.Errorf("wiki taxonomy category %d duplicates another category or the fallback", i+1)
+			}
+		}
+		if utf8.RuneCountInString(category.Description) > 240 {
+			return fmt.Errorf("wiki taxonomy category %d description exceeds 240 characters", i+1)
+		}
+		names = append(names, name)
+	}
+	return nil
 }
 
 // IsAutoGenerateEnabled preserves automatic generation for configurations saved
