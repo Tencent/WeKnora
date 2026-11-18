@@ -778,6 +778,7 @@ export default {
       book: 'База знаний Yuque',
       library: 'Библиотека Seafile'
     },
+    resourceUnavailable: 'Удалено или недоступно',
     scheduleHuman: {
       '30min': 'Каждые 30 мин',
       '1h': 'Каждый час',
@@ -848,6 +849,8 @@ export default {
     logDetail: {
       startTime: 'Время начала',
       endTime: 'Время окончания',
+      deletedItems: 'Удалено в источнике',
+      deletedItemsMore: 'Ещё {n} удалённых документов не показаны',
       failedItems: 'Документы с ошибкой',
       failedItemsMore: 'Ещё {n} документов с ошибкой не показаны',
       docsFailedSummary: 'Не удалось синхронизировать документов: {n}'

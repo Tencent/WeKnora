@@ -932,6 +932,59 @@ func recordSyncError(result *types.SyncResult, item types.SyncItemError) {
 	}
 }
 
+// recordSyncDeletedItem appends a source-deleted item sample to
+// result.DeletedItems (capped at maxSyncResultErrors and deduplicated),
+// resolving a human-readable title from the item, KB row, or prior sync result.
+func recordSyncDeletedItem(
+	result *types.SyncResult, ds *types.DataSource,
+	existing *types.Knowledge, item *types.FetchedItem,
+) {
+	if result == nil || item == nil || len(result.DeletedItems) >= maxSyncResultErrors {
+		return
+	}
+	for _, d := range result.DeletedItems {
+		if d.ExternalID == item.ExternalID && d.SourceResourceID == item.SourceResourceID {
+			return
+		}
+	}
+	result.DeletedItems = append(result.DeletedItems, types.SyncDeletedItem{
+		ExternalID:       item.ExternalID,
+		SourceResourceID: item.SourceResourceID,
+		Title:            resolveDeletedItemTitle(ds, existing, item),
+	})
+}
+
+func resolveDeletedItemTitle(
+	ds *types.DataSource, existing *types.Knowledge, item *types.FetchedItem,
+) string {
+	if t := strings.TrimSpace(item.Title); t != "" {
+		return t
+	}
+	if existing != nil {
+		if t := strings.TrimSpace(existing.Title); t != "" {
+			return t
+		}
+		if t := strings.TrimSpace(existing.FileName); t != "" {
+			return t
+		}
+	}
+	if ds != nil && len(ds.LastSyncResult) > 0 {
+		var prev types.SyncResult
+		if err := json.Unmarshal(ds.LastSyncResult, &prev); err == nil {
+			for _, d := range prev.DeletedItems {
+				if d.Title == "" {
+					continue
+				}
+				if (item.ExternalID != "" && d.ExternalID == item.ExternalID) ||
+					(item.SourceResourceID != "" && d.SourceResourceID == item.SourceResourceID) {
+					return d.Title
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // fetchFailureSyncError maps a connector error item into a structured, user-
 // facing sample. Connectors that classify their errors (Feishu) provide a stable
 // i18n code + params via metadata so the frontend localises it to the viewer's
@@ -963,7 +1016,18 @@ func (s *DataSourceService) applyFetchedItem(
 	tagIDs []string, result *types.SyncResult,
 ) (nonBlockingFailure bool, ingestErr error) {
 	if item.IsDeleted {
+		selectedDeleted := item.Metadata[types.MetaKeySelectedResourceDeleted] == "true"
 		if !ds.SyncDeletions {
+			if selectedDeleted {
+				var existing *types.Knowledge
+				if s.knowledgeService != nil && s.knowledgeService.GetRepository() != nil && item.ExternalID != "" {
+					existing, _ = s.knowledgeService.GetRepository().FindByDataSourceExternalID(
+						ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID,
+					)
+				}
+				result.Skipped++
+				recordSyncDeletedItem(result, ds, existing, item)
+			}
 			// Sync deletion disabled: neither count nor delete.
 			return false, nil
 		}
@@ -994,6 +1058,9 @@ func (s *DataSourceService) applyFetchedItem(
 			// Deletion is idempotent: the source item may already have been
 			// removed manually or by an earlier sync.
 			result.Skipped++
+			if selectedDeleted {
+				recordSyncDeletedItem(result, ds, nil, item)
+			}
 			return false, nil
 		}
 		if deleteErr := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); deleteErr != nil {
@@ -1024,6 +1091,7 @@ func (s *DataSourceService) applyFetchedItem(
 			return false, nil
 		}
 		result.Deleted++
+		recordSyncDeletedItem(result, ds, existing, item)
 		return false, nil
 	}
 

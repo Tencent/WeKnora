@@ -46,6 +46,41 @@ const maxJSONResponseBytes = 16 << 20
 // request returns the same oversized body, so callers must not retry it.
 var errResponseTooLarge = errors.New("response exceeds maximum size")
 
+const (
+	// feishuErrCodeWikiNotFound is Feishu Wiki's "not found" error code
+	// (e.g. "not found: node has been deleted", "node not found").
+	feishuErrCodeWikiNotFound = 131005
+	// feishuErrCodeDriveNotFound is Feishu Drive's "not found" error code.
+	feishuErrCodeDriveNotFound = 1061003
+)
+
+type feishuAPIError struct {
+	statusCode int
+	code       int
+	body       string
+}
+
+func newFeishuAPIError(statusCode int, respBody []byte) error {
+	var apiResp ApiResponse
+	_ = json.Unmarshal(respBody, &apiResp)
+	return &feishuAPIError{
+		statusCode: statusCode,
+		code:       apiResp.Code,
+		body:       string(respBody),
+	}
+}
+
+func (e *feishuAPIError) Error() string {
+	return fmt.Sprintf("feishu api error: status=%d body=%s", e.statusCode, e.body)
+}
+
+func (e *feishuAPIError) Unwrap() error {
+	if e.code == feishuErrCodeWikiNotFound || e.code == feishuErrCodeDriveNotFound {
+		return datasource.ErrResourceNotFound
+	}
+	return nil
+}
+
 // readCapped reads a response body, refusing anything larger than limit instead
 // of buffering it. Oversized payloads are reported as an error: a truncated
 // body would be indexed as if it were the whole document. A non-positive limit
@@ -315,7 +350,7 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("feishu api error: status=%d body=%s", resp.StatusCode, string(respBody))
+			return newFeishuAPIError(resp.StatusCode, respBody)
 		}
 
 		if result != nil {
@@ -464,6 +499,12 @@ func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken stri
 		return WikiNode{}, fmt.Errorf("get wiki node: %w", err)
 	}
 	if resp.Code != 0 {
+		if resp.Code == feishuErrCodeWikiNotFound {
+			return WikiNode{}, fmt.Errorf(
+				"get wiki node error: code=%d msg=%s: %w",
+				resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+			)
+		}
 		return WikiNode{}, fmt.Errorf("get wiki node error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
@@ -906,6 +947,12 @@ func (c *Client) listDriveFiles(
 		return nil, "", false, fmt.Errorf("list drive files: %w", err)
 	}
 	if resp.Code != 0 {
+		if resp.Code == feishuErrCodeDriveNotFound {
+			return nil, "", false, fmt.Errorf(
+				"list drive files error: code=%d msg=%s: %w",
+				resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+			)
+		}
 		return nil, "", false, fmt.Errorf("list drive files error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 

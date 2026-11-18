@@ -286,6 +286,10 @@ func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID stri
 	spaceID, nodeToken := parseWikiResourceID(resourceID)
 	nodes, err := client.ListWikiNodesWithShortcuts(ctx, spaceID, nodeToken)
 	if err != nil {
+		if nodeToken != "" && errors.Is(err, datasource.ErrResourceNotFound) {
+			logger.Warnf(ctx, "[Feishu] selected wiki node %s has been deleted, skipping: %v", resourceID, err)
+			return nil, &core.SelectedResourceDeletedError{Token: nodeToken, Cause: err}, nil
+		}
 		var partial *core.PartialWikiNodeListError
 		if !errors.As(err, &partial) {
 			// Total listing failure: nothing usable — abort the sync.

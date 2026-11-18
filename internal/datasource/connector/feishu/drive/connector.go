@@ -321,6 +321,10 @@ func (o *driveOps) List(ctx context.Context, client *core.Client, resourceID str
 	if err == nil {
 		return files, nil, nil
 	}
+	var deleted *core.SelectedResourceDeletedError
+	if errors.As(err, &deleted) {
+		return nil, deleted, nil
+	}
 	var partial *core.PartialDriveFileListError
 	if errors.As(err, &partial) {
 		return files, err, nil

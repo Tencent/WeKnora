@@ -31,6 +31,7 @@ async function fixture({
   settings = { projects: [{ project_id: '123', paths: [] }] },
   resources = [],
   dataSource = null,
+  detailDataSource = null,
 }: {
   configured?: boolean
   create?: boolean
@@ -38,6 +39,7 @@ async function fixture({
   settings?: Record<string, unknown>
   resources?: any[]
   dataSource?: any
+  detailDataSource?: any
 } = {}) {
   const calls: Array<{ method: string; args: any[] }> = []
   const warnings: string[] = []
@@ -70,8 +72,25 @@ async function fixture({
     },
     async resolveResourceAncestors(id: string, ids: string[]) {
       calls.push({ method: 'resolveResourceAncestors', args: [id, ids] })
-      return { data: { ancestors: [] } }
+      const byId = new Map(resources.map((r: any) => [r.external_id, r]))
+      const ancestors: string[] = []
+      const seen = new Set<string>()
+      for (const rid of ids) {
+        for (let cur = byId.get(rid)?.parent_id; cur; cur = byId.get(cur)?.parent_id) {
+          if (!seen.has(cur)) {
+            seen.add(cur)
+            ancestors.push(cur)
+          }
+        }
+      }
+      return { data: { ancestors } }
     },
+    ...(detailDataSource ? {
+      async getDataSource(id: string) {
+        calls.push({ method: 'getDataSource', args: [id] })
+        return detailDataSource
+      },
+    } : {}),
   }
   const props = reactive({
     visible: false, kbId: 'kb-one',
@@ -538,5 +557,134 @@ test('Confluence PAT replacement uses the credentials subresource and keeps the 
     const update = f.calls.find(c => c.method === 'updateDataSource')?.args[1]
     assert.deepEqual(update.config.credentials, {})
     assert.equal(update.config.settings.token, undefined)
+  } finally { f.close() }
+})
+
+test('a deleted Feishu node selection stays visible in the picker so the user can uncheck and save', async () => {
+  const spaceId = '7701598185524874545'
+  const deletedId = `${spaceId}:Ut8Gw3GsbiNIAnkNp2kcaZTpnAe`
+  const liveId = `${spaceId}:DocBNodeToken`
+  const f = await fixture({
+    type: 'feishu',
+    resources: [
+      { external_id: spaceId, name: '研发知识库', type: 'wiki_space', has_children: true },
+      { external_id: liveId, name: '文档 B', type: 'wiki_node', parent_id: spaceId, has_children: false },
+    ],
+    dataSource: {
+      id: 'ds-feishu-5633',
+      name: 'Feishu Wiki',
+      type: 'feishu',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: [deletedId, liveId], settings: { parse_mode: 'blocks' } },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+      latest_sync_log: {
+        id: 'log-2',
+        status: 'success',
+        result: {
+          deleted_items: [{
+            external_id: 'Ut8Gw3GsbiNIAnkNp2kcaZTpnAe',
+            source_resource_id: deletedId,
+            title: '文档 A',
+          }],
+        },
+      },
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    assert.equal(f.vm.step, 2)
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.unavailableResources)), [
+      { external_id: deletedId, label: '文档 A' },
+    ])
+    assert.equal(f.vm.resourceRowState(deletedId), 'checked')
+    assert.equal(f.vm.resourceRowState(liveId), 'checked')
+    assert.equal(f.vm.selectedResourceCount, 2)
+
+    // Unchecking the deleted node removes it from selectedResourceIds while
+    // keeping its row visible as unchecked until the drawer is saved.
+    f.vm.toggleResource(deletedId)
+    assert.equal(f.vm.resourceRowState(deletedId), 'unchecked')
+    assert.equal(f.vm.selectedResourceCount, 1)
+    assert.deepEqual([...f.vm.selectedResourceIds], [liveId])
+
+    await f.vm.nextStep()
+    await f.vm.handleSubmit()
+    const saved = f.calls.find(c => c.method === 'updateDataSource')?.args[1]
+    assert.deepEqual(saved.config.resource_ids, [liveId])
+  } finally { f.close() }
+})
+
+test('selecting a whole Feishu space subsumes vanished node selections under that space', async () => {
+  const spaceId = '7701598185524874545'
+  const deletedId = `${spaceId}:Ut8Gw3GsbiNIAnkNp2kcaZTpnAe`
+  const f = await fixture({
+    type: 'feishu',
+    resources: [
+      { external_id: spaceId, name: '研发知识库', type: 'wiki_space', has_children: true },
+    ],
+    dataSource: {
+      id: 'ds-feishu-space',
+      name: 'Feishu Wiki',
+      type: 'feishu',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: [deletedId], settings: {} },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    f.vm.toggleResource(spaceId)
+    assert.deepEqual([...f.vm.selectedResourceIds], [spaceId])
+    f.vm.toggleResource(spaceId)
+    assert.deepEqual([...f.vm.selectedResourceIds], [])
+  } finally { f.close() }
+})
+
+test('unavailable Feishu selection refreshes deleted item title when list snapshot was stale', async () => {
+  const spaceId = '7701598185524874545'
+  const deletedId = `${spaceId}:Ut8Gw3GsbiNIAnkNp2kcaZTpnAe`
+  const f = await fixture({
+    type: 'feishu',
+    resources: [
+      { external_id: spaceId, name: '研发知识库', type: 'wiki_space', has_children: true },
+    ],
+    dataSource: {
+      id: 'ds-feishu-stale',
+      name: 'Feishu Wiki',
+      type: 'feishu',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: [deletedId], settings: { parse_mode: 'blocks' } },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+    },
+    detailDataSource: {
+      id: 'ds-feishu-stale',
+      last_sync_result: {
+        deleted_items: [{
+          external_id: 'Ut8Gw3GsbiNIAnkNp2kcaZTpnAe',
+          source_resource_id: deletedId,
+          title: '文档 A.md',
+        }],
+      },
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    await flush()
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.unavailableResources)), [
+      { external_id: deletedId, label: '文档 A.md' },
+    ])
+    assert.ok(f.calls.some(c => c.method === 'getDataSource' && c.args[0] === 'ds-feishu-stale'))
   } finally { f.close() }
 })
