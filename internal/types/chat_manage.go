@@ -89,6 +89,8 @@ type PipelineRequest struct {
 	// query-understanding stage. Empty values fall back to tenant/global defaults.
 	IntentPromptOverrides map[string]string `json:"-"`
 
+	// RetrievalPolicy controls whether knowledge-base retrieval follows the model intent or runs for every query.
+	RetrievalPolicy string `json:"-"`
 	// Misc request-scoped config
 	TenantID            uint64 `json:"-"`
 	WebSearchEnabled    bool   `json:"-"`
@@ -246,6 +248,12 @@ type ChatManage struct {
 	PipelineContext
 }
 
+// Retrieval policy values control the knowledge-base retrieval gate.
+const (
+	RetrievalPolicyIntentBased         = "intent_based"
+	RetrievalPolicyAlwaysKnowledgeBase = "always_knowledge_base"
+)
+
 // NeedsRetrieval returns true when the current pipeline execution should
 // run the retrieval stages (search, rerank, merge, etc.).
 // For IntentWebSearch, retrieval is only needed if web search is enabled;
@@ -253,6 +261,9 @@ type ChatManage struct {
 // user web search is unavailable. All other intents delegate to
 // QueryIntent.NeedsKBRetrieval().
 func (c *ChatManage) NeedsRetrieval() bool {
+	if c.RetrievalPolicy == RetrievalPolicyAlwaysKnowledgeBase {
+		return true
+	}
 	if c.Intent == IntentWebSearch {
 		return c.WebSearchEnabled
 	}
