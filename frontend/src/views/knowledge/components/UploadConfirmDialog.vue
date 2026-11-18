@@ -1316,7 +1316,8 @@ function initFromKbInfo(kb: any) {
         name: node.name,
         attributes: node.attributes || [],
       })),
-      relations: kb.extract_config?.relations || [],
+      // 隔离可编辑数组及关系对象，避免删除或编辑时污染用于继承的 KB 默认值。
+      relations: (kb.extract_config?.relations || []).map((relation: any) => ({ ...relation })),
       customInstructions: kb.extract_config?.custom_instructions || '',
     },
     graphEnabled: kb.indexing_strategy?.graph_enabled ?? false,

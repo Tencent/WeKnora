@@ -65,6 +65,37 @@ const graphKb = () => ({
 })
 
 for (const mode of ['file', 'reparse'] as const) {
+  test(`${mode}: removing the last relation in place preserves KB defaults for inheritance`, () => {
+    const kb = graphKb()
+    const snapshot = structuredClone(kb)
+    const f = fixture(kb, mode)
+    try {
+      // 对应 GraphSettings.removeRelation，而不是用新数组替换整个字段。
+      f.vm.uiState.nodeExtractConfig.relations.splice(0, 1)
+      f.vm.handleNodeExtractUpdate(f.vm.uiState.nodeExtractConfig)
+      assert.deepEqual(kb, snapshot)
+      assert.equal(f.vm.validateBeforeConfirm(), true)
+      assert.deepEqual(f.warnings, [])
+      assert.deepEqual(JSON.parse(JSON.stringify(f.vm.buildProcessOverrides().extract_config.relations)), [])
+    } finally { f.dispose() }
+  })
+
+  test(`${mode}: editing a relation object does not change the KB example`, () => {
+    const kb = graphKb()
+    const snapshot = structuredClone(kb)
+    const f = fixture(kb, mode)
+    try {
+      const relation = f.vm.uiState.nodeExtractConfig.relations[0]
+      relation.node1 = 'B'
+      relation.node2 = 'A'
+      f.vm.handleNodeExtractUpdate(f.vm.uiState.nodeExtractConfig)
+      assert.deepEqual(kb, snapshot)
+      assert.equal(f.vm.validateBeforeConfirm(), true)
+      assert.deepEqual(JSON.parse(JSON.stringify(f.vm.buildProcessOverrides().extract_config.relations)),
+        [{ node1: 'B', node2: 'A', type: 'Knows' }])
+    } finally { f.dispose() }
+  })
+
   for (const field of ['text', 'tags', 'nodes', 'relations', 'all'] as const) {
     test(`${mode}: cleared extraction ${field} inherits the KB example without rewriting the override`, () => {
       const kb = graphKb()
