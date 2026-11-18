@@ -340,3 +340,60 @@ func TestPreviewChunking_LineEndingsMatchUpload(t *testing.T) {
 		})
 	}
 }
+
+// Preview must honor the custom_separator strategy fields end-to-end: the
+// marker config the frontend sends produces marker-split chunks in the
+// preview, matching what ingestion would store.
+func TestPreviewChunking_CustomSeparatorStrategy(t *testing.T) {
+	body := PreviewChunkingRequest{
+		Text: "预分块一。\n======\n预分块二。",
+		ChunkingConfig: PreviewChunkingPayload{
+			ChunkSize:           512,
+			Separators:          []string{"\n\n", "\n"},
+			Strategy:            "custom_separator",
+			CustomSeparator:     "======",
+			CustomSeparatorOnly: true,
+		},
+	}
+	w, parsed := postPreview(t, body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200; body=%s", w.Code, w.Body.String())
+	}
+	data, ok := parsed["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data missing: %v", parsed)
+	}
+	if data["selected_tier"] != "custom" {
+		t.Errorf("selected_tier = %v, want custom", data["selected_tier"])
+	}
+	chunks, _ := data["chunks"].([]any)
+	if len(chunks) != 2 {
+		t.Fatalf("want 2 marker-split chunks, got %d: %v", len(chunks), chunks)
+	}
+	first, _ := chunks[0].(map[string]any)
+	if got, _ := first["content"].(string); got != "预分块一。" {
+		t.Errorf("first chunk content = %v (marker not stripped?)", got)
+	}
+}
+
+// A marker without the custom_separator strategy must stay inert in the
+// preview too (no accidental marker-split for plain strategies).
+func TestPreviewChunking_MarkerInertWithoutStrategy(t *testing.T) {
+	body := PreviewChunkingRequest{
+		Text: "# 标题\n\n段落一。\n======\n段落二。",
+		ChunkingConfig: PreviewChunkingPayload{
+			ChunkSize:       512,
+			Separators:      []string{"\n\n", "\n", "。"},
+			Strategy:        "heading",
+			CustomSeparator: "======",
+		},
+	}
+	w, parsed := postPreview(t, body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200; body=%s", w.Code, w.Body.String())
+	}
+	data, _ := parsed["data"].(map[string]any)
+	if data["selected_tier"] == "custom" {
+		t.Errorf("marker split ran without the custom_separator strategy")
+	}
+}

@@ -50,6 +50,8 @@ WeKnora 的分块在 **Go 侧**完成（`internal/infrastructure/chunker` 包）
 | `child_chunk_size` | int | 384 | 子块大小（仅父子模式），子块 overlap 固定为 `child_size/5`（约 20%） |
 | `parser_engine_rules` | []ParserEngineRule | 空 | 文件类型 → 解析引擎路由，附带解析器级开关如 `xlsx_first_row_as_header`（属于解析而非分块，但同在此结构） |
 | `table_metadata_instructions` | string | 空 | CSV/Excel 表格摘要生成时的业务指引 |
+| `custom_separator` | string | 空 | **预分块文档标记**：上游 AI / 工程链路已完成分块、以特殊标记（如 `======` 或 `<\|chunk\|>`）拼接各块的文档。设置后该标记优先级最高——先于所有 `strategy` 与 `separators`；分块时自动删除标记及其两侧空白，避免标记进入 embedding / RAG 输出。见 [预分块文档（自定义分隔符）](#_6-预分块文档自定义分隔符) |
+| `custom_separator_only` | bool | false | 仅按 `custom_separator` 切分：一个标记段 = 一个块，不再走任何二次切分，也不受 `chunk_size` 约束（预分块边界由上游决定，平台原样保留）。需 `custom_separator` 非空 |
 
 默认值的单一来源是 `chunker` 包常量（`splitter.go`）：
 
@@ -377,6 +379,35 @@ g.apiKeyRoute(r, http.MethodPost, "/chunker/preview",
     apiKeyRetrieve(apiKeyIngest(apiKeyFullAccess())), g.Viewer(), handler.PreviewChunking)
 ```
 
+### 预分块文档（自定义分隔符） {#_6-预分块文档自定义分隔符}
+
+面向的场景：**分块边界已经在上游决定**——AI 管线产出的结构化内容、工程侧 ETL 切好的语料，各块之间用特殊标记拼接（如 `======`、`<|chunk|>`、`//`）。此时平台再做结构分析/递归切分反而会破坏上游语义。
+
+设置 `custom_separator` 后的语义（`internal/infrastructure/chunker/custom_separator.go`）：
+
+1. **优先级最高**：先于所有 `strategy`（auto/heading/heuristic/legacy）与 `separators`，诊断信息中表现为独立层级 `custom`；
+2. **标记清除**：标记本身及其两侧的空白字符从块内容中删除，不进入 embedding、不进入 RAG 引用输出；块的 `start/end` 位置同步收窄，保持 `end - start == len(content)` 的位置不变量（UI 高亮/原文重建依赖它）；
+3. **两种模式**：
+   - `custom_separator_only = true`（仅识别该分隔符）：一个标记段 = 一个块，无任何二次切分、不受 `chunk_size` 约束——上游分块原样保留；
+   - `custom_separator_only = false`（默认，混合模式）：先按标记切边界，段内若超过 `chunk_size` 再走常规策略链细分（适合个别段特别长的场景）；
+4. **父子分块**：声明了 `custom_separator` 时父子分块退化为平面分块（外部边界与父子细化互相冲突，预分块语义优先）；
+5. 相邻/重复标记产生的空段自动丢弃；多字节标记按 rune 精确匹配，不是正则。
+
+配置示例：
+
+```json
+{
+  "chunking_config": {
+    "chunk_size": 512,
+    "chunk_overlap": 80,
+    "custom_separator": "======",
+    "custom_separator_only": true
+  }
+}
+```
+
+UI 入口：知识库设置 → 分块设置（KB 级默认）；上传确认弹窗 → 更多处理选项（按批次覆盖）。上传前可用 `POST /api/v1/chunker/preview` 传同样的配置试切验证。改动只影响之后解析的文档，已入库文档需重新解析。
+
 ### Python 侧分块器（docreader/splitter/） {#_9-python-侧分块器-docreader-splitter}
 
 `docreader/splitter/splitter.py` 的 `TextSplitter` 是 Go legacy 实现的原型，仍随 docreader sidecar 保留：
@@ -403,4 +434,5 @@ g.apiKeyRoute(r, http.MethodPost, "/chunker/preview",
 | 配置结构 | `internal/types/knowledgebase.go`（`ChunkingConfig`）、`internal/types/indexing_strategy.go` |
 | 管线接入 | `internal/application/service/knowledge_process.go`（`buildSplitterConfigFromChunking` / `buildParentChildConfigs` / `processChunks`） |
 | 调试端点 | `internal/handler/chunker_debug.go`（`POST /api/v1/chunker/preview`） |
+| 自定义分隔符 | `internal/infrastructure/chunker/custom_separator.go`（预分块文档支持） |
 | Python 侧 | `docreader/splitter/splitter.py`、`docreader/splitter/header_hook.py` |

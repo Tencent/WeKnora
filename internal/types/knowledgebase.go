@@ -279,6 +279,22 @@ type ChunkingConfig struct {
 	ChunkOverlap int `yaml:"chunk_overlap" json:"chunk_overlap" minimum:"0" maximum:"5000" extensions:"x-agent"`
 	// Separators, in the order they are tried.
 	Separators []string `yaml:"separators"    json:"separators" extensions:"x-agent,x-agent-maximum=20"`
+	// CustomSeparator holds the pre-chunked document marker: chunk
+	// boundaries were decided upstream (AI pipeline / engineering tooling)
+	// and segments are joined by this literal marker (e.g. "======" or
+	// "<|chunk|>"). Only honored when Strategy is "custom_separator";
+	// under every other strategy the marker is inert. The marker is
+	// removed from chunk content so it never reaches embeddings or RAG
+	// output.
+	CustomSeparator string `yaml:"custom_separator,omitempty" json:"custom_separator,omitempty" extensions:"x-agent"`
+	// CustomSeparatorOnly selects "marker only" mode of the
+	// custom_separator strategy: one marker-delimited segment = one chunk,
+	// no other splitting logic runs. Segments over the size budget
+	// (TokenLimit, or ChunkSize in characters when TokenLimit is 0) are
+	// still split further so the embedding batch layer cannot reject the
+	// document. Requires the custom_separator strategy and a non-empty
+	// CustomSeparator.
+	CustomSeparatorOnly bool `yaml:"custom_separator_only,omitempty" json:"custom_separator_only,omitempty" extensions:"x-agent"`
 	// ParserEngineRules configures which parser engine to use for each file type.
 	// When empty, DefaultParserEngine is used (builtin/simple routing, except
 	// types that only a specific engine can parse: ppt/pptx fall back to
@@ -295,8 +311,10 @@ type ChunkingConfig struct {
 	// Only used when EnableParentChild is true.
 	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty" minimum:"1" maximum:"10000" extensions:"x-agent"`
 	// Strategy selects how documents are split: auto, heading, heuristic,
-	// recursive or legacy. Empty keeps the server default.
-	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty" enums:"auto,heading,heuristic,recursive,legacy" extensions:"x-agent"`
+	// recursive, legacy or custom_separator (pre-chunked documents: split
+	// on CustomSeparator only, see CustomSeparator / CustomSeparatorOnly).
+	// Empty keeps the server default.
+	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty" enums:"auto,heading,heuristic,recursive,legacy,custom_separator" extensions:"x-agent"`
 	// TokenLimit caps chunk size in approximate tokens. 0 uses ChunkSize as a character count.
 	TokenLimit int `yaml:"token_limit,omitempty" json:"token_limit,omitempty" minimum:"0" maximum:"100000" extensions:"x-agent"`
 	// Languages hints the splitter, for example de or zh. Empty detects the language from the document.
