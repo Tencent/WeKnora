@@ -100,6 +100,29 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 	return knowledges, nil
 }
 
+func (r *knowledgeRepository) ListFailedKnowledgeSummaries(
+	ctx context.Context, tenantID uint64, kbID string,
+) ([]*types.Knowledge, error) {
+	var rows []*types.Knowledge
+	err := r.db.WithContext(ctx).
+		Select("id", "tenant_id", "knowledge_base_id", "metadata", "summary_status").
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Where("parse_status = ? AND summary_status = ?", types.ParseStatusCompleted, types.SummaryStatusFailed).
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *knowledgeRepository) TransitionKnowledgeSummaryStatus(
+	ctx context.Context, knowledge *types.Knowledge, from, to string,
+) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("id = ? AND tenant_id = ? AND knowledge_base_id = ?",
+			knowledge.ID, knowledge.TenantID, knowledge.KnowledgeBaseID).
+		Where("parse_status = ? AND summary_status = ?", types.ParseStatusCompleted, from).
+		Update("summary_status", to)
+	return result.RowsAffected == 1, result.Error
+}
+
 // ListKnowledgeProfileRows selects only the columns the knowledge-base
 // description aggregation needs. Documents still in "finalizing" are
 // included on purpose: their title and file type already count, and the
