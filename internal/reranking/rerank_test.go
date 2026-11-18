@@ -199,12 +199,39 @@ func TestRerank_boostedFAQsKeepRelevanceOrder(t *testing.T) {
 func TestCompositeScore_graphHitUsesModelScoreAsBase(t *testing.T) {
 	t.Parallel()
 	graph := &types.SearchResult{MatchType: types.MatchTypeGraph}
-	if got := CompositeScore(graph, 0.8, 0); math.Abs(got-(0.9*0.8+0.1)) > 1e-9 {
+	if got := CompositeScore(graph, 0.8, 0, 0); math.Abs(got-(0.9*0.8+0.1)) > 1e-9 {
 		t.Fatalf("graph composite = %v", got)
 	}
 	vector := &types.SearchResult{MatchType: types.MatchTypeEmbedding}
-	if got := CompositeScore(vector, 0.8, 0); math.Abs(got-(0.6*0.8+0.1)) > 1e-9 {
+	if got := CompositeScore(vector, 0.8, 0, 0); math.Abs(got-(0.6*0.8+0.1)) > 1e-9 {
 		t.Fatalf("vector composite = %v", got)
+	}
+}
+
+// A web hit's source weight comes from the workspace retrieval config; zero
+// falls back to the built-in default so an unset config keeps the historic
+// ranking.
+func TestCompositeScore_webSourceWeight(t *testing.T) {
+	t.Parallel()
+	web := &types.SearchResult{KnowledgeSource: "web_search"}
+	local := &types.SearchResult{}
+
+	// Default (weight 0 → built-in): web sits a hair below a local hit with
+	// identical scores.
+	gotWeb := CompositeScore(web, 0.7, 0.6, 0)
+	gotLocal := CompositeScore(local, 0.7, 0.6, 0)
+	if gotWeb >= gotLocal {
+		t.Fatalf("default web composite %v should sit below local %v", gotWeb, gotLocal)
+	}
+
+	// A lowered weight penalizes web hits further, and it applies only to
+	// web rows.
+	gotWebLow := CompositeScore(web, 0.7, 0.6, 0.5)
+	if gotWebLow >= gotWeb {
+		t.Fatalf("lowered web weight raised the composite: %v vs %v", gotWebLow, gotWeb)
+	}
+	if got := CompositeScore(local, 0.7, 0.6, 0.5); got != gotLocal {
+		t.Fatalf("source weight leaked into a local hit: %v vs %v", got, gotLocal)
 	}
 }
 

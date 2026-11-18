@@ -68,6 +68,17 @@ registry.Add(infra_web_search.Spec{Type: "searchapi", FilteredSearch: infra_web_
 
 CRUD 路由（`RegisterWebSearchProviderRoutes`，`internal/router/routes_infra.go`）：`/web-search-providers` 下的增删改查、`POST /test`（用未保存的参数试连）、`POST /:id/test`（测试已保存配置）、`PUT /:id/credentials` 与 `DELETE /:id/credentials/:field`，测试与写操作均需 Admin；另有 `GET /web-search/providers` 返回可用引擎类型目录。完整接口见[基础设施 API](../04-api/02-api-infra.md)。
 
+## 联网问答的排序权重（空间 retrieval-config）
+
+知识问答同时开启知识库与联网搜索时，两路结果合并进同一个排序列表。默认行为下，网络结果以固定基分参与合并：SEO 优化的通用网页常常压过知识库自己的文档（参见 issue #2984 的企业场景反馈）。空间检索配置（`GET/PUT /tenants/kv/retrieval-config`）提供两个旋钮调节这一平衡，不设置时保持既有行为：
+
+| 名称 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `web_search_base_score` | float | 0.6 | 未配置 rerank 模型时，网络结果进入合并列表携带的分数；配置 rerank 时作为其合成分的检索分基座。调低可让知识库命中排在前面（0–1，0 = 用默认值） |
+| `web_search_source_weight` | float | 0.95 | 配置 rerank 模型时，网络结果在合成分（`0.6×模型分 + 0.3×检索分 + 0.1×来源权重`）中的来源权重，知识库命中恒为 1.0。调低即在模型分相同时压低网络结果（0–1，0 = 用默认值） |
+
+两个旋钮只影响参与合并排序的分数，不改变检索执行本身；若希望"知识库优先、不足时才联网"的级联行为，属于更进一步的检索策略，可在此基础上叠加。
+
 ## Agent 搜索与读页
 
 `web_search` 负责发现来源，`web_fetch` 负责读取选中的页面。用户指定网页时可直接读页；用户要求外部或实时信息时可直接搜索。知识库是否需要检索取决于任务相关性与当前可用工具，不再强制先调用 `search_knowledge`。

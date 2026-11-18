@@ -12,7 +12,8 @@ import (
 type ConvertWebResultOption func(*convertWebResultOptions)
 
 type convertWebResultOptions struct {
-	seqFunc func(idx int) int
+	seqFunc   func(idx int) int
+	baseScore float64
 }
 
 // WithSeqFunc overrides the default sequence assignment for converted results.
@@ -22,16 +23,30 @@ func WithSeqFunc(f func(idx int) int) ConvertWebResultOption {
 	}
 }
 
+// WithBaseScore overrides the score converted results carry into the merged
+// ranking. Zero keeps the built-in default, whose historical value made web
+// hits outrank mediocre knowledge-base hits; workspaces can lower it via the
+// retrieval config.
+func WithBaseScore(score float64) ConvertWebResultOption {
+	return func(opts *convertWebResultOptions) {
+		opts.baseScore = score
+	}
+}
+
 // ConvertWebSearchResults converts []*types.WebSearchResult into []*types.SearchResult.
 func ConvertWebSearchResults(
 	webResults []*types.WebSearchResult,
 	opts ...ConvertWebResultOption,
 ) []*types.SearchResult {
 	options := convertWebResultOptions{
-		seqFunc: func(int) int { return 1 },
+		seqFunc:   func(int) int { return 1 },
+		baseScore: types.DefaultWebSearchBaseScore,
 	}
 	for _, opt := range opts {
 		opt(&options)
+	}
+	if options.baseScore <= 0 {
+		options.baseScore = types.DefaultWebSearchBaseScore
 	}
 
 	results := make([]*types.SearchResult, 0, len(webResults))
@@ -70,7 +85,7 @@ func ConvertWebSearchResults(
 			StartAt:        0,
 			EndAt:          utf8.RuneCountInString(content),
 			Seq:            options.seqFunc(i),
-			Score:          0.6,
+			Score:          options.baseScore,
 			MatchType:      types.MatchTypeWebSearch,
 			SubChunkID:     []string{},
 			Metadata: map[string]string{
