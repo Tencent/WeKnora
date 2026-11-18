@@ -96,7 +96,7 @@ func newMemoryAdminHarnessWithAudit(t *testing.T, enforceRBAC, persistentAudit b
 	RegisterMemoryRoutes(api, handler.NewMemoryHandler(svc), g)
 	if persistentAudit {
 		api.GET("/tenants/:id/audit-log", g.PathTenantMatch(), g.Admin(),
-			handler.NewAuditLogHandler(auditService).ListTenantAuditLog)
+			handler.NewAuditLogHandler(auditService, nil, nil, nil).ListTenantAuditLog)
 	}
 	return &memoryAdminHarness{db: db, r: r, audit: audit}
 }

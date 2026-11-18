@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -18,12 +20,25 @@ import (
 // requirement — leaks of denied-action histories should not surface
 // to ordinary members.
 type AuditLogHandler struct {
-	auditService interfaces.AuditLogService
+	auditService       interfaces.AuditLogService
+	userService        interfaces.UserService
+	mcpEndpointService interfaces.MCPEndpointService
+	embedChannelSvc    interfaces.EmbedChannelService
 }
 
 // NewAuditLogHandler constructs the handler.
-func NewAuditLogHandler(auditService interfaces.AuditLogService) *AuditLogHandler {
-	return &AuditLogHandler{auditService: auditService}
+func NewAuditLogHandler(
+	auditService interfaces.AuditLogService,
+	userService interfaces.UserService,
+	mcpEndpointService interfaces.MCPEndpointService,
+	embedChannelSvc interfaces.EmbedChannelService,
+) *AuditLogHandler {
+	return &AuditLogHandler{
+		auditService:       auditService,
+		userService:        userService,
+		mcpEndpointService: mcpEndpointService,
+		embedChannelSvc:    embedChannelSvc,
+	}
 }
 
 // auditLogListResponse is the response envelope for ListTenantAuditLog. The
@@ -34,6 +49,33 @@ type auditLogListResponse struct {
 	// NextCursor is the id of the last entry on this page, 0 when it is empty.
 	NextCursor uint64 `json:"next_cursor" extensions:"x-agent"`
 }
+
+// kbActivityListResponse adds display names for the actors on the page,
+// keyed by actor_user_id, so the UI does not have to resolve ids itself.
+type kbActivityListResponse struct {
+	Success bool              `json:"success"`
+	Data    []*types.AuditLog `json:"data"`
+	// NextCursor is the id of the last entry on this page, 0 when it is empty.
+	NextCursor uint64                     `json:"next_cursor" extensions:"x-agent"`
+	Actors     map[string]kbActivityActor `json:"actors"`
+}
+
+// kbActivityActor describes who an actor_user_id refers to. Name is empty
+// when the user, endpoint, or channel no longer exists.
+type kbActivityActor struct {
+	Kind string `json:"kind" enums:"user,mcp_endpoint,embed_channel"`
+	Name string `json:"name"`
+}
+
+const (
+	kbActivityActorUser         = "user"
+	kbActivityActorMCPEndpoint  = "mcp_endpoint"
+	kbActivityActorEmbedChannel = "embed_channel"
+
+	// Synthetic user ids minted by MCPEndpointAuth and EmbedAuth.
+	mcpEndpointActorPrefix  = "mcp-"
+	embedChannelActorPrefix = "embed-"
+)
 
 // ListTenantAuditLog godoc
 // @Summary      获取空间审计日志
@@ -122,7 +164,7 @@ func (h *AuditLogHandler) ListTenantAuditLog(c *gin.Context) {
 // @Param        action    query  string  false  "按 action 精确过滤，如 knowledge.deleted"  extensions(x-agent)
 // @Param        outcome   query  string  false  "结果过滤"  Enums(success,accepted,partial,failed,denied,canceled)  extensions(x-agent)
 // @Param        actor     query  string  false  "按 actor_user_id 精确过滤"
-// @Success      200  {object}  auditLogListResponse
+// @Success      200  {object}  kbActivityListResponse
 // @Failure      403  {object}  errors.AppError  "非创建者或管理员，或知识库来自其他空间"
 // @Failure      404  {object}  errors.AppError  "知识库不存在"
 // @Security     Bearer
@@ -169,9 +211,89 @@ func (h *AuditLogHandler) ListKnowledgeBaseActivity(c *gin.Context) {
 	if n := len(entries); n > 0 {
 		nextCursor = entries[n-1].ID
 	}
-	c.JSON(http.StatusOK, auditLogListResponse{
+	c.JSON(http.StatusOK, kbActivityListResponse{
 		Success: true, Data: entries, NextCursor: nextCursor,
+		Actors: h.resolveKBActivityActors(ctx, access.KnowledgeBase.TenantID, entries),
 	})
+}
+
+// resolveKBActivityActors maps each distinct actor id on the page to a display
+// name. A failed lookup omits that kind entirely rather than returning empty
+// names, which would read as "deleted"; the UI then falls back to the id
+// prefix, and the activity feed itself is still served.
+func (h *AuditLogHandler) resolveKBActivityActors(
+	ctx context.Context, tenantID uint64, entries []*types.AuditLog,
+) map[string]kbActivityActor {
+	actors := make(map[string]kbActivityActor)
+	var userIDs []string
+	var hasMCP, hasEmbed bool
+	for _, e := range entries {
+		id := e.ActorUserID
+		if id == "" {
+			continue
+		}
+		if _, seen := actors[id]; seen {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(id, mcpEndpointActorPrefix):
+			actors[id] = kbActivityActor{Kind: kbActivityActorMCPEndpoint}
+			hasMCP = true
+		case strings.HasPrefix(id, embedChannelActorPrefix):
+			actors[id] = kbActivityActor{Kind: kbActivityActorEmbedChannel}
+			hasEmbed = true
+		default:
+			actors[id] = kbActivityActor{Kind: kbActivityActorUser}
+			userIDs = append(userIDs, id)
+		}
+	}
+
+	if len(userIDs) > 0 {
+		users, err := h.userService.GetUsersByIDs(ctx, userIDs)
+		if err != nil {
+			logger.Warnf(ctx, "resolveKBActivityActors: GetUsersByIDs failed: %v", err)
+			dropActorsOfKind(actors, kbActivityActorUser)
+		}
+		for id, u := range users {
+			if u == nil {
+				continue
+			}
+			name := strings.TrimSpace(u.Username)
+			if name == "" {
+				name = strings.TrimSpace(u.Email)
+			}
+			actors[id] = kbActivityActor{Kind: kbActivityActorUser, Name: name}
+		}
+	}
+
+	if hasMCP {
+		endpoints, err := h.mcpEndpointService.List(ctx, tenantID)
+		if err != nil {
+			logger.Warnf(ctx, "resolveKBActivityActors: list MCP endpoints failed: %v", err)
+			dropActorsOfKind(actors, kbActivityActorMCPEndpoint)
+		}
+		for _, ep := range endpoints {
+			id := mcpEndpointActorPrefix + ep.ID
+			if _, ok := actors[id]; ok {
+				actors[id] = kbActivityActor{Kind: kbActivityActorMCPEndpoint, Name: ep.Name}
+			}
+		}
+	}
+
+	if hasEmbed {
+		channels, err := h.embedChannelSvc.ListByTenant(ctx, tenantID)
+		if err != nil {
+			logger.Warnf(ctx, "resolveKBActivityActors: list embed channels failed: %v", err)
+			dropActorsOfKind(actors, kbActivityActorEmbedChannel)
+		}
+		for _, ch := range channels {
+			id := embedChannelActorPrefix + ch.ID
+			if _, ok := actors[id]; ok {
+				actors[id] = kbActivityActor{Kind: kbActivityActorEmbedChannel, Name: ch.Name}
+			}
+		}
+	}
+	return actors
 }
 
 func parseAuditCursor(c *gin.Context) (uint64, int) {
@@ -259,4 +381,12 @@ func (h *AuditLogHandler) ListSystemAuditLog(c *gin.Context) {
 		Data:       entries,
 		NextCursor: nextCursor,
 	})
+}
+
+func dropActorsOfKind(actors map[string]kbActivityActor, kind string) {
+	for id, a := range actors {
+		if a.Kind == kind {
+			delete(actors, id)
+		}
+	}
 }
