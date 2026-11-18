@@ -281,7 +281,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 
 ## 内置厂商
 
-内置 31 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 32 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -309,6 +309,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 | LiteLLM | `litellm` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Requesty | `requesty` | ✓ | ✓ | | ✓ | ✓ |
 | Runcrate | `runcrate` | ✓ | ✓ | | ✓ | |
+| CloudGPU | `cloudgpu` | ✓ | | | | |
 | Jina | `jina` | | ✓ | ✓ | | |
 | NVIDIA | `nvidia` | ✓ | ✓ | ✓ | ✓ | |
 | Novita AI | `novita` | ✓ | ✓ | ✓ | ✓ | |
@@ -371,6 +372,31 @@ Runcrate 是提供 OpenAI 兼容推理 API 的 GPU 云，默认地址为 `https:
 
 思考强度通过 `reasoning_effort` 发送，关闭思考时发送 `none`；GLM-5.3、GLM-5.3 Flash、
 Qwen3.8 Flash 和 gpt-oss 120B 的思考无法关闭，目录中不提供「关闭」档位。
+
+### CloudGPU
+
+CloudGPU 提供 OpenAI 兼容的对话补全 API，默认地址为 `https://cloudgpu.app/v1`。
+模型 ID 与公开的 `GET /v1/models` 一致（如 `deepseek-v4-flash`、`kimi-k3`、`glm-5.2`）。
+API Key 在
+[CloudGPU 控制台](https://cloudgpu.app/?utm_source=weknora&utm_medium=integration&utm_campaign=202611_seg06_indiedev_api)创建。
+
+文档写明暂不提供向量接口。目录中的模型在该列表里输入模态只有文本，因此只注册对话类型。
+输出上限沿用对话补全的 `max_completion_tokens`。文档未说明思考开关，请求不附带 `reasoning_effort`。
+
+通过 `POST /api/v1/models` 创建对话模型时，请求体示例：
+
+```json
+{
+  "name": "deepseek-v4-flash",
+  "type": "KnowledgeQA",
+  "source": "remote",
+  "parameters": {
+    "provider": "cloudgpu",
+    "base_url": "https://cloudgpu.app/v1",
+    "api_key": "your-cloudgpu-api-key"
+  }
+}
+```
 
 ## 设置空间默认模型 {#workspace-defaults}
 

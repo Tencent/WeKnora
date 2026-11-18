@@ -6381,6 +6381,78 @@
         "context_window": 8192,
         "source": "https://api.runcrate.ai/v1/models"
       }
+    ],
+    "cloudgpu": [
+      {
+        "id": "deepseek-v4-pro",
+        "name": "DeepSeek V4 Pro",
+        "reasoning": false,
+        "input": [
+          "text"
+        ],
+        "context_window": 131072,
+        "source": "https://cloudgpu.app/v1/models"
+      },
+      {
+        "id": "deepseek-v4-flash",
+        "name": "DeepSeek V4 Flash",
+        "reasoning": false,
+        "input": [
+          "text"
+        ],
+        "context_window": 131072,
+        "source": "https://cloudgpu.app/v1/models"
+      },
+      {
+        "id": "kimi-k3",
+        "name": "Kimi K3",
+        "reasoning": false,
+        "input": [
+          "text"
+        ],
+        "context_window": 262144,
+        "source": "https://cloudgpu.app/v1/models"
+      },
+      {
+        "id": "glm-5.2",
+        "name": "GLM-5.2",
+        "reasoning": false,
+        "input": [
+          "text"
+        ],
+        "context_window": 131072,
+        "source": "https://cloudgpu.app/v1/models"
+      },
+      {
+        "id": "minimax-m3",
+        "name": "MiniMax M3",
+        "reasoning": false,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "source": "https://cloudgpu.app/v1/models"
+      },
+      {
+        "id": "qwen3-coder-480b",
+        "name": "Qwen3 Coder 480B",
+        "reasoning": false,
+        "input": [
+          "text"
+        ],
+        "context_window": 262144,
+        "source": "https://cloudgpu.app/v1/models"
+      },
+      {
+        "id": "qwen3.8-27b",
+        "name": "Qwen3.8 27B",
+        "reasoning": false,
+        "input": [
+          "text"
+        ],
+        "context_window": 262144,
+        "source": "https://cloudgpu.app/v1/models"
+      }
     ]
   }
 }

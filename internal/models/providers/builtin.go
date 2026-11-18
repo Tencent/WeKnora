@@ -9,6 +9,7 @@ func Builtins() []*Definition {
 		newAnthropicProvider(),
 		newAzureOpenaiProvider(),
 		newCohereProvider(),
+		newCloudGPUProvider(),
 		newDeepseekProvider(),
 		newGeminiProvider(),
 		newGenericProvider(),
