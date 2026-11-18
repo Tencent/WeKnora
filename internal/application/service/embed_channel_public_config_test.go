@@ -136,3 +136,33 @@ func TestPublicConfigDisplayTitleFallsBackToAgentName(t *testing.T) {
 		t.Fatalf("agent_name = %q", cfg.AgentName)
 	}
 }
+
+// TestPublicConfigVisibilitySwitches pins #5631: the channel-level
+// show_tool_steps / show_sources switches must reach anonymous embed
+// clients through the public config, defaulting to true so existing
+// channels keep rendering steps and sources.
+func TestPublicConfigVisibilitySwitches(t *testing.T) {
+	svc := &embedChannelService{agentService: &stubAgentForEmbed{
+		agent: &types.CustomAgent{Name: "A"},
+	}}
+	on := svc.PublicConfig(context.Background(), &types.EmbedChannel{
+		ID:            "ch-vis",
+		Name:          "Vis",
+		AgentID:       "builtin-quick-answer",
+		ShowToolSteps: true,
+		ShowSources:   true,
+	})
+	if !on.ShowToolSteps || !on.ShowSources {
+		t.Fatalf("defaults must be true, got %+v", on)
+	}
+
+	off := svc.PublicConfig(context.Background(), &types.EmbedChannel{
+		ID:            "ch-vis-off",
+		AgentID:       "builtin-quick-answer",
+		ShowToolSteps: false,
+		ShowSources:   false,
+	})
+	if off.ShowToolSteps || off.ShowSources {
+		t.Fatalf("disabled switches must propagate, got %+v", off)
+	}
+}

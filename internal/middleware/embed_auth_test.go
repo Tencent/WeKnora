@@ -41,6 +41,7 @@ func (f *fakeEmbedChannelService) Update(
 	ctx context.Context, tenantID uint64, id string, req *types.EmbedChannel,
 	enabled *bool, showSuggested *bool, allowWebSearch *bool, allowFileUpload *bool,
 	defaultLocale *string, webhookURL *string, webhookSecret *string,
+	_ *bool, _ *bool,
 ) (*types.EmbedChannel, error) {
 	return nil, nil
 }

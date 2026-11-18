@@ -4,13 +4,13 @@
       <RagPipelineProgress :session="session" embedded-mode />
       <AgentStreamDisplay v-if="session?.isAgentMode" :session="session" :session-id="sessionId" :user-query="userQuery"
         rag-mode :embedded-mode="embeddedMode" :embed-channel-id="embedChannelId" :embed-token="embedToken"
-        :embed-session-sig="embedSessionSig" :embed-visitor-id="embedVisitorId" />
+        :embed-session-sig="embedSessionSig" :embed-visitor-id="embedVisitorId" :hide-steps="showToolSteps === false" />
     </div>
     <template v-else>
-      <DocInfo v-if="session?.knowledge_references?.length" :session="session" embedded-mode />
+      <DocInfo v-if="showSources !== false && session?.knowledge_references?.length" :session="session" embedded-mode />
       <AgentStreamDisplay v-if="session?.isAgentMode" :session="session" :session-id="sessionId" :user-query="userQuery"
         :embedded-mode="embeddedMode" :embed-channel-id="embedChannelId" :embed-token="embedToken"
-        :embed-session-sig="embedSessionSig" :embed-visitor-id="embedVisitorId" />
+        :embed-session-sig="embedSessionSig" :embed-visitor-id="embedVisitorId" :hide-steps="showToolSteps === false" />
     </template>
     <DeepThink v-if="session?.showThink && !session?.isAgentMode" :deep-session="session" />
     <div v-if="!session?.hideContent && !session?.isAgentMode" ref="parentMd">
@@ -105,7 +105,9 @@ const props = withDefaults(
     embedToken?: string
     embedSessionSig?: string
     embedVisitorId?: string
-  }>(),
+  showToolSteps?: boolean
+  showSources?: boolean
+}>(),
   {
     content: '',
     session: () => ({}),

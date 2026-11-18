@@ -15,6 +15,8 @@ export interface EmbedChannel {
   page_title?: string
   header_title_mode?: HeaderTitleMode
   show_suggested_questions?: boolean
+  show_tool_steps?: boolean
+  show_sources?: boolean
   widget_position?: WidgetPosition
   allow_web_search?: boolean
   allow_file_upload?: boolean
@@ -39,6 +41,8 @@ export interface EmbedChannelPublicConfig {
   page_title?: string
   header_title_mode?: HeaderTitleMode
   show_suggested_questions?: boolean
+  show_tool_steps?: boolean
+  show_sources?: boolean
   widget_position?: WidgetPosition
   allow_web_search?: boolean
   allow_file_upload?: boolean

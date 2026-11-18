@@ -35,8 +35,15 @@ func (f *flowEmbedSvc) ListByTenant(context.Context, uint64) ([]*types.EmbedChan
 	return nil, nil
 }
 
-func (f *flowEmbedSvc) Update(context.Context, uint64, string, *types.EmbedChannel, *bool, *bool, *bool, *bool, *string, *string, *string) (*types.EmbedChannel, error) {
+func (f *flowEmbedSvc) Update(
+	context.Context, uint64, string, *types.EmbedChannel,
+	*bool, *bool, *bool, *bool, *string, *string, *string, *bool, *bool,
+) (*types.EmbedChannel, error) {
 	return nil, nil
+}
+func (f *flowEmbedSvc) Delete(context.Context, uint64, string) error { return nil }
+func (f *flowEmbedSvc) RotateToken(context.Context, uint64, string) (*types.EmbedChannel, string, error) {
+	return nil, "", nil
 }
 
 func (f *flowEmbedSvc) GetOwnedChannel(_ context.Context, tenantID uint64, id string) (*types.EmbedChannel, error) {
@@ -45,10 +52,6 @@ func (f *flowEmbedSvc) GetOwnedChannel(_ context.Context, tenantID uint64, id st
 		return nil, service.ErrEmbedChannelNotFound
 	}
 	return ch, nil
-}
-func (f *flowEmbedSvc) Delete(context.Context, uint64, string) error { return nil }
-func (f *flowEmbedSvc) RotateToken(context.Context, uint64, string) (*types.EmbedChannel, string, error) {
-	return nil, "", nil
 }
 
 func (f *flowEmbedSvc) LookupForEmbed(_ context.Context, channelID, token string) (*types.EmbedChannel, error) {

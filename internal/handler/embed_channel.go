@@ -70,6 +70,8 @@ type embedChannelRequest struct {
 	PageTitle              string   `json:"page_title"`
 	HeaderTitleMode        string   `json:"header_title_mode"`
 	ShowSuggestedQuestions *bool    `json:"show_suggested_questions"`
+	ShowToolSteps          *bool    `json:"show_tool_steps"`
+	ShowSources            *bool    `json:"show_sources"`
 	WidgetPosition         string   `json:"widget_position"`
 	AllowWebSearch         *bool    `json:"allow_web_search"`
 	AllowFileUpload        *bool    `json:"allow_file_upload"`
@@ -137,6 +139,14 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 	if req.ShowSuggestedQuestions != nil {
 		showSuggested = *req.ShowSuggestedQuestions
 	}
+	showToolSteps := true
+	if req.ShowToolSteps != nil {
+		showToolSteps = *req.ShowToolSteps
+	}
+	showSources := true
+	if req.ShowSources != nil {
+		showSources = *req.ShowSources
+	}
 	allowWebSearch := false
 	if req.AllowWebSearch != nil {
 		allowWebSearch = *req.AllowWebSearch
@@ -156,6 +166,8 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 		PageTitle:              req.PageTitle,
 		HeaderTitleMode:        req.HeaderTitleMode,
 		ShowSuggestedQuestions: showSuggested,
+		ShowToolSteps:          showToolSteps,
+		ShowSources:            showSources,
 		WidgetPosition:         req.WidgetPosition,
 		AllowWebSearch:         allowWebSearch,
 		AllowFileUpload:        allowFileUpload,
@@ -244,7 +256,10 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 	if req.AgentID != nil {
 		update.AgentID = strings.TrimSpace(*req.AgentID)
 	}
-	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, update, req.Enabled, req.ShowSuggestedQuestions, req.AllowWebSearch, req.AllowFileUpload, req.DefaultLocale, req.WebhookURL, req.WebhookSecret)
+	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, update,
+		req.Enabled, req.ShowSuggestedQuestions, req.AllowWebSearch, req.AllowFileUpload,
+		req.DefaultLocale, req.WebhookURL, req.WebhookSecret,
+		req.ShowToolSteps, req.ShowSources)
 	if err != nil {
 		writeEmbedMgmtError(c, err)
 		return
@@ -848,6 +863,8 @@ func embedChannelResponse(ch *types.EmbedChannel, publishToken string) gin.H {
 		"page_title":               ch.PageTitle,
 		"header_title_mode":        types.NormalizeEmbedHeaderTitleMode(ch.HeaderTitleMode),
 		"show_suggested_questions": ch.ShowSuggestedQuestions,
+		"show_tool_steps":          ch.ShowToolSteps,
+		"show_sources":             ch.ShowSources,
 		"widget_position":          ch.WidgetPosition,
 		"allow_web_search":         ch.AllowWebSearch,
 		"allow_file_upload":        ch.AllowFileUpload,
