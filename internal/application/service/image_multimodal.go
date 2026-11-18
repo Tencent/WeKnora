@@ -63,14 +63,18 @@ func buildVLMCaptionPrompt(ctx context.Context, cfg types.VLMConfig) string {
 	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "image_description")
 }
 
-// buildVLMOCRPrompt returns the system-owned OCR prompt for the given image
-// source type. cfg is part of the signature and deliberately unused: knowledge
-// base custom instructions must never reach the OCR prompt — free-form
-// business rules compete with the "No text content" output contract and turn
-// decorative images into poisoned, vectorized image_ocr chunks. Custom OCR
-// guidance, if ever needed, deserves a dedicated OCR instruction field rather
-// than reusing CustomInstructions.
-func buildVLMOCRPrompt(sourceType string, _ types.VLMConfig) string {
+// buildVLMOCRPrompt returns the OCR prompt for the given image source type.
+//
+// OCRPrompt is a dedicated override so a tenant can match a model that expects
+// a fixed recognition prompt (MiniCPM-OCR's "Text Recognition:" is the first
+// such model). When it is empty the system prompt applies. Knowledge base
+// custom instructions still never reach this function: free-form business
+// rules compete with the "No text content" output contract and turn decorative
+// images into poisoned, vectorized image_ocr chunks.
+func buildVLMOCRPrompt(sourceType string, cfg types.VLMConfig) string {
+	if prompt := strings.TrimSpace(cfg.OCRPrompt); prompt != "" {
+		return prompt
+	}
 	if sourceType == "scanned_pdf" {
 		return vlmOCRScannedPDFPrompt
 	}

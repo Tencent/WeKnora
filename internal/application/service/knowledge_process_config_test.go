@@ -656,3 +656,32 @@ func TestBuildSplitterConfigFromChunking_PreservesWikiOnlyZeroOverlap(t *testing
 	require.Equal(t, 2048, cfg.ChunkSize)
 	require.Equal(t, 0, cfg.ChunkOverlap)
 }
+
+func TestResolveProcessConfig_VLMOCRPrompt(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm-1", OCRPrompt: "Text Recognition:"},
+	}
+
+	t.Run("inherits when the per-upload override leaves it empty", func(t *testing.T) {
+		t.Parallel()
+
+		eff := ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+			VLMConfig: &types.VLMConfig{Enabled: true, ModelID: "vlm-2"},
+		})
+		require.Equal(t, "vlm-2", eff.VLMConfig.ModelID)
+		require.Equal(t, "Text Recognition:", eff.VLMConfig.OCRPrompt)
+	})
+
+	t.Run("override wins when set", func(t *testing.T) {
+		t.Parallel()
+
+		eff := ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+			VLMConfig: &types.VLMConfig{
+				Enabled: true, ModelID: "vlm-2", OCRPrompt: "Table Recognition:",
+			},
+		})
+		require.Equal(t, "Table Recognition:", eff.VLMConfig.OCRPrompt)
+	})
+}

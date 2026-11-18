@@ -79,6 +79,9 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		if eff.VLMConfig.CustomInstructions == "" {
 			eff.VLMConfig.CustomInstructions = base.CustomInstructions
 		}
+		if eff.VLMConfig.OCRPrompt == "" {
+			eff.VLMConfig.OCRPrompt = base.OCRPrompt
+		}
 	}
 	if overrides.ASRConfig != nil {
 		eff.ASRConfig = *overrides.ASRConfig

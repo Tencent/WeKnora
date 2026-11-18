@@ -29,7 +29,7 @@
 | `embedding_model_id` | string | 否 | Embedding 模型 ID |
 | `chunking_config` | object | 否 | 分块配置（chunk_size/overlap/separators/strategy…） |
 | `image_processing_config` | object | 否 | 图片处理配置：`model_id` / `image_pipeline`（`default`、`smartocr`）/ `image_pipeline_params` / `image_attrs_enabled`（兼容字段）/ `image_actions`（`{ ocr: { on: [...], on_unobserved: bool } }`）/ `image_vector_enabled`（图片向量索引与召回，默认 false，见[知识库功能](../03-features/02-knowledge-base.md)） |
-| `vlm_config` | object | 否 | 图片理解配置：`enabled`（默认 false）与 `model_id`（已创建的多模态模型 ID）须同时设置才能启用；可选 `description_language`、`custom_instructions`（≤4000 字） |
+| `vlm_config` | object | 否 | 图片理解配置：`enabled`（默认 false）与 `model_id`（已创建的多模态模型 ID）须同时设置才能启用；可选 `description_language`、`custom_instructions`（≤4000 字）、`ocr_prompt`（OCR 专用提示词，≤2000 字；为空使用内置提示词，MiniCPM-OCR 直连 vLLM 时填 `Text Recognition:`） |
 | `storage_provider_config` | object | 否 | 存储配置 |
 | `vector_store_id` | string | 否 | 向量库绑定（非法返回 code 2200/2201） |
 | `faq_config` / `wiki_config` / `extract_config` / `indexing_strategy` | object | 否 | 类型相关配置 |

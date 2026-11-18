@@ -34,10 +34,27 @@ func TestValidateKnowledgeBasePromptInstructions(t *testing.T) {
 
 func TestNormalizeKnowledgeBasePromptInstructions(t *testing.T) {
 	kb := &KnowledgeBase{
-		VLMConfig: VLMConfig{CustomInstructions: "  focus labels  "},
+		VLMConfig: VLMConfig{CustomInstructions: "  focus labels  ", OCRPrompt: "  Text Recognition:  "},
 	}
 	NormalizeKnowledgeBasePromptInstructions(kb)
 	if kb.VLMConfig.CustomInstructions != "focus labels" {
 		t.Fatalf("got %q", kb.VLMConfig.CustomInstructions)
+	}
+	if kb.VLMConfig.OCRPrompt != "Text Recognition:" {
+		t.Fatalf("OCR prompt not trimmed: %q", kb.VLMConfig.OCRPrompt)
+	}
+}
+
+func TestValidateKnowledgeBaseOCRPrompt(t *testing.T) {
+	kb := &KnowledgeBase{
+		VLMConfig: VLMConfig{OCRPrompt: strings.Repeat("a", MaxOCRPromptLength+1)},
+	}
+	if err := ValidateKnowledgeBasePromptInstructions(kb); err == nil {
+		t.Fatal("expected OCR prompt length validation error")
+	}
+
+	kb.VLMConfig.OCRPrompt = strings.Repeat("a", MaxOCRPromptLength)
+	if err := ValidateKnowledgeBasePromptInstructions(kb); err != nil {
+		t.Fatalf("boundary length should pass: %v", err)
 	}
 }

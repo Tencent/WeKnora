@@ -715,6 +715,10 @@ type VLMConfig struct {
 	DescriptionLanguage string `yaml:"description_language,omitempty" json:"description_language,omitempty" extensions:"x-agent=vlm_language"`
 	// CustomInstructions adds image-reading guidance. The OCR and Markdown format stay fixed.
 	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty" extensions:"x-agent=vlm_instructions,x-agent-detail,x-agent-max-bytes=4000"`
+	// OCRPrompt replaces the built-in OCR instruction. Empty keeps the system
+	// prompt for the image or scanned-PDF path. Use it for models that expect a
+	// fixed recognition prompt, such as MiniCPM-OCR's "Text Recognition:".
+	OCRPrompt string `yaml:"ocr_prompt,omitempty" json:"ocr_prompt,omitempty" extensions:"x-agent=vlm_ocr_prompt,x-agent-detail,x-agent-max-bytes=2000"`
 
 	// 兼容老版本
 	// Model Name

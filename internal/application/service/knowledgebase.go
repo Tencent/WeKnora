@@ -530,6 +530,7 @@ func (s *knowledgeBaseService) resolveUpdatedVLMConfig(
 	next.ModelID = strings.TrimSpace(requested.ModelID)
 	next.DescriptionLanguage = strings.TrimSpace(requested.DescriptionLanguage)
 	next.CustomInstructions = strings.TrimSpace(requested.CustomInstructions)
+	next.OCRPrompt = strings.TrimSpace(requested.OCRPrompt)
 	if err := types.ValidateKnowledgeBasePromptInstructions(&types.KnowledgeBase{VLMConfig: next}); err != nil {
 		return types.VLMConfig{}, apperrors.NewBadRequestError("vlm_config: " + err.Error())
 	}
