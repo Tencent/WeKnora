@@ -1636,11 +1636,18 @@ const validateBeforeConfirm = (): boolean => {
     return false
   }
 
-  // 图谱抽取必填项校验（与后端 validateExtractConfig 同规则）：
-  // process overrides 里 extract_config.enabled=true 但 few-shot 为空时，
-  // 保存/重解析会在后端撞 400，这里提前拦截并引导到图谱分区。
+  // 与后端 mergeExtractConfig 保持一致：空字符串和空数组继承 KB 默认值。
+  // 只校验合并后的有效配置，不修改界面或待提交的原始覆盖项。
   if (uiState.value.nodeExtractConfig.enabled) {
-    const graphIssues = getGraphExtractIssues(uiState.value.nodeExtractConfig)
+    const override = uiState.value.nodeExtractConfig
+    const defaults = props.kbInfo?.extract_config
+    const graphIssues = getGraphExtractIssues({
+      ...override,
+      text: override.text || defaults?.text,
+      tags: override.tags.length > 0 ? override.tags : defaults?.tags,
+      nodes: override.nodes.length > 0 ? override.nodes : defaults?.nodes,
+      relations: override.relations.length > 0 ? override.relations : defaults?.relations,
+    })
     if (graphIssues.length > 0) {
       MessagePlugin.warning(t('graphSettings.extractIncompleteWarning'))
       if (isGraphSectionAvailable.value) {
