@@ -28,8 +28,11 @@ type feishuSelectedNodeServer struct {
 
 	mu            sync.Mutex
 	spaceID       string
+	failAuth      bool
 	nodes         map[string]core.WikiNode
+	children      map[string][]core.WikiNode
 	docxText      map[string]string
+	docxAttach    map[string]string
 	deletedTokens map[string]bool
 	deniedTokens  map[string]bool
 	driveFiles    map[string][]core.DriveFile
@@ -41,7 +44,9 @@ func newFeishuSelectedNodeServer(t *testing.T, spaceID string) *feishuSelectedNo
 	f := &feishuSelectedNodeServer{
 		spaceID:       spaceID,
 		nodes:         map[string]core.WikiNode{},
+		children:      map[string][]core.WikiNode{},
 		docxText:      map[string]string{},
+		docxAttach:    map[string]string{},
 		deletedTokens: map[string]bool{},
 		deniedTokens:  map[string]bool{},
 		driveFiles:    map[string][]core.DriveFile{},
@@ -59,6 +64,11 @@ func (f *feishuSelectedNodeServer) handle(w http.ResponseWriter, r *http.Request
 
 	switch {
 	case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+		if f.failAuth {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"code":99991663,"msg":"tenant_access_token invalid"}`))
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 0, "tenant_access_token": "tok-test", "expire": 7200,
 		})
@@ -68,6 +78,12 @@ func (f *feishuSelectedNodeServer) handle(w http.ResponseWriter, r *http.Request
 			Data: core.WikiSpaceListData{
 				Items: []core.WikiSpace{{SpaceID: f.spaceID, Name: "研发知识库"}},
 			},
+		})
+	case r.URL.Path == "/open-apis/wiki/v2/spaces/"+f.spaceID+"/nodes":
+		parent := r.URL.Query().Get("parent_node_token")
+		_ = json.NewEncoder(w).Encode(core.WikiNodeListResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.WikiNodeListData{Items: f.children[parent]},
 		})
 	case r.URL.Path == "/open-apis/wiki/v2/spaces/get_node":
 		tok := r.URL.Query().Get("token")
@@ -98,21 +114,32 @@ func (f *feishuSelectedNodeServer) handle(w http.ResponseWriter, r *http.Request
 		trimmed := strings.TrimPrefix(r.URL.Path, "/open-apis/docx/v1/documents/")
 		objToken := strings.TrimSuffix(trimmed, "/blocks")
 		body := f.docxText[objToken]
-		_ = json.NewEncoder(w).Encode(core.DocxBlocksResponse{
-			ApiResponse: core.ApiResponse{Code: 0},
-			Data: core.DocxBlocksData{
-				Items: []core.DocxBlock{
-					{BlockID: "root", BlockType: core.BlockTypePage},
-					{
-						BlockID:   "b1",
-						BlockType: core.BlockTypeText,
-						Text: &core.BlockText{
-							Elements: []core.TextElement{{TextRun: &core.TextRun{Content: body}}},
-						},
-					},
+		blocks := []core.DocxBlock{
+			{BlockID: "root", BlockType: core.BlockTypePage, Children: []string{"b1"}},
+			{
+				BlockID:   "b1",
+				BlockType: core.BlockTypeText,
+				Text: &core.BlockText{
+					Elements: []core.TextElement{{TextRun: &core.TextRun{Content: body}}},
 				},
 			},
+		}
+		if attTok := f.docxAttach[objToken]; attTok != "" {
+			blocks[0].Children = append(blocks[0].Children, "b-att")
+			blocks = append(blocks, core.DocxBlock{
+				BlockID:   "b-att",
+				BlockType: core.BlockTypeFile,
+				File:      &core.BlockFileRef{Token: attTok, Name: "设计附件.md"},
+			})
+		}
+		_ = json.NewEncoder(w).Encode(core.DocxBlocksResponse{
+			ApiResponse: core.ApiResponse{Code: 0},
+			Data:        core.DocxBlocksData{Items: blocks},
 		})
+	case strings.HasPrefix(r.URL.Path, "/open-apis/drive/v1/medias/") &&
+		strings.HasSuffix(r.URL.Path, "/download"):
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte(strings.Repeat("# attachment markdown\n", 150)))
 	case r.URL.Path == "/open-apis/drive/v1/files":
 		folderToken := r.URL.Query().Get("folder_token")
 		if f.deletedDrive[folderToken] {
@@ -228,10 +255,18 @@ func (k *feishuStatefulKnowledgeService) ReplaceKnowledgeFromDataSource(
 	return row, nil
 }
 
-func (k *feishuStatefulKnowledgeService) DeleteKnowledge(_ context.Context, id string) error {
-	k.deleted = append(k.deleted, id)
+func (k *feishuStatefulKnowledgeService) DeleteKnowledge(ctx context.Context, id string) error {
+	return k.DeleteKnowledgeList(ctx, []string{id})
+}
+
+func (k *feishuStatefulKnowledgeService) DeleteKnowledgeList(_ context.Context, ids []string) error {
+	k.deleted = append(k.deleted, ids...)
+	drop := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		drop[id] = true
+	}
 	for key, row := range k.repo.live {
-		if row != nil && row.ID == id {
+		if row != nil && drop[row.ID] {
 			delete(k.repo.live, key)
 		}
 	}
@@ -483,38 +518,159 @@ func TestProcessSync_FeishuPermissionDeniedNodeStillFailsWithoutDeletingKB(t *te
 }
 
 // TestProcessSync_FeishuDriveDeletedSelectedItemSkipsAndSyncsRemaining covers
-// the Feishu Drive sibling connector when a selected sub-item returns 1061003.
+// the Feishu Drive sibling connector for both:
+//  1. A directly selected file token (which returns 1061002 "params error" on
+//     the folder-list endpoint and vanishes from the root folder walk),
+//     including SyncDeletions=false and subsequent idempotent rounds.
+//  2. A directly selected Drive sub-folder returning 1061003, ensuring child
+//     files are deleted without emitting a bogus extra item for the folder token.
 func TestProcessSync_FeishuDriveDeletedSelectedItemSkipsAndSyncsRemaining(t *testing.T) {
 	srv := newFeishuSelectedNodeServer(t, "unused")
 	srv.driveFiles["root-folder"] = []core.DriveFile{
 		{Token: "file-a", Name: "驱动文档A.md", Type: "file", ParentToken: "root-folder", ModifiedTime: "100"},
+		{Token: "sub-folder", Name: "子目录", Type: "folder", ParentToken: "root-folder", ModifiedTime: "100"},
 		{Token: "file-b", Name: "驱动文档B.md", Type: "file", ParentToken: "root-folder", ModifiedTime: "100"},
+	}
+	srv.driveFiles["sub-folder"] = []core.DriveFile{
+		{Token: "sub-doc-1", Name: "目录内文档1.md", Type: "file", ParentToken: "sub-folder", ModifiedTime: "100"},
+		{Token: "sub-doc-2", Name: "目录内文档2.md", Type: "file", ParentToken: "sub-folder", ModifiedTime: "100"},
 	}
 
 	svc, ds, logRepo, ks := newFeishuSyncServiceHarness(
-		t, srv, types.ConnectorTypeFeishuDrive, []string{"root-folder:file-a", "root-folder:file-b"}, true,
+		t, srv, types.ConnectorTypeFeishuDrive,
+		[]string{"root-folder:file-a", "root-folder:sub-folder", "root-folder:file-b"}, true,
 	)
 	log1, err := runFeishuSyncRound(t, svc, ds, logRepo, "drive-1")
 	require.NoError(t, err)
-	assert.Equal(t, 2, log1.ItemsCreated)
+	assert.Equal(t, 4, log1.ItemsCreated)
 
+	// Delete file-a (leaves it returning realistic 1061002 on folder probe) AND
+	// delete sub-folder (returns 1061003), while updating file-b.
 	srv.mu.Lock()
 	srv.driveFiles["root-folder"] = []core.DriveFile{
 		{Token: "file-b", Name: "驱动文档B.md", Type: "file", ParentToken: "root-folder", ModifiedTime: "200"},
 	}
-	srv.deletedDrive["file-a"] = true
+	delete(srv.driveFiles, "sub-folder")
+	srv.deletedDrive["sub-folder"] = true
 	srv.mu.Unlock()
 
 	log2, err := runFeishuSyncRound(t, svc, ds, logRepo, "drive-2")
 	require.NoError(t, err)
 	assert.Equal(t, types.SyncLogStatusSuccess, log2.Status)
-	assert.Equal(t, 1, log2.ItemsDeleted)
+	assert.Equal(t, 3, log2.ItemsDeleted, "file-a + 2 child files in sub-folder")
+	assert.Equal(t, 0, log2.ItemsSkipped, "folder token itself must not emit a bogus skipped deletion")
 	assert.Equal(t, 1, log2.ItemsUpdated)
 	assert.Nil(t, ks.repo.live[ds.ID+"|file-a"])
+	assert.Nil(t, ks.repo.live[ds.ID+"|sub-doc-1"])
+	assert.Nil(t, ks.repo.live[ds.ID+"|sub-doc-2"])
 
 	res2, err := log2.ParseResult()
 	require.NoError(t, err)
-	require.Len(t, res2.DeletedItems, 1)
+	require.Len(t, res2.DeletedItems, 3)
 	assert.Equal(t, "file-a", res2.DeletedItems[0].ExternalID)
 	assert.Equal(t, "驱动文档A", res2.DeletedItems[0].Title)
+
+	// Round 3: file-a still in config.resource_ids -> title survives via SelectedResourceDeletedError.
+	log3, err := runFeishuSyncRound(t, svc, ds, logRepo, "drive-3")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusSuccess, log3.Status)
+	res3, err := log3.ParseResult()
+	require.NoError(t, err)
+	require.Len(t, res3.DeletedItems, 2)
+	assert.Equal(t, "file-a", res3.DeletedItems[0].ExternalID)
+	assert.Equal(t, "驱动文档A", res3.DeletedItems[0].Title)
+}
+
+// TestProcessSync_FeishuDeletedDocSweepsAttachmentSubItemsAndPreservesParentTitle
+// verifies:
+//  1. Deleting a docx node with a parsed attachment (<node>#file#<att>) sweeps
+//     both the parent KB row and its orphaned attachment sub-item.
+//  2. Deleting a selected parent wiki node with child documents preserves the
+//     parent node's own title (not a child's title), even across an
+//     intermediate failed sync round.
+func TestProcessSync_FeishuDeletedDocSweepsAttachmentSubItemsAndPreservesParentTitle(t *testing.T) {
+	const (
+		spaceID     = "space-att-tree"
+		docWithAtt  = "node-with-att"
+		folderToken = "node-parent"
+		childToken  = "a-child-first"
+		keepToken   = "node-keep"
+	)
+	srv := newFeishuSelectedNodeServer(t, spaceID)
+	srv.nodes[docWithAtt] = core.WikiNode{
+		SpaceID: spaceID, NodeToken: docWithAtt, ObjToken: "obj-att-doc",
+		ObjType: "docx", Title: "带附件文档", ObjEditTime: "100",
+	}
+	srv.docxText["obj-att-doc"] = "正文内容"
+	srv.docxAttach["obj-att-doc"] = "att-tok-1"
+
+	srv.nodes[folderToken] = core.WikiNode{
+		SpaceID: spaceID, NodeToken: folderToken, ObjToken: "obj-parent",
+		ObjType: "docx", Title: "父目录文档", ObjEditTime: "100", HasChild: true,
+	}
+	srv.nodes[childToken] = core.WikiNode{
+		SpaceID: spaceID, NodeToken: childToken, ParentNodeID: folderToken,
+		ObjToken: "obj-child", ObjType: "docx", Title: "子文档一", ObjEditTime: "100",
+	}
+	srv.children[folderToken] = []core.WikiNode{srv.nodes[childToken]}
+	srv.docxText["obj-parent"] = "父目录正文"
+	srv.docxText["obj-child"] = "子文档正文"
+
+	srv.nodes[keepToken] = core.WikiNode{
+		SpaceID: spaceID, NodeToken: keepToken, ObjToken: "obj-keep",
+		ObjType: "docx", Title: "存活文档", ObjEditTime: "100",
+	}
+	srv.docxText["obj-keep"] = "存活正文"
+
+	svc, ds, logRepo, ks := newFeishuSyncServiceHarness(
+		t, srv, types.ConnectorTypeFeishu,
+		[]string{spaceID + ":" + docWithAtt, spaceID + ":" + folderToken, spaceID + ":" + keepToken},
+		true,
+	)
+
+	log1, err := runFeishuSyncRound(t, svc, ds, logRepo, "att-1")
+	require.NoError(t, err)
+	assert.Equal(t, 5, log1.ItemsCreated, "att child + parent doc + folder doc + child doc + keep doc")
+	attExtID := types.SubtreeChildID(docWithAtt, "file", "att-tok-1")
+	require.NotNil(t, ks.repo.live[ds.ID+"|"+attExtID], "attachment sub-item must exist after sync 1")
+
+	// Round 2: delete docWithAtt and folderToken (including childToken) in Feishu.
+	srv.mu.Lock()
+	srv.deletedTokens[docWithAtt] = true
+	srv.deletedTokens[folderToken] = true
+	srv.deletedTokens[childToken] = true
+	srv.mu.Unlock()
+
+	log2, err := runFeishuSyncRound(t, svc, ds, logRepo, "att-2")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusSuccess, log2.Status)
+	assert.Nil(t, ks.repo.live[ds.ID+"|"+docWithAtt], "parent doc must be deleted")
+	assert.Nil(t, ks.repo.live[ds.ID+"|"+attExtID], "attachment sub-item must be swept on parent deletion")
+	assert.Nil(t, ks.repo.live[ds.ID+"|"+folderToken])
+	assert.Nil(t, ks.repo.live[ds.ID+"|"+childToken])
+	assert.NotNil(t, ks.repo.live[ds.ID+"|"+keepToken])
+
+	// Round 3: transient auth outage fails the sync before listing resources.
+	srv.mu.Lock()
+	srv.failAuth = true
+	srv.mu.Unlock()
+	log3, err := runFeishuSyncRound(t, svc, ds, logRepo, "att-3")
+	require.Error(t, err)
+	assert.Equal(t, types.SyncLogStatusFailed, log3.Status)
+
+	// Round 4: auth recovers; folderToken's own title ("父目录文档") must still
+	// resolve cleanly rather than being overwritten by childToken ("子文档一")
+	// or wiped by failed Round 3.
+	srv.mu.Lock()
+	srv.failAuth = false
+	srv.mu.Unlock()
+	log4, err := runFeishuSyncRound(t, svc, ds, logRepo, "att-4")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusSuccess, log4.Status)
+	res4, err := log4.ParseResult()
+	require.NoError(t, err)
+	require.Len(t, res4.DeletedItems, 2)
+	assert.Equal(t, "带附件文档", res4.DeletedItems[0].Title)
+	assert.Equal(t, folderToken, res4.DeletedItems[1].ExternalID)
+	assert.Equal(t, "父目录文档", res4.DeletedItems[1].Title)
 }

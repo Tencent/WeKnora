@@ -643,8 +643,85 @@ test('selecting a whole Feishu space subsumes vanished node selections under tha
     await flush()
     f.vm.toggleResource(spaceId)
     assert.deepEqual([...f.vm.selectedResourceIds], [spaceId])
+    assert.equal(f.vm.resourceRowState(deletedId), 'unchecked')
+    assert.equal(f.vm.selectedResourceCount, 1)
+    // Clicking the superseded deleted row while the space is selected must not re-add it.
+    f.vm.toggleResource(deletedId)
+    assert.deepEqual([...f.vm.selectedResourceIds], [spaceId])
     f.vm.toggleResource(spaceId)
     assert.deepEqual([...f.vm.selectedResourceIds], [])
+    assert.equal(f.vm.selectedResourceCount, 0)
+  } finally { f.close() }
+})
+
+test('unavailable parent wiki node resolves its own title rather than a deleted child title', async () => {
+  const spaceId = '7701598185524874545'
+  const folderId = `${spaceId}:folderToken`
+  const f = await fixture({
+    type: 'feishu',
+    resources: [
+      { external_id: spaceId, name: '研发知识库', type: 'wiki_space', has_children: true },
+    ],
+    dataSource: {
+      id: 'ds-feishu-folder',
+      name: 'Feishu Wiki',
+      type: 'feishu',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: [folderId], settings: {} },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+      latest_sync_log: {
+        id: 'log-subtree',
+        status: 'success',
+        result: {
+          deleted_items: [
+            { external_id: 'a-child-token', source_resource_id: folderId, title: '子文档一' },
+            { external_id: 'folderToken', source_resource_id: folderId, title: '父目录文档' },
+          ],
+        },
+      },
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.unavailableResources)), [
+      { external_id: folderId, label: '父目录文档' },
+    ])
+  } finally { f.close() }
+})
+
+test('Confluence Cloud folder-limited spaces do not misclassify unexpanded live pages as unavailable', async () => {
+  const f = await fixture({
+    type: 'confluence',
+    resources: [
+      {
+        external_id: '101',
+        name: 'Engineering',
+        type: 'space',
+        has_children: true,
+        metadata: { hierarchy_limitation: 'cloud_top_level_containers' },
+      },
+    ],
+    dataSource: {
+      id: 'ds-conf-cloud',
+      name: 'Confluence Cloud',
+      type: 'confluence',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: ['page:101:999'], settings: { edition: 'cloud', base_url: 'https://team.atlassian.net/wiki' } },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.unavailableResources)), [])
+    assert.deepEqual([...f.vm.selectedResourceIds], ['page:101:999'])
   } finally { f.close() }
 })
 

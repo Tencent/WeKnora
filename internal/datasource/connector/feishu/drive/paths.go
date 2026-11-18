@@ -123,7 +123,16 @@ func (o *driveOps) listDriveFilesForResource(
 			// permission/transport failures, which must retain the old cursor.
 			rootFiles, rootDirs, rootFailures := core.WalkDriveTree(ctx, client, rootFolderToken, rootBase)
 			o.dirPaths = rootDirs
-			return filterDriveFileByToken(rootFiles, fileToken), partialDriveError(rootFailures)
+			matched := filterDriveFileByToken(rootFiles, fileToken)
+			if len(matched) == 0 && len(rootFailures) == 0 {
+				logger.Warnf(ctx, "[FeishuDrive] selected drive file %s no longer exists under %s, skipping",
+					resourceID, rootFolderToken)
+				return nil, &core.SelectedResourceDeletedError{
+					Token: fileToken,
+					Cause: datasource.ErrResourceNotFound,
+				}
+			}
+			return matched, partialDriveError(rootFailures)
 		}
 	}
 	o.dirPaths = dirPaths

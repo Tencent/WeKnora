@@ -110,6 +110,20 @@ test('DataSourceSyncLogs surfaces deleted_items with titles and external IDs acr
       vm.formatDeletedItem(vm.deletedItems(vm.logs[1])[0]),
       'Ut8Gw3GsbiNIAnkNp2kcaZTpnAe',
     )
+
+    // Over-cap (>50) deleted_items with items_deleted=0 preserves true count for deletedItemsMore.
+    const manyDeletedLog = {
+      ...vm.logs[0],
+      items_deleted: 0,
+      result: {
+        deleted_items: Array.from({ length: 65 }, (_, idx) => ({
+          external_id: `tok-${idx}`,
+          title: `文档 ${idx}`,
+        })),
+      },
+    }
+    assert.equal(vm.deletedItems(manyDeletedLog).length, 50)
+    assert.equal(vm.deletedItemsCount(manyDeletedLog), 65)
   } finally {
     app.unmount()
   }

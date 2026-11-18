@@ -971,13 +971,29 @@ func resolveDeletedItemTitle(
 	if ds != nil && len(ds.LastSyncResult) > 0 {
 		var prev types.SyncResult
 		if err := json.Unmarshal(ds.LastSyncResult, &prev); err == nil {
-			for _, d := range prev.DeletedItems {
-				if d.Title == "" {
-					continue
+			if item.ExternalID != "" {
+				for _, d := range prev.DeletedItems {
+					if d.Title != "" && d.ExternalID == item.ExternalID {
+						return d.Title
+					}
 				}
-				if (item.ExternalID != "" && d.ExternalID == item.ExternalID) ||
-					(item.SourceResourceID != "" && d.SourceResourceID == item.SourceResourceID) {
-					return d.Title
+			}
+			if item.SourceResourceID != "" {
+				matchedTitle := ""
+				ambiguous := false
+				for _, d := range prev.DeletedItems {
+					if d.Title == "" || d.SourceResourceID != item.SourceResourceID {
+						continue
+					}
+					if matchedTitle == "" {
+						matchedTitle = d.Title
+					} else if matchedTitle != d.Title {
+						ambiguous = true
+						break
+					}
+				}
+				if matchedTitle != "" && !ambiguous {
+					return matchedTitle
 				}
 			}
 		}
@@ -1057,6 +1073,7 @@ func (s *DataSourceService) applyFetchedItem(
 		if existing == nil {
 			// Deletion is idempotent: the source item may already have been
 			// removed manually or by an earlier sync.
+			s.sweepStaleSubtree(ctx, ds, item)
 			result.Skipped++
 			if selectedDeleted {
 				recordSyncDeletedItem(result, ds, nil, item)
@@ -1090,6 +1107,7 @@ func (s *DataSourceService) applyFetchedItem(
 			})
 			return false, nil
 		}
+		s.sweepStaleSubtree(ctx, ds, item)
 		result.Deleted++
 		recordSyncDeletedItem(result, ds, existing, item)
 		return false, nil
@@ -1488,7 +1506,17 @@ func (s *DataSourceService) updateSyncRunResult(
 		ds.Status = types.DataSourceStatusActive
 	}
 	ds.ErrorMessage = errorMessage
-	ds.LastSyncResult = resultJSON
+	dsResultJSON := resultJSON
+	if status == types.SyncLogStatusFailed && result != nil && len(result.DeletedItems) == 0 {
+		if prev, err := ds.ParseSyncResult(); err == nil && prev != nil && len(prev.DeletedItems) > 0 {
+			merged := *result
+			merged.DeletedItems = prev.DeletedItems
+			if b, merr := merged.ToJSON(); merr == nil {
+				dsResultJSON = b
+			}
+		}
+	}
+	ds.LastSyncResult = dsResultJSON
 	sourceErr := s.dsRepo.UpdateSyncState(ctx, ds)
 	if sourceErr != nil {
 		logger.Errorf(ctx, "failed to update data source: %v", sourceErr)

@@ -461,6 +461,12 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			return nil, fmt.Errorf("list wiki nodes: %w", err)
 		}
 		if resp.Code != 0 {
+			if resp.Code == feishuErrCodeWikiNotFound {
+				return nil, fmt.Errorf(
+					"list wiki nodes error: code=%d msg=%s: %w",
+					resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+				)
+			}
 			return nil, fmt.Errorf("list wiki nodes error: code=%d msg=%s", resp.Code, resp.Msg)
 		}
 
@@ -976,6 +982,12 @@ func (c *Client) GetDriveFolderMeta(ctx context.Context, folderToken string) (dr
 		return resp, fmt.Errorf("get drive folder meta: %w", err)
 	}
 	if resp.Code != 0 {
+		if resp.Code == feishuErrCodeDriveNotFound {
+			return resp, fmt.Errorf(
+				"get drive folder meta error: code=%d msg=%s: %w",
+				resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+			)
+		}
 		return resp, fmt.Errorf("get drive folder meta error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	return resp, nil

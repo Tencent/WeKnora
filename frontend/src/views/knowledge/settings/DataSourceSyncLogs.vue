@@ -145,7 +145,7 @@ function deletedItems(log: SyncLog): SyncDeletedItem[] {
 }
 
 function deletedItemsCount(log: SyncLog): number {
-  return Math.max(log.items_deleted || 0, deletedItems(log).length)
+  return Math.max(log.items_deleted || 0, (log.result?.deleted_items || []).length)
 }
 
 function formatDeletedItem(item: SyncDeletedItem): string {

@@ -155,21 +155,20 @@ func runSync[N any](
 		var deletedRes *SelectedResourceDeletedError
 		if errors.As(partial, &deletedRes) {
 			tokens := make([]string, 0, len(prevTimes[resourceID])+1)
-			emitted := make(map[string]bool)
 			if prevTimes != nil {
 				for tok := range prevTimes[resourceID] {
 					tokens = append(tokens, tok)
-					emitted[tok] = true
 				}
 				slices.Sort(tokens)
 			}
-			if deletedRes.Token != "" && !emitted[deletedRes.Token] {
+			if len(tokens) == 0 && deletedRes.Token != "" {
 				tokens = append(tokens, deletedRes.Token)
 			}
 			for _, tok := range tokens {
 				if eerr := h.Emit(ctx, types.FetchedItem{
 					ExternalID:       tok,
 					IsDeleted:        true,
+					ReplacesSubtree:  true,
 					SourceResourceID: resourceID,
 					Metadata: map[string]string{
 						types.MetaKeySelectedResourceDeleted: "true",
@@ -270,6 +269,7 @@ func runSync[N any](
 						if eerr := h.Emit(ctx, types.FetchedItem{
 							ExternalID:       tok,
 							IsDeleted:        true,
+							ReplacesSubtree:  true,
 							SourceResourceID: resourceID,
 						}); eerr != nil {
 							return nil, eerr

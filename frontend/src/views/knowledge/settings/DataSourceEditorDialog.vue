@@ -357,6 +357,9 @@ async function loadDriveRoot() {
   driveFolderTokenError.value = ''
   // Normalize the input so the user sees the extracted token, not the full URL.
   driveFolderToken.value = token
+  if (selectedResourceIds.value.some(id => id.split(':')[0] !== token)) {
+    selectedResourceIds.value = selectedResourceIds.value.filter(id => id.split(':')[0] === token)
+  }
   form.value.config.resource_ids = [token]
   driveRootLoaded.value = false
   loadingResources.value = true
@@ -1192,13 +1195,29 @@ async function loadResources() {
   }
 }
 
-function hasKnownDeletedTitle(id: string): boolean {
-  if (knownDeletedTitleByResource.value.has(id)) return true
+function lookupKnownDeletedTitle(id: string): string {
+  const byExt = knownDeletedTitles.value.byExternalId.get(id)
+  if (byExt) return byExt
   if (isFeishuFamilyConnector(form.value.type) && id.includes(':')) {
     const token = id.slice(id.indexOf(':') + 1)
-    if (knownDeletedTitleByResource.value.has(token)) return true
+    const byToken = knownDeletedTitles.value.byExternalId.get(token)
+    if (byToken) return byToken
   }
-  return false
+  return knownDeletedTitles.value.uniqueBySourceResourceId.get(id) || ''
+}
+
+function hasKnownDeletedTitle(id: string): boolean {
+  return lookupKnownDeletedTitle(id) !== ''
+}
+
+function isHiddenUnderLimitedContainer(id: string): boolean {
+  if (form.value.type !== 'confluence' || !id.startsWith('page:')) return false
+  const parts = id.split(':')
+  if (parts.length < 3) return false
+  const spaceId = parts[1]
+  return resources.value.some(
+    r => r.external_id === spaceId && r.metadata?.hierarchy_limitation === 'cloud_top_level_containers',
+  )
 }
 
 async function syncUnavailableSelections() {
@@ -1207,12 +1226,12 @@ async function syncUnavailableSelections() {
     return
   }
   const loaded = new Set(resources.value.map(r => r.external_id))
-  const missing = selectedResourceIds.value.filter(id => !loaded.has(id))
+  const rawMissing = selectedResourceIds.value.filter(id => !loaded.has(id))
   if (
-    missing.length > 0 &&
+    rawMissing.length > 0 &&
     tempDsId.value &&
     typeof getDataSource === 'function' &&
-    !missing.every(hasKnownDeletedTitle)
+    !rawMissing.every(hasKnownDeletedTitle)
   ) {
     const ownSession = drawerSession
     try {
@@ -1227,7 +1246,9 @@ async function syncUnavailableSelections() {
       // Fall back to resource token/id if fetching latest sync summary fails.
     }
   }
-  unavailableResourceIds.value = missing
+  unavailableResourceIds.value = rawMissing.filter(
+    id => !isHiddenUnderLimitedContainer(id) || hasKnownDeletedTitle(id),
+  )
 }
 
 // revealExistingSelections asks the backend which ancestors must be expanded to
@@ -1274,6 +1295,9 @@ function getAncestorChain(id: string): string[] {
 function isCovered(id: string, cover: Set<string>): boolean {
   for (let cur: string | undefined = id; cur; cur = parentMap.value.get(cur)) {
     if (cover.has(cur)) return true
+  }
+  for (const sel of cover) {
+    if (sel === id || isSelectionWithin(form.value.type, id, sel)) return true
   }
   return false
 }
@@ -1530,8 +1554,10 @@ async function handleDrawerConfirm() {
 
 const loadedResourceIdSet = computed(() => new Set(resources.value.map(r => r.external_id)))
 
-const knownDeletedTitleByResource = computed(() => {
-  const map = new Map<string, string>()
+const knownDeletedTitles = computed(() => {
+  const byExternalId = new Map<string, string>()
+  const uniqueBySourceResourceId = new Map<string, string>()
+  const ambiguousSourceResourceIds = new Set<string>()
   const lists = [
     refreshedSyncDeletedItems.value,
     props.dataSource?.latest_sync_log?.result?.deleted_items,
@@ -1542,23 +1568,29 @@ const knownDeletedTitleByResource = computed(() => {
     for (const item of list) {
       const title = String(item?.title || '').trim()
       if (!title) continue
-      if (item?.source_resource_id && !map.has(item.source_resource_id)) {
-        map.set(item.source_resource_id, title)
+      if (item?.external_id && !byExternalId.has(item.external_id)) {
+        byExternalId.set(item.external_id, title)
       }
-      if (item?.external_id && !map.has(item.external_id)) {
-        map.set(item.external_id, title)
+      const srcId = item?.source_resource_id
+      if (srcId && !ambiguousSourceResourceIds.has(srcId)) {
+        const existing = uniqueBySourceResourceId.get(srcId)
+        if (!existing) {
+          uniqueBySourceResourceId.set(srcId, title)
+        } else if (existing !== title) {
+          uniqueBySourceResourceId.delete(srcId)
+          ambiguousSourceResourceIds.add(srcId)
+        }
       }
     }
   }
-  return map
+  return { byExternalId, uniqueBySourceResourceId }
 })
 
 function formatUnavailableResourceLabel(id: string): string {
-  const direct = knownDeletedTitleByResource.value.get(id)
-  if (direct) return direct
+  const known = lookupKnownDeletedTitle(id)
+  if (known) return known
   if (isFeishuFamilyConnector(form.value.type) && id.includes(':')) {
-    const token = id.slice(id.indexOf(':') + 1)
-    return knownDeletedTitleByResource.value.get(token) || token
+    return id.slice(id.indexOf(':') + 1)
   }
   return id
 }
@@ -1635,10 +1667,7 @@ function shouldShowResourceType(type: string): boolean {
 function resourceRowState(id: string): CheckState {
   const state = checkStates.value.get(id)
   if (state) return state
-  for (const sel of selectedResourceIds.value) {
-    if (sel === id || isSelectionWithin(form.value.type, id, sel)) return 'checked'
-  }
-  return 'unchecked'
+  return selectedResourceIds.value.includes(id) ? 'checked' : 'unchecked'
 }
 
 const stepTitles = computed(() => [
