@@ -45,7 +45,7 @@ func newRebuildLinksWiki(
 		page.Version = 1
 		page.CreatedAt = now
 		page.UpdatedAt = now
-		require.NoError(t, repo.Create(ctx, page))
+		require.NoError(t, db.Create(page).Error)
 	}
 
 	return ctx, db, repo, svc

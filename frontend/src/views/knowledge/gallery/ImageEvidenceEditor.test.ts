@@ -7,7 +7,7 @@ import * as vue from 'vue'
 
 const source = readFileSync(new URL('./ImageEvidenceEditor.vue', import.meta.url), 'utf8')
   .split('<script setup lang="ts">')[1].split('</script>')[0]
-const compiled = ts.transpileModule(`${source}\nexport { beginEdit, save, draft, chunk, error, editing }`, {
+const compiled = ts.transpileModule(`${source}\nexport { save, draft, chunk, error }`, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText
 
@@ -21,6 +21,7 @@ function fixture() {
   const state: any = {}
   vm.runInNewContext(compiled, {
     exports: state, defineProps: () => props, defineEmits: () => (name: string) => events.push(name),
+    defineExpose: (exposed: object) => Object.assign(state, exposed),
     require(id: string) {
       if (id === 'vue') return { ...vue, watch: (_: unknown, fn: () => void) => watches.push(fn),
         onBeforeUnmount: (fn: () => void) => unmounts.push(fn) }

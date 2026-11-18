@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -89,10 +90,10 @@ func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
 	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
 		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
 	}
-	return "(in_links IS NULL OR in_links = '[]'::JSONB)"
+	return "(in_links IS NULL OR in_links IN ('[]'::JSONB, 'null'::JSONB))"
 }
 
-// Create inserts a new wiki page record
+// Create inserts a page only while its knowledge base is active.
 func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) error {
 	if types.WikiPageProgressCommitFromContext(ctx) != nil {
 		return r.withWikiPageProgressWrite(ctx, page, true, func(tx *gorm.DB) error {
@@ -101,6 +102,18 @@ func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) e
 	}
 	originalSnapshot := page.ProgressSnapshot
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Keep the mainline KB guard and snapshot refresh in the same create transaction.
+		// Progress writes already lock and validate their owners before writing receipts.
+		var kb types.KnowledgeBase
+		err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Select("id").
+			Where("id = ? AND tenant_id = ?", page.KnowledgeBaseID, page.TenantID).
+			Take(&kb).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrKnowledgeBaseNotFound
+		}
+		if err != nil {
+			return err
+		}
 		if err := tx.Create(page).Error; err != nil {
 			return err
 		}
@@ -343,34 +356,46 @@ func (r *wikiPageRepository) PublishDraftPage(
 		publication.PageID != pageID || publication.Slug != slug || publication.PageVersion <= 0) {
 		return errors.New("invalid wiki page publication: identity or receipt version does not match")
 	}
-	identity := "tenant_id = ? AND knowledge_base_id = ? AND id = ? AND slug = ?"
-	query := r.db.WithContext(ctx).Model(&types.WikiPage{}).
-		Where(identity, tenantID, kbID, pageID, slug).
-		Where("status = ?", types.WikiPageStatusDraft)
-	if guarded {
-		// 版本由已提交回执授权；必须与状态在同一条 SQL 中比较，不能发布读取后保存的新草稿。
-		query = query.Where("version = ?", publication.PageVersion)
-	}
-	result := query.Updates(map[string]interface{}{
-		"status":     types.WikiPageStatusPublished,
-		"updated_at": time.Now(),
-	})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected > 0 {
+	write := func(db *gorm.DB) error {
+		identity := "tenant_id = ? AND knowledge_base_id = ? AND id = ? AND slug = ?"
+		query := db.Model(&types.WikiPage{}).
+			Where(identity, tenantID, kbID, pageID, slug).
+			Where("status = ?", types.WikiPageStatusDraft)
+		if guarded {
+			// 版本由已提交回执授权；必须与状态在同一条 SQL 中比较，不能发布读取后保存的新草稿。
+			query = query.Where("version = ?", publication.PageVersion)
+		}
+		result := query.Updates(map[string]interface{}{
+			"status":     types.WikiPageStatusPublished,
+			"updated_at": time.Now(),
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected > 0 {
+			return nil
+		}
+		// 保留相同身份和软删除条件，避免把已删除的旧页或同路径新页当作发布成功。
+		var count int64
+		if err := db.Model(&types.WikiPage{}).
+			Where(identity, tenantID, kbID, pageID, slug).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return ErrWikiPageNotFound
+		}
 		return nil
 	}
-	// 保留相同身份和软删除条件，避免把已删除的旧页或同路径新页当作发布成功。
-	var count int64
-	if err := r.db.WithContext(ctx).Model(&types.WikiPage{}).
-		Where(identity, tenantID, kbID, pageID, slug).Count(&count).Error; err != nil {
-		return err
+	db := r.db.WithContext(ctx)
+	if guarded && publication.Claim != (types.WikiProgressClaim{}) {
+		return db.Transaction(func(tx *gorm.DB) error {
+			if err := lockWikiPublication(tx, publication); err != nil {
+				return err
+			}
+			return write(tx)
+		})
 	}
-	if count == 0 {
-		return ErrWikiPageNotFound
-	}
-	return nil
+	return write(db)
 }
 
 // updateWikiPageMetaRow 保持原有元数据写入语义，同时允许与持久进度共用一个事务。
@@ -1533,6 +1558,16 @@ func (r *wikiPageRepository) Search(
 	ctx context.Context, kbID string, query string, limit int,
 ) ([]*types.WikiPage, error) {
 	return r.SearchAcross(ctx, []string{kbID}, query, limit)
+}
+
+// SearchLiteral preserves literal text across PostgreSQL regex and SQLite LIKE.
+func (r *wikiPageRepository) SearchLiteral(
+	ctx context.Context, kbID, query string, limit int,
+) ([]*types.WikiPage, error) {
+	if r.wikiDialect() != "sqlite" {
+		query = regexp.QuoteMeta(query)
+	}
+	return r.Search(ctx, kbID, query, limit)
 }
 
 func wikiSearchPredicate(column, op string, withEscape bool) string {

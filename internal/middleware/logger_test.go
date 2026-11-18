@@ -263,3 +263,22 @@ func TestSanitizeQueryRedactsTerminalTicket(t *testing.T) {
 		t.Fatalf("sanitizeQuery() leaked the ticket: %q", got)
 	}
 }
+
+func TestSkipsBodyLoggingForSecretRoutes(t *testing.T) {
+	for _, p := range []string{
+		"/api/v1/agent/secure-forms/p1",
+		"/api/v1/me/credential-vault",
+		"/api/v1/me/credential-vault/abc",
+		"/api/v1/local-browser/x",
+		"/api/v1/me/browser",
+	} {
+		if !skipsBodyLogging(p) {
+			t.Errorf("%s must not have its body logged", p)
+		}
+	}
+	for _, p := range []string{"/api/v1/agent/prompts/p1", "/api/v1/me/env-vars"} {
+		if skipsBodyLogging(p) {
+			t.Errorf("%s keeps its body log", p)
+		}
+	}
+}

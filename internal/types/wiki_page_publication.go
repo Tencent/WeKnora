@@ -9,6 +9,8 @@ type WikiPagePublication struct {
 	PageID          string
 	Slug            string
 	PageVersion     int
+	// Claim 非零时必须在发布事务内重新核对领取、来源和持久回执。
+	Claim WikiProgressClaim
 }
 
 type wikiPagePublicationKey struct{}

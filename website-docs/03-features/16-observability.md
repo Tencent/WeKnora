@@ -163,6 +163,19 @@ Prompt 组装将稳定说明放在前部，动态会话内容放在后部；支�
 
 沙箱调用也有 Langfuse span，可把实例操作和工具执行耗时串到当前 trace，区分等待沙箱与等待模型。沙箱后台维护（如会话回收）只在已有父 trace 时记录子 span，不会单独生成 trace；技能安装、删除与维护任务会自行开启 trace。追踪开关未启用时不会向 Langfuse 导出。
 
+#### 自定义 metadata 头（`X-Langfuse-Metadata`）
+
+调用受追踪的接口时，可通过 `X-Langfuse-Metadata` 请求头附带业务自定义键值对，它们会合并进该请求 trace 的 metadata，便于在 Langfuse/LiteFuse 控制台按业务维度过滤、统计：
+
+```
+POST /api/v1/knowledge-chat/:session_id
+X-Langfuse-Metadata: {"ticket_id":"T-123","biz_line":"order","priority":"P1"}
+```
+
+- 与内置字段（`http.method`、`http.path`、`http.query`、`request_id` 等）同名时以内置字段为准，调用方无法覆盖关联字段。
+- 值只接受标量（字符串/数字/布尔），嵌套对象与数组会被跳过；最多合并 32 个 key，超出部分按 key 名排序截断。
+- header 原始值超过 4 KiB 时整段忽略；非法 JSON、空值同样静默忽略，不影响业务请求。不传该 header 时行为与之前完全一致。
+
 ### 审计日志 {#_4-审计日志}
 
 #### 数据模型（`internal/types/audit_log.go`） {#_4-1-数据模型-internal-types-audit-log-go}

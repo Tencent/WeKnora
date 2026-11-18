@@ -249,6 +249,7 @@ func (t *ShellExecAsyncTool) Execute(ctx context.Context, args json.RawMessage) 
 	request := ShellJobSubmitRequest{
 		Command:        execCommand,
 		DisplayCommand: command,
+		ProgramStdin:   programStdin(command, input.Stdin),
 		WorkDir:        workDir,
 		Env:            env,
 		Description:    shellJobLabel(input.Description, command),
@@ -268,6 +269,10 @@ func (t *ShellExecAsyncTool) Execute(ctx context.Context, args json.RawMessage) 
 	}
 
 	submission, err := t.submitter.SubmitShellJob(ctx, ref, request)
+	if !submission.Background {
+		// Inline commands may have changed files even when they failed.
+		noteSandboxMutation()
+	}
 	if err != nil {
 		if errors.Is(err, interfaces.ErrActivityLimit) ||
 			strings.Contains(err.Error(), interfaces.ErrActivityLimit.Error()) {

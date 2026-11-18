@@ -77,6 +77,16 @@ func (a *Adapter) ReleaseSessionState(_ context.Context, sessionID string) {
 	a.svc.ReleaseSession(sessionID)
 }
 
+// SessionApprovalMode reports the session's approval mode and the default.
+func (a *Adapter) SessionApprovalMode(ctx context.Context, sessionID string) (string, string) {
+	return string(a.svc.ModeForSession(ctx, sessionID)), string(a.svc.DefaultMode(ctx, sessionID))
+}
+
+// SetSessionApprovalMode switches one session's approval mode.
+func (a *Adapter) SetSessionApprovalMode(_ context.Context, sessionID, mode string) error {
+	return a.svc.SetSessionMode(sessionID, localsandbox.ApprovalMode(mode))
+}
+
 // Execute is the legacy script entry point. The local sandbox exposes shell
 // execution only, so callers must use ExecShellCommand.
 func (a *Adapter) Execute(context.Context, *sandbox.ExecuteConfig) (*sandbox.ExecuteResult, error) {
@@ -125,15 +135,16 @@ func (a *Adapter) ExecShellCommand(
 	timeout time.Duration,
 	env map[string]string,
 ) (*sandbox.ExecuteResult, error) {
-	approver, review := runApproval(ctx)
+	user, reviewer, spec := runApprovals(ctx)
 	res, err := a.svc.Run(ctx, localsandbox.RunRequest{
-		SessionID:     sessionID,
-		Command:       command,
-		WorkDir:       workDir,
-		Timeout:       timeout,
-		Env:           env,
-		ReviewCommand: review,
-		Approver:      approver,
+		SessionID: sessionID,
+		Command:   command,
+		WorkDir:   workDir,
+		Timeout:   timeout,
+		Env:       env,
+		Spec:      spec,
+		Approver:  user,
+		Reviewer:  reviewer,
 	})
 	if err != nil {
 		logger.Warnf(ctx, "[LocalSandbox] exec session=%s work_dir=%q: %v", sessionID, workDir, err)
@@ -165,6 +176,9 @@ func executeResult(ctx context.Context, sessionID string, res *localsandbox.RunR
 func (a *Adapter) guard(
 	ctx context.Context, sessionID string,
 ) (*localsandbox.PathGuard, localsandbox.Workspace, error) {
+	if approval := fileApprovalFrom(ctx); approval != nil {
+		return a.svc.GuardForSession(ctx, sessionID, approval.Grant)
+	}
 	return a.svc.GuardForSession(ctx, sessionID)
 }
 
@@ -290,7 +304,16 @@ func (a *Adapter) WriteSessionWorkspaceFile(
 	unlock := a.svc.LockRoot(ws.Root)
 	defer unlock()
 	target := absoluteIn(ws.Root, p)
-	if err := guard.WriteFile(target, content, 0o644); err != nil {
+	// The approval may have been given just before the user stopped the
+	// turn; the lock wait is the last point to notice.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	writePath, err := fileGrantWrite(guard, fileApprovalFrom(ctx), target, content)
+	if err != nil {
+		return err
+	}
+	if err := guard.WriteFile(writePath, content, 0o644); err != nil {
 		if errors.Is(err, localsandbox.ErrPathDenied) {
 			logger.Warnf(ctx, "[LocalSandbox] write denied session=%s path=%q: %v", sessionID, p, err)
 		} else {

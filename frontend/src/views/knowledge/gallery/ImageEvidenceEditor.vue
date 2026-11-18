@@ -104,29 +104,74 @@ async function save() {
     if (token === sequence) saving.value = false
   }
 }
+
+defineExpose({ beginEdit, editing })
 </script>
 
 <template>
-  <div class="image-evidence-editor">
-    <t-button v-if="!editing" variant="text" size="small" @click="beginEdit">{{ t('common.edit') }}</t-button>
-    <template v-else>
-      <t-loading v-if="loading" size="small" />
-      <textarea v-else-if="chunk" v-model="draft" :aria-label="t(`knowledgeEditor.wikiBrowser.gallery.${field === 'caption' ? 'caption' : 'ocr'}`)" :disabled="saving" />
-      <p v-if="error" role="alert">{{ error }}</p>
-      <div class="image-evidence-editor__actions">
-        <t-button v-if="chunk" size="small" :loading="saving" @click="save">
-          {{ t(chunk.index_status === 'failed' ? 'knowledgeBase.retryIndex' : 'common.save') }}
-        </t-button>
-        <t-button v-else-if="!loading" size="small" @click="beginEdit">{{ t('common.refresh') }}</t-button>
-        <t-button size="small" variant="text" :disabled="saving" @click="reset">{{ t('common.cancel') }}</t-button>
-      </div>
-    </template>
+  <div v-if="editing" class="image-evidence-editor" :aria-busy="loading || saving">
+    <div v-if="loading" class="image-evidence-editor__loading">
+      <t-loading size="small" />
+    </div>
+    <label v-else-if="chunk" class="image-evidence-editor__field">
+      <span class="image-evidence-editor__label">{{ t(`knowledgeEditor.wikiBrowser.gallery.${field === 'caption' ? 'caption' : 'ocr'}`) }}</span>
+      <t-textarea
+        v-model="draft"
+        :autosize="{ minRows: 6, maxRows: 16 }"
+        :disabled="saving"
+        autofocus
+      />
+    </label>
+    <p v-if="error" class="image-evidence-editor__error" role="alert">{{ error }}</p>
+    <div class="image-evidence-editor__actions">
+      <t-button size="small" theme="default" variant="outline" :disabled="saving" @click="reset">{{ t('common.cancel') }}</t-button>
+      <t-button v-if="chunk" size="small" theme="primary" :loading="saving" @click="save">
+        {{ t(chunk.index_status === 'failed' ? 'knowledgeBase.retryIndex' : 'common.save') }}
+      </t-button>
+      <t-button v-else-if="!loading" size="small" theme="primary" @click="beginEdit">{{ t('common.refresh') }}</t-button>
+    </div>
   </div>
 </template>
 
-<style scoped>
-.image-evidence-editor { margin-top: 8px; }
-.image-evidence-editor textarea { box-sizing: border-box; width: 100%; min-height: 140px; resize: vertical; padding: 8px; border: 1px solid var(--td-component-border); border-radius: 4px; color: inherit; background: var(--td-bg-color-container); font: inherit; }
-.image-evidence-editor p { color: var(--td-error-color); }
-.image-evidence-editor__actions { display: flex; gap: 8px; margin-top: 8px; }
+<style scoped lang="less">
+.image-evidence-editor {
+  &__field { display: block; }
+
+  &__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  :deep(.t-textarea__inner) {
+    font-size: var(--app-text-md);
+    line-height: 1.75;
+  }
+
+  &__loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 140px;
+  }
+
+  &__error {
+    margin: 8px 0 0;
+    color: var(--td-error-color);
+    font-size: var(--app-text-sm);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+  }
+}
 </style>

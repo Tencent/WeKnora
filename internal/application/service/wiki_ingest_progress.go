@@ -44,6 +44,21 @@ type wikiProgressBatch struct {
 	publications wikiProgressPublisher
 }
 
+// handoffContext 将批尾的聚合副作用绑定到全部剩余计划，不能借一个活领取代表失效文档。
+// 已提前结算的快文档不参与；任一剩余授权失效只保守拒绝批尾新写，留待恢复。
+func (b *wikiProgressBatch) handoffContext(ctx context.Context) context.Context {
+	var claims []types.WikiProgressClaim
+	for _, op := range b.canonical {
+		if b.settlement.isSettled(op.dbID) || b.settlement.isHandedOff(op.dbID) {
+			continue
+		}
+		if state := b.states[op.dbID]; state != nil && state.Plan != nil {
+			claims = append(claims, b.claims[op.dbID])
+		}
+	}
+	return types.WithWikiProgressClaims(ctx, claims)
+}
+
 // claimWikiProgressBatch 在 Lite 模式也使用持久领取，旧进程晚返回时由代次拒绝写入。
 func (s *wikiIngestService) claimWikiProgressBatch(
 	ctx context.Context,

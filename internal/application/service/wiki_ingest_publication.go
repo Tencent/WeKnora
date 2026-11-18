@@ -29,8 +29,11 @@ func (p *wikiProgressPublisher) publish(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// 只合并同一页版本的物理发布；调用方自己的交接仍须单独通过领取授权事务。
+	key := target
+	key.Claim = types.WikiProgressClaim{}
 	p.mu.Lock()
-	if existing := p.results[target]; existing != nil {
+	if existing := p.results[key]; existing != nil {
 		p.mu.Unlock()
 		select {
 		case <-ctx.Done():
@@ -43,7 +46,7 @@ func (p *wikiProgressPublisher) publish(
 		p.results = make(map[types.WikiPagePublication]*wikiPublicationResult)
 	}
 	result := &wikiPublicationResult{done: make(chan struct{})}
-	p.results[target] = result
+	p.results[key] = result
 	p.mu.Unlock()
 	// 异常退出也要唤醒同页等待者，不能留下永远无法完成的发布标记。
 	err = errors.New("wiki publication interrupted")
@@ -51,7 +54,7 @@ func (p *wikiProgressPublisher) publish(
 		p.mu.Lock()
 		result.err = err
 		if err != nil {
-			delete(p.results, target)
+			delete(p.results, key)
 		}
 		close(result.done)
 		p.mu.Unlock()
@@ -64,6 +67,9 @@ func (p *wikiProgressPublisher) publish(
 func wikiPublicationFromReceipt(
 	claim types.WikiProgressClaim, receipt types.WikiIngestPageProgress,
 ) (types.WikiPagePublication, error) {
+	if claim.PendingOpID <= 0 || claim.Epoch <= 0 {
+		return types.WikiPagePublication{}, types.ErrWikiProgressClaimLost
+	}
 	if !receipt.Applied || !receipt.EffectsDone || !receipt.Changed ||
 		receipt.PageID == "" || receipt.Slug == "" || receipt.PageVersion <= 0 {
 		return types.WikiPagePublication{}, types.ErrWikiProgressIncomplete
@@ -71,6 +77,7 @@ func wikiPublicationFromReceipt(
 	return types.WikiPagePublication{
 		TenantID: claim.TenantID, KnowledgeBaseID: claim.KnowledgeBaseID,
 		PageID: receipt.PageID, Slug: receipt.Slug, PageVersion: receipt.PageVersion,
+		Claim: claim,
 	}, nil
 }
 

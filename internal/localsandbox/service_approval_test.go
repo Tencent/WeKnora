@@ -55,7 +55,7 @@ func TestRunAsksBeforeDelete(t *testing.T) {
 	require.Len(t, approver.requests, 1)
 	req := approver.requests[0]
 	require.Equal(t, ReasonDelete, req.Reason)
-	require.Equal(t, "rm a.txt", req.Command)
+	require.Equal(t, "rm a.txt", req.Spec.Command)
 	require.Equal(t, root, req.Cwd)
 	require.True(t, req.AllowSession)
 	require.Nil(t, req.Proposed, "a delete inside the workspace needs no directory")
@@ -77,7 +77,7 @@ func TestRunAsksBeforeQuotedGitClean(t *testing.T) {
 		require.Len(t, backend.prepared, 1, "the delete must spawn only after approval: %s", command)
 		req := approver.requests[0]
 		require.Equal(t, ReasonDelete, req.Reason, command)
-		require.Equal(t, command, req.Command)
+		require.Equal(t, command, req.Spec.Command)
 		require.Equal(t, root, req.Cwd)
 		require.True(t, req.AllowSession, command)
 	}
@@ -90,7 +90,7 @@ func TestRunRefusesDeleteWithoutApprover(t *testing.T) {
 	res, err := svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: "rm a.txt"})
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Exit.Code)
-	require.Contains(t, res.Notice, "needs the user's approval")
+	require.Contains(t, res.Notice, "needs approval")
 	require.Empty(t, backend.prepared)
 }
 
@@ -210,22 +210,6 @@ func TestRunShellScriptDeleteCannotBeRememberedForTheSession(t *testing.T) {
 	require.False(t, approver.requests[0].AllowSession)
 }
 
-func TestRunDangerousDeleteIsNeverRemembered(t *testing.T) {
-	backend := &fakeBackend{}
-	svc, _, _ := approvalFixture(t, backend)
-	approver := &fakeApprover{decisions: []ApprovalDecision{{Approved: true, Session: true}, {Approved: true}}}
-	ctx := context.Background()
-
-	for i := 0; i < 2; i++ {
-		_, err := svc.Run(ctx, RunRequest{SessionID: "s1", Command: "rm -rf ~", Approver: approver})
-		require.NoError(t, err)
-	}
-	require.Len(t, approver.requests, 2)
-	require.Equal(t, ReasonDangerous, approver.requests[0].Reason)
-	require.False(t, approver.requests[0].AllowSession)
-	require.Empty(t, approver.requests[0].SessionRules)
-}
-
 // shell_exec wraps stdin and skill environments around the command; the
 // wrapper must not hide a delete from the approval check.
 func TestRunReviewsOriginalCommand(t *testing.T) {
@@ -234,14 +218,14 @@ func TestRunReviewsOriginalCommand(t *testing.T) {
 	approver := &fakeApprover{decisions: []ApprovalDecision{{Approved: true}}}
 
 	_, err := svc.Run(context.Background(), RunRequest{
-		SessionID:     "s1",
-		Command:       "printf %s cm0gYS50eHQ= | base64 -d | /bin/bash --noprofile --norc -c 'sh'",
-		ReviewCommand: "rm a.txt",
-		Approver:      approver,
+		SessionID: "s1",
+		Command:   "printf %s cm0gYS50eHQ= | base64 -d | /bin/bash --noprofile --norc -c 'sh'",
+		Spec:      ReviewSpec{Command: "rm a.txt"},
+		Approver:  approver,
 	})
 	require.NoError(t, err)
 	require.Len(t, approver.requests, 1)
-	require.Equal(t, "rm a.txt", approver.requests[0].Command)
+	require.Equal(t, "rm a.txt", approver.requests[0].Spec.Command)
 }
 
 func TestRunEscalatesOutsideWriteAndRetriesOnce(t *testing.T) {

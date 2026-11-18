@@ -68,6 +68,12 @@ func wikiProgressTestDB(t *testing.T, dialect string) *gorm.DB {
 	require.NoError(t, db.Exec(
 		"CREATE TABLE knowledge_processing_spans (knowledge_id VARCHAR(128), attempt INTEGER)",
 	).Error)
+	if dialect == "postgres" {
+		fence, readErr := os.ReadFile(filepath.Join("..", "..", "..", "migrations", "versioned",
+			"000139_wiki_source_attempt_fence.up.sql"))
+		require.NoError(t, readErr)
+		require.NoError(t, db.Exec(string(fence)).Error)
+	}
 	// 用最小归属表保留与真实查询一致的软删除字段；本夹具没有模型供应商或业务数据。
 	timestamp := "TIMESTAMP"
 	require.NoError(t, db.Exec("CREATE TABLE tenants (id BIGINT PRIMARY KEY, deleted_at "+timestamp+")").Error)
@@ -824,9 +830,9 @@ func TestWikiProgressMigrationUpgradeDowngradeAndCascade(t *testing.T) {
 		require.NoError(t, db.Exec("DROP TABLE wiki_ingest_page_progress").Error)
 		require.NoError(t, db.Exec("DROP TABLE wiki_ingest_plans").Error)
 		require.NoError(t, db.Exec("ALTER TABLE task_pending_ops DROP COLUMN claim_epoch").Error)
-		dialect, name := "sqlite", "000052_wiki_ingest_progress"
+		dialect, name := "sqlite", "000054_wiki_ingest_progress"
 		if db.Name() == "postgres" {
-			dialect, name = "versioned", "000136_wiki_ingest_progress"
+			dialect, name = "versioned", "000138_wiki_ingest_progress"
 		}
 		up, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", dialect, name+".up.sql"))
 		require.NoError(t, err)

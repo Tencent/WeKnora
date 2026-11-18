@@ -25,18 +25,20 @@ var ErrPathDenied = errors.New("localsandbox: path is outside the permitted work
 // Seatbelt profile needs the explicit deny only because its base grants
 // blanket file-read*.
 type PathGuard struct {
-	writable []WritableRoot
-	readable []string
-	denyRead []string
+	writable      []WritableRoot
+	writableFiles []string
+	readable      []string
+	denyRead      []string
 }
 
 // NewPathGuard builds a PathGuard from p. The guard copies the policy's path
 // lists so later mutations of p do not change enforcement.
 func NewPathGuard(p Policy) *PathGuard {
 	g := &PathGuard{
-		writable: append([]WritableRoot(nil), p.WritableRoots...),
-		readable: append([]string(nil), p.ReadableRoots...),
-		denyRead: append([]string(nil), p.DenyRead...),
+		writable:      append([]WritableRoot(nil), p.WritableRoots...),
+		writableFiles: append([]string(nil), p.WritableFiles...),
+		readable:      append([]string(nil), p.ReadableRoots...),
+		denyRead:      append([]string(nil), p.DenyRead...),
 	}
 	return g
 }
@@ -56,6 +58,9 @@ func (g *PathGuard) CheckWrite(path string) (string, error) {
 	if g.readOnly(resolved) {
 		return "", fmt.Errorf("%w: %q is read-only", ErrPathDenied, path)
 	}
+	if g.writableFile(resolved) {
+		return resolved, nil
+	}
 	for _, root := range g.writable {
 		if PathUnder(resolved, root.Path) {
 			return resolved, nil
@@ -74,14 +79,27 @@ func (g *PathGuard) readOnly(path string) bool {
 				return true
 			}
 		}
-		if root.ProtectGitDirs && PathUnder(path, root.Path) {
+		if (root.ProtectGitDirs || root.ProtectBareGitDirs) && PathUnder(path, root.Path) {
 			// Count elements instead of slicing bytes: PathUnder folds case,
 			// and folding can change a string's length.
 			parts := strings.Split(filepath.ToSlash(path), "/")
 			depth := len(strings.Split(filepath.ToSlash(root.Path), "/"))
-			if hasGitComponent(strings.Join(parts[depth:], "/")) {
+			if root.ProtectGitDirs && hasGitComponent(strings.Join(parts[depth:], "/")) {
 				return true
 			}
+			if root.ProtectBareGitDirs && isBareGitMetadata(parts[depth:]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// writableFile reports whether path is one of the single files a grant opened.
+func (g *PathGuard) writableFile(path string) bool {
+	for _, file := range g.writableFiles {
+		if samePath(path, file) {
+			return true
 		}
 	}
 	return false
@@ -95,6 +113,9 @@ func (g *PathGuard) CheckRead(path string) (string, error) {
 	}
 	if g.denied(resolved) {
 		return "", fmt.Errorf("%w: %q", ErrPathDenied, path)
+	}
+	if g.writableFile(resolved) {
+		return resolved, nil
 	}
 	for _, root := range g.writable {
 		if PathUnder(resolved, root.Path) {
@@ -146,4 +167,24 @@ func (g *PathGuard) resolve(path string) (string, error) {
 		remainder = filepath.Join(filepath.Base(cur), remainder)
 		cur = parent
 	}
+}
+
+// GrantWritePath decides one file-grant write. matches means target is the
+// granted file under the same equality WriteFile uses, so the caller must
+// check the approved digest and then write path.
+//
+// A resolved match writes the grant path. A failed resolve never substitutes
+// that path; it matches only when target itself already equals the grant.
+func (g *PathGuard) GrantWritePath(grantPath, target string) (path string, matches bool) {
+	resolved, err := g.resolve(target)
+	if err != nil {
+		if samePath(target, grantPath) {
+			return target, true
+		}
+		return target, false
+	}
+	if samePath(resolved, grantPath) {
+		return grantPath, true
+	}
+	return target, false
 }

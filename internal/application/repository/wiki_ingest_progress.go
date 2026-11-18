@@ -15,7 +15,11 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const wikiProgressIngestOp = "ingest"
+const (
+	wikiProgressIngestOp            = "ingest"
+	wikiSourceAttemptFenceTrigger   = "trg_wiki_source_attempt_fence"
+	wikiSourceAttemptFenceNamespace = "weknora:wiki-source-attempt:"
+)
 
 var _ interfaces.WikiIngestProgressRepository = (*taskPendingOpsRepository)(nil)
 
@@ -46,7 +50,7 @@ func orderedWikiClaims(claims []types.WikiProgressClaim) ([]types.WikiProgressCl
 	return ordered, nil
 }
 
-// wikiProgressRowLock 在 PostgreSQL 上串行化提交；SQLite 由其写事务和单连接约束串行化。
+// wikiProgressRowLock 在 PostgreSQL 上串行化提交；SQLite 依赖事务写锁及冲突时回滚。
 func wikiProgressRowLock(db *gorm.DB, strength string) *gorm.DB {
 	if db.Name() == "postgres" {
 		return db.Clauses(clause.Locking{Strength: strength})
@@ -138,7 +142,56 @@ func wikiProgressOwnersActive(tx *gorm.DB, claims []types.WikiProgressClaim) err
 	return nil
 }
 
-// lockWikiProgressClaims 先锁归属，再锁有序队列行；事务结束前删除/重建不能越过提交边界。
+// lockWikiSourceAttempts pairs with migration 139's shared span-writer fence.
+// Acquire it before owner/claim locks: a newer INSERT must either commit before
+// the following READ COMMITTED snapshot or wait until this authorized write ends.
+func lockWikiSourceAttempts(tx *gorm.DB, claims []types.WikiProgressClaim) error {
+	if tx.Name() != "postgres" {
+		return nil
+	}
+	ids := make(map[string]struct{})
+	for _, claim := range claims {
+		if claim.Op == wikiProgressIngestOp {
+			ids[claim.KnowledgeID] = struct{}{}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	// Match INSERT's table-before-advisory order, while preventing concurrent
+	// trigger disable/drop. ROW EXCLUSIVE remains compatible with normal writers.
+	if err := tx.Exec("LOCK TABLE knowledge_processing_spans IN ROW EXCLUSIVE MODE").Error; err != nil {
+		return err
+	}
+	var available bool
+	if err := tx.Raw(`SELECT current_setting('transaction_isolation') = 'read committed'
+		AND EXISTS (SELECT 1 FROM pg_trigger
+			WHERE tgrelid = 'knowledge_processing_spans'::regclass
+			AND tgname = ? AND NOT tgisinternal AND tgenabled = 'A')`,
+		wikiSourceAttemptFenceTrigger).Scan(&available).Error; err != nil {
+		return err
+	}
+	// A missing migration, disabled trigger, or fixed old snapshot must fail
+	// closed rather than silently publishing without the source-attempt barrier.
+	if !available {
+		return errors.New("wiki source attempt fence unavailable: require migration 139 and READ COMMITTED")
+	}
+	ordered := make([]string, 0, len(ids))
+	for id := range ids {
+		ordered = append(ordered, id)
+	}
+	sort.Strings(ordered)
+	for _, id := range ordered {
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtextextended(
+			? || 'knowledge_processing_spans'::regclass::oid::text || ':' || ?, 0))`,
+			wikiSourceAttemptFenceNamespace, id).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// lockWikiProgressClaims 先锁源代次、归属，再锁有序队列行，保持所有写路径的锁序一致。
 func lockWikiProgressClaims(
 	tx *gorm.DB,
 	claims []types.WikiProgressClaim,
@@ -149,6 +202,9 @@ func lockWikiProgressClaims(
 		return nil, err
 	}
 	if active {
+		if err := lockWikiSourceAttempts(tx, ordered); err != nil {
+			return nil, err
+		}
 		if err := wikiProgressOwnersActive(tx, ordered); err != nil {
 			if errors.Is(err, types.ErrWikiProgressOwnerGone) {
 				// 只有仍持有正确领取才能报告“归属已失效”；错误归属或旧代次仍是失主。
@@ -191,7 +247,7 @@ func readWikiPlanTx(tx *gorm.DB, claim types.WikiProgressClaim) (*types.WikiInge
 	return state, nil
 }
 
-// wikiSourceAttemptSnapshot 在归属与队列行锁内核对源代次；不因 span 保留清理造成代次降低而拒绝恢复。
+// wikiSourceAttemptSnapshot 在源代次屏障、归属与队列行锁内核对代次；允许 span 清理后代次降低。
 func wikiSourceAttemptSnapshot(tx *gorm.DB, claim types.WikiProgressClaim, allowUnbound bool) (int, error) {
 	if claim.SourceAttempt < types.WikiSourceAttemptUnbound ||
 		(claim.SourceAttempt == types.WikiSourceAttemptUnbound && !allowUnbound) {
@@ -248,6 +304,56 @@ func (r *taskPendingOpsRepository) LoadWikiIngestPlan(
 		return err
 	})
 	return state, err
+}
+
+// enqueueWikiProgressHandoff 将授权和这一条交接行的插入放在同一短事务。
+// 每行都重新取得归属/领取锁；前一行成功或页面已发布不能授权后续失主写入。
+func (r *taskPendingOpsRepository) enqueueWikiProgressHandoff(
+	ctx context.Context, op *types.TaskPendingOp, claims []types.WikiProgressClaim,
+) (bool, error) {
+	if op.TaskType != types.TypeWikiFinalize {
+		return false, types.ErrWikiProgressClaimLost
+	}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		ordered, err := lockWikiProgressClaims(tx, claims, true)
+		if err != nil {
+			return err
+		}
+		for _, claim := range ordered {
+			if op.TenantID != claim.TenantID || op.ScopeID != claim.KnowledgeBaseID {
+				return types.ErrWikiProgressClaimLost
+			}
+			state, err := readWikiPlanSnapshotTx(tx, claim, false)
+			if err != nil {
+				return err
+			}
+			if state.Plan == nil {
+				return types.ErrWikiProgressPlanMissing
+			}
+		}
+		return tx.Create(op).Error
+	})
+	return err == nil, err
+}
+
+// lockWikiPublication 在同一发布事务内复验持久授权；不能把进程内版本目标当作当前领取权。
+func lockWikiPublication(tx *gorm.DB, publication types.WikiPagePublication) error {
+	if publication.Claim.TenantID != publication.TenantID ||
+		publication.Claim.KnowledgeBaseID != publication.KnowledgeBaseID {
+		return types.ErrWikiProgressClaimLost
+	}
+	_, receipts, err := lockWikiPageProgress(tx, types.WikiPageProgressCommit{
+		Claims: []types.WikiProgressClaim{publication.Claim}, Slug: publication.Slug,
+	})
+	if err != nil {
+		return err
+	}
+	receipt := receipts[0]
+	if !receipt.Applied || !receipt.EffectsDone || !receipt.Changed ||
+		receipt.PageID != publication.PageID || receipt.PageVersion != publication.PageVersion {
+		return types.ErrWikiProgressIncomplete
+	}
+	return nil
 }
 
 func (r *taskPendingOpsRepository) SaveWikiIngestPlan(
@@ -645,7 +751,10 @@ func (r *taskPendingOpsRepository) SettleWikiIngestClaim(
 			return err
 		}
 		if finalize {
-			// 与页面提交保持“文档 → 队列”锁序，避免结算和页写形成交叉等待。
+			if err := lockWikiSourceAttempts(tx, []types.WikiProgressClaim{claim}); err != nil {
+				return err
+			}
+			// 与页面提交保持“源代次 → 文档 → 队列”锁序。
 			var owner struct{ ID string }
 			err := wikiProgressRowLock(
 				tx.Unscoped().Model(&types.Knowledge{}).Select("id").

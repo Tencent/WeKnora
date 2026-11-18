@@ -1067,7 +1067,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		}
 		if progress != nil {
 			if _, finalizeErr := s.enqueueFinalizeRows(
-				tailCtx, payload, finalizeSlugs, freshTitleBySlug, changes, retractFolderIDs,
+				progress.handoffContext(tailCtx), payload, finalizeSlugs, freshTitleBySlug, changes, retractFolderIDs,
 			); finalizeErr != nil {
 				return fmt.Errorf("wiki ingest: persist checkpointed tail: %w", finalizeErr)
 			}
@@ -1846,11 +1846,10 @@ func (s *wikiIngestService) mapOneDocument(
 	//
 	// Three cases:
 	//
-	//  (a) oldSlug ∉ new  → "retractStale": the doc no longer mentions this
-	//      page's subject, so strip its ref (and possibly delete the page
-	//      if this was the only source). Passes the NEW content as the
-	//      retract context — if the LLM finds matching facts it trims
-	//      them, otherwise the retract is a near no-op, which is fine.
+	//  (a) oldSlug ∉ new → preserve the page and its source refs. Extraction
+	//      can omit previously produced slugs even when the document still
+	//      supports them. Only actual document deletion should remove their
+	//      source refs; cleanupWikiOnKnowledgeDelete handles that path.
 	//
 	//  (b) oldSlug ∈ new AND slug is an entity/concept page  → reparse
 	//      swap: emit BOTH a "retract" (carrying the doc's PRIOR summary
@@ -1878,7 +1877,7 @@ func (s *wikiIngestService) mapOneDocument(
 		newSlugSet[ns.Slug] = true
 	}
 
-	var reparseOverlap, staleCount int
+	var reparseOverlap, preservedCount int
 	for oldSlug := range oldPageSlugs {
 		if newSlugSet[oldSlug] {
 			// Skip summary slugs — they're overwritten wholesale by the
@@ -1897,22 +1896,16 @@ func (s *wikiIngestService) mapOneDocument(
 			})
 			continue
 		}
-		staleCount++
-		updates = append(updates, SlugUpdate{
-			Slug:              oldSlug,
-			Type:              "retractStale",
-			RetractDocContent: content,
-			DocTitle:          docTitle,
-			KnowledgeID:       knowledgeID,
-			Language:          lang,
-		})
+		preservedCount++
 	}
 
 	logger.Infof(ctx,
-		"wiki ingest: mapped knowledge %s title=%q candidates=%d chunks=%d batches=%d cited_chunks=%d uncited_slugs=%d new_slugs=%d updates=%d reparse_slugs=%d stale_slugs=%d pass0_fallback=%v elapsed=%s",
+		"wiki ingest: mapped knowledge %s title=%q candidates=%d chunks=%d batches=%d "+
+			"cited_chunks=%d uncited_slugs=%d new_slugs=%d updates=%d reparse_slugs=%d "+
+			"preserved_slugs=%d pass0_fallback=%v elapsed=%s",
 		knowledgeID, previewText(docTitle, 80),
 		len(slugItems), len(chunks), batchCount, len(citedChunkSet), uncited, len(newSlugs),
-		len(updates), reparseOverlap, staleCount, pass0Failed,
+		len(updates), reparseOverlap, preservedCount, pass0Failed,
 		time.Since(docStartedAt).Round(time.Millisecond),
 	)
 
@@ -1932,7 +1925,7 @@ func (s *wikiIngestService) mapOneDocument(
 		"new_slugs":        len(newSlugs),
 		"updates":          len(updates),
 		"reparse_slugs":    reparseOverlap,
-		"stale_slugs":      staleCount,
+		"preserved_slugs":  preservedCount,
 		"extracted_pages":  len(extractedPages),
 		"summary_chars":    utf8.RuneCountInString(docSummary),
 		"pass0_fallback":   pass0Failed,

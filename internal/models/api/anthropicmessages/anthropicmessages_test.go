@@ -686,3 +686,22 @@ func TestMapStopReason(t *testing.T) {
 		})
 	}
 }
+
+func TestIsolatedRequestSendsTemperatureZeroDespiteExtraBody(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", func(cfg *Config) {
+		cfg.Settings.ExtraBody = map[string]any{"temperature": 0.9}
+	})
+	out := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
+		&api.Options{Isolated: true}, false)
+	assert.Equal(t, 0.0, out["temperature"])
+}
+
+func TestIsolatedThinkingStillOmitsTemperature(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", func(cfg *Config) {
+		cfg.Settings.ExtraBody = map[string]any{"temperature": 0.9}
+	})
+	out := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
+		&api.Options{Isolated: true, ReasoningEffort: api.ReasoningLow}, false)
+	_, hasTemp := out["temperature"]
+	assert.False(t, hasTemp, "temperature is rejected alongside thinking, got %v", out["temperature"])
+}

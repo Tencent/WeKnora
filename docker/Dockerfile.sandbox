@@ -251,6 +251,9 @@ RUN chmod 0755 /root/Desktop/google-chrome.desktop \
 # in (Dice), which ties the Google session to that one browser; when another
 # session browser then presents the synced cookies, Google revokes the session
 # for every browser.
+# Password manager and autofill off: with --password-store=basic a saved
+# password sits in the profile's Login Data under a fixed key, readable by
+# every root process in the sandbox, including the agent's shell.
 COPY docker/desktop/chrome-managed-policies.json /etc/opt/chrome/policies/managed/weknora.json
 
 # The command name "agent-browser" is the isolation wrapper; the real binary
@@ -261,6 +264,8 @@ COPY docker/desktop/chrome-managed-policies.json /etc/opt/chrome/policies/manage
 # fetch/WebSocket.
 COPY docker/scripts/agent-browser-wrapper.sh docker/scripts/wk-display.sh /usr/local/lib/weknora/
 COPY docker/scripts/cdp-cookies.mjs docker/scripts/wk-browser-sync.mjs docker/scripts/wk-cookie-plan.mjs docker/scripts/wk-page-sync.mjs /usr/local/lib/weknora/
+COPY docker/scripts/wk-secret-fill.mjs /usr/local/lib/weknora/
+COPY docker/scripts/wk-secret-fill.sh /usr/local/bin/wk-secret-fill
 COPY docker/scripts/wk-ua-governor.mjs docker/scripts/wk-fingerprint-profiles.mjs docker/scripts/wk-egress-timezone.mjs docker/scripts/wk-locale-match.mjs /usr/local/lib/weknora/
 RUN node -e 'if (typeof WebSocket !== "function" || typeof fetch !== "function") process.exit(1)'
 COPY docker/scripts/wk-auth.sh /usr/local/bin/wk-auth
@@ -273,7 +278,7 @@ COPY docker/scripts/link-chrome-session.sh /usr/local/bin/link-chrome-session
 RUN chmod 0755 /usr/local/lib/weknora/agent-browser-wrapper.sh /usr/local/lib/weknora/wk-display.sh \
         /usr/local/bin/wk-auth /usr/local/bin/chrome-wk \
         /usr/local/bin/wk-machine-id /usr/local/bin/wk-browser-sync /usr/local/bin/wk-chrome \
-        /usr/local/bin/wk-ua-governor /usr/local/bin/link-chrome-session \
+        /usr/local/bin/wk-ua-governor /usr/local/bin/link-chrome-session /usr/local/bin/wk-secret-fill \
     && ln -s /usr/local/lib/weknora/agent-browser-wrapper.sh /usr/local/bin/agent-browser \
     && ln -s /usr/local/lib/weknora/wk-display.sh /usr/local/bin/wk-display \
     && mkdir -p /var/lib/weknora/browser/auth && chmod 0700 /var/lib/weknora/browser

@@ -27,6 +27,11 @@ func NewTaskPendingOpsRepository(db *gorm.DB) interfaces.TaskPendingOpsRepositor
 // Scope/ScopeID/Op (Payload optional). ID, FailCount default to zero;
 // EnqueuedAt is filled with the DB-side default if left zero.
 func (r *taskPendingOpsRepository) Enqueue(ctx context.Context, op *types.TaskPendingOp) error {
+	if _, guarded := types.WikiProgressClaimsFromContext(ctx); guarded {
+		// 包装仓储可能只暴露基础 Enqueue，仍不能绕过持久交接的授权事务。
+		_, err := r.EnqueueIfKnowledgeBaseActive(ctx, op)
+		return err
+	}
 	if err := preparePendingOp(op); err != nil {
 		return err
 	}
@@ -69,6 +74,9 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 	}
 	if op.Scope != types.TaskScopeKnowledgeBase {
 		return false, errors.New("task pending ops: guarded enqueue requires knowledge_base scope")
+	}
+	if claims, guarded := types.WikiProgressClaimsFromContext(ctx); guarded {
+		return r.enqueueWikiProgressHandoff(ctx, op, claims)
 	}
 	accepted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

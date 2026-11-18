@@ -86,6 +86,12 @@ func wikiIngestProgressDB(t *testing.T, dialect string) *gorm.DB {
 	} {
 		require.NoError(t, db.Exec(ddl).Error)
 	}
+	if dialect == "postgres" {
+		fence, readErr := os.ReadFile(filepath.Join("..", "..", "..", "migrations", "versioned",
+			"000139_wiki_source_attempt_fence.up.sql"))
+		require.NoError(t, readErr)
+		require.NoError(t, db.Exec(string(fence)).Error)
+	}
 	return db
 }
 

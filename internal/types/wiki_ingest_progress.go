@@ -89,6 +89,19 @@ type WikiPageProgressCommit struct {
 
 type wikiPageProgressCommitKey struct{}
 
+type wikiProgressClaimsKey struct{}
+
+// WithWikiProgressClaims 将持久交接绑定到原领取集合；显式空集合不能降级为普通入队。
+func WithWikiProgressClaims(ctx context.Context, claims []WikiProgressClaim) context.Context {
+	return context.WithValue(ctx, wikiProgressClaimsKey{}, append([]WikiProgressClaim(nil), claims...))
+}
+
+// WikiProgressClaimsFromContext 返回交接的授权要求，仓储必须在每次实际写入的事务中复验。
+func WikiProgressClaimsFromContext(ctx context.Context) ([]WikiProgressClaim, bool) {
+	claims, ok := ctx.Value(wikiProgressClaimsKey{}).([]WikiProgressClaim)
+	return claims, ok
+}
+
 // WithWikiPageProgressCommit 复制领取集合，避免调用方之后改切片而改变事务的归属。
 func WithWikiPageProgressCommit(ctx context.Context, commit *WikiPageProgressCommit) context.Context {
 	if commit == nil {

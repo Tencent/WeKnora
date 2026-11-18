@@ -176,6 +176,17 @@ test('a live host approval reaches the composer while the tool is still running'
   assert.deepEqual(hostApproval.pendingComposerApprovals.value.map((item) => item.pending_id), ['pending-2'])
 })
 
+test('a model review stays in the timeline and never reaches the composer', async t => {
+  const h = setup(t, 'agent')
+  hostApproval.clearComposerApproval()
+  h.send('tool_approval_required', '', true, {
+    pending_id: 'review-1', kind: 'host_command', tool_call_id: 'call-1',
+    host: { reason: 'delete', command: 'rm ~/Desktop/a.txt', reviewer: 'model', allow_session: false },
+  })
+  await h.flush()
+  assert.deepEqual(hostApproval.pendingComposerApprovals.value, [])
+})
+
 test('ordinary completion waits for the buffered typewriter before recovering images', async t => {
   const h = setup(t, 'ordinary')
   h.revealed.value = 0

@@ -11,8 +11,8 @@
 # A held seat always reaches the session browser, even before the agent has
 # opened one: the wrapper creates the root and restores the login state before
 # the first page loads. The root is the one the backend exports as
-# WEKNORA_BROWSER_ROOT: <sessions>/<sid>.browser on a machine sessions share,
-# the single session root on a machine without that directory.
+# WEKNORA_BROWSER_ROOT, which wk-display records when the session claims the
+# seat.
 #
 # Paths are WK_*-overridable for the tests, same convention as the wrapper.
 set -u
@@ -42,10 +42,23 @@ case "$sid" in
   ''|.*|*[!A-Za-z0-9._-]*) exec "$CHROME_WK" "$@" ;;
 esac
 
-root="$SESSIONS_ROOT/$sid.browser"
-[ -d "$root" ] || [ -d "$SESSIONS_ROOT" ] || root="$SINGLE_ROOT"
+# The root recorded when the session claimed this seat is authoritative. The
+# guess below only covers seats claimed before claims recorded it: before the
+# session's first browser, the sessions directory may not exist yet.
+root="$("$DISPLAY_CMD" browser-root "$sid" 2>/dev/null)" || root=""
+if [ -z "$root" ]; then
+  root="$SESSIONS_ROOT/$sid.browser"
+  [ -d "$root" ] || [ -d "$SESSIONS_ROOT" ] || root="$SINGLE_ROOT"
+fi
 
 export WEKNORA_SESSION_ID="$sid" WEKNORA_BROWSER_ROOT="$root"
-# exec keeps this launcher out of the process tree; the wrapper finds the
-# browser, waits for browser sync, and opens the URL on this session's screen.
-exec "$AB" --headed open "$url" >>/tmp/wk-chrome.log 2>&1
+# WK_DESKTOP_CLICK keeps a click from navigating the page of a running browser.
+export WK_DESKTOP_CLICK=1
+# The wrapper finds the browser, waits for browser sync, and opens the URL on
+# this session's screen. A click has no terminal, so a failure is shown there.
+"$AB" --headed open "$url" >>/tmp/wk-chrome.log 2>&1 && exit 0
+rc=$?
+"${WK_NOTIFY:-xmessage}" -center -timeout 15 \
+  "The browser did not open (exit $rc). If the assistant is using it, try again in a moment." \
+  >/dev/null 2>&1 &
+exit "$rc"

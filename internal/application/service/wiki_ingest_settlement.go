@@ -208,7 +208,8 @@ func (c *wikiDocumentSettlement) settleDocument(
 				Action: wikiFinalizeAdded, DocTitle: doc.DocTitle, DocSummary: doc.Summary,
 			})
 		}
-		_, enqueueErr := c.service.enqueueFinalizeRows(ctx, c.payload, slugs, titles, changes, nil)
+		handoffCtx := types.WithWikiProgressClaims(ctx, []types.WikiProgressClaim{claim})
+		_, enqueueErr := c.service.enqueueFinalizeRows(handoffCtx, c.payload, slugs, titles, changes, nil)
 		c.mu.Lock()
 		// 部分写入失败仍由恢复路径重交；这里只避免成功交接后的进程内重复 change。
 		if enqueueErr == nil {

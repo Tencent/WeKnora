@@ -103,8 +103,7 @@ func (a *App) GetApprovalMode() string {
 	return LoadApprovalMode()
 }
 
-// SetApprovalMode persists the approval mode. Unshipped modes ("ask", "full")
-// are rejected; currently only "auto" can be stored.
+// SetApprovalMode persists the default approval mode ("ask" or "auto").
 func (a *App) SetApprovalMode(mode string) error {
 	return SaveApprovalMode(mode)
 }

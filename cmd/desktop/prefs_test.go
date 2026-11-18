@@ -76,9 +76,9 @@ func TestEnsureDesktopLiteEditionOverridesDefaultStandard(t *testing.T) {
 	require.Equal(t, "lite", handler.Edition)
 }
 
-func TestApprovalModeDefaultsToAuto(t *testing.T) {
+func TestApprovalModeDefaultsToAsk(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	require.Equal(t, "auto", LoadApprovalMode())
+	require.Equal(t, "ask", LoadApprovalMode())
 }
 
 func TestSaveApprovalModeRejectsUnknownValue(t *testing.T) {
@@ -86,19 +86,19 @@ func TestSaveApprovalModeRejectsUnknownValue(t *testing.T) {
 	require.Error(t, SaveApprovalMode("yolo"))
 }
 
-// Only "auto" is shipped. Accepting "ask" would promise an approval card
-// that does not exist yet (the command is just denied); accepting "full" makes
-// Build return ErrFullAccessHasNoPolicy, i.e. nothing runs at all.
-func TestSaveApprovalModeRejectsModesNotShippedYet(t *testing.T) {
+// "full" makes Build return ErrFullAccessHasNoPolicy, i.e. nothing runs at
+// all, and it must never become a saved default.
+func TestSaveApprovalModeRejectsFull(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	require.Error(t, SaveApprovalMode("ask"))
 	require.Error(t, SaveApprovalMode("full"))
 }
 
 func TestSaveApprovalModeRoundTrips(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	require.NoError(t, SaveApprovalMode("auto"))
-	require.Equal(t, "auto", LoadApprovalMode())
+	for _, mode := range []string{"auto", "ask"} {
+		require.NoError(t, SaveApprovalMode(mode))
+		require.Equal(t, mode, LoadApprovalMode())
+	}
 }
 
 func TestProjectDirsRoundTrip(t *testing.T) {
