@@ -1404,10 +1404,14 @@ func (s *TenantSkillService) updateSkillFields(
 	if skill == nil {
 		return fmt.Errorf("skill %s not found", skillID)
 	}
+	before := skill.Status
 	mutate(skill)
 	if err := s.skills.UpdateSkill(ctx, skill); err != nil {
 		logger.Warnf(ctx, "[skill] update %s failed: %v", skillID, err)
 		return fmt.Errorf("update skill %s: %w", skillID, err)
+	}
+	if skill.Status != before {
+		s.notifySkillState(ctx, tenantID, skill.CatalogID)
 	}
 	return nil
 }
@@ -2396,7 +2400,9 @@ func (s *TenantSkillService) storeEnvDeclaration(
 	merged := mergeEnvDeclaration(skill.Envs, envs)
 	if err := s.skills.UpdateSkillEnvs(ctx, tenantID, configID, skillID, merged); err != nil {
 		logger.Warnf(ctx, "[skill] store the env declaration of %s failed: %v", skillID, err)
+		return
 	}
+	s.notifySkillState(ctx, tenantID, skill.CatalogID)
 }
 
 type skillImageManifest struct {

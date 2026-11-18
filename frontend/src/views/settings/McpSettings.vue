@@ -13,16 +13,16 @@
 
     <template v-else>
       <Teleport to="#toolbox-toolbar" defer>
-        <t-input v-if="services.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
+        <t-input v-if="listedServices.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
           :aria-label="$t('menu.search')" clearable>
           <template #prefix-icon><t-icon name="search" size="16px" /></template>
         </t-input>
       </Teleport>
-      <div v-if="services.length === 0 && !authStore.hasRole('admin')" class="empty-state">
+      <div v-if="listedServices.length === 0 && !authStore.hasRole('admin')" class="empty-state">
         <t-empty :description="$t('mcpSettings.empty')" />
       </div>
 
-      <div v-else-if="services.length > 0 && filteredServices.length === 0" class="empty-state">
+      <div v-else-if="listedServices.length > 0 && filteredServices.length === 0" class="empty-state">
         <t-empty :description="$t('common.noResult')" />
         <t-button variant="outline" @click="query = ''">{{ $t('common.clear') }}</t-button>
         <t-button v-if="authStore.hasRole('admin')" variant="text" @click="handleAdd">
@@ -45,7 +45,8 @@
                     <t-icon name="edit" size="14px" />
                   </button>
                   <button v-if="!service.is_builtin" type="button" class="service-card__icon-btn service-card__icon-btn--danger"
-                    :disabled="togglingIds.has(service.id)" :title="$t('common.delete')"
+                    :disabled="togglingIds.has(service.id) || !!service.plugin"
+                    :title="service.plugin ? $t('settings.plugins.managedByHint') : $t('common.delete')"
                     :aria-label="`${service.name} · ${$t('common.delete')}`" @click="handleDelete(service)">
                     <t-icon name="delete" size="14px" />
                   </button>
@@ -158,7 +159,10 @@ const dialogInitialStep = ref<0 | 1>(0)
 const togglingIds = ref(new Set<string>())
 const serviceUsage = (service: MCPService) => service.usage_instructions?.trim() || service.description?.trim() || ''
 const query = ref('')
-const filteredServices = computed(() => services.value.filter((service) =>
+// Plugin installs stay in the MCP table so agents can call them. This page
+// only lists services added here.
+const listedServices = computed(() => services.value.filter((service) => !service.plugin))
+const filteredServices = computed(() => listedServices.value.filter((service) =>
   matchesResourceQuery({ name: service.name, description: serviceUsage(service) }, query.value),
 ))
 
@@ -175,7 +179,7 @@ const loadServices = async () => {
   loading.value = true
   try {
     services.value = await listMCPServices()
-    emit('count', services.value.length)
+    emit('count', listedServices.value.length)
   } catch (error) {
     MessagePlugin.error(t('mcpSettings.toasts.loadFailed'))
     console.error('Failed to load MCP services:', error)
@@ -239,6 +243,7 @@ const handleToggleEnabled = async (service: MCPService) => {
 // Handle delete button click
 const handleDelete = (service: MCPService) => {
   if (!authStore.hasRole('admin') || service.is_builtin || !service.id || togglingIds.value.has(service.id)) return
+  if (service.plugin) return
 
   confirmDelete({
     body: t('mcpSettings.deleteConfirmBody', { name: service.name || t('mcpSettings.unnamed') }),

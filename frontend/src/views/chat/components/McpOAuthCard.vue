@@ -60,6 +60,7 @@ import {
   resolveEmbedMCPOAuth,
 } from '@/api/embed'
 import { markPromptSubmitted, promptSubmission, usePromptDock } from '@/composables/usePromptDock'
+import { openMcpOAuthPopup } from '@/utils/mcpOAuthPopup'
 import { isSubmitKey } from '@/utils/promptKeys'
 
 const props = defineProps<{
@@ -105,7 +106,6 @@ const authorizing = ref(false)
 const canceling = ref(false)
 const now = ref(Date.now())
 let clock: number | null = null
-let poll: number | null = null
 
 const deadline = computed(() => {
   const base = (props.requestedAt || 0) * 1000
@@ -163,11 +163,11 @@ function formatCountdown(s: number): string {
   return `${m}:${r.toString().padStart(2, '0')}`
 }
 
+let stopOAuthPopup: (() => void) | null = null
+
 function stopPoll() {
-  if (poll) {
-    window.clearInterval(poll)
-    poll = null
-  }
+  stopOAuthPopup?.()
+  stopOAuthPopup = null
 }
 
 const skip = async () => {
@@ -199,51 +199,36 @@ const authorize = async () => {
   if (props.resolved || authorizing.value) return
   authorizing.value = true
   try {
-    const redirectUri = window.location.origin + MCP_OAUTH_CALLBACK_PATH
-    const frontendRedirect = useEmbedOAuth()
-      ? window.location.pathname + window.location.search
-      : '/'
-    const authorization = useEmbedOAuth()
-      ? await getEmbedMCPOAuthAuthorizeURL(
-        props.embedChannelId!,
-        props.embedToken!,
-        props.embedSessionId!,
-        props.embedSessionSig!,
-        props.embedVisitorId!,
-        props.serviceId,
-        { redirect_uri: redirectUri, frontend_redirect: frontendRedirect },
-      )
-      : await getMCPOAuthAuthorizeURL(props.serviceId, {
-        redirect_uri: redirectUri,
-        frontend_redirect: frontendRedirect,
-      })
-    if (!authorization.authorizationUrl || !authorization.authorizationAttempt) {
-      MessagePlugin.error(t('agentStream.mcpOAuth.startFailed'))
-      authorizing.value = false
-      return
-    }
-    const popup = window.open(authorization.authorizationUrl, 'mcp_oauth', 'width=600,height=720')
-    poll = window.setInterval(async () => {
-      const closed = !popup || popup.closed
-      let ok = false
-      try {
-        ok = useEmbedOAuth()
-          ? await getEmbedMCPOAuthStatus(
-            props.embedChannelId!,
-            props.embedToken!,
-            props.embedSessionId!,
-            props.embedSessionSig!,
-            props.embedVisitorId!,
-            props.serviceId,
-            authorization.authorizationAttempt,
-          )
-          : await getMCPOAuthStatus(props.serviceId, authorization.authorizationAttempt)
-      } catch {
-        /* transient; keep polling */
-      }
-      if (ok) {
-        stopPoll()
-        try { popup?.close() } catch { /* cross-origin close may throw */ }
+    const result = await openMcpOAuthPopup({
+      win: window,
+      serviceId: props.serviceId,
+      redirectUri: window.location.origin + MCP_OAUTH_CALLBACK_PATH,
+      frontendRedirect: useEmbedOAuth()
+        ? window.location.pathname + window.location.search
+        : '/',
+      authorize: (serviceId, body) => useEmbedOAuth()
+        ? getEmbedMCPOAuthAuthorizeURL(
+          props.embedChannelId!,
+          props.embedToken!,
+          props.embedSessionId!,
+          props.embedSessionSig!,
+          props.embedVisitorId!,
+          serviceId,
+          body,
+        )
+        : getMCPOAuthAuthorizeURL(serviceId, body),
+      pollStatus: (serviceId, authorizationAttempt) => useEmbedOAuth()
+        ? getEmbedMCPOAuthStatus(
+          props.embedChannelId!,
+          props.embedToken!,
+          props.embedSessionId!,
+          props.embedSessionSig!,
+          props.embedVisitorId!,
+          serviceId,
+          authorizationAttempt,
+        )
+        : getMCPOAuthStatus(serviceId, authorizationAttempt),
+      onAuthorized: async () => {
         try {
           if (useEmbedOAuth()) {
             await resolveEmbedMCPOAuth(
@@ -270,11 +255,15 @@ const authorize = async () => {
           MessagePlugin.error(msg)
         }
         authorizing.value = false
-      } else if (closed) {
-        stopPoll()
-        authorizing.value = false
-      }
-    }, 1500)
+      },
+      onClosed: () => { authorizing.value = false },
+    })
+    if (result.status === 'opened') {
+      stopOAuthPopup = result.stop
+      return
+    }
+    authorizing.value = false
+    if (result.status === 'missing') MessagePlugin.error(t('agentStream.mcpOAuth.startFailed'))
   } catch (e: any) {
     const msg = e?.response?.data?.error?.message || e?.message || t('agentStream.mcpOAuth.startFailed')
     MessagePlugin.error(msg)

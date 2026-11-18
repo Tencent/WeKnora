@@ -20,18 +20,22 @@ type mcpServiceService struct {
 	mcpServiceRepo interfaces.MCPServiceRepository
 	mcpManager     *mcp.MCPManager
 	oauthRepo      interfaces.MCPOAuthRepository
+	pluginLookup   interfaces.PluginOwnershipLookup
 }
 
-// NewMCPServiceService creates a new MCP service service
+// NewMCPServiceService creates a new MCP service service. pluginLookup guards
+// plugin-owned services against direct deletion; nil disables the guard.
 func NewMCPServiceService(
 	mcpServiceRepo interfaces.MCPServiceRepository,
 	mcpManager *mcp.MCPManager,
 	oauthRepo interfaces.MCPOAuthRepository,
+	pluginLookup interfaces.PluginOwnershipLookup,
 ) interfaces.MCPServiceService {
 	return &mcpServiceService{
 		mcpServiceRepo: mcpServiceRepo,
 		mcpManager:     mcpManager,
 		oauthRepo:      oauthRepo,
+		pluginLookup:   pluginLookup,
 	}
 }
 
@@ -343,8 +347,23 @@ func (s *mcpServiceService) UpdateMCPService(
 	return nil
 }
 
-// DeleteMCPService deletes an MCP service
+// DeleteMCPService deletes an MCP service. A service a plugin owns is refused:
+// the plugin page is the only uninstall entry.
 func (s *mcpServiceService) DeleteMCPService(ctx context.Context, tenantID uint64, id string) error {
+	if s.pluginLookup != nil {
+		info, err := s.pluginLookup.LookupPluginByResource(ctx, tenantID, types.PluginResourceKindMCPService, id)
+		if err != nil {
+			return fmt.Errorf("failed to check plugin ownership: %w", err)
+		}
+		if err := pluginOwnedDeleteError(info, types.PluginResourceKindMCPService); err != nil {
+			return err
+		}
+	}
+	return s.DeleteMCPServiceUnguarded(ctx, tenantID, id)
+}
+
+// DeleteMCPServiceUnguarded deletes an MCP service without checking plugin ownership.
+func (s *mcpServiceService) DeleteMCPServiceUnguarded(ctx context.Context, tenantID uint64, id string) error {
 	// Check if service exists
 	existing, err := s.mcpServiceRepo.GetByID(ctx, tenantID, id)
 	if err != nil {
@@ -362,13 +381,71 @@ func (s *mcpServiceService) DeleteMCPService(ctx context.Context, tenantID uint6
 	// Close client connection
 	s.mcpManager.CloseClient(id)
 
-	if err := s.mcpServiceRepo.Delete(ctx, tenantID, id); err != nil {
+	// Drop local OAuth tokens and the registered client, then the secrets
+	// stored on the service. Remote revocation is intentionally not done here.
+	// A local deletion error stops the soft-delete so a retry can finish it.
+	cleanupCtx := context.WithoutCancel(ctx)
+	if err := deleteLocalMCPOAuth(cleanupCtx, s.oauthRepo, existing); err != nil {
+		logger.GetLogger(ctx).Errorf("Failed to delete MCP OAuth credentials: %v", err)
+		return fmt.Errorf("failed to delete MCP OAuth credentials: %w", err)
+	}
+	if stripMCPCredentials(existing) {
+		existing.UpdatedAt = time.Now()
+		if err := s.mcpServiceRepo.Update(cleanupCtx, existing); err != nil {
+			logger.GetLogger(ctx).Errorf("Failed to clear MCP credentials: %v", err)
+			return fmt.Errorf("failed to clear MCP credentials: %w", err)
+		}
+	}
+
+	if err := s.mcpServiceRepo.Delete(cleanupCtx, tenantID, id); err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to delete MCP service: %v", err)
 		return fmt.Errorf("failed to delete MCP service: %w", err)
 	}
 
 	logger.GetLogger(ctx).Infof("MCP service deleted: %s (ID: %s)", secutils.SanitizeForLog(existing.Name), id)
 	return nil
+}
+
+// deleteLocalMCPOAuth removes every stored token and the registered client
+// for the service. repo may be nil when OAuth storage is not wired.
+func deleteLocalMCPOAuth(ctx context.Context, repo interfaces.MCPOAuthRepository, service *types.MCPService) error {
+	if repo == nil || service == nil || service.ID == "" {
+		return nil
+	}
+	if err := repo.DeleteTokensByService(ctx, service.TenantID, service.ID); err != nil {
+		return fmt.Errorf("delete MCP OAuth tokens: %w", err)
+	}
+	if err := repo.DeleteClient(ctx, service.TenantID, service.ID); err != nil {
+		return fmt.Errorf("delete MCP OAuth client: %w", err)
+	}
+	return nil
+}
+
+// stripMCPCredentials blanks every secret stored on the service row: the API
+// key, bearer token, OAuth client secret, custom auth headers, and the
+// service-level header map. It reports whether anything changed. The row is
+// soft-deleted afterwards, so the tombstone must not keep the secrets.
+func stripMCPCredentials(service *types.MCPService) bool {
+	if service == nil {
+		return false
+	}
+	changed := false
+	if len(service.Headers) > 0 {
+		service.Headers = types.MCPHeaders{}
+		changed = true
+	}
+	ac := service.AuthConfig
+	if ac == nil {
+		return changed
+	}
+	if ac.APIKey != "" || ac.Token != "" || ac.ClientSecret != "" || len(ac.CustomHeaders) > 0 {
+		ac.APIKey = ""
+		ac.Token = ""
+		ac.ClientSecret = ""
+		ac.CustomHeaders = nil
+		changed = true
+	}
+	return changed
 }
 
 // TestMCPService tests the connection to an MCP service and returns available tools/resources

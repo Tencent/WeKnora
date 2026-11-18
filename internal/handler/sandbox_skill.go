@@ -103,13 +103,13 @@ func NewSandboxSkillHandler(
 // body is deliberately omitted: it is level-2 disclosure for the agent, and a
 // list of them would dwarf the response.
 type skillResponse struct {
-	ID                  string    `json:"id" extensions:"x-agent=skill_id"`
-	Name                string    `json:"name" extensions:"x-agent"`
-	Version             string    `json:"version,omitempty" extensions:"x-agent"`
-	Description         string    `json:"description,omitempty" extensions:"x-agent"`
-	Enabled             bool      `json:"enabled" extensions:"x-agent"`
-	Status              string    `json:"status" extensions:"x-agent"`
-	Error               string    `json:"error,omitempty" extensions:"x-agent"`
+	ID                  string    `json:"id"                              extensions:"x-agent=skill_id"`
+	Name                string    `json:"name"                            extensions:"x-agent"`
+	Version             string    `json:"version,omitempty"               extensions:"x-agent"`
+	Description         string    `json:"description,omitempty"           extensions:"x-agent"`
+	Enabled             bool      `json:"enabled"                         extensions:"x-agent"`
+	Status              string    `json:"status"                          extensions:"x-agent"`
+	Error               string    `json:"error,omitempty"                 extensions:"x-agent"`
 	BundleSHA256        string    `json:"bundle_sha256,omitempty"`
 	InstalledSnapshotID string    `json:"installed_snapshot_id,omitempty"`
 	InstallSessionID    string    `json:"install_session_id,omitempty"`
@@ -125,6 +125,9 @@ type skillResponse struct {
 	// MissingEnvs names the required environment variables with no
 	// workspace value yet; the skill cannot run until they are set.
 	MissingEnvs []string `json:"missing_envs,omitempty" extensions:"x-agent"`
+	// Plugin is set when a plugin install owns this skill's catalog.
+	// The console shows that name and does not offer to delete the skill alone.
+	Plugin *types.PluginInfoForResource `json:"plugin,omitempty"`
 }
 
 // skillAccepted is the data of an accepted install or removal.
@@ -166,6 +169,36 @@ func missingSkillEnvs(envs types.SkillEnvVars) []string {
 		}
 	}
 	return missing
+}
+
+type catalogPluginLookup interface {
+	PluginOwnershipByCatalog(ctx context.Context, tenantID uint64) (map[string]*types.PluginInfoForResource, error)
+}
+
+func (h *SandboxSkillHandler) pluginOwnership(c *gin.Context) map[string]*types.PluginInfoForResource {
+	lookup, ok := h.service.(catalogPluginLookup)
+	if !ok || lookup == nil {
+		return nil
+	}
+	got, err := lookup.PluginOwnershipByCatalog(c.Request.Context(), sandboxConfigTenantID(c))
+	if err != nil {
+		return nil
+	}
+	return got
+}
+
+func withSkillPlugin(
+	resp skillResponse, plugins map[string]*types.PluginInfoForResource, skill *types.TenantSkillEntity,
+) skillResponse {
+	if skill == nil || plugins == nil {
+		return resp
+	}
+	resp.Plugin = plugins[skill.CatalogID]
+	return resp
+}
+
+func (h *SandboxSkillHandler) skillView(c *gin.Context, skill *types.TenantSkillEntity) skillResponse {
+	return withSkillPlugin(toSkillResponse(skill), h.pluginOwnership(c), skill)
 }
 
 func toSkillResponse(e *types.TenantSkillEntity) skillResponse {
@@ -223,9 +256,10 @@ func (h *SandboxSkillHandler) List(c *gin.Context) {
 		_ = c.Error(err)
 		return
 	}
+	plugins := h.pluginOwnership(c)
 	data := make([]skillResponse, 0, len(skills))
 	for _, skill := range skills {
-		data = append(data, toSkillResponse(skill))
+		data = append(data, withSkillPlugin(toSkillResponse(skill), plugins, skill))
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }
@@ -251,7 +285,10 @@ func (h *SandboxSkillHandler) Get(c *gin.Context) {
 		_ = c.Error(err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": toSkillResponse(skill)})
+	c.JSON(
+		http.StatusOK,
+		gin.H{"success": true, "data": withSkillPlugin(toSkillResponse(skill), h.pluginOwnership(c), skill)},
+	)
 }
 
 // ListFiles godoc
@@ -473,7 +510,7 @@ func (h *SandboxSkillHandler) Stop(c *gin.Context) {
 		_ = c.Error(apperrors.NewNotFoundError("skill not found"))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": toSkillResponse(skill)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.skillView(c, skill)})
 }
 
 func skillTooLargeError() error {
@@ -553,7 +590,7 @@ func (h *SandboxSkillHandler) Patch(c *gin.Context) {
 		_ = c.Error(apperrors.NewNotFoundError("skill not found"))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": toSkillResponse(updated)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.skillView(c, updated)})
 }
 
 // Delete godoc

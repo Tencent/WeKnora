@@ -4,6 +4,14 @@ import { SKILL_ICON } from '../types/mention'
 
 export const TOOLBOX_ITEMS = [
   {
+    key: 'plugins',
+    icon: 'app',
+    title: 'settings.plugins.title',
+    description: 'settings.plugins.description',
+    action: 'settings.plugins.addMarketplace',
+    actionMinRole: 'admin',
+  },
+  {
     key: 'skills',
     icon: SKILL_ICON,
     title: 'settings.skills.title',

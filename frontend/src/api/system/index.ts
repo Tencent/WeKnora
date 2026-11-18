@@ -1,4 +1,5 @@
 import { get, post, put, del, patch, postUpload } from '@/utils/request'
+import type { PluginOwnership } from '@/api/plugin'
 import type { CreatedTenantAPIKey, TenantAPIKey, TenantAPIKeyCapability } from '@/api/tenant'
 
 export interface CreatePlatformAPIKeyPayload {
@@ -1140,6 +1141,8 @@ export interface ConfigSkill {
   // Absent for a skill whose installer declared nothing, which is how the
   // panel decides whether to offer the environment variable editor at all.
   envs?: ConfigSkillEnv[]
+  // Set when a plugin install owns this skill. Delete it from the plugin page.
+  plugin?: PluginOwnership
 }
 
 export interface ConfigSkillInstallEvent {

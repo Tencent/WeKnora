@@ -18,6 +18,11 @@ import (
 // hostSkillTargetName labels local installs wherever a config name is shown.
 const hostSkillTargetName = "本机"
 
+// RequireSkillTarget checks if a sandbox target exists and is valid for skills.
+func (s *TenantSkillService) RequireSkillTarget(ctx context.Context, tenantID uint64, configID string) error {
+	return s.requireSkillTarget(ctx, tenantID, configID)
+}
+
 // requireSkillTarget is the existence check every skill entry point runs
 // before doing work. Lite accepts only the host target; the standard edition
 // never accepts it.

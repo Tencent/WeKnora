@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
 	sdkserver "github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
@@ -346,6 +347,70 @@ func TestUpdateMCPService_DoesNotTouchSecretsEvenIfPassed(t *testing.T) {
 	assert.Equal(t, "stored-token", got.AuthConfig.Token,
 		"main PUT must not overwrite stored Token under any circumstance")
 	assert.Equal(t, "renamed", got.Name, "non-secret field updates still apply")
+}
+
+// deleteOAuthStub embeds the repository interface so this test only
+// implements the methods the delete path calls. The embedded value stays nil.
+type deleteOAuthStub struct {
+	interfaces.MCPOAuthRepository
+	deletedTokens bool
+	deletedClient bool
+}
+
+func (s *deleteOAuthStub) DeleteTokensByService(context.Context, uint64, string) error {
+	s.deletedTokens = true
+	return nil
+}
+
+func (s *deleteOAuthStub) DeleteClient(context.Context, uint64, string) error {
+	s.deletedClient = true
+	return nil
+}
+
+func (s *deleteOAuthStub) GetClient(context.Context, uint64, string) (*types.MCPOAuthClient, error) {
+	return nil, nil
+}
+
+func TestDeleteMCPServiceClearsCredentialsAndOAuthRows(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeMCPRepo()
+	id := seedService(t, repo, "stored-api", "stored-token")
+	repo.store[id].AuthConfig.ClientSecret = "stored-secret"
+	repo.store[id].AuthConfig.CustomHeaders = map[string]string{"Authorization": "Bearer x"}
+	repo.store[id].Headers = types.MCPHeaders{"X-Secret": "y"}
+
+	var atDelete *types.MCPService
+	recording := &recordingMCPRepo{fakeMCPRepo: repo, atDelete: &atDelete}
+	oauth := &deleteOAuthStub{}
+	svc := &mcpServiceService{
+		mcpServiceRepo: recording,
+		mcpManager:     mcp.NewMCPManager(nil),
+		oauthRepo:      oauth,
+	}
+	require.NoError(t, svc.DeleteMCPServiceUnguarded(ctx, 1, id))
+
+	require.True(t, oauth.deletedTokens)
+	require.True(t, oauth.deletedClient)
+	require.NotNil(t, atDelete)
+	require.Empty(t, atDelete.AuthConfig.APIKey)
+	require.Empty(t, atDelete.AuthConfig.Token)
+	require.Empty(t, atDelete.AuthConfig.ClientSecret)
+	require.Empty(t, atDelete.AuthConfig.CustomHeaders)
+	require.Empty(t, atDelete.Headers)
+	_, stillThere := repo.store[id]
+	require.False(t, stillThere)
+}
+
+type recordingMCPRepo struct {
+	*fakeMCPRepo
+	atDelete **types.MCPService
+}
+
+func (r *recordingMCPRepo) Delete(ctx context.Context, tenantID uint64, id string) error {
+	if s := r.store[id]; s != nil {
+		*r.atDelete = cloneService(s)
+	}
+	return r.fakeMCPRepo.Delete(ctx, tenantID, id)
 }
 
 func TestUpdateMCPService_DropSecretsClearsCredentialsAndHeaders(t *testing.T) {

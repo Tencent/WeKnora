@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,6 +122,34 @@ type TenantSkillService struct {
 	// placer records the maintenance session's sandbox assignment. Nil keeps
 	// today's behaviour: the session row carries the pin and no assignment.
 	placer SessionPlacer
+
+	// pluginLookup marks catalogs a plugin install owns and refuses direct
+	// deletion. Nil leaves catalog delete unguarded, which tests rely on.
+	pluginLookup interfaces.PluginOwnershipLookup
+
+	// discardedPluginCatalogs are catalogs a plugin uninstall already dropped
+	// from the ledger. The definition is deleted once its last sandbox install
+	// is gone. The set is process-local; a restart leaves an idle catalog the
+	// workspace can delete like any other skill.
+	discardMu               sync.Mutex
+	discardedPluginCatalogs map[string]struct{}
+
+	// skillStateListener is told which catalog changed after one of its
+	// sandbox installs changes status, has its envs rewritten, or is deleted.
+	// It is set once while the container is built.
+	skillStateListener func(ctx context.Context, tenantID uint64, catalogID string)
+}
+
+// OnSkillStateChange registers the listener told about catalog install changes.
+func (s *TenantSkillService) OnSkillStateChange(l func(ctx context.Context, tenantID uint64, catalogID string)) {
+	s.skillStateListener = l
+}
+
+func (s *TenantSkillService) notifySkillState(ctx context.Context, tenantID uint64, catalogID string) {
+	if s.skillStateListener == nil || strings.TrimSpace(catalogID) == "" {
+		return
+	}
+	s.skillStateListener(ctx, tenantID, catalogID)
 }
 
 // WithPlacer attaches the allocation service. Without one, maintenance
@@ -132,7 +161,8 @@ func (s *TenantSkillService) WithPlacer(p SessionPlacer) *TenantSkillService {
 
 // NewTenantSkillService wires the repositories and runtimes the install and
 // remove flows share. Redis may be nil; the local lock then serialises one
-// process only.
+// process only. pluginLookup may be nil; with one, catalogs a plugin install
+// owns are marked in listings and refuse direct deletion.
 func NewTenantSkillService(
 	skillsRepo repository.TenantSkillRepository,
 	configsRepo repository.TenantSandboxConfigRepository,
@@ -147,6 +177,7 @@ func NewTenantSkillService(
 	streams interfaces.StreamManager,
 	messages interfaces.MessageRepository,
 	host HostSandboxManager,
+	pluginLookup interfaces.PluginOwnershipLookup,
 ) *TenantSkillService {
 	return &TenantSkillService{
 		skills:            skillsRepo,
@@ -162,6 +193,7 @@ func NewTenantSkillService(
 		streams:           streams,
 		messages:          messages,
 		host:              host,
+		pluginLookup:      pluginLookup,
 		now:               time.Now,
 		cleanupTimeout:    installCleanupTimeout,
 		snapshotRetention: skillSnapshotRetention,

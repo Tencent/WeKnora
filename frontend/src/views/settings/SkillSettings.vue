@@ -25,12 +25,12 @@
 
     <template v-else>
       <Teleport to="#toolbox-toolbar" defer>
-        <t-input v-if="catalog.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
+        <t-input v-if="manageableCatalog.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
           :aria-label="$t('menu.search')" clearable>
           <template #prefix-icon><t-icon name="search" size="16px" /></template>
         </t-input>
       </Teleport>
-      <div v-if="catalog.length === 0" class="empty-state">
+      <div v-if="manageableCatalog.length === 0" class="empty-state">
         <t-empty :description="skillText('emptyDesc')" />
         <p v-if="skillConfigs.length === 0" class="empty-hint">
           {{ $t('settings.skills.emptyNoSandboxHint') }}
@@ -74,8 +74,9 @@
                     :aria-label="$t('settings.sandbox.skillFiles')" @click="openCatalogFiles(item)">
                     <folder-icon size="14px" />
                   </button>
-                  <button v-if="canDelete(item)" type="button" class="skill-card__icon-btn skill-card__icon-btn--danger"
-                    :disabled="deletingId === item.id" :title="$t('settings.skills.deleteCatalog')"
+                  <button v-if="showDelete(item)" type="button" class="skill-card__icon-btn skill-card__icon-btn--danger"
+                    :disabled="deletingId === item.id || !!item.plugin"
+                    :title="item.plugin ? $t('settings.plugins.managedByHint') : $t('settings.skills.deleteCatalog')"
                     :aria-label="$t('settings.skills.deleteCatalog')" @click="askDelete(item)">
                     <delete-icon size="14px" />
                   </button>
@@ -452,7 +453,10 @@ const scriptsDisabled = ref(false)
 const policySaving = ref(false)
 const catalog = ref<SkillCatalogItem[]>([])
 const query = ref('')
-const filteredCatalog = computed(() => catalog.value.filter((item) => matchesResourceQuery(item, query.value)))
+// Plugin installs stay in the skill catalog so agents can call them. This
+// page only lists skills added here.
+const manageableCatalog = computed(() => catalog.value.filter((item) => !item.plugin))
+const filteredCatalog = computed(() => manageableCatalog.value.filter((item) => matchesResourceQuery(item, query.value)))
 const focusedCatalogId = ref('')
 const deletingId = ref('')
 const showAdd = ref(false)
@@ -584,7 +588,11 @@ function liveInstalls(item: SkillCatalogItem): SkillCatalogInstall[] {
 }
 
 function canDelete(item: SkillCatalogItem): boolean {
-  return liveInstalls(item).length === 0
+  return !item.plugin && liveInstalls(item).length === 0
+}
+
+function showDelete(item: SkillCatalogItem): boolean {
+  return canDelete(item) || !!item.plugin
 }
 
 function targetsFor(item: SkillCatalogItem): SandboxConfigRecord[] {
@@ -960,6 +968,7 @@ function openCatalogFiles(item: SkillCatalogItem) {
 }
 
 function askDelete(item: SkillCatalogItem) {
+  if (item.plugin) return
   if (!canDelete(item)) {
     MessagePlugin.warning(skillText('deleteCatalogBlocked'))
     return
@@ -1231,6 +1240,7 @@ async function confirmInstall() {
 }
 
 async function removeCatalog(item: SkillCatalogItem) {
+  if (item.plugin) return
   if (!canDelete(item)) {
     MessagePlugin.warning(t('settings.skills.deleteCatalogBlocked'))
     return
@@ -1248,7 +1258,7 @@ async function removeCatalog(item: SkillCatalogItem) {
 }
 
 function catalogBusy(): boolean {
-  return catalog.value.some((item) =>
+  return manageableCatalog.value.some((item) =>
     liveInstalls(item).some((inst) => inst.status === 'installing' || inst.status === 'removing'),
   )
 }
@@ -1275,7 +1285,7 @@ async function loadCatalog(silent = false) {
   try {
     const res = await listSkillCatalog()
     catalog.value = res?.data || []
-    emit('count', catalog.value.length)
+    emit('count', manageableCatalog.value.length)
   } catch (e: any) {
     if (!silent) MessagePlugin.error(e?.message || t('settings.skills.loadFailed'))
   } finally {

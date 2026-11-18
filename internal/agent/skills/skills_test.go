@@ -101,7 +101,7 @@ func TestSkillValidation(t *testing.T) {
 			skillName:   "My Skill",
 			description: "A skill",
 			wantErr:     true,
-			errContains: "letters, numbers, hyphens, and underscores",
+			errContains: "letters, numbers, hyphens, underscores, and dots",
 		},
 		{
 			name:        "underscore is allowed",
@@ -116,11 +116,10 @@ func TestSkillValidation(t *testing.T) {
 			wantErr:     false,
 		},
 		{
-			name:        "reserved word in name",
-			skillName:   "my-claude-skill",
-			description: "A skill",
-			wantErr:     true,
-			errContains: "reserved word",
+			name:        "claude and anthropic are ordinary name words",
+			skillName:   "claude-code-setup__claude-automation-recommender",
+			description: "Recommend automations. Usage: <the problem>",
+			wantErr:     false,
 		},
 		{
 			name:        "empty description",
