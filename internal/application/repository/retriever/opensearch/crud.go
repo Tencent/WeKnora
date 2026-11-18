@@ -27,7 +27,25 @@ import (
 // dim-less keywords index). Missing "chunk_enabled" → IndexInfo's own
 // IsEnabled field is used as-is.
 
-// Save indexes a single chunk. Idempotent: _id is set to chunk_id so
+// documentIDFor returns the OpenSearch _id for one index document.
+//
+// A chunk is not a single index entry: the service layer writes the chunk
+// text plus each generated question (and, in the separate FAQ index mode,
+// each similar question) as documents that share ChunkID and differ only in
+// SourceID. Keying _id on ChunkID made every write replace the previous one,
+// silently dropping the chunk text and all but one question (#5608).
+// SourceID is unique per document and stable across re-indexes, so it keeps
+// Save/BatchSave idempotent while leaving each entry its own _id. Deletes
+// are unaffected: DeleteByChunkIDList/DeleteBySourceIDList filter on the
+// chunk_id/source_id fields, not on _id.
+func documentIDFor(info *types.IndexInfo) string {
+	if info.SourceID != "" {
+		return info.SourceID
+	}
+	return info.ChunkID
+}
+
+// Save indexes a single chunk. Idempotent: _id keys on source_id so
 // re-indexing the same chunk overwrites instead of creating a duplicate.
 func (r *Repository) Save(
 	ctx context.Context,
@@ -59,7 +77,7 @@ func (r *Repository) Save(
 	}
 	req := osapi.IndexReq{
 		Index:      targetIndex,
-		DocumentID: info.ChunkID, // _id = chunk_id (idempotent)
+		DocumentID: documentIDFor(info), // _id = source_id (unique per doc, idempotent)
 		Body:       bytes.NewReader(doc),
 	}
 	resp, err := r.client.Index(ctx, req)
@@ -153,7 +171,7 @@ func buildBulkBody(alias string, infos []*types.IndexInfo, emb [][]float32, para
 		action := map[string]any{
 			"index": map[string]any{
 				"_index": alias,
-				"_id":    info.ChunkID,
+				"_id":    documentIDFor(info),
 			},
 		}
 		actionJSON, err := json.Marshal(action)
