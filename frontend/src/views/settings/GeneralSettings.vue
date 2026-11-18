@@ -229,8 +229,11 @@ onMounted(async () => {
   // 从 localStorage 加载语言设置
   const savedLocale = localStorage.getItem('locale')
   if (savedLocale) {
-    const applied = await setI18nLanguage(savedLocale)
-    localLanguage.value = applied
+    try {
+      localLanguage.value = await setI18nLanguage(savedLocale)
+    } catch {
+      localLanguage.value = locale.value
+    }
   } else {
     localLanguage.value = locale.value
   }
@@ -238,8 +241,14 @@ onMounted(async () => {
 
 // 处理语言变化
 const handleLanguageChange = async () => {
-  localLanguage.value = await setI18nLanguage(localLanguage.value)
-  MessagePlugin.success(t('language.languageSaved'))
+  try {
+    localLanguage.value = await setI18nLanguage(localLanguage.value)
+    MessagePlugin.success(t('language.languageSaved'))
+  } catch (err) {
+    localLanguage.value = locale.value
+    console.error('[WeKnora] Failed to switch language:', err)
+    MessagePlugin.error(t('common.failed'))
+  }
 }
 
 // 处理主题变化

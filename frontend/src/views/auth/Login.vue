@@ -520,9 +520,14 @@ const toggleLanguageMenu = () => {
 
 // Select language
 const selectLanguage = async (lang: string) => {
-  await setI18nLanguage(lang)
   showLanguageMenu.value = false
-  MessagePlugin.success(t('language.languageSaved'))
+  try {
+    await setI18nLanguage(lang)
+    MessagePlugin.success(t('language.languageSaved'))
+  } catch (err) {
+    console.error('[WeKnora] Failed to switch language:', err)
+    MessagePlugin.error(t('common.failed'))
+  }
 }
 
 // Close language menu when clicking outside

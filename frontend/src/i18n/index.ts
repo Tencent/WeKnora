@@ -103,6 +103,33 @@ const i18n = createI18n({
 
 const loadedLocales = new Set<SupportedMainLocale>()
 const inflightLoads = new Map<SupportedMainLocale, Promise<SupportedMainLocale>>()
+const embedSeedMessages = new Map<SupportedMainLocale, Record<string, unknown>>()
+
+function mergePlainRecords(
+  base: Record<string, unknown>,
+  override: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base }
+  for (const [key, val] of Object.entries(override)) {
+    const prev = out[key]
+    if (
+      val &&
+      typeof val === 'object' &&
+      !Array.isArray(val) &&
+      prev &&
+      typeof prev === 'object' &&
+      !Array.isArray(prev)
+    ) {
+      out[key] = mergePlainRecords(
+        prev as Record<string, unknown>,
+        val as Record<string, unknown>,
+      )
+    } else {
+      out[key] = val
+    }
+  }
+  return out
+}
 
 export function isLocaleLoaded(locale: string): boolean {
   return loadedLocales.has(normalizeMainLocale(locale))
@@ -119,7 +146,9 @@ export async function loadLocaleMessages(rawLocale: string): Promise<SupportedMa
   }
   const task = LOCALE_LOADERS[target]()
     .then((mod) => {
-      i18n.global.setLocaleMessage(target, mod.default as never)
+      const embedSeed = embedSeedMessages.get(target)
+      const bundle = embedSeed ? mergePlainRecords(mod.default, embedSeed) : mod.default
+      i18n.global.setLocaleMessage(target, bundle as never)
       loadedLocales.add(target)
       return target
     })
@@ -128,6 +157,33 @@ export async function loadLocaleMessages(rawLocale: string): Promise<SupportedMa
     })
   inflightLoads.set(target, task)
   return task
+}
+
+export function syncEmbedSharedLocale(rawLocale: string): SupportedMainLocale {
+  const target = normalizeMainLocale(rawLocale)
+  i18n.global.locale.value = target
+  void loadLocaleMessages(target).catch(() => {
+    // Non-fatal on embed: seeded EMBED_MESSAGES remain available offline.
+  })
+  return target
+}
+
+export function seedEmbedLocaleMessages(
+  bundles: Partial<Record<SupportedMainLocale, Record<string, unknown>>>,
+  activeLocale: string,
+): SupportedMainLocale {
+  for (const locale of SUPPORTED_MAIN_LOCALES) {
+    const seed = bundles[locale]
+    if (!seed) continue
+    embedSeedMessages.set(locale, seed)
+    if (loadedLocales.has(locale)) {
+      const current = i18n.global.getLocaleMessage(locale) as unknown as Record<string, unknown>
+      i18n.global.setLocaleMessage(locale, mergePlainRecords(current, seed) as never)
+    } else {
+      i18n.global.setLocaleMessage(locale, seed as never)
+    }
+  }
+  return syncEmbedSharedLocale(activeLocale)
 }
 
 export async function setI18nLanguage(rawLocale: string): Promise<SupportedMainLocale> {
@@ -142,10 +198,16 @@ let bootstrapPromise: Promise<SupportedMainLocale> | null = null
 export function initI18n(): Promise<SupportedMainLocale> {
   if (!bootstrapPromise) {
     const active = normalizeMainLocale(i18n.global.locale.value || savedLocale)
-    bootstrapPromise = loadLocaleMessages(active).then((loaded) => {
-      i18n.global.locale.value = loaded
-      return loaded
-    })
+    const task = loadLocaleMessages(active)
+      .then((loaded) => {
+        i18n.global.locale.value = loaded
+        return loaded
+      })
+      .catch((err) => {
+        bootstrapPromise = null
+        throw err
+      })
+    bootstrapPromise = task
   }
   return bootstrapPromise
 }
@@ -154,13 +216,15 @@ watch(
   () => i18n.global.locale.value,
   (next) => {
     if (next && !isEmbedSurface()) {
-      void loadLocaleMessages(next)
+      void loadLocaleMessages(next).catch(() => {})
     }
   },
 )
 
 if (typeof window !== 'undefined' && !isEmbedSurface()) {
-  void initI18n()
+  void initI18n().catch((err) => {
+    console.warn('[WeKnora] Initial locale bundle failed to preload; will retry on bootstrap:', err)
+  })
 }
 
 export default i18n

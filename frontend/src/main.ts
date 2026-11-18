@@ -39,6 +39,12 @@ async function bootstrap() {
   const pinia = createPinia();
   app.use(pinia);
 
+  try {
+    await initI18n();
+  } catch (err) {
+    console.error("[WeKnora] Failed to load initial locale bundle:", err);
+  }
+
   // Capabilities (can_create_tenant, auto_accept_invitation) are not cached
   // in localStorage — reconcile once before first paint when a session exists.
   const authStore = useAuthStore();
@@ -50,7 +56,6 @@ async function bootstrap() {
     }
   }
 
-  await initI18n();
   app.use(router);
   app.use(i18n);
 

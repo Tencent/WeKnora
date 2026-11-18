@@ -68,6 +68,29 @@ test('lazy i18n loads active locale on demand and switches languages cleanly', a
   await setI18nLanguage('zh-CN')
 })
 
+test('embed i18n synchronizes shared utility i18n synchronously and merges full active locale', async () => {
+  const embedMod = await import('./embed.ts')
+
+  embedMod.applyEmbedLocale('ru-RU')
+  assert.equal(i18n.global.locale.value, 'ru-RU')
+  // Seeded EMBED_MESSAGES are available immediately before awaiting dynamic chunk load.
+  assert.equal(
+    i18n.global.t('embedPublish.copyCode'),
+    embedMod.EMBED_MESSAGES['ru-RU'].embedPublish.copyCode,
+  )
+
+  await loadLocaleMessages('ru-RU')
+  // Shared markdown/mermaid/tool/error utilities read from @/i18n on /embed/ too.
+  assert.notEqual(i18n.global.t('mermaid.diagram'), 'mermaid.diagram')
+  assert.notEqual(i18n.global.t('tools.searchKnowledge'), 'tools.searchKnowledge')
+  assert.equal(
+    i18n.global.t('embedPublish.copyCode'),
+    embedMod.EMBED_MESSAGES['ru-RU'].embedPublish.copyCode,
+  )
+
+  await setI18nLanguage('zh-CN')
+})
+
 test('normalizeMainLocale resolves BCP-47 tags and Traditional Chinese variants', () => {
   assert.equal(normalizeMainLocale('zh-CN'), 'zh-CN')
   assert.equal(normalizeMainLocale('zh'), 'zh-CN')
