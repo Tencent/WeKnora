@@ -78,6 +78,9 @@ func TestTransferAPICapabilitiesRemainSeparate(t *testing.T) {
 		{KBTransferMove, "ingest", false, []string{"source", "target"}, true},
 		{KBTransferMove, "manage_kbs", false, []string{"source", "target"}, false},
 		{KBTransferMove, "ingest", false, []string{"source"}, false},
+		{KBTransferCopy, "ingest", false, []string{"source", "target"}, true},
+		{KBTransferCopy, "ingest", false, []string{"target"}, false},
+		{KBTransferCopy, "manage_kbs", false, []string{"source", "target"}, false},
 		{KBTransferClone, "manage_kbs", true, []string{"source"}, true},
 	} {
 		t.Run(

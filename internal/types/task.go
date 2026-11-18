@@ -82,7 +82,7 @@ var queueDefinitions = []QueueDefinition{
 	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{TypeDataSourceSync}},
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
-		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
+		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove, TypeKnowledgeCopy,
 	}},
 	{Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1, TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize}},
 }
@@ -243,6 +243,7 @@ const (
 	TypeKnowledgeListDelete      = "knowledge:list_delete"      // 批量删除知识任务
 	TypeKnowledgeListReparse     = "knowledge:list_reparse"     // 批量重解析知识任务
 	TypeKnowledgeMove            = "knowledge:move"             // 知识移动任务
+	TypeKnowledgeCopy            = "knowledge:copy"             // 知识复制任务
 	TypeDataTableSummary         = "datatable:summary"          // 表格摘要任务
 	TypeImageMultimodal          = "image:multimodal"           // 图片多模态处理任务（OCR + VLM Caption）
 	TypeKnowledgePostProcess     = "knowledge:post_process"     // 知识后处理任务（统一调度）
@@ -472,6 +473,10 @@ type KnowledgeMovePayload struct {
 	Mode         string        `json:"mode"` // "reuse_vectors" or "reparse"
 	Initiator    TaskInitiator `json:"initiator,omitempty"`
 }
+
+// KnowledgeCopyPayload has the same queue contract as a move. The task type
+// identifies the copy, and the copy worker accepts reuse_vectors only.
+type KnowledgeCopyPayload KnowledgeMovePayload
 
 // KnowledgeMoveProgress represents the progress of a knowledge move task
 type KnowledgeMoveProgress struct {

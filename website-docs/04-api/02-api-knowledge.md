@@ -791,6 +791,24 @@ curl -X POST $BASE/api/v1/knowledge/move -H "Authorization: Bearer $TOKEN" \
   -d '{"knowledge_ids":["k-1"],"source_kb_id":"kb-1","target_kb_id":"kb-2","mode":"reuse_vectors"}'
 ```
 
+### POST /api/v1/knowledge/copy
+
+异步将 1–20 篇已完成解析的文档复制到同一工作区的另一个文档知识库。保留源文档及其引用，目标副本拥有独立的文件、分块和索引。源库和目标库必须使用相同的嵌入模型、分块配置、搜索索引开关、向量库及文件存储实例。当前支持 `reuse_vectors`，目标库已有相同文件时该项报告冲突。
+
+用户需对源库和目标库均具备移动文档所要求的权限。API Key 需有 `ingest` 或 full 权限，并覆盖两个知识库。
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge/copy" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"knowledge_ids":["k-1"],"source_kb_id":"kb-1","target_kb_id":"kb-2","mode":"reuse_vectors"}'
+```
+
+响应中的 `data.task_id` 用于查询复制进度。
+
+### GET /api/v1/knowledge/copy/progress/:task_id
+
+查询复制任务的 `status`、`processed`、`failed` 和错误信息。调用方须能读取源库和目标库。API Key 需有 `retrieve` 或 full 权限，并覆盖两个知识库。
+
 ## 画廊与图片属性 {#image-gallery-api}
 
 画廊读取要求 Viewer+、目标知识库可读；API Key 需 `retrieve` 或 full，并遵守知识库范围。画廊与图片向量开关独立，列表返回已提取图片的描述、OCR 和来源。
