@@ -624,6 +624,9 @@ func markdownItem(
 	if err != nil {
 		return types.FetchedItem{}, err
 	}
+	// Root-relative attachment links resolve against the WeKnora origin in
+	// the browser and fail; point them at the Confluence site (#5445).
+	markdown = absolutizeAttachmentLinks(markdown, client.cfg.baseURL)
 	if strings.TrimSpace(markdown) == "" {
 		markdown = "# " + summary.Title + "\n"
 	}

@@ -73,3 +73,33 @@ func TestConvertPageHTMLWithoutTables(t *testing.T) {
 		t.Errorf("unexpected non-table Markdown: %q", got)
 	}
 }
+
+// Issue: https://github.com/Tencent/WeKnora/issues/5445
+func TestAbsolutizeAttachmentLinks(t *testing.T) {
+	base := "https://confluence.test/wiki"
+	in := "[Download](/download/attachments/123/example.pdf?version=1)"
+	out := absolutizeAttachmentLinks(in, base)
+	want := "[Download](https://confluence.test/download/attachments/123/example.pdf?version=1)"
+	if out != want {
+		t.Fatalf("root-relative attachment link not resolved: %s", out)
+	}
+
+	in2 := "[img](/wiki/download/attachments/9/a.png) and [doc](/download/attachments/7/b.pdf)"
+	out2 := absolutizeAttachmentLinks(in2, "https://team.atlassian.net/wiki")
+	if !strings.Contains(out2, "(https://team.atlassian.net/wiki/download/attachments/9/a.png)") {
+		t.Fatalf("/wiki prefix attachment not resolved: %s", out2)
+	}
+	if !strings.Contains(out2, "(https://team.atlassian.net/download/attachments/7/b.pdf)") {
+		t.Fatalf("second attachment not resolved: %s", out2)
+	}
+
+	absolute := "[ext](https://elsewhere.test/download/attachments/1/x.png)"
+	if got := absolutizeAttachmentLinks(absolute, base); got != absolute {
+		t.Fatalf("absolute link must pass through: %s", got)
+	}
+
+	unrelated := "[page](/spaces/TEAM/pages/12345)"
+	if got := absolutizeAttachmentLinks(unrelated, base); got != unrelated {
+		t.Fatalf("unrelated path must pass through: %s", got)
+	}
+}

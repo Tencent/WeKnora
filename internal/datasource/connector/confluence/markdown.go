@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -17,6 +18,50 @@ var nestedTableRow = regexp.MustCompile(`(?i)<tr\b`)
 // convertPageHTML protects tables before the default HTML converter flattens
 // their rows and cells. The shared normalizer renders simple tables as GFM and
 // keeps complex tables as row-separated HTML.
+// attachmentLinkPrefixes are the Confluence attachment paths that may remain
+// root-relative in a page body. Anything else keeps its original form.
+var attachmentLinkPrefixes = []string{"/download/attachments/", "/wiki/download/attachments/"}
+
+// absolutizeAttachmentLinks rewrites root-relative attachment hrefs in
+// converted Markdown against the Confluence origin. A link like
+// [text](/download/attachments/123/example.pdf?version=1) resolves against
+// the WeKnora origin in the browser and fails (#5445); resolving it here
+// keeps the filename and query parameters and lets Confluence enforce
+// access with the reader's own session. Absolute URLs and unrelated paths
+// pass through untouched.
+func absolutizeAttachmentLinks(markdown, baseURL string) string {
+	if strings.TrimSpace(markdown) == "" || strings.TrimSpace(baseURL) == "" {
+		return markdown
+	}
+	base, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return markdown
+	}
+	origin := base.Scheme + "://" + base.Host
+	out := markdown
+	for _, prefix := range attachmentLinkPrefixes {
+		target := "](" + prefix
+		for {
+			at := strings.Index(out, target)
+			if at < 0 {
+				break
+			}
+			open := at + 1
+			closeAt := strings.IndexByte(out[open:], ')')
+			if closeAt < 0 {
+				break
+			}
+			href := out[open+1 : open+closeAt]
+			if strings.HasPrefix(href, prefix) {
+				out = out[:open+1] + origin + href + out[open+closeAt:]
+			} else {
+				break
+			}
+		}
+	}
+	return out
+}
+
 func convertPageHTML(content string) (string, error) {
 	if !strings.Contains(strings.ToLower(content), "<table") {
 		return htmltomd.ConvertString(content)
