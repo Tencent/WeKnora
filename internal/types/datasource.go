@@ -31,6 +31,7 @@ const (
 	ConnectorTypeLarkDrive   = "lark_drive"
 	ConnectorTypeNotion      = "notion"
 	ConnectorTypeConfluence  = "confluence"
+	ConnectorTypeJira        = "jira"
 	ConnectorTypeYuque       = "yuque"
 	ConnectorTypeGitHub      = "github"
 	ConnectorTypeGoogleDrive = "google_drive"
