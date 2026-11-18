@@ -353,3 +353,40 @@ class MHTMLParserTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class MHTMLUnknownCharsetTest(unittest.TestCase):
+    '''
+    Issue: https://github.com/Tencent/WeKnora/issues/5470
+
+    An unknown MIME charset must not silently drop bytes: the document
+    declares its real encoding in a <meta charset> tag, and the parser
+    must honor that declaration instead of guessing UTF-8.
+    '''
+
+    def _parse_unknown_charset(self):
+        meta = b'"windows-1252"'
+        payload = (
+            b"Content-Type: text/html; charset=x-unknown\r\n"
+            b"MIME-Version: 1.0\r\n\r\n"
+            b"<html><head><meta charset=" + meta + b"></head>"
+            b"<body><p>Le caf" + bytes([0xE9]) + b" est ouvert.</p></body></html>"
+        )
+        parser = MHTMLParser(file_name="test.mhtml")
+        return parser.parse_into_text(payload)
+
+    def test_unknown_mime_charset_honors_meta_declaration(self):
+        doc = self._parse_unknown_charset()
+        needle = "Le café est ouvert."
+        self.assertIn(needle, doc.content)
+        self.assertNotIn("Le caf est ouvert", doc.content)
+
+    def test_known_charset_still_decodes_directly(self):
+        utf8_text = "Content-Type: text/html; charset=utf-8\r\n"
+        utf8_text += "MIME-Version: 1.0\r\n\r\n"
+        utf8_text += "<html><body><p>Le café est ouvert.</p></body></html>"
+        parser = MHTMLParser(file_name="test.mhtml")
+        doc = parser.parse_into_text(utf8_text.encode("utf-8"))
+        needle = "Le café est ouvert."
+        self.assertIn(needle, doc.content)

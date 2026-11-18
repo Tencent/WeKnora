@@ -125,9 +125,14 @@ class MHTMLParser(BaseParser):
                 charset = part.get_content_charset()
                 if charset:
                     try:
-                        html_text = payload.decode(charset, errors="ignore")
-                    except LookupError:
-                        html_text = payload.decode("utf-8", errors="ignore")
+                        html_text = payload.decode(charset, errors="strict")
+                    except (LookupError, UnicodeDecodeError):
+                        # An unknown MIME charset (x-unknown, vendor aliases) must not
+                        # silently drop bytes via errors="ignore": the document itself
+                        # declares its encoding in a <meta charset> tag or a BOM, and
+                        # UnicodeDammit honors both (#5470). Falls back to the same
+                        # absent-charset path instead of guessing UTF-8.
+                        html_text = UnicodeDammit(payload, is_html=True).unicode_markup or ""
                 else:
                     # Keep the bytes until HTML declarations and BOMs have
                     # been inspected; decoding as UTF-8 first loses text.
