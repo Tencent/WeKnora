@@ -25,6 +25,7 @@ func Builtins() []*Definition {
 		newMoonshotProvider(),
 		newNovitaProvider(),
 		newNvidiaProvider(),
+		newOCIEnterpriseAIProvider(),
 		newOpenaiProvider(),
 		newOpenrouterProvider(),
 		newPineconeProvider(),
