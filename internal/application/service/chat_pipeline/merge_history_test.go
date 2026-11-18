@@ -71,12 +71,26 @@ func historyRerankChatManage() *types.ChatManage {
 		PipelineState: types.PipelineState{
 			RewriteQuery: "do schools give students yearly psychological screening",
 			RerankResult: []*types.SearchResult{
-				{ID: "fresh-1", Content: "implementation rules of the provincial school safety regulation notice", Score: 0.7},
+				{
+					ID:      "fresh-1",
+					Content: "implementation rules of the provincial school safety regulation notice",
+					Score:   0.7,
+				},
 			},
 			History: []*types.History{{
 				KnowledgeReferences: []*types.SearchResult{
-					{ID: "hist-food", Content: "school food safety and nutrition management regulation: schools must provide safe meals to students and run yearly canteen inspections", Score: 0.8},
-					{ID: "hist-mental", Content: "mental health plan: schools give students yearly psychological screening and keep records confidential", Score: 0.8},
+					{
+						ID:    "hist-food",
+						Score: 0.8,
+						Content: "school food safety and nutrition management regulation: schools must provide " +
+							"safe meals to students and run yearly canteen inspections",
+					},
+					{
+						ID:    "hist-mental",
+						Score: 0.8,
+						Content: "mental health plan: schools give students yearly psychological screening " +
+							"and keep records confidential",
+					},
 				},
 			}},
 		},
@@ -100,7 +114,8 @@ func TestInjectHistoryResultsReranksHistoryCandidates(t *testing.T) {
 	}}
 	cm := historyRerankChatManage()
 
-	if err := plugin.OnEvent(context.Background(), types.CHUNK_MERGE, cm, func() *PluginError { return nil }); err != nil {
+	if err := plugin.OnEvent(context.Background(), types.CHUNK_MERGE, cm,
+		func() *PluginError { return nil }); err != nil {
 		t.Fatalf("OnEvent: %v", err)
 	}
 
@@ -125,7 +140,8 @@ func TestInjectHistoryResultsWithoutRerankModelKeepsLegacyFilter(t *testing.T) {
 	cm := historyRerankChatManage()
 	cm.RerankModelID = ""
 
-	if err := plugin.OnEvent(context.Background(), types.CHUNK_MERGE, cm, func() *PluginError { return nil }); err != nil {
+	if err := plugin.OnEvent(context.Background(), types.CHUNK_MERGE, cm,
+		func() *PluginError { return nil }); err != nil {
 		t.Fatalf("OnEvent: %v", err)
 	}
 
@@ -143,7 +159,8 @@ func TestInjectHistoryResultsModelFailureKeepsLegacyFilter(t *testing.T) {
 	}}
 	cm := historyRerankChatManage()
 
-	if err := plugin.OnEvent(context.Background(), types.CHUNK_MERGE, cm, func() *PluginError { return nil }); err != nil {
+	if err := plugin.OnEvent(context.Background(), types.CHUNK_MERGE, cm,
+		func() *PluginError { return nil }); err != nil {
 		t.Fatalf("OnEvent: %v", err)
 	}
 
