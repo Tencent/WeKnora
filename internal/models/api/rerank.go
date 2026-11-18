@@ -35,13 +35,17 @@ const (
 	// RerankVolcengineKnowledge is Volcengine's managed Knowledge Service
 	// rerank, reached through the vikingdb SDK for the same reason.
 	RerankVolcengineKnowledge RerankAPI = "volcengine-knowledge"
+	// RerankOCI is OCI Generative AI's native rerankText action. It is
+	// built by the rerank package because the request signer comes from the
+	// row's credentials, not from a bearer key.
+	RerankOCI RerankAPI = "oci-rerank"
 )
 
 // Known reports whether the value names a protocol this build implements.
 func (a RerankAPI) Known() bool {
 	switch a {
 	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI,
-		RerankTencentLKEAP, RerankVolcengineKnowledge:
+		RerankTencentLKEAP, RerankVolcengineKnowledge, RerankOCI:
 		return true
 	}
 	return false

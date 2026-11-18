@@ -37,6 +37,17 @@ func TestApplyCustomHeaders_SkipReserved(t *testing.T) {
 	}
 }
 
+func TestApplyCustomHeaders_KeepsSignedHeaders(t *testing.T) {
+	// OCI request signatures cover these; a custom value would break them.
+	req, _ := http.NewRequest("POST", "https://example.com", nil)
+	req.Header.Set("Date", "signed-date")
+	req.Header.Set("X-Content-Sha256", "signed-digest")
+	ApplyCustomHeaders(req, map[string]string{"date": "other", "x-content-sha256": "other"})
+	if req.Header.Get("Date") != "signed-date" || req.Header.Get("X-Content-Sha256") != "signed-digest" {
+		t.Fatalf("signed headers overwritten: %v", req.Header)
+	}
+}
+
 func TestApplyCustomHeaders_NilSafe(t *testing.T) {
 	ApplyCustomHeaders(nil, map[string]string{"x": "y"})
 	req, _ := http.NewRequest("GET", "https://example.com", nil)

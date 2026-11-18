@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
@@ -47,6 +48,9 @@ func TestEveryCatalogEmbeddingTransport(t *testing.T) {
 						AppSecret:                 "secret",
 						Dimensions:                256,
 						SupportsDimensionOverride: true,
+					}
+					if v.ID == providers.OCIGenAIID {
+						cfg.ExtraConfig, cfg.AppSecret = ociTestRow(t)
 					}
 					client, err := newRemoteEmbedder(cfg, nil)
 					require.NoError(t, err)

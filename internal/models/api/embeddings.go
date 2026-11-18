@@ -26,12 +26,15 @@ const (
 	EmbeddingArk EmbeddingAPI = "ark-embeddings"
 	// EmbeddingGoogle is Gemini's batchEmbedContents.
 	EmbeddingGoogle EmbeddingAPI = "google-embeddings"
+	// EmbeddingOCI is OCI Generative AI's native embedText action, signed
+	// with OCI IAM and scoped to a compartment.
+	EmbeddingOCI EmbeddingAPI = "oci-embeddings"
 )
 
 // Known reports whether the value names a protocol this build implements.
 func (a EmbeddingAPI) Known() bool {
 	switch a {
-	case EmbeddingOpenAI, EmbeddingDashScope, EmbeddingArk, EmbeddingGoogle:
+	case EmbeddingOpenAI, EmbeddingDashScope, EmbeddingArk, EmbeddingGoogle, EmbeddingOCI:
 		return true
 	}
 	return false

@@ -116,7 +116,17 @@
       <!-- Editing: real input + tiny action row beneath -->
       <template v-else>
         <div class="credential-edit">
-          <t-input v-model="drafts[field.key]" type="password"
+          <!-- File credential (e.g. a PEM private key): its text content is the value. -->
+          <div v-if="field.accept !== undefined" class="credential-file">
+            <t-button size="small" variant="outline" @click="pickFile(field)">
+              <template #icon><t-icon name="upload" /></template>
+              {{ t('credential.uploadFile') }}
+            </t-button>
+            <span v-if="fileNames[field.key]" class="credential-file-name">
+              {{ t('credential.fileLoaded', { name: fileNames[field.key] }) }}
+            </span>
+          </div>
+          <t-input v-else v-model="drafts[field.key]" type="password"
             :placeholder="field.placeholder ?? t('credential.inputPlaceholder')" :autocomplete="'new-password'"
             class="credential-edit-input" @enter="onSave(field)">
             <template #prefix-icon><t-icon name="lock-on" /></template>
@@ -147,6 +157,9 @@ export interface CredentialFieldDef<K extends string = string> {
   // Optional connector-specific placeholder shown only when the input is
   // visible (e.g. "ntn_xxxx" for Notion). Defaults to a generic "Enter value".
   placeholder?: string
+  // When set, the value is uploaded as a file (its text content) instead of
+  // typed; the string is the file picker's accept filter, e.g. ".pem".
+  accept?: string
 }
 
 export interface CredentialResourceApi<K extends string = string> {
@@ -253,7 +266,23 @@ function enterEdit(key: string) {
 // no async re-fetch needed, and no risk of staying stuck in 'editing'
 // because the previous implementation's refresh was a no-op when state
 // was already 'editing'.
+// File fields: read the chosen file as text into the draft; Save commits it.
+const fileNames = reactive<Record<string, string>>({})
+function pickFile(field: CredentialFieldDef) {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = field.accept ?? ''
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    drafts[field.key] = await file.text()
+    fileNames[field.key] = file.name
+  }
+  input.click()
+}
+
 function cancelEdit(key: string) {
+  fileNames[key] = ''
   drafts[key] = ''
   states[key] = props.meta?.[key as K]?.configured ? 'configured' : 'unconfigured'
 }
@@ -274,6 +303,7 @@ async function onSave(field: CredentialFieldDef) {
     }
     states[field.key] = updated[field.key as K]?.configured ? 'configured' : 'unconfigured'
     drafts[field.key] = ''
+    fileNames[field.key] = ''
     MessagePlugin.success(t('credential.savedToast'))
     emit('changed')
   } catch (err: any) {
@@ -521,5 +551,20 @@ onBeforeUnmount(() => {
     padding: 0 12px;
     font-size: var(--app-text-sm);
   }
+}
+
+.credential-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.credential-file-name {
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

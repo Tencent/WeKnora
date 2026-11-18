@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/cohererank"
 	"github.com/Tencent/WeKnora/internal/models/api/dashscoperank"
 	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
+	"github.com/Tencent/WeKnora/internal/models/api/ocigenai"
 	"github.com/Tencent/WeKnora/internal/models/api/pineconerank"
 	"github.com/Tencent/WeKnora/internal/models/api/teirank"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
@@ -211,6 +212,11 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		client, err = newLKEAPClient(config, resolved)
 	case api.RerankVolcengineKnowledge:
 		client, err = newVolcengineClient(config, resolved)
+	case api.RerankOCI:
+		var cfg ocigenai.Config
+		if cfg, err = ocigenai.NewConfig(endpoint, config.APIKey, config.AppSecret, config.ExtraConfig); err == nil {
+			client = ocigenai.NewReranker(cfg)
+		}
 	default:
 		return nil, fmt.Errorf("unsupported rerank api %q for provider %s", resolved.RerankAPI, vendor.ID)
 	}

@@ -623,6 +623,8 @@ export interface ModelProviderExtraField {
     model_types?: string[];
     // Secret values are never echoed back; they are stored as the app_secret credential.
     secret?: boolean;
+    // type "file": the picker's accept filter (e.g. ".pem"); the file's text is the value.
+    accept?: string;
 }
 
 // 厂商内置模型目录条目。Mirrors handler.ModelCatalogEntryDTO.

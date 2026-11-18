@@ -34,7 +34,7 @@ type ExtraField struct {
 	Key         string            `json:"key"`
 	Label       string            `json:"label"`
 	Labels      map[string]string `json:"labels,omitempty"`
-	Type        string            `json:"type"` // "string", "number", "boolean", "select", "password"
+	Type        string            `json:"type"` // "string", "number", "boolean", "select", "password", "file"
 	Required    bool              `json:"required"`
 	Default     string            `json:"default,omitempty"`
 	Placeholder string            `json:"placeholder,omitempty"`
@@ -45,6 +45,66 @@ type ExtraField struct {
 	ModelTypes []types.ModelType `json:"model_types,omitempty"`
 	// Secret marks values that must never be echoed back to the UI.
 	Secret bool `json:"secret,omitempty"`
+	// Accept lists the file types a "file" field offers (the HTML accept
+	// attribute, e.g. ".pem"). The file's text content is the value.
+	Accept string `json:"accept,omitempty"`
+	// Header, when set, sends the field's value as this HTTP header on every
+	// request (e.g. a project id the vendor reads from `OpenAI-Project`).
+	// Empty values send nothing; a user's custom header of the same name
+	// (compared case-insensitively) wins and also satisfies Required.
+	// VLM requests go through the chat client, so the header is resolved
+	// with the chat model type: restrict a header field to VLLM alone and it
+	// is required on save but never sent.
+	Header string `json:"header,omitempty"`
+}
+
+// AppliesTo reports whether the field is shown for a model type.
+func (f ExtraField) AppliesTo(modelType types.ModelType) bool {
+	if len(f.ModelTypes) == 0 {
+		return true
+	}
+	for _, mt := range f.ModelTypes {
+		if mt == modelType {
+			return true
+		}
+	}
+	return false
+}
+
+// MissingRequiredExtra returns the keys of required, non-secret extra fields
+// that a row for modelType leaves empty. Fields with a Default are satisfied by
+// it, and secret fields are skipped: their value is stored outside
+// extra_config (AppSecret) and checked where it is used. A header field is
+// also satisfied by a custom header of the same name, which older rows used
+// before the field existed.
+func (v *Definition) MissingRequiredExtra(
+	modelType types.ModelType, extra, customHeaders map[string]string,
+) []string {
+	var missing []string
+	for _, f := range v.ExtraFields {
+		if !f.Required || f.Secret || f.Default != "" || !f.AppliesTo(modelType) {
+			continue
+		}
+		if strings.TrimSpace(extra[f.Key]) != "" {
+			continue
+		}
+		if f.Header != "" && HeaderValue(customHeaders, f.Header) != "" {
+			continue
+		}
+		missing = append(missing, f.Key)
+	}
+	return missing
+}
+
+// HeaderValue returns the trimmed value of the header named name, matched
+// case-insensitively as HTTP header names are.
+func HeaderValue(headers map[string]string, name string) string {
+	for k, v := range headers {
+		if strings.EqualFold(k, name) {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 // CredentialLabel renames the primary credential input for one vendor.

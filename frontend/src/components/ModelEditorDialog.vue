@@ -346,11 +346,20 @@
           -->
           <div v-if="secretExtraField && !isEdit && formData.provider !== 'weknoracloud'" class="form-item">
             <label class="form-label" :class="{ required: secretExtraField.required }">{{ extraFieldDisplayLabel(secretExtraField) }}</label>
-            <t-input v-model="formData.appSecret" type="password"
-              :placeholder="secretExtraField.placeholder || ''" autocomplete="new-password" spellcheck="false">
+            <div v-if="secretExtraField.type === 'file'" class="secret-file">
+              <t-button variant="outline" @click="pickSecretFile">
+                <template #icon><t-icon name="upload" /></template>
+                {{ t('credential.uploadFile') }}
+              </t-button>
+              <span v-if="secretFileName" class="secret-file-name">
+                {{ t('credential.fileLoaded', { name: secretFileName }) }}
+              </span>
+            </div>
+            <t-input v-else v-model="formData.appSecret" type="password"
+              :placeholder="extraFieldDisplayPlaceholder(secretExtraField)" autocomplete="new-password" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
-            <p v-if="secretExtraField.placeholder" class="form-desc">{{ secretExtraField.placeholder }}</p>
+            <p v-if="secretExtraField.placeholder" class="form-desc">{{ extraFieldDisplayPlaceholder(secretExtraField) }}</p>
           </div>
 
           <!-- 厂商声明的其余额外字段：按 type 动态渲染，值存入 extra_config[key] -->
@@ -855,6 +864,20 @@ const secretExtraField = computed<ModelProviderExtraField | undefined>(() =>
 const plainExtraFields = computed<ModelProviderExtraField[]>(() =>
   visibleExtraFields.value.filter(field => !isSecretExtraField(field)),
 )
+// A "file" secret field (OCI API signing key): the file's text becomes app_secret.
+const secretFileName = ref('')
+const pickSecretFile = () => {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = secretExtraField.value?.accept ?? ''
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    formData.value.appSecret = await file.text()
+    secretFileName.value = file.name
+  }
+  input.click()
+}
 
 /** extra_config keys that belong to the connection, not to the vendor. */
 const VENDOR_NEUTRAL_EXTRA_CONFIG_KEYS = ['api', 'remote_model_name'] as const
@@ -1176,12 +1199,17 @@ const modelTypeIcon = computed(() => {
 // is stored as the app_secret credential, so it shows up here in edit mode.
 const credentialFields = computed<CredentialFieldDef<ModelCredentialField>[]>(() => {
   const fields: CredentialFieldDef<ModelCredentialField>[] = [
-    { key: 'api_key', label: t('model.editor.apiKeyOptional') as string },
+    // The vendor's own name for its first credential (SecretId, passphrase, ...).
+    { key: 'api_key', label: apiKeyLabel.value as string },
   ]
   if (formData.value.provider === 'weknoracloud') {
     fields.push({ key: 'app_secret', label: 'App Secret' })
   } else if (secretExtraField.value) {
-    fields.push({ key: 'app_secret', label: extraFieldDisplayLabel(secretExtraField.value) })
+    fields.push({
+      key: 'app_secret',
+      label: extraFieldDisplayLabel(secretExtraField.value),
+      ...(secretExtraField.value.type === 'file' ? { accept: secretExtraField.value.accept ?? '' } : {}),
+    })
   }
   return fields
 })
@@ -1336,6 +1364,8 @@ const formData = ref<ModelFormData>({
   customHeaders: [],
   appSecret: '',
 })
+// Clear the chosen key file's name whenever the form drops its secret.
+watch(() => formData.value.appSecret, value => { if (!value) secretFileName.value = '' })
 
 const rules = computed(() => ({
   modelName: [
@@ -2239,6 +2269,20 @@ const handleCancel = () => {
 </script>
 
 <style lang="less" scoped>
+.secret-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secret-file-name {
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .provider-doc-link {
   margin-top: 6px;
 }

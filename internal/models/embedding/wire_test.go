@@ -108,6 +108,11 @@ func answer(path string, body map[string]any) string {
 			parts = append(parts, fmt.Sprintf(`{"values":[%d]}`, itemLen(part)))
 		}
 		return `{"embeddings":[` + strings.Join(parts, ",") + `]}`
+	case strings.HasSuffix(path, "/actions/embedText"): // OCI Generative AI: vectors in input order
+		for _, input := range body["inputs"].([]any) {
+			parts = append(parts, fmt.Sprintf("[%d]", itemLen(input)))
+		}
+		return `{"id":"r","embeddings":[` + strings.Join(parts, ",") + `]}`
 	case strings.HasSuffix(path, "/multimodal-embedding"):
 		contents := body["input"].(map[string]any)["contents"].([]any)
 		for i := len(contents) - 1; i >= 0; i-- {

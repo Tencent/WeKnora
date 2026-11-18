@@ -18,6 +18,10 @@ var reservedHeaderKeys = map[string]struct{}{
 	"host":              {},
 	"connection":        {},
 	"transfer-encoding": {},
+	// Covered by OCI request signatures; a custom value would invalidate
+	// the signature computed before custom headers are applied.
+	"date":             {},
+	"x-content-sha256": {},
 }
 
 // IsReservedHeader 判断某个 header key 是否为保留 header，保留 header 不允许被自定义头覆盖。

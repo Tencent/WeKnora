@@ -798,6 +798,8 @@ export default {
     update: 'Заменить',
     remove: 'Удалить',
     inputPlaceholder: 'Введите значение',
+    uploadFile: 'Загрузить файл',
+    fileLoaded: 'Загружен: {name}',
     savedToast: 'Учётные данные сохранены',
     saveFailed: 'Не удалось сохранить учётные данные',
     removedToast: 'Учётные данные удалены',

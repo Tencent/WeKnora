@@ -43,6 +43,7 @@ require (
 	github.com/ollama/ollama v0.23.2
 	github.com/open-dingtalk/dingtalk-stream-sdk-go v0.9.2-beta.1
 	github.com/opensearch-project/opensearch-go/v4 v4.6.0
+	github.com/oracle/oci-go-sdk/v65 v65.126.0
 	github.com/panjf2000/ants/v2 v2.12.0
 	github.com/parquet-go/parquet-go v0.29.0
 	github.com/pganalyze/pg_query_go/v6 v6.2.2
@@ -95,7 +96,12 @@ require (
 	gorm.io/gorm v1.31.1
 )
 
-require github.com/metakeule/fmtdate v1.1.2 // indirect
+require (
+	github.com/gofrs/flock v0.13.0 // indirect
+	github.com/metakeule/fmtdate v1.1.2 // indirect
+	github.com/sony/gobreaker/v2 v2.4.0 // indirect
+	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
+)
 
 require (
 	cloud.google.com/go/auth v0.20.0 // indirect
