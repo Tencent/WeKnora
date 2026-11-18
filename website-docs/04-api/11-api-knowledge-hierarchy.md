@@ -4,12 +4,12 @@
 
 ## 上传：增加一个顶层字段
 
-`````http
+```http
 POST /api/v1/knowledge-bases/{kb_id}/knowledge/manual
 Content-Type: application/json
 ```
 
-`````json
+```json
 {
   "title": "补充材料",
   "content": "完整内容\n\n![配图](https://images.example/supplement.jpg)",
