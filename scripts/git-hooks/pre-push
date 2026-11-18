@@ -52,18 +52,20 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
     continue
   fi
 
+  all_changed_go=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && all_changed_go+=("$ROOT/$line")
+  done < <(git diff --name-only --diff-filter=ACMR "$pr_diff" -- '*.go' || true)
+  if [[ ${#all_changed_go[@]} -gt 0 ]]; then
+    check_gofmt_files check "${all_changed_go[@]}"
+  fi
+
   pr_changed_go=()
   while IFS= read -r line; do
     [[ -n "$line" ]] && pr_changed_go+=("$line")
   done < <(git diff --name-only --diff-filter=ACMR "$pr_diff" -- '*.go' ':!cli/**' ':!client/**' || true)
 
   if [[ ${#pr_changed_go[@]} -gt 0 ]]; then
-    go_files=()
-    for f in "${pr_changed_go[@]}"; do
-      go_files+=("$ROOT/$f")
-    done
-    check_gofmt_files check "${go_files[@]}"
-
     run_golangci_if_available "$lint_from_rev"
 
     run_app_vet_test

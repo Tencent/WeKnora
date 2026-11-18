@@ -40,21 +40,47 @@ jobs:
         go: ['1.26']
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go }}
           cache-dependency-path: |
             cli/go.sum
             client/go.sum
-      - name: Check client formatting
+      - name: Check client and changed cli Go formatting
         if: runner.os == 'Linux'
-        working-directory: client
+        working-directory: .
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
+          unformatted_client=$(cd client && gofmt -l .)
+          if [ -n "$unformatted_client" ]; then
             echo "The following client Go files are not gofmt-formatted:"
-            echo "$unformatted"
+            echo "$unformatted_client"
             exit 1
+          fi
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            diff_range="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            base="$BASE_SHA"
+            if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then
+              base=$(git rev-parse HEAD^)
+            fi
+            diff_range="$base..$GITHUB_SHA"
+          else
+            diff_range=""
+          fi
+          if [ -n "$diff_range" ]; then
+            unformatted_cli=$(
+              git diff --name-only --diff-filter=ACMR -z "$diff_range" -- ':(glob)cli/**/*.go' |
+                xargs -0 -r gofmt -l
+            )
+            if [ -n "$unformatted_cli" ]; then
+              echo "The following cli Go files are not gofmt-formatted:"
+              echo "$unformatted_cli"
+              exit 1
+            fi
           fi
       - name: client go build, vet, and test
         working-directory: client

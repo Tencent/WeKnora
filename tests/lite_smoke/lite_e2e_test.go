@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -25,6 +26,23 @@ import (
 )
 
 const embeddingDims = 8
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // TestLiteEditionEndToEndSmoke boots a real compiled WeKnora-lite server
 // subprocess (SQLite + sqlite-vec + FTS5 + local storage + in-memory stream
@@ -66,12 +84,16 @@ func TestLiteEditionEndToEndSmoke(t *testing.T) {
 	port := allocateFreePort(t)
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 
-	var serverLogs bytes.Buffer
+	var serverLogs syncBuffer
 	srvCmd := exec.Command(binPath)
 	srvCmd.Dir = workDir
 	srvCmd.Stdout = &serverLogs
 	srvCmd.Stderr = &serverLogs
 	srvCmd.Env = append(os.Environ(),
+		"ENV_FILE=",
+		"REDIS_ADDR=",
+		"NO_PROXY=127.0.0.1,localhost",
+		"no_proxy=127.0.0.1,localhost",
 		"GIN_MODE=debug",
 		"LOG_LEVEL=info",
 		"SERVER_HOST=127.0.0.1",
@@ -93,28 +115,38 @@ func TestLiteEditionEndToEndSmoke(t *testing.T) {
 	)
 	require.NoError(t, srvCmd.Start())
 
-	exited := make(chan error, 1)
+	var waitErr error
+	done := make(chan struct{})
 	go func() {
-		exited <- srvCmd.Wait()
+		waitErr = srvCmd.Wait()
+		close(done)
 	}()
 	t.Cleanup(func() {
-		if srvCmd.Process == nil {
-			return
-		}
-		_ = srvCmd.Process.Signal(syscall.SIGTERM)
 		select {
-		case <-exited:
-		case <-time.After(10 * time.Second):
-			_ = srvCmd.Process.Kill()
-			<-exited
+		case <-done:
+		default:
+			if srvCmd.Process != nil {
+				_ = srvCmd.Process.Signal(syscall.SIGTERM)
+			}
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				if srvCmd.Process != nil {
+					_ = srvCmd.Process.Kill()
+				}
+				<-done
+			}
 		}
 		if t.Failed() {
 			t.Logf("WeKnora-lite server logs:\n%s", serverLogs.String())
 		}
 	})
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	waitForHealth(t, client, baseURL, exited, &serverLogs)
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: &http.Transport{Proxy: nil},
+	}
+	waitForHealth(t, client, baseURL, done, func() error { return waitErr }, &serverLogs)
 
 	// 1. Register + login user and verify Lite edition metadata.
 	const (
@@ -272,9 +304,8 @@ func TestLiteEditionEndToEndSmoke(t *testing.T) {
 	// 8. Graceful shutdown on SIGTERM must exit cleanly (code 0).
 	require.NoError(t, srvCmd.Process.Signal(syscall.SIGTERM))
 	select {
-	case waitErr := <-exited:
+	case <-done:
 		require.NoErrorf(t, waitErr, "WeKnora-lite did not exit cleanly on SIGTERM:\n%s", serverLogs.String())
-		srvCmd.Process = nil
 	case <-time.After(15 * time.Second):
 		t.Fatalf("timed out waiting for WeKnora-lite graceful shutdown:\n%s", serverLogs.String())
 	}
@@ -441,13 +472,15 @@ func allocateFreePort(t *testing.T) int {
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
-func waitForHealth(t *testing.T, client *http.Client, baseURL string, exited <-chan error, logs *bytes.Buffer) {
+func waitForHealth(
+	t *testing.T, client *http.Client, baseURL string, done <-chan struct{}, waitErr func() error, logs *syncBuffer,
+) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		select {
-		case err := <-exited:
-			t.Fatalf("WeKnora-lite exited before becoming healthy (%v):\n%s", err, logs.String())
+		case <-done:
+			t.Fatalf("WeKnora-lite exited before becoming healthy (%v):\n%s", waitErr(), logs.String())
 		default:
 		}
 		resp, err := client.Get(baseURL + "/health")
