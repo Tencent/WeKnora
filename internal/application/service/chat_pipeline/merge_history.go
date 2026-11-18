@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/reranking"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -89,4 +92,88 @@ func filterHistoryResults(
 		}
 	}
 	return filtered
+}
+
+// rerankHistoryResults scores the token-filtered history candidates with the
+// session's rerank model and keeps only those whose relevance score reaches
+// the rerank threshold — the same bar the fresh candidates had to clear at
+// the CHUNK_RERANK stage. History injection runs in CHUNK_MERGE, after
+// PluginRerank, so before this gate a chunk that merely shared generic
+// domain words with the query (TokenOverlapRatio >= 0.3) entered the context
+// without any relevance judgment (#5613).
+//
+// When no rerank model is configured, or the model cannot be loaded or
+// called, the legacy token-overlap filter keeps deciding, mirroring how the
+// rerank stage itself degrades.
+func (p *PluginMerge) rerankHistoryResults(
+	ctx context.Context,
+	chatManage *types.ChatManage,
+	history []*types.SearchResult,
+) []*types.SearchResult {
+	if p.modelService == nil || chatManage.RerankModelID == "" || len(history) == 0 {
+		return history
+	}
+	rerankModel, err := p.modelService.GetRerankModel(ctx, chatManage.RerankModelID)
+	if err != nil {
+		pipelineWarn(ctx, "Merge", "history_rerank_model_fallback", map[string]interface{}{
+			"model_id": chatManage.RerankModelID,
+			"error":    err.Error(),
+		})
+		return history
+	}
+	query := chatManage.RewriteQuery
+	if query == "" {
+		query = chatManage.Query
+	}
+	limit := rerank.MaxPassageRunes(rerankModel, query)
+	passages := make([]string, len(history))
+	for i, r := range history {
+		passage := reranking.ModelPassage(ctx, r)
+		if limit > 0 && utf8.RuneCountInString(passage) > limit {
+			passage = string([]rune(passage)[:limit])
+		}
+		passages[i] = passage
+	}
+	scores, err := rerankModel.Rerank(ctx, query, passages)
+	if err != nil {
+		pipelineWarn(ctx, "Merge", "history_rerank_fallback", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return history
+	}
+	threshold := chatManage.RerankThreshold
+	if threshold <= 0 {
+		threshold = reranking.DefaultThreshold
+	}
+	scored := make(map[int]float64, len(scores))
+	for _, s := range scores {
+		if s.Index >= 0 && s.Index < len(history) {
+			scored[s.Index] = s.RelevanceScore
+		}
+	}
+	kept := make([]*types.SearchResult, 0, len(history))
+	for i, r := range history {
+		score, ok := scored[i]
+		if !ok || score < threshold {
+			pipelineInfo(ctx, "Merge", "history_rerank_drop", map[string]interface{}{
+				"chunk_id":  r.ID,
+				"score":     score,
+				"threshold": threshold,
+				"scored":    ok,
+			})
+			continue
+		}
+		if r.Metadata == nil {
+			r.Metadata = make(map[string]string)
+		}
+		r.Metadata["history_rerank_score"] = strings.TrimRight(strings.TrimRight(
+			fmt.Sprintf("%.4f", score), "0"), ".")
+		kept = append(kept, r)
+	}
+	pipelineInfo(ctx, "Merge", "history_rerank", map[string]interface{}{
+		"candidates": len(history),
+		"kept":       len(kept),
+		"threshold":  threshold,
+	})
+	return kept
 }

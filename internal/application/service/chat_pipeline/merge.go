@@ -13,13 +13,17 @@ import (
 type PluginMerge struct {
 	chunkRepo    interfaces.ChunkRepository
 	chunkService interfaces.ChunkService // for parent chunk resolution
+	// modelService loads the rerank model that scores history candidates
+	// before they are injected into the current results.
+	modelService interfaces.ModelService
 }
 
 // NewPluginMerge creates and registers a new PluginMerge instance
-func NewPluginMerge(eventManager *EventManager, chunkRepo interfaces.ChunkRepository, chunkService interfaces.ChunkService) *PluginMerge {
+func NewPluginMerge(eventManager *EventManager, chunkRepo interfaces.ChunkRepository, chunkService interfaces.ChunkService, modelService interfaces.ModelService) *PluginMerge {
 	res := &PluginMerge{
 		chunkRepo:    chunkRepo,
 		chunkService: chunkService,
+		modelService: modelService,
 	}
 	eventManager.Register(res)
 	return res
@@ -158,6 +162,10 @@ func (p *PluginMerge) injectHistoryResults(
 	current []*types.SearchResult,
 ) []*types.SearchResult {
 	historyResults := filterHistoryResults(ctx, chatManage, current)
+	if len(historyResults) == 0 {
+		return current
+	}
+	historyResults = p.rerankHistoryResults(ctx, chatManage, historyResults)
 	if len(historyResults) == 0 {
 		return current
 	}
