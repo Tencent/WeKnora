@@ -258,6 +258,23 @@ func parseRetryAfter(value string, now time.Time) time.Duration {
 	return 0
 }
 
+// ErrCorruptStreamChunk is a chunk that reached the client but would not
+// decode: a truncated frame, an HTML error page from a proxy, malformed JSON.
+// It sits beside TransportError because that is the layer it comes from, but
+// it is a distinct failure: the bytes arrived and the connection may be fine,
+// yet the answer has a hole in it.
+//
+// Failing the round on it is deliberate — skipping the chunk would run the
+// loop to EOF, which the caller cannot tell from a complete reply and then
+// persists as the model's answer. The corruption is transport-level damage,
+// though, so the round is worth one more attempt instead of ending the turn.
+//
+// The text is types.StreamChunkCorruptError, the same string the retry
+// classifier matches after the streaming path has flattened the error into
+// StreamResponse.Content; wrapping this value keeps errors.Is working on the
+// paths that still carry a real error.
+var ErrCorruptStreamChunk = errors.New(types.StreamChunkCorruptError)
+
 // LogRequest emits the standard request log line with image payloads
 // compacted so data URIs do not flood the log.
 func LogRequest(ctx context.Context, url, model string, body []byte, stream bool) {
