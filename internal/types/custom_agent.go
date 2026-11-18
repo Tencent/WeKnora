@@ -158,6 +158,8 @@ type CustomAgentConfig struct {
 	// ===== Basic Settings =====
 	// Agent mode: "quick-answer" for RAG mode, "smart-reasoning" for ReAct agent mode
 	AgentMode string `yaml:"agent_mode" json:"agent_mode" extensions:"x-agent"`
+	// Nil preserves WeKnora; an explicit empty title follows the agent name.
+	FeishuReplyTitle *string `yaml:"feishu_reply_title,omitempty" json:"feishu_reply_title,omitempty" binding:"omitempty,max=100"` //nolint:lll // Serialization tags cannot wrap.
 	// AgentType is a preset category under smart-reasoning mode that pre-fills
 	// system prompt, allowed tools and recommended KB compatibility.
 	// Valid values: "rag-qa", "wiki-qa", "hybrid-rag-wiki", "custom".
@@ -579,6 +581,10 @@ func (a *CustomAgent) EnsureCreationDefaults() {
 func (a *CustomAgent) EnsureDefaults() {
 	if a == nil {
 		return
+	}
+	if a.Config.FeishuReplyTitle == nil {
+		title := DefaultFeishuReplyTitle
+		a.Config.FeishuReplyTitle = &title
 	}
 	if a.Config.QuestionSuggestions == nil {
 		a.Config.QuestionSuggestions = &QuestionSuggestionConfig{

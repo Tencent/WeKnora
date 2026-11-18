@@ -134,7 +134,7 @@ func TestValidateAPIBaseURL(t *testing.T) {
 // Chinese copy.
 func TestBuildStreamingCardJSON_PlaceholderFollowsRegion(t *testing.T) {
 	for _, region := range []Region{RegionFeishu, RegionLark} {
-		raw := buildStreamingCardJSON(region)
+		raw := buildStreamingCardJSON(region, "")
 
 		var card struct {
 			Config struct {

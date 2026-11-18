@@ -273,3 +273,11 @@ imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
 - 各平台适配器：`internal/im/{wecom,feishu,dingtalk,slack,telegram,mattermost,wechat,qqbot,yunzhijia}/`
 - HTTP 接口层：`internal/handler/im.go`
 - 路由：`internal/router/routes_agent.go` 的 `RegisterIMRoutes` / `RegisterIMChannelRoutes`
+
+### 按智能体配置飞书 / Lark 回复卡片标题
+
+在智能体的基础设置中填写「飞书 / Lark 回复卡片标题」，最多 100 字。未设置的智能体保持 `WeKnora`；明确清空后跟随智能体名称，名称为空时回退到 `WeKnora`。标题按纯文本显示，每次回复开始时确定，流式回复和完整输出的进度卡片共用此设置；纯文本兜底消息没有卡片标题。
+
+API 配置字段为 `config.feishu_reply_title`（可选字符串）。无需数据库迁移或重启渠道。
+
+![智能体飞书 / Lark 回复卡片标题](/screenshots/feishu-reply-title.jpg)
