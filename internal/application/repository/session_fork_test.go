@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +66,96 @@ func TestCreateForkedPersistsSessionAndCopiedMessages(t *testing.T) {
 	var stored []*types.Message
 	require.NoError(t, db.Where("session_id = ?", "fork-1").Order("created_at ASC, id ASC").Find(&stored).Error)
 	require.Equal(t, []string{"copy-1", "copy-2"}, messageIDs(stored))
+}
+
+func TestCreateForkedWithAssignmentPersistsPlacementAndRollsBackARepeat(t *testing.T) {
+	repo, db := newSessionRepositoryForForkTest(t)
+	require.NoError(t, db.AutoMigrate(&types.SessionSandboxAssignment{}, &types.SandboxUserMachine{}))
+	ctx := context.Background()
+	digest := strings.Repeat("ab", 32)
+	const sessionID = "fork-user-1"
+	session := &types.Session{
+		ID: sessionID, TenantID: 1, UserID: "u1", Title: "branched",
+		SandboxConfigID: "cfg-1", ParentSessionID: "src",
+	}
+	messages := []*types.Message{
+		{ID: "copy-u", SessionID: sessionID, Role: "user", CreatedAt: time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC)},
+	}
+	assignment := &types.SessionSandboxAssignment{
+		SessionID: sessionID, ConfigTenantID: 1, ConfigID: "cfg-1", MachineDigest: digest,
+	}
+	machine := &types.SandboxUserMachine{
+		MachineDigest: digest, OwnerTenantID: 1, OwnerID: "u1",
+		ConfigTenantID: 1, ConfigID: "cfg-1",
+	}
+
+	require.NoError(t,
+		repo.(*sessionRepository).CreateForkedWithAssignment(ctx, session, messages, assignment, machine))
+
+	var row types.SessionSandboxAssignment
+	require.NoError(t, db.Where("session_id = ?", sessionID).Take(&row).Error)
+	require.Equal(t, digest, row.MachineDigest)
+	require.Equal(t, "cfg-1", row.ConfigID)
+	require.Nil(t, row.ReleasedAt)
+
+	var stored types.SandboxUserMachine
+	require.NoError(t, db.Where("machine_digest = ?", digest).Take(&stored).Error)
+	require.Nil(t, stored.EmptySince)
+	require.Equal(t, "u1", stored.OwnerID)
+
+	var sessions int64
+	require.NoError(t, db.Model(&types.Session{}).Where("id = ?", sessionID).Count(&sessions).Error)
+	require.Equal(t, int64(1), sessions)
+
+	again := &types.Session{ID: sessionID, TenantID: 1, UserID: "u1", Title: "again"}
+	err := repo.(*sessionRepository).CreateForkedWithAssignment(ctx, again, []*types.Message{
+		{ID: "copy-extra", SessionID: sessionID, Role: "user"},
+	}, assignment, machine)
+	require.Error(t, err)
+	require.NoError(t, db.Model(&types.Session{}).Where("id = ?", sessionID).Count(&sessions).Error)
+	require.Equal(t, int64(1), sessions, "the failed repeat rolls back and does not write a second session row")
+	var extras int64
+	require.NoError(t, db.Model(&types.Message{}).Where("id = ?", "copy-extra").Count(&extras).Error)
+	require.Zero(t, extras)
+}
+
+func TestCreateForkedWithAssignmentLocksWebUserBeforeSessionAndMachine(t *testing.T) {
+	repo, db := newSessionRepositoryForForkTest(t)
+	require.NoError(t, db.AutoMigrate(&types.SessionSandboxAssignment{}, &types.SandboxUserMachine{}))
+	migrateUsers(t, db)
+	ctx := context.Background()
+	owner := "11111111-1111-4111-8111-111111111111"
+	require.NoError(t, db.Create(&types.User{
+		ID: owner, Username: "fork-owner", Email: "fork-owner@example.com", PasswordHash: "x",
+	}).Error)
+	digest := strings.Repeat("cd", 32)
+	const sessionID = "fork-locked-1"
+	sawLock := false
+	sessionVisible := false
+	machineVisible := false
+	afterWebUserLock = func(tx *gorm.DB) {
+		sawLock = true
+		var n int64
+		require.NoError(t, tx.Model(&types.Session{}).Where("id = ?", sessionID).Count(&n).Error)
+		sessionVisible = n > 0
+		require.NoError(t, tx.Model(&types.SandboxUserMachine{}).Where("machine_digest = ?", digest).Count(&n).Error)
+		machineVisible = n > 0
+	}
+	t.Cleanup(func() { afterWebUserLock = nil })
+
+	err := repo.(*sessionRepository).CreateForkedWithAssignment(ctx, &types.Session{
+		ID: sessionID, TenantID: 1, UserID: owner, Title: "locked",
+	}, nil, &types.SessionSandboxAssignment{
+		SessionID: sessionID, ConfigTenantID: 1, ConfigID: "cfg-1", MachineDigest: digest,
+	}, &types.SandboxUserMachine{
+		MachineDigest: digest, OwnerTenantID: 1, OwnerID: owner,
+		ConfigTenantID: 1, ConfigID: "cfg-1",
+	})
+	afterWebUserLock = nil
+	require.NoError(t, err)
+	require.True(t, sawLock, "a canonical web owner is locked in the fork transaction")
+	require.False(t, sessionVisible, "the user row is locked before the session insert")
+	require.False(t, machineVisible, "the user row is locked before the machine row")
 }
 
 func TestCreateForkedAllowsEmptyHistory(t *testing.T) {

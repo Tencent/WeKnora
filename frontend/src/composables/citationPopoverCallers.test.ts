@@ -48,7 +48,7 @@ function loadComposable(name: string) {
     runInNewContext(transpile(readFileSync(join(srcDir, 'composables', `${file}.ts`), 'utf8')), {
       exports,
       require: (path: string) => {
-        if (path === 'vue') return vue
+        if (path === 'vue') return { ...vue, inject: (_key: unknown, fallback: unknown) => fallback }
         if (path.startsWith('./')) return load(path.slice(2))
         return stub
       },
@@ -65,7 +65,7 @@ function runSetup(file: string, props: Record<string, unknown>) {
   runInNewContext(transpile(script.content), {
     exports, console,
     require: (path: string) => {
-      if (path === 'vue') return vue
+      if (path === 'vue') return { ...vue, inject: (_key: unknown, fallback: unknown) => fallback }
       const name = composables.find(c => path.endsWith(`/composables/${c}`))
       return name ? loadComposable(name) : stub
     },

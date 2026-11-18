@@ -298,3 +298,36 @@ func (c *Client) ResolveToolApproval(ctx context.Context, pendingID string, req 
 	}
 	return parseResponse(resp, &response)
 }
+
+// ResolveAgentPromptRequest answers a prompt an agent run is waiting on. Kind
+// must match the prompt ("ask_user" or "tool_approval"); Response is the
+// kind's answer, e.g. {"text": "..."} or {"selected": ["..."]} for ask_user,
+// {"approved": true} or {"approved": false, "reason": "..."} for
+// tool_approval (approval may add "modified_args": {...}). Unknown fields are
+// rejected.
+type ResolveAgentPromptRequest struct {
+	Kind     string          `json:"kind"`
+	Response json.RawMessage `json:"response"`
+}
+
+// ResolveAgentPrompt answers a pending agent prompt by id. Resumed reports
+// that the run had been suspended and now continues in the background; its
+// output lands in the same assistant message.
+// Server route: POST /api/v1/agent/prompts/{prompt_id}.
+func (c *Client) ResolveAgentPrompt(
+	ctx context.Context, promptID string, req *ResolveAgentPromptRequest,
+) (resumed bool, err error) {
+	path := fmt.Sprintf("/api/v1/agent/prompts/%s", promptID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, req, nil)
+	if err != nil {
+		return false, err
+	}
+	var response struct {
+		Success bool `json:"success"`
+		Resumed bool `json:"resumed"`
+	}
+	if err := parseResponse(resp, &response); err != nil {
+		return false, err
+	}
+	return response.Resumed, nil
+}

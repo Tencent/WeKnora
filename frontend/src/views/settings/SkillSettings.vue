@@ -410,6 +410,7 @@ import {
   type SkillCatalogRegisterResult,
 } from '@/api/skill'
 import { useSkillInstallerModel } from '@/composables/useSkillInstallerModel'
+import { useAssistantDataChange } from '@/utils/assistantDataChange'
 import { installOutdated, installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade'
 import {
   HOST_SKILL_TARGET_ID,
@@ -1362,6 +1363,7 @@ watch(busyPickTargets, (targets) => {
 }, { immediate: true })
 
 onMounted(load)
+useAssistantDataChange(() => { void loadCatalog(true) }, { areas: ['skill'] })
 
 defineExpose({ openAdd })
 onUnmounted(() => {

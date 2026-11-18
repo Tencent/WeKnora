@@ -3,6 +3,8 @@ package types
 import (
 	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestPrincipalFromContextFallsBackToWebUser(t *testing.T) {
@@ -81,4 +83,43 @@ func TestMCPOAuthPrincipalMapsEmbedSessionToVisitor(t *testing.T) {
 	if got.StorageID() != want {
 		t.Fatalf("MCPOAuthPrincipalFromContext() = %q, want %q", got.StorageID(), want)
 	}
+}
+
+func TestPrincipalAuthSourceRoundTrip(t *testing.T) {
+	ctx := WithPrincipalAuthSource(context.Background(), AuthSourceWeb)
+	require.Equal(t, AuthSourceWeb, PrincipalAuthSourceFromContext(ctx))
+	require.Equal(t, "", PrincipalAuthSourceFromContext(context.Background()))
+}
+
+func TestStampSessionOwnerSource(t *testing.T) {
+	web := WithPrincipalAuthSource(
+		WithPrincipal(context.WithValue(context.Background(), UserIDContextKey, "u-1"),
+			Principal{Type: PrincipalWebUser, ID: "u-1"}),
+		AuthSourceWeb)
+
+	s := &Session{UserID: "u-1", OwnerAuthSource: "forged"}
+	StampSessionOwnerSource(web, s)
+	require.Equal(t, AuthSourceWeb, s.OwnerAuthSource)
+
+	// A row created for someone else (internal service, admin tooling) is not
+	// vouched for by the caller's credentials.
+	other := &Session{UserID: "u-2"}
+	StampSessionOwnerSource(web, other)
+	require.Equal(t, AuthSourceInternal, other.OwnerAuthSource)
+
+	// No middleware source: background or internal context.
+	bare := &Session{UserID: "u-1"}
+	StampSessionOwnerSource(context.WithValue(context.Background(), UserIDContextKey, "u-1"), bare)
+	require.Equal(t, AuthSourceInternal, bare.OwnerAuthSource)
+
+	empty := &Session{}
+	StampSessionOwnerSource(web, empty)
+	require.Equal(t, AuthSourceUnknown, empty.OwnerAuthSource)
+}
+
+func TestAuthSourceForBoundOwnerID(t *testing.T) {
+	require.Equal(t, AuthSourceMCPEndpoint, AuthSourceForBoundOwnerID(MCPEndpointPrincipal(7, "e").StorageID()))
+	require.Equal(t, AuthSourceEmbed, AuthSourceForBoundOwnerID(EmbedSessionPrincipal(7, "c", "s").StorageID()))
+	require.Equal(t, AuthSourceInternal, AuthSourceForBoundOwnerID("u-1"),
+		"binding never elevates an owner to a verified person")
 }

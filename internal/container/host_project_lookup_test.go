@@ -84,6 +84,26 @@ func TestProjectLookupReturnsFalseForUnknownSession(t *testing.T) {
 	require.Empty(t, dir)
 }
 
+func TestProjectLookupSeesDirsInstalledAfterTheSandboxIsBuilt(t *testing.T) {
+	db := hostProjectLookupTestDB(t)
+	projectDir := t.TempDir()
+	insertHostSession(t, db, "sess-1", projectDir)
+
+	// BuildContainer constructs the sandbox, and therefore this lookup, before
+	// the desktop process can install its prefs reader.
+	lookup := newHostProjectLookup(db, provideHostProjectDirsLoader())
+	_, _, err := lookup.ProjectDirForSession(context.Background(), "sess-1")
+	require.ErrorIs(t, err, localsandbox.ErrProjectDirRevoked)
+
+	SetHostProjectDirsLoader(func() []string { return []string{projectDir} })
+	t.Cleanup(func() { SetHostProjectDirsLoader(nil) })
+
+	dir, ok, err := lookup.ProjectDirForSession(context.Background(), "sess-1")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, projectDir, dir)
+}
+
 func TestProjectLookupPropagatesDatabaseErrors(t *testing.T) {
 	db := hostProjectLookupTestDB(t)
 	projectDir := t.TempDir()

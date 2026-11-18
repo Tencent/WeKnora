@@ -54,7 +54,7 @@ r.GET("/health", func(c *gin.Context) {
 
 - 底层为**私有** logrus 实例（`appLogger`，避免外部依赖改写全局 logrus 导致日志丢失），自定义 `CustomFormatter`。
 - 默认单行格式：`LEVEL[时间戳] [request_id 字段...] caller | message`，caller 为 `文件:行[函数名]`（`addCaller`）。
-- 可通过 `LOG_FORMAT` 环境变量提供模板，占位符：`%d`=时间、`%level`=级别、`%thread`=goroutine ID（仅模板引用时才取，避免每条日志跑 `runtime.Stack`）、`%logger`=caller、`%traceId`=request_id、`%msg`=消息+结构化字段。单趟 `strings.NewReplacer` 替换避免二次替换问题。
+- 可通过 `WEKNORA_LOG_FORMAT` 环境变量提供模板，占位符：`%d`=时间、`%level`=级别、`%thread`=goroutine ID（仅模板引用时才取，避免每条日志跑 `runtime.Stack`）、`%logger`=caller、`%traceId`=request_id、`%msg`=消息+结构化字段。单趟 `strings.NewReplacer` 替换避免二次替换问题。非空模板必须包含 `%msg`，否则输出警告并使用默认格式；`json` 不是受支持的格式关键字。新变量未设置时兼容旧 `LOG_FORMAT`（提示弃用），显式设为空则使用默认格式并禁用旧变量回退。
 - 级别由 `LOG_LEVEL` 控制（`debug`/`info`/`warn`/`error`/`fatal`，未设置或非法时**默认 debug**）。
 - 颜色：stdout 是终端时启用 ANSI 颜色；非终端（Docker 采集）禁用；写文件时 `ansiStripWriter` 剥离 ANSI 序列保持纯文本。
 - 结构化字段 API：`logger.WithField(ctx, k, v)` / `WithFields` 把带字段的 entry 存进 context（`types.LoggerContextKey`），后续 `logger.Infof(ctx, ...)` 自动携带；`WarnWithFields` 专用于审计相关事件（跨租户探测、不变量破坏），便于日志聚合器按 tenant/资源索引。
@@ -162,6 +162,19 @@ cache_reported 与 cache_status 区分 hit、miss、unreported、unsupported，�
 Prompt 组装将稳定说明放在前部，动态会话内容放在后部；支持的提供商使用 cache marker。命中仍取决于提供商协议、模型及请求前缀，不保证每次请求都有缓存。排查时先对比调用用途、前缀指纹与模型，再看上报状态。
 
 沙箱调用也有 Langfuse span，可把实例操作和工具执行耗时串到当前 trace，区分等待沙箱与等待模型。沙箱后台维护（如会话回收）只在已有父 trace 时记录子 span，不会单独生成 trace；技能安装、删除与维护任务会自行开启 trace。追踪开关未启用时不会向 Langfuse 导出。
+
+#### 自定义 metadata 头（`X-Langfuse-Metadata`）
+
+调用受追踪的接口时，可通过 `X-Langfuse-Metadata` 请求头附带业务自定义键值对，它们会合并进该请求 trace 的 metadata，便于在 Langfuse/LiteFuse 控制台按业务维度过滤、统计：
+
+```
+POST /api/v1/knowledge-chat/:session_id
+X-Langfuse-Metadata: {"ticket_id":"T-123","biz_line":"order","priority":"P1"}
+```
+
+- 与内置字段（`http.method`、`http.path`、`http.query`、`request_id` 等）同名时以内置字段为准，调用方无法覆盖关联字段。
+- 值只接受标量（字符串/数字/布尔），嵌套对象与数组会被跳过；最多合并 32 个 key，超出部分按 key 名排序截断。
+- header 原始值超过 4 KiB 时整段忽略；非法 JSON、空值同样静默忽略，不影响业务请求。不传该 header 时行为与之前完全一致。
 
 ### 审计日志 {#_4-审计日志}
 

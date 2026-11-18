@@ -7,6 +7,7 @@ import (
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,9 @@ import (
 type MessageSuggestionHandler struct {
 	service interfaces.MessageSuggestionService
 }
+
+// Keeps types imported so swag can resolve MessageSuggestionSet in comments.
+var _ types.MessageSuggestionSet
 
 func NewMessageSuggestionHandler(service interfaces.MessageSuggestionService) *MessageSuggestionHandler {
 	return &MessageSuggestionHandler{service: service}
@@ -40,8 +44,8 @@ type SuggestionEventRequest struct {
 // @Param        session_id  path  string  true  "会话 ID"
 // @Param        message_id  path  string  true  "助手消息 ID"
 // @Param        request     body  EnsureMessageSuggestionsRequest  false  "生成选项"
-// @Success      200  {object}  map[string]interface{}
-// @Success      202  {object}  map[string]interface{}
+// @Success      200  {object}  handler.DataResponse{data=types.MessageSuggestionSet}
+// @Success      202  {object}  handler.DataResponse{data=types.MessageSuggestionSet}
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/messages/{message_id}/suggestions [post]
@@ -76,7 +80,7 @@ func (h *MessageSuggestionHandler) Ensure(c *gin.Context) {
 // @Produce      json
 // @Param        session_id  path  string  true  "会话 ID"
 // @Param        message_id  path  string  true  "助手消息 ID"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.DataResponse{data=types.MessageSuggestionSet}
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/messages/{message_id}/suggestions [get]

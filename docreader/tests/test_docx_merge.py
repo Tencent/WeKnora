@@ -120,6 +120,52 @@ class DocxVerticalMergeFillTest(unittest.TestCase):
 
 
 class DocxMarkitdownDispatchTest(unittest.TestCase):
+    def test_xlsx_starts_without_embedded_data_uris(self):
+        parser = StdMarkitdownParser(file_type="xlsx")
+        result = SimpleNamespace(text_content="parsed")
+        with patch.object(parser, "_convert_markitdown", return_value=result) as convert:
+            document = parser.parse_into_text(b"payload")
+
+        self.assertEqual(document.content, "parsed")
+        convert.assert_called_once_with(b"payload", ".xlsx", keep_data_uris=False)
+
+    def test_xlsx_conversion_failure_is_not_retried_with_data_uris(self):
+        parser = StdMarkitdownParser(file_type="xlsx")
+        with patch.object(parser, "_convert_markitdown", return_value=None) as convert:
+            with self.assertRaisesRegex(RuntimeError, "MarkItDown conversion failed"):
+                parser.parse_into_text(b"payload")
+
+        convert.assert_called_once_with(b"payload", ".xlsx", keep_data_uris=False)
+
+    def test_xlsx_conversion_exception_is_wrapped_without_retry(self):
+        parser = StdMarkitdownParser(file_type="xlsx")
+        with patch.object(
+            parser,
+            "_convert_markitdown",
+            side_effect=ValueError("synthetic parser failure"),
+        ) as convert:
+            with self.assertRaisesRegex(RuntimeError, "MarkItDown conversion failed"):
+                parser.parse_into_text(b"payload")
+
+        convert.assert_called_once_with(b"payload", ".xlsx", keep_data_uris=False)
+
+    def test_non_xlsx_parser_has_one_bounded_fallback(self):
+        parser = StdMarkitdownParser(file_type="docx")
+        result = SimpleNamespace(text_content="parsed")
+        with patch.object(
+            parser, "_convert_markitdown", side_effect=[None, result]
+        ) as convert:
+            document = parser.parse_into_text(b"payload")
+
+        self.assertEqual(document.content, "parsed")
+        self.assertEqual(convert.call_count, 2)
+        self.assertEqual(
+            convert.call_args_list[0].kwargs["keep_data_uris"], True
+        )
+        self.assertEqual(
+            convert.call_args_list[1].kwargs["keep_data_uris"], False
+        )
+
     def test_non_docx_types_do_not_run_docx_preprocessor(self):
         for file_type in ("doc", "txt", "md"):
             with self.subTest(file_type=file_type):

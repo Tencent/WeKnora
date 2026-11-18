@@ -4,6 +4,10 @@
 
 使用前需先完成[安装部署](02-installation.md)，并准备可用的对话模型和向量模型。
 
+::: tip 需要使用帮助？
+在页面侧边栏打开 [WeKnora 助手](../03-features/26-weknora-assistant.md)，可查询产品文档、检查解析结果或获得配置说明。首次使用建议选择「只读」或「修改前确认」，先核对操作范围。
+:::
+
 ## 开始之前 {#_1-开始之前}
 
 - 启动服务：按[安装部署](./02-installation.md)启动后，前端在 `http://localhost`，后端在 `http://localhost:8080`；

@@ -76,6 +76,10 @@ type TenantSkillEntity struct {
 	// image either way; removal is a separate flow that rebuilds the snapshot.
 	Enabled bool `gorm:"default:true"`
 
+	// Builtin marks a row the backend synthesized for this run. It is not a
+	// database column and it has no uploaded bundle.
+	Builtin bool `json:"-" gorm:"-"`
+
 	// InstalledSnapshotID is the snapshot produced by this skill's install,
 	// kept for audit and chain troubleshooting.
 	InstalledSnapshotID string `gorm:"type:varchar(255)"`

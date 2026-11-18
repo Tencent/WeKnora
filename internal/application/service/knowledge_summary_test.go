@@ -131,6 +131,16 @@ func TestValidateSummaryOutput(t *testing.T) {
 			want:     "useful summary",
 		},
 		{
+			name:      "think-only response rejected",
+			response:  &types.ChatResponse{Content: "<think>\nreasoning\n</think>\n"},
+			wantError: true,
+		},
+		{
+			name:     "inline think block is stripped",
+			response: &types.ChatResponse{Content: "<think>\nreasoning\n</think>\nuseful summary"},
+			want:     "useful summary",
+		},
+		{
 			name:     "a normal stop is accepted",
 			response: &types.ChatResponse{Content: "useful summary", FinishReason: "stop"},
 			want:     "useful summary",

@@ -1,5 +1,5 @@
 import { onUnmounted, ref, type Ref } from 'vue'
-import RFB from '@novnc/novnc'
+import type RFB from '@novnc/novnc'
 import { post } from '@/utils/request'
 
 export type SandboxDesktopStatus =
@@ -259,6 +259,10 @@ export function useSandboxDesktop(
     status.value = 'starting'
     let socket: WebSocket | undefined
     try {
+      // noVNC probes WebCodecs with top-level await. Load it only for an
+      // explicit desktop connection so a stalled decoder cannot block chat.
+      const { default: RFB } = await import('@novnc/novnc')
+      if (disposed || !wanted || !target) return
       const ticket = await mintDesktopTicket(sid)
       if (disposed || !wanted || !target) return
 

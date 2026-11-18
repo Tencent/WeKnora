@@ -79,6 +79,53 @@ type Options struct {
 // with errors.Is.
 var ErrUnavailable = errors.New("anydoc: binding not built into this binary")
 
+// ErrResourceLimit marks a permanent anydoc rejection: the document exceeds a
+// parser budget (for example max_xml_nodes) and retrying the same bytes cannot
+// succeed. Callers detect it with errors.Is. The wrapped error's text names
+// the limit the converter reported.
+var ErrResourceLimit = errors.New("document is too large for the parser")
+
+// resourceLimiter is the method set anydoc's *ConvertError uses to report a
+// parser budget failure. The cgo binding implements it; the default build does
+// not import that package, so classification goes through this interface.
+type resourceLimiter interface {
+	ResourceLimit() bool
+	LimitDetail() string
+}
+
+// permanentResourceLimit is the errors.Is(ErrResourceLimit) wrapper. Error
+// keeps the user-facing reason and the converter's limit detail, without the
+// transport prefixes that sit further down the chain.
+type permanentResourceLimit struct {
+	detail string
+	cause  error
+}
+
+func (e *permanentResourceLimit) Error() string {
+	if e.detail == "" {
+		return ErrResourceLimit.Error()
+	}
+	return ErrResourceLimit.Error() + ": " + e.detail
+}
+
+func (e *permanentResourceLimit) Unwrap() error { return e.cause }
+
+func (e *permanentResourceLimit) Is(target error) bool { return target == ErrResourceLimit }
+
+// markResourceLimit wraps a converter error whose kind is resource_limit.
+// Other errors, including untyped text that merely mentions the kind, are
+// returned unchanged so a transient failure can still be retried.
+func markResourceLimit(err error) error {
+	if err == nil {
+		return nil
+	}
+	var limiter resourceLimiter
+	if !errors.As(err, &limiter) || !limiter.ResourceLimit() {
+		return err
+	}
+	return &permanentResourceLimit{detail: strings.TrimSpace(limiter.LimitDetail()), cause: err}
+}
+
 // supportedExtensions are the file types anydoc converts, mapped to the format
 // name its parser selector uses. The list is static so that engine metadata
 // (file types shown in the UI) is identical whether or not the binding is
@@ -156,7 +203,11 @@ func Convert(data []byte, opts Options) (*Result, error) {
 	if opts.Format == "pdf" {
 		opts.WithAssets = false
 	}
-	return backendConvert(data, opts)
+	result, err := backendConvert(data, opts)
+	if err != nil {
+		err = markResourceLimit(err)
+	}
+	return result, err
 }
 
 // PDFNeedsOCR reports whether a Convert error means the PDF has no usable
@@ -173,6 +224,18 @@ func PDFNeedsOCR(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "ocr is required") ||
 		strings.Contains(msg, "no extractable text")
+}
+
+// PDFInvalidStructure reports a malformed document error that another PDF
+// engine may still read. Encryption, resource limits and I/O errors are excluded.
+func PDFInvalidStructure(err error) bool {
+	if err == nil || errors.Is(err, ErrUnavailable) || errors.Is(err, ErrResourceLimit) {
+		return false
+	}
+	if malformed, typed := backendPDFInvalidStructure(err); typed {
+		return malformed
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "invalid pdf structure")
 }
 
 func normalizeExt(s string) string {

@@ -7,7 +7,7 @@ export interface LoadedProtectedFile {
 export const RESOURCE_PREVIEW_EVENT = 'weknora:resource-preview';
 
 export function responseFileName(disposition: string | null, source: string): string {
-  const encoded = disposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const encoded = disposition?.match(/(?:^|;)\s*filename\*\s*=\s*UTF-8'[^']*'([^;]+)/i)?.[1]?.trim();
   let name = disposition?.match(/filename="([^"]+)"|filename=([^;]+)/i)?.slice(1).find(Boolean);
   if (encoded) {
     try { name = decodeURIComponent(encoded); } catch { /* use plain filename */ }

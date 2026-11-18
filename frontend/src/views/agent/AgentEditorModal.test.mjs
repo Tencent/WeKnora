@@ -1,8 +1,34 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { runInNewContext } from 'node:vm'
+import { effectScope, nextTick, ref, watch } from 'vue'
+import { agentRequiresRerankModel } from '../../utils/agent-readiness.ts'
 
 const source = readFileSync(new URL('./AgentEditorModal.vue', import.meta.url), 'utf8')
+
+test('the agent editor marks rerank required only for the built-in knowledge search', () => {
+  const declaration = source.match(/^const needsRerankModel = computed\(\(\) => \{[\s\S]*?^\}\);/m)?.[0]
+  assert.ok(declaration)
+
+  const required = ({ allowedTools, ragEnabled, isAgent = true }) => runInNewContext(
+    `${declaration}\nneedsRerankModel`,
+    {
+      computed: evaluate => evaluate(),
+      isAgentMode: { value: isAgent },
+      kbSelectionMode: { value: 'all' },
+      hasKnowledgeBase: { value: true },
+      kbOptions: { value: [{ ragEnabled }] },
+      allowedToolsToSave: () => allowedTools,
+      agentRequiresRerankModel,
+    },
+  )
+
+  assert.equal(required({ allowedTools: [], ragEnabled: true }), false)
+  assert.equal(required({ allowedTools: ['wiki_search'], ragEnabled: true }), false)
+  assert.equal(required({ allowedTools: null, ragEnabled: false }), true)
+  assert.equal(required({ allowedTools: [], ragEnabled: true, isAgent: false }), true)
+})
 
 test('editing an agent closes the editor after a successful save', () => {
   assert.match(
@@ -184,4 +210,74 @@ test('retrieval strategy settings are hidden in agent mode, where search_knowled
   assert.match(source, /if \(hasKnowledgeBase\.value && !isAgentMode\.value\) \{\s*items\.push\(\{ key: 'retrieval'/)
   const modeWatch = source.match(/watch\(isAgentMode, \(isAgent\) => \{([\s\S]*?)^\}\);/m)?.[1] ?? ''
   assert.match(modeWatch, /isAgent && \([^)]*currentSection\.value === 'retrieval'/)
+})
+
+async function mcpFixture(t, config) {
+  const init = source.match(/const initMcpSelectionMode = \(\) => \{[\s\S]*?^\};/m)?.[0]
+  const start = source.indexOf('watch(mcpSelectionMode,')
+  const end = source.indexOf('watch(() => formData.value.config.sandbox_config_id', start)
+  assert.ok(init && start >= 0 && end > start, 'expected MCP initialization and watchers')
+  const state = {
+    watch,
+    formData: ref({ config: { mcp_selection_mode: 'none', mcp_services: [] } }),
+    loadedConfig: structuredClone(config),
+    mcpSelectionMode: ref('none'),
+    isInitializing: ref(true),
+  }
+  const scope = effectScope()
+  t.after(() => scope.stop())
+  // Run the component's actual initialization and watchers with Vue's scheduler.
+  scope.run(() => runInNewContext(`${source.slice(start, end)}\n${init}\nformData.value = { config: loadedConfig };\ninitMcpSelectionMode();`, state))
+  await nextTick(() => { state.isInitializing.value = false })
+  return state
+}
+
+test('legacy empty MCP config opens as all without rewriting persisted config', async t => {
+  const config = { mcp_selection_mode: '', mcp_services: [] }
+  const state = await mcpFixture(t, config)
+  assert.equal(state.mcpSelectionMode.value, 'all')
+  assert.deepEqual(state.formData.value.config, config)
+})
+
+test('MCP hydration preserves saved modes and legacy service lists', async t => {
+  for (const mode of ['', 'none', 'selected', 'all']) {
+    const config = { mcp_selection_mode: mode, mcp_services: ['service-a'] }
+    const state = await mcpFixture(t, config)
+    assert.equal(state.mcpSelectionMode.value, mode || 'selected')
+    assert.deepEqual(state.formData.value.config, config)
+  }
+})
+
+test('editing a legacy service list persists selected mode without toggling the radio', async t => {
+  const state = await mcpFixture(t, { mcp_selection_mode: '', mcp_services: ['service-a'] })
+  assert.equal(state.mcpSelectionMode.value, 'selected')
+  // t-select replaces the v-model array while leaving the radio unchanged.
+  state.formData.value.config.mcp_services = ['service-b']
+  await nextTick()
+  assert.deepEqual(state.formData.value.config, {
+    mcp_selection_mode: 'selected', mcp_services: ['service-b'],
+  })
+})
+
+test('clearing a legacy service list persists selected with no services', async t => {
+  const state = await mcpFixture(t, { mcp_selection_mode: '', mcp_services: ['service-a'] })
+  state.formData.value.config.mcp_services.splice(0)
+  await nextTick()
+  assert.equal(state.formData.value.config.mcp_selection_mode, 'selected')
+  assert.deepEqual(state.formData.value.config.mcp_services, [])
+})
+
+test('switching MCP modes still clears lists only for all and none', async t => {
+  const state = await mcpFixture(t, { mcp_selection_mode: '', mcp_services: ['service-a'] })
+  for (const mode of ['all', 'selected', 'none']) {
+    state.mcpSelectionMode.value = mode
+    await nextTick()
+    assert.equal(state.formData.value.config.mcp_selection_mode, mode)
+    assert.equal(state.formData.value.config.mcp_services.length, 0)
+    if (mode === 'selected') {
+      state.formData.value.config.mcp_services = ['service-b']
+      await nextTick()
+      assert.deepEqual(state.formData.value.config.mcp_services, ['service-b'])
+    }
+  }
 })

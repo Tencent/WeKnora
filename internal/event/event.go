@@ -3,6 +3,7 @@ package event
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/google/uuid"
@@ -49,6 +50,7 @@ const (
 	EventAgentComplete EventType = "agent.complete" // Agent 完成
 
 	// Agent streaming events (for real-time feedback)
+	EventAgentProgress      EventType = "progress"       // User-facing intermediate update
 	EventAgentThought       EventType = "thought"        // Agent 思考过程
 	EventAgentCommandOutput EventType = "command_output" // bounded command output
 	EventAgentToolCall      EventType = "tool_call"      // 工具调用通知
@@ -60,6 +62,11 @@ const (
 	// MCP tool human approval (issue #1173)
 	EventToolApprovalRequired EventType = "tool_approval_required"
 	EventToolApprovalResolved EventType = "tool_approval_resolved"
+
+	// EventAgentPromptRequired requests user input (ask_user). The request and answer travel as the
+	// prompt kind's JSON, so a new kind needs no new event.
+	EventAgentPromptRequired EventType = "agent_prompt_required"
+	EventAgentPromptResolved EventType = "agent_prompt_resolved"
 
 	// MCP OAuth in-conversation authorization prompt: emitted when an
 	// OAuth-enabled MCP service is invoked but the current user has not
@@ -103,6 +110,15 @@ type Event struct {
 
 // EventHandler is a function that handles events
 type EventHandler func(ctx context.Context, event Event) error
+
+// snapshotEventForHandler returns a per-handler copy of the event with an
+// isolated metadata map, for delivery paths that run handlers concurrently
+// against one Event value.
+func snapshotEventForHandler(event Event) Event {
+	e := event
+	e.Metadata = maps.Clone(e.Metadata)
+	return e
+}
 
 // EventBus manages event publishing and subscription
 type EventBus struct {
@@ -163,16 +179,21 @@ func (eb *EventBus) Emit(ctx context.Context, event Event) error {
 	}
 
 	if eb.asyncMode {
-		// Async mode: fire and forget
+		// Async mode: fire and forget. Each handler gets its own copy of the
+		// event: handlers may annotate what they receive (the WithTiming
+		// middleware writes Metadata["duration_ms"]), and a shared metadata
+		// map written from concurrent goroutines is a fatal concurrent-map
+		// panic the per-handler recover() cannot catch.
 		for _, handler := range handlers {
 			h := handler // capture loop variable
+			e := snapshotEventForHandler(event)
 			go func() {
 				defer func() {
 					if r := recover(); r != nil {
 						logger.Errorf(ctx, "event handler panic recovered (type=%s): %v", event.Type, r)
 					}
 				}()
-				_ = h(ctx, event)
+				_ = h(ctx, e)
 			}()
 		}
 		return nil
@@ -211,6 +232,7 @@ func (eb *EventBus) EmitAndWait(ctx context.Context, event Event) error {
 	for _, handler := range handlers {
 		wg.Add(1)
 		h := handler // capture loop variable
+		e := snapshotEventForHandler(event)
 
 		go func() {
 			defer wg.Done()
@@ -219,7 +241,7 @@ func (eb *EventBus) EmitAndWait(ctx context.Context, event Event) error {
 					errChan <- fmt.Errorf("event handler panic (type=%s): %v", event.Type, r)
 				}
 			}()
-			if err := h(ctx, event); err != nil {
+			if err := h(ctx, e); err != nil {
 				errChan <- err
 			}
 		}()

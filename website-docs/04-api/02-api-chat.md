@@ -4,6 +4,21 @@
 
 会话为“用户私有”资源，handler 内部强制归属校验；路由层为 Viewer+。API key：会话/聊天需 `chat` capability（或 full-access）；消息搜索需 `message_history`；知识检索需 `retrieve`。
 
+
+## 助手会话、权限与后台任务 {#assistant-runtime}
+
+会话的 `kind=assistant` 用于内置助手，助手会话历史与普通聊天分别管理。不要将普通会话 ID 传入助手恢复入口。自动化会话由系统创建并关联任务。
+
+助手聊天请求使用 `assistant_access`（`read_only` / `confirm` / `auto_write`），受空间助手上限约束；普通智能体不使用此请求字段，其配置通过 `config.access_level` 控制。审批答复使用 `POST /api/v1/agent/prompts/:prompt_id`；可用授权的查询与撤销使用 `/api/v1/agent/grants`。详见[执行权限](../03-features/28-agent-permissions.md)。
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| `GET /api/v1/sessions/:id/background-work` | 查询会话后台任务 |
+| `GET /api/v1/sessions/:id/background-work/:work_id` | 查询任务状态与输出 |
+| `POST /api/v1/sessions/:session_id/background-work/:work_id/cancel` | 取消指定任务 |
+
+接口继续检查会话访问权限。`work_id` 是后台任务标识，不是终端进程 ID，也不是自动化运行 ID。
+
 ## 会话（/api/v1/sessions）
 
 ### POST /api/v1/sessions
@@ -13,10 +28,11 @@
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `title` | string | 否 | 标题 |
+| `kind` | string | 否 | 空值（默认）为普通会话；`assistant` 为 WeKnora 助手会话；其他值返回 400 |
 | `description` | string | 否 | 描述 |
 | `project_dir` | string | 否 | 仅桌面版：把会话绑定到用户已批准的本机项目目录（绝对路径，须与批准列表完全一致），否则返回 400 |
 
-响应：201 `{"success":true,"data":{Session}}`（`id,title,description,tenant_id,user_id,is_pinned,last_request_state,created_at,...`）
+响应：201 `{"success":true,"data":{Session}}`（`id,kind,title,description,tenant_id,user_id,is_pinned,last_request_state,created_at,...`）
 
 ```bash
 curl -X POST $BASE/api/v1/sessions -H "X-API-Key: $API_KEY" \
@@ -31,6 +47,7 @@ curl -X POST $BASE/api/v1/sessions -H "X-API-Key: $API_KEY" \
 | --- | --- | --- | --- |
 | `page` / `page_size` | int | 否 | 分页 |
 | `keyword` | string | 否 | 标题模糊搜索 |
+| `kind` | string | 否 | 缺省或空值仅返回普通会话，适用于所有来源；`assistant` 仅返回调用者本人的助手会话（管理员也不能跨用户），按 `updated_at DESC` 排序；其他值返回 400 |
 | `source` | string | 否 | 来源过滤（web/embed/api/feishu/wechat/slack/...） |
 | `agent_id` | string | 否 | 按 Agent 过滤（IM 会话） |
 
@@ -73,7 +90,7 @@ curl -X DELETE $BASE/api/v1/sessions/s-1 -H "Authorization: Bearer $TOKEN"
 
 ### DELETE /api/v1/sessions/batch
 
-用途：批量删除会话。请求体：`{"ids":["s-1"],"delete_all":false}`（二选一：`ids` 或 `delete_all:true`）。
+用途：批量删除会话。`delete_all:true` 保留助手会话；指定 ID 删除仍按原有归属规则处理。请求体：`{"ids":["s-1"],"delete_all":false}`（二选一：`ids` 或 `delete_all:true`）。
 
 响应：200 `{"success":true,"message":"Sessions deleted successfully"}`
 
@@ -393,6 +410,8 @@ Handler: `internal/handler/session/qa.go`。API key：聊天需 `chat`/full；`k
 | `channel` | string | 否 | 来源渠道 |
 | `suggestion_attribution` | object | 否 | 点击建议的归因信息 |
 | `question_origin` | object | 否 | 用户点选的建议问题来自哪里：`knowledge_base_id`、可选 `knowledge_id`。仅智能推理模式使用，智能体会先检索该来源；来源不在本轮检索范围内时忽略，不会扩大范围 |
+| `page_context` | object | 否 | 当前页面：`knowledge_base_id`、可选 `knowledge_id`、`wiki_slug`、`wiki_issue_ids`（最多保留 20 项），或 `agent_id`。知识库必须属于本轮检索范围；智能体独立校验，必须在当前租户可见（支持内置智能体）。无效部分丢弃，不扩大检索权限 |
+| `assistant_access` | string | 否 | WeKnora 助手权限等级：`read_only`、`confirm`、`auto_write`，默认 `confirm`，受空间上限约束 |
 
 所选 `reasoning_effort` 会写入会话的 `last_request_state.reasoning_effort`，重新打开会话时前端据此恢复。
 
@@ -432,6 +451,7 @@ curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
 | `vector_threshold` / `keyword_threshold` | float | 否 | 召回阈值；省略时用空间检索配置（默认 0.15 / 0.3） |
 | `match_count` | int | 否 | 返回条数，上限 200；省略时用空间配置的 `rerank_top_k`（默认 10）。召回深度会自动加大到不小于它 |
 | `disable_keywords_match` / `disable_vector_match` | bool | 否 | 关闭某一路召回；两个都为 `true` 返回 400 |
+| `parent_slot_aggregation` | bool | 否 | 同一父块下的多个子块命中只占 1 个 top-k 名额：返回父块正文，`sub_chunk_id` 保留命中的子块，分数取这组子块的最高分。默认 `false`，不影响普通切片 |
 | `rerank` | object | 否 | 覆盖 rerank 设置；`{"enabled":false}` 关闭 rerank。字段见 [rerank 对象](./01-api-overview.md#retrieval-api)。`rerank.top_k` 同时给出时优先于 `match_count` |
 
 省略的字段都沿用空间的检索配置（`GET /tenants/kv/retrieval-config`），不传任何新字段时行为和以前一样。
@@ -480,10 +500,27 @@ curl -X POST $BASE/api/v1/messages/search -H "Authorization: Bearer $TOKEN" \
 
 用途：聊天历史索引统计。权限：Viewer+；API key `message_history`/full。
 
-响应：200 `{"success":true,"data":{indexed_message_count,knowledge_base_size,last_indexed_at,...}}`
+响应：200 `{"success":true,"data":{enabled,embedding_model_id,knowledge_base_id,knowledge_base_name,indexed_message_count,has_indexed_messages}}`。
+
+`embedding_model_id`、`knowledge_base_id`、`knowledge_base_name` 为空时省略。关闭消息索引不会删除已有索引，统计仍包含保留的条目（包括清理未完成的条目）；统计失败不会作为“索引为空”处理。
 
 ```bash
 curl $BASE/api/v1/messages/chat-history-stats -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/v1/messages/chat-history-index/clear
+
+用途：清空**当前空间所有成员**的历史消息检索索引。权限：Admin+；API Key 需要 `manage_tenant_settings` 或 full-access。`message_history` 或 `chat` 能力不授予此权限。无请求参数，不能指定其他空间或知识库。
+
+先暂停该空间的自动消息索引，再同步删除历史索引的知识条目、分块和检索向量。不会删除原始消息或会话，也不影响普通知识库。操作不可撤销；关键词历史搜索仍可使用保留的消息内容。
+
+成功返回 200，`data` 与统计接口结构一致：`enabled=false`、`indexed_message_count=0`、`has_indexed_messages=false`，不再包含旧 `knowledge_base_id`。此时可更换 Embedding 模型并重新启用索引；重新启用会创建新索引，仅后续对话被自动索引，不会自动重建旧消息的索引。
+
+如果暂停已保存而后续清理失败，索引保持暂停，旧知识库绑定保留以便重试。请重新获取配置和统计，再重试此接口；不要把超时或失败响应当作清理完成。仍有索引时，即使已关闭索引，配置接口也会拒绝更换模型（409）。接口同步执行，服务端超时为 5 分钟；反向代理和客户端也需要允许相应的等待时间。重复调用不会删除原始消息。
+
+```bash
+curl -X POST $BASE/api/v1/messages/chat-history-index/clear \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### GET /api/v1/messages/:session_id/load

@@ -73,7 +73,7 @@
             type="button" role="tab" class="settings-tab" :data-section="tab.key"
             :aria-selected="activeSettingsSection === tab.key" :tabindex="activeSettingsSection === tab.key ? 0 : -1"
             :aria-controls="tab.key === 'users' ? 'system-settings-users' : 'system-settings-values'"
-            @click="activeSettingsSection = tab.key" @keydown="onTabKeydown($event, tab.key)">
+            @click="showPanel(tab.key)" @keydown="onTabKeydown($event, tab.key)">
             <t-icon :name="tab.icon" size="16px" />
             <span>{{ tab.label }}</span>
           </button>
@@ -198,21 +198,19 @@
           -->
               <div v-if="hasOverride(item) || hasBulkAction(item)" class="setting-control-actions">
                 <!--
-              Per-key bulk action. Currently only one key
-              (tenant.default_storage_quota_gb) carries one — clicking
-              writes the current setting value onto every existing
-              tenant. We do this as a separate explicit action rather
+              Both quota rows apply the effective default (MB takes precedence)
+              to every existing tenant. We do this as a separate explicit action rather
               than auto-cascade on save so a SystemAdmin who tweaks the
               default while triaging a single new-tenant question
-              doesn't accidentally rewrite production quotas. Hidden
-              when the row is dirty because applying a not-yet-saved
-              value would confuse "what just happened".
+              doesn't accidentally rewrite production quotas. Disabled
+              while either quota row is dirty, so the confirmation
+              always describes the saved effective default.
             -->
-                <t-popconfirm v-if="hasBulkAction(item)" :content="bulkActionConfirmBody(item)"
+                <t-popconfirm v-if="hasBulkAction(item)" :content="bulkActionConfirmBody()"
                   :confirm-btn="{ content: t('system.globalSettings.bulkApply.confirmBtn'), theme: 'primary' }"
                   :cancel-btn="{ content: t('system.globalSettings.confirm.cancelBtn') }" placement="left"
                   @confirm="runBulkAction(item)">
-                  <t-button variant="text" size="small" :disabled="savingKey === item.key || isDirty(item)"
+                  <t-button variant="text" size="small" :disabled="quotaActionDisabled"
                     :title="t('system.globalSettings.bulkApply.tooltip')" class="setting-bulk-btn">
                     <template #icon><t-icon name="usergroup" /></template>
                     {{ t('system.globalSettings.bulkApply.label') }}
@@ -242,6 +240,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import {
@@ -255,10 +254,13 @@ import UserManagement from './UserManagement.vue'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { PASSWORD_SPECIAL_CHARS } from '@/utils/passwordPolicy'
 import { isSettingValueDirty, resolveCurrentSetting } from './systemSettingsEdit'
+import { STORAGE_QUOTA_KEYS, resolveStorageQuota, formatStorageQuota } from './storageQuota'
 
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
 
 const { t, tm, te, locale } = useI18n()
+const route = useRoute()
+const router = useRouter()
 
 // Friendly labels per key live in i18n (system.globalSettings.keyLabels.*).
 // Adding a new entry there must accompany every new key registered in
@@ -391,6 +393,7 @@ const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other' | 'users'>,
   ],
   tenant: [
     'tenant.default_storage_quota_gb',
+    'tenant.default_storage_quota_mb',
     'tenant.auto_create_api_key',
     'tenant.auto_accept_invitation',
   ],
@@ -424,6 +427,28 @@ const sectionTabs = computed(() => {
   return tabs
 })
 
+const PANEL_KEYS: readonly SettingsSection[] = ['access', 'users', 'tenant', 'runtime', 'security', 'other']
+
+function panelFromQuery(): SettingsSection | null {
+  const raw = Array.isArray(route.query.panel) ? route.query.panel[0] : route.query.panel
+  return typeof raw === 'string' && (PANEL_KEYS as readonly string[]).includes(raw) ? raw as SettingsSection : null
+}
+
+/** Follows ?panel= so a navigated link can open a tab other than the first. */
+function applyRoutePanel() {
+  const panel = panelFromQuery()
+  if (!panel || panel === activeSettingsSection.value) return
+  if (panel === 'other' && !hasUnknownSettings.value) return
+  activeSettingsSection.value = panel
+}
+
+function showPanel(key: SettingsSection) {
+  activeSettingsSection.value = key
+  if (route.path !== '/platform/settings' || route.query.section !== 'system-global') return
+  if (route.query.panel === key) return
+  void router.replace({ path: route.path, query: { ...route.query, panel: key } })
+}
+
 function onTabKeydown(event: KeyboardEvent, key: SettingsSection) {
   const tabs = sectionTabs.value
   const index = tabs.findIndex(tab => tab.key === key)
@@ -436,16 +461,19 @@ function onTabKeydown(event: KeyboardEvent, key: SettingsSection) {
     default: return
   }
   event.preventDefault()
-  activeSettingsSection.value = tabs[next]!.key
+  showPanel(tabs[next]!.key)
   const tablist = (event.currentTarget as HTMLElement).parentElement
   tablist?.querySelector<HTMLButtonElement>(`[data-section="${activeSettingsSection.value}"]`)?.focus()
 }
 
+watch(() => route.query.panel, applyRoutePanel, { immediate: true })
 
 watch(hasUnknownSettings, (hasUnknown) => {
   if (!hasUnknown && activeSettingsSection.value === 'other') {
-    activeSettingsSection.value = 'access'
+    showPanel('access')
+    return
   }
+  applyRoutePanel()
 })
 
 const activeSectionSettings = computed(() => {
@@ -789,32 +817,24 @@ function highRiskConfirmBody(item: SystemSettingItem, value: unknown): string {
   })
 }
 
-// hasBulkAction tells the template whether the current row carries an
-// extra "apply to existing data" action beyond plain save/reset.
-// Currently only `tenant.default_storage_quota_gb` does — saving the
-// setting only affects future tenants, so the bulk button is the
-// escape hatch for "rewrite all current tenants too".
 function hasBulkAction(item: SystemSettingItem): boolean {
-  return item.key === 'tenant.default_storage_quota_gb'
+  return STORAGE_QUOTA_KEYS.some((key) => key === item.key)
 }
+
+const quotaActionDisabled = computed(() => savingKey.value !== null ||
+  settings.value.some((item) => hasBulkAction(item) && isDirty(item)))
 
 async function refreshSandboxDockerCapability(key: string) {
   if (key !== 'sandbox.docker_enabled') return
   await deploymentCapabilities.ensureLoaded(true)
 }
 
-function bulkActionConfirmBody(item: SystemSettingItem): string {
-  // Use the canonical (saved) value, not the in-progress edit, so the
-  // operator sees exactly what will be written. The button is disabled
-  // when the row is dirty (see template), so item.value is the value
-  // that's currently in effect for new tenants.
-  const v = item.value
-  const valueText = v === null || v === undefined ? '' : String(v)
-  return t('system.globalSettings.bulkApply.confirmBody', { value: valueText })
+function bulkActionConfirmBody(): string {
+  return t('system.globalSettings.bulkApply.confirmBody', resolveStorageQuota(settings.value))
 }
 
 async function runBulkAction(item: SystemSettingItem) {
-  if (!hasBulkAction(item)) return
+  if (!hasBulkAction(item) || quotaActionDisabled.value) return
   savedKey.value = null
   savingKey.value = item.key
   try {
@@ -822,7 +842,7 @@ async function runBulkAction(item: SystemSettingItem) {
     MessagePlugin.success(
       t('system.globalSettings.bulkApply.success', {
         count: result.affected,
-        gb: result.quota_gb,
+        ...formatStorageQuota(result.quota_bytes),
       }),
     )
     markSettingSaved(item)

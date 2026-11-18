@@ -55,7 +55,7 @@ func TestSanitizeGeneratedTitle(t *testing.T) {
 				"| 发布日期 | 2026-09-01 |",
 			query: "打开 https://github.com/Tencent/WeKnora ，找到最新 Release 的版本号和发布日期；" +
 				"然后打开 https://httpbin.org/forms/post ，用以下信息填写订单表单",
-			want:          "打开 https://github.com/Tencent/…",
+			want:          "打开 https://github.co…",
 			wantFromQuery: true,
 		},
 		{
@@ -110,9 +110,10 @@ func TestSanitizeGeneratedTitle(t *testing.T) {
 			want: "保单理赔流程咨询",
 		},
 		{
-			name: "title label with english prefix and quotes",
-			raw:  "Title: 'Quarterly revenue summary'",
-			want: "Quarterly revenue summary",
+			name:          "title label with english prefix and quotes",
+			raw:           "Title: 'Quarterly revenue summary'",
+			want:          "Quarterly revenue summar",
+			wantTruncated: true,
 		},
 		{
 			name: "markdown link keeps its text",
@@ -150,6 +151,21 @@ func TestSanitizeGeneratedTitle(t *testing.T) {
 				t.Fatalf("title still exceeds %d runes: %d", maxSessionTitleRunes, len([]rune(got)))
 			}
 		})
+	}
+}
+
+func TestGeneratedTitleFitsSidebar(t *testing.T) {
+	// A verbose model response must not become a full sentence in the sidebar.
+	got := sanitizeGeneratedTitle("海底电力电缆寿命与短路电流计算方法及其工程应用分析", "电缆问题")
+	if got.Title != "海底电力电缆寿命与短路电流计算方法及其工程应用分" || !got.Truncated {
+		t.Fatalf("sidebar title = %+v", got)
+	}
+}
+
+func TestFallbackTitleFitsSidebar(t *testing.T) {
+	got := fallbackTitleFromQuery("海底电力电缆寿命与短路电流计算方法及其工程应用分析")
+	if got != "海底电力电缆寿命与短路电流计算方法及其工…" {
+		t.Fatalf("fallback title = %q", got)
 	}
 }
 
@@ -208,5 +224,43 @@ func TestMaxSessionTitleRunesFitsColumn(t *testing.T) {
 	// in PostgreSQL and bytes in some engines, so keep a conservative bound.
 	if maxSessionTitleRunes > 255 {
 		t.Fatalf("maxSessionTitleRunes=%d exceeds the sessions.title column limit", maxSessionTitleRunes)
+	}
+}
+
+func TestSanitizeGeneratedTitleJSONResponses(t *testing.T) {
+	tests := []struct {
+		name, raw, want string
+		fallback        bool
+	}{
+		{"compact object", `{"title":"Agent search tools"}`, "Agent search tools", false},
+		{"pretty object", "{\n  \"title\": \"Agent search tools\"\n}", "Agent search tools", false},
+		{"fenced object", "```json\n{\"title\":\"Agent search tools\"}\n```", "Agent search tools", false},
+		{"reasoning before object", `<think>draft</think>{"title":"Agent search tools"}`, "Agent search tools", false},
+		{"nested JSON title", `{"title":"{\"type\":\"object\"}"}`, "Original question", true},
+		{"schema with title", `{"type":"object","title":"Schema"}`, "Original question", true},
+		{"schema properties", `{"title":"Schema","properties":{"name":{"type":"string"}}}`, "Original question", true},
+		{"plain brace placeholder", "{name} syntax", "{name} syntax", false},
+		{"schema object", `{"type":"object"}`, "Original question", true},
+		{"wrong title type", `{"title":{"type":"string"}}`, "Original question", true},
+		{"empty title", `{"title":"  "}`, "Original question", true},
+		{"truncated object", `{"title":"Agent search tools`, "Original question", true},
+		{"array", `["Agent search tools"]`, "Original question", true},
+		{"plain text with braces", "Explain {name} syntax", "Explain {name} syntax", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeGeneratedTitle(tt.raw, "Original question")
+			if got.Title != tt.want || got.FromQuery != tt.fallback {
+				t.Fatalf("got %+v; want title %q, fallback %v", got, tt.want, tt.fallback)
+			}
+		})
+	}
+}
+
+func TestSanitizeJSONTitleKeepsRuneLimit(t *testing.T) {
+	raw := `{"title":"` + strings.Repeat("保", 30) + `"}`
+	got := sanitizeGeneratedTitle(raw, "Original question")
+	if got.Title != strings.Repeat("保", maxSessionTitleRunes) || !got.Truncated || got.FromQuery {
+		t.Fatalf("unexpected result: %+v", got)
 	}
 }

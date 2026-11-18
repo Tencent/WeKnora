@@ -7,6 +7,10 @@
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
             <div class="logo_actions">
+                <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="bottom">
+                    <AssistantButton data-guide="assistant-entry" icon-only :icon-size="18" :label="assistantName"
+                        :active="assistantStore.visible" @click="assistantStore.toggle()" />
+                </t-tooltip>
                 <t-tooltip placement="bottom">
                     <template #content>
                         <span class="cmdk-tip">
@@ -77,6 +81,10 @@
                         </div>
                     </div>
                 </t-tooltip>
+                <t-tooltip v-if="assistantStore.entry === 'sidebar'" :content="assistantName" placement="right">
+                    <AssistantButton data-guide="assistant-entry" class="assistant-sidebar-entry" icon-only :icon-size="18"
+                        :label="assistantName" :active="assistantStore.visible" @click="assistantStore.toggle()" />
+                </t-tooltip>
             </div>
             <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !uiStore.sidebarCollapsed }"
                 v-for="(item, index) in topMenuItems" :key="index">
@@ -87,7 +95,7 @@
                         <div class="menu_item-box">
                             <div class="menu_icon" :class="`menu_icon--${item.icon}`">
                                 <img class="icon"
-                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'toolbox' ? toolboxIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
+                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'automation' ? automationIcon : item.icon == 'toolbox' ? toolboxIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
                             </div>
                             <template v-if="!uiStore.sidebarCollapsed">
@@ -190,15 +198,15 @@
         <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
             <div class="batch-footer-left">
                 <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
-                    @change="toggleBatchSelectAll">
+                    :disabled="batchDeleting" @change="toggleBatchSelectAll">
                     {{ t('batchManage.selectAll') }}
                 </t-checkbox>
             </div>
             <div class="batch-footer-right">
-                <t-button size="small" variant="text" @click="exitBatchMode">
+                <t-button size="small" variant="text" :disabled="batchDeleting" @click="exitBatchMode">
                     {{ t('batchManage.cancel') }}
                 </t-button>
-                <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
+                <t-button size="small" theme="danger" variant="base" :disabled="batchDeleting || batchSelectedIds.length === 0"
                     :loading="batchDeleting" @click="handleInlineBatchDelete">
                     {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
                 </t-button>
@@ -265,6 +273,7 @@ import {
 } from './sessionSidebarSourceFilter';
 import { logout as logoutApi } from '@/api/auth';
 import { useMenuStore } from '@/stores/menu';
+import { useSettingsStore } from '@/stores/settings';
 import { useSessionActivityStore } from '@/stores/sessionActivity';
 import { useAuthStore } from '@/stores/auth';
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
@@ -274,6 +283,8 @@ import { useBrowserConnectionStore } from '@/stores/browserConnection';
 import { useOrganizationStore } from '@/stores/organization';
 import { useUIStore } from '@/stores/ui';
 import { useCommandPaletteStore } from '@/stores/commandPalette';
+import { useAssistantStore } from '@/stores/assistant';
+import AssistantButton from '@/components/assistant/AssistantButton.vue';
 import { MessagePlugin, DialogPlugin, Icon as TIcon } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
@@ -333,6 +344,8 @@ watch(() => uiStore.sidebarBrowserStatus && toolboxPreview.value.some((tool) => 
     if (visible && !browserConnection.loaded) browserConnection.refresh().catch(() => {});
 }, { immediate: true });
 const commandPaletteStore = useCommandPaletteStore();
+const assistantStore = useAssistantStore();
+const assistantName = computed(() => assistantStore.displayName || t('assistant.title'));
 
 // Platform-aware label for the ⌘K hint. navigator.platform is deprecated but
 // the alternatives (userAgentData.platform) aren't universally available yet;
@@ -451,6 +464,8 @@ const isMenuItemActive = (itemPath: string): boolean => {
             return currentRoute === 'toolbox';
         case 'artifacts':
             return currentRoute === 'artifactLibrary';
+        case 'automations':
+            return currentRoute === 'automationList';
         case 'organizations':
             return currentRoute === 'organizationList';
         case 'creatChat':
@@ -479,7 +494,7 @@ const getIconActiveState = (itemPath: string) => {
 };
 
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
-const TOP_MENU_PATHS = new Set(['creatChat', 'knowledge-bases', 'artifacts', 'agents', 'toolbox', 'organizations']);
+const TOP_MENU_PATHS = new Set(['creatChat', 'knowledge-bases', 'artifacts', 'agents', 'automations', 'toolbox', 'organizations']);
 
 const topMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => TOP_MENU_PATHS.has(item.path));
@@ -593,16 +608,19 @@ const mouseleaveBotDown = () => {
 }
 
 const enterBatchMode = () => {
+    if (batchDeleting.value) return
     batchMode.value = true
     batchSelectedIds.value = []
 }
 
 const exitBatchMode = () => {
+    if (batchDeleting.value) return
     batchMode.value = false
     batchSelectedIds.value = []
 }
 
 const toggleBatchSelect = (id: string) => {
+    if (batchDeleting.value) return
     const idx = batchSelectedIds.value.indexOf(id)
     if (idx > -1) {
         batchSelectedIds.value.splice(idx, 1)
@@ -612,13 +630,16 @@ const toggleBatchSelect = (id: string) => {
 }
 
 const toggleBatchSelectAll = (checked: boolean) => {
+    if (batchDeleting.value) return
     batchSelectedIds.value = checked ? [...allSessionIds.value] : []
 }
 
 const handleInlineBatchDelete = () => {
-    if (batchSelectedIds.value.length === 0) return
-    const isDeleteAll = isAllBatchSelected.value
-    const displayCount = batchDisplayCount.value
+    if (batchDeleting.value || batchSelectedIds.value.length === 0) return;
+    const selectedIds = [...batchSelectedIds.value];
+    const isDeleteAll = isAllBatchSelected.value;
+    const displayCount = batchDisplayCount.value;
+    let submitted = false;
     const confirmDialog = DialogPlugin.confirm({
         header: t('batchManage.deleteConfirmTitle'),
         body: isDeleteAll
@@ -627,15 +648,25 @@ const handleInlineBatchDelete = () => {
         confirmBtn: { content: t('batchManage.delete'), theme: 'danger' as const },
         cancelBtn: t('batchManage.cancel'),
         theme: 'warning',
+        confirmOnEnter: false,
+        onClose: () => {
+            if (!batchDeleting.value) confirmDialog.destroy();
+        },
         onConfirm: async () => {
-            batchDeleting.value = true
+            if (submitted || batchDeleting.value) return;
+            submitted = true;
+            batchDeleting.value = true;
             try {
-                let res: any
-                if (isDeleteAll) {
-                    res = await deleteAllSessions()
-                } else {
-                    res = await batchDelSessions([...batchSelectedIds.value])
-                }
+                confirmDialog.update({
+                    confirmLoading: true,
+                    closeOnEscKeydown: false,
+                    closeOnOverlayClick: false,
+                    closeBtn: false,
+                    cancelBtn: { content: t('batchManage.cancel'), disabled: true },
+                });
+                const res = isDeleteAll
+                    ? await deleteAllSessions()
+                    : await batchDelSessions(selectedIds);
                 if (res && res.success === true) {
                     if (isDeleteAll) {
                         usemenuStore.clearMenuArr();
@@ -643,30 +674,28 @@ const handleInlineBatchDelete = () => {
                         await getMessageList();
                     } else {
                         let next = sessionBuckets.value;
-                        for (const id of batchSelectedIds.value) {
-                            next = removeSessionFromBuckets(next, id);
-                        }
+                        for (const id of selectedIds) next = removeSessionFromBuckets(next, id);
                         sessionBuckets.value = next;
                         syncMenuStoreFromBuckets();
                     }
                     const currentChatId = route.params.chatid as string;
-                    if (currentChatId && (isDeleteAll || batchSelectedIds.value.includes(currentChatId))) {
+                    if (currentChatId && (isDeleteAll || selectedIds.includes(currentChatId)))
                         router.push('/platform/creatChat');
-                    }
-                    batchSelectedIds.value = []
-                    MessagePlugin.success(t('batchManage.deleteSuccess'))
-                    exitBatchMode()
+                    batchSelectedIds.value = [];
+                    batchMode.value = false;
+                    MessagePlugin.success(t('batchManage.deleteSuccess'));
                 } else {
-                    MessagePlugin.error(t('batchManage.deleteFailed'))
+                    MessagePlugin.error(t('batchManage.deleteFailed'));
                 }
             } catch {
-                MessagePlugin.error(t('batchManage.deleteFailed'))
+                MessagePlugin.error(t('batchManage.deleteFailed'));
+            } finally {
+                batchDeleting.value = false;
+                confirmDialog.destroy();
             }
-            batchDeleting.value = false
-            confirmDialog.destroy()
         },
-    })
-}
+    });
+};
 
 const handleSessionMenuClick = (data: { value: string }, item: any) => {
     if (data?.value === 'delete') {
@@ -1124,6 +1153,7 @@ let settingIcon = ref('setting.svg');
 let agentIcon = ref('agent.svg');
 let artifactIcon = ref('artifact.svg');
 let toolboxIcon = ref('toolbox.svg');
+let automationIcon = ref('automation.svg');
 let organizationIcon = ref('organization.svg');
 let pathPrefix = ref(route.name)
 const getIcon = (path: string) => {
@@ -1145,6 +1175,7 @@ const getIcon = (path: string) => {
     artifactIcon.value = artifactsActiveState ? 'artifact-green.svg' : 'artifact.svg';
 
     toolboxIcon.value = route.name === 'toolbox' ? 'toolbox-green.svg' : 'toolbox.svg';
+    automationIcon.value = route.name === 'automationList' ? 'automation-green.svg' : 'automation.svg';
 
     // 组织图标：只在组织页面显示绿色
     organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
@@ -1213,6 +1244,8 @@ const gotopage = async (path: string) => {
         return;
     } else {
         if (path === 'creatChat') {
+            // 再次点击当前「新对话」时路由不会变化，仍需清空上一条草稿的引用。
+            if (isInCreatChat.value) useSettingsStore().clearChatReferences()
             // 如果在知识库详情页，跳转到全局对话创建页
             if (isInKnowledgeBase.value) {
                 router.push('/platform/creatChat')
@@ -1326,7 +1359,6 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         .menu_bottom {
             align-items: center;
         }
-
         .menu_top {
             margin-right: 0;
             padding-right: 0;
@@ -1819,6 +1851,13 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
     flex-shrink: 0;
 }
 
+.aside_box--collapsed .assistant-sidebar-entry {
+    display: flex;
+    width: 32px;
+    height: 32px;
+    margin: 0 auto 6px;
+}
+
 .header-icon-btn {
     display: flex;
     align-items: center;
@@ -1834,6 +1873,11 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 
     &:hover {
         background: var(--td-bg-color-container-hover);
+    }
+
+    &.is-active {
+        background: var(--td-bg-color-container-hover);
+        color: var(--td-brand-color);
     }
 
     .header-icon-img {

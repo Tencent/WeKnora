@@ -167,7 +167,9 @@ func TestConfig_FeedURLList_SplitsAndDedupes(t *testing.T) {
 }
 
 func TestConfig_ParseHeaders(t *testing.T) {
-	cfg := &Config{AuthHeaders: "Authorization: Bearer x\nX-Foo:  bar \nbroken-line\n: noname"}
+	cfg := &Config{
+		AuthHeaders: "authorization: Bearer old\nAuthorization: Bearer x\nx-foo:  bar \nbroken-line\n: noname",
+	}
 	got := cfg.parseHeaders()
 	if got["Authorization"] != "Bearer x" {
 		t.Errorf("Authorization = %q", got["Authorization"])
@@ -218,7 +220,7 @@ func TestConnector_Validate_PrivateFeedWithHeader(t *testing.T) {
 	}
 	// With the header → success.
 	if err := NewConnector().Validate(
-		context.Background(), makeConfig(f.feedURL(), "X-Test-Auth: secret"),
+		context.Background(), makeConfig(f.feedURL(), "X-Test-Auth: stale\nx-test-auth: secret"),
 	); err != nil {
 		t.Fatalf("Validate with header error: %v", err)
 	}

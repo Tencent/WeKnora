@@ -223,11 +223,12 @@ func allDigits(value string) bool {
 }
 
 // StreamDecoder composes resource restoration, source-citation expansion,
-// issue-handle decoding and orphan filtering so callers cannot split handle
+// source-handle expansion, issue-handle decoding and orphan filtering so callers cannot split handle
 // processing or apply stages in the wrong order.
 type StreamDecoder struct {
 	resources  *resourceStreamDecoder
 	sources    *citationStreamExpander
+	handles    *sourceHandleStreamDecoder
 	issues     *HandleStreamDecoder
 	mcpServers *HandleStreamDecoder
 	mcpTools   *HandleStreamDecoder
@@ -243,6 +244,9 @@ func (d *StreamDecoder) Feed(chunk string) string {
 	}
 	if d.sources != nil {
 		chunk = d.sources.Feed(chunk)
+	}
+	if d.handles != nil {
+		chunk = d.handles.Feed(chunk)
 	}
 	if d.issues != nil {
 		chunk = d.issues.Feed(chunk)
@@ -272,6 +276,9 @@ func (d *StreamDecoder) Flush() string {
 	}
 	if d.sources != nil {
 		tail = d.sources.Feed(tail) + d.sources.Flush()
+	}
+	if d.handles != nil {
+		tail = d.handles.Feed(tail) + d.handles.Flush()
 	}
 	if d.issues != nil {
 		tail = d.issues.Feed(tail) + d.issues.Flush()

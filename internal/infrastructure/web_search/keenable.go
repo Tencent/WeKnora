@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -40,7 +39,7 @@ type KeenableProvider struct {
 
 // NewKeenableProvider creates a new Keenable provider from parameters.
 // The API key is optional; Keenable works keyless against the public endpoint.
-func NewKeenableProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewKeenableProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	client, err := NewSearchHTTPClient(defaultKeenableTimeout, params.ProxyURL)
 	if err != nil {
 		return nil, err
@@ -60,10 +59,9 @@ func (p *KeenableProvider) Name() string {
 // Search performs a web search using the Keenable Search API.
 func (p *KeenableProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
+	query, maxResults, includeDate := request.Query, request.MaxResults, request.IncludeDate
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
 	}
@@ -102,12 +100,12 @@ func (p *KeenableProvider) Search(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		logger.Warnf(ctx, "[WebSearch][Keenable] API returned status %d: %s", resp.StatusCode, string(respBody))
-		return nil, fmt.Errorf("keenable API returned status %d: %s", resp.StatusCode, string(respBody))
+		preview := readErrorPreview(resp.Body)
+		logger.Warnf(ctx, "[WebSearch][Keenable] API returned status %d: %s", resp.StatusCode, preview)
+		return nil, fmt.Errorf("keenable API returned status %d: %s", resp.StatusCode, preview)
 	}
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readCapped(resp.Body, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}

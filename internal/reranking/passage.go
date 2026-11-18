@@ -32,8 +32,6 @@ var (
 	reMarkdownLink = regexp.MustCompile(`\[([^\]]+)\]\([^()\s]*(?:\([^)]*\)[^()\s]*)*\)`)
 	// reRawURL matches standalone http(s) URLs.
 	reRawURL = regexp.MustCompile(`https?://[^\s)\]>]+`)
-	// reCodeBlock captures the semantic body of fenced code blocks.
-	reCodeBlock = regexp.MustCompile("(?s)```[^\\r\\n]*\\r?\\n(.*?)\\r?\\n?```")
 	// reLatexBlock captures the semantic body of block-level LaTeX ($$...$$).
 	reLatexBlock = regexp.MustCompile(`(?s)\$\$(.*?)\$\$`)
 	// reTableSep matches table separator rows like |---|---|.
@@ -65,8 +63,59 @@ var (
 // all meaningful semantic content while removing formatting that would
 // confuse text-similarity scoring.
 func CleanPassage(text string) string {
-	// 1. Unwrap code blocks so code-only candidates remain rerankable.
-	text = reCodeBlock.ReplaceAllString(text, "$1")
+	var out, prose strings.Builder
+	var fenceChar byte
+	fenceLength := 0
+	flushProse := func() {
+		if prose.Len() == 0 {
+			return
+		}
+		out.WriteString(cleanPassageProse(prose.String()))
+		prose.Reset()
+	}
+
+	// Keep fenced code separate from prose throughout cleaning. Unwrapping
+	// first would let later passes delete XML, URLs and operators in code.
+	for line := range strings.SplitAfterSeq(text, "\n") {
+		marker, length, tail := passageFence(line)
+		if fenceLength == 0 {
+			if length < 3 || (marker == '`' && strings.ContainsRune(tail, '`')) {
+				prose.WriteString(line)
+				continue
+			}
+			flushProse()
+			fenceChar, fenceLength = marker, length
+		} else if marker == fenceChar && length >= fenceLength && strings.Trim(tail, " \t\r\n") == "" {
+			fenceLength = 0
+		} else {
+			out.WriteString(line)
+		}
+	}
+	flushProse()
+	return strings.TrimSpace(out.String())
+}
+
+// passageFence recognizes a top-level fence with up to three leading spaces.
+// Matching type/length and a whitespace-only closing tail follow CommonMark
+// 4.5. This helper does not recognize container, indented or inline code.
+func passageFence(line string) (marker byte, length int, tail string) {
+	trimmed := strings.TrimLeft(line, " ")
+	if len(line)-len(trimmed) > 3 || len(trimmed) == 0 {
+		return 0, 0, ""
+	}
+	marker = trimmed[0]
+	if marker != '`' && marker != '~' {
+		return 0, 0, ""
+	}
+	for length < len(trimmed) && trimmed[length] == marker {
+		length++
+	}
+	return marker, length, trimmed[length:]
+}
+
+// cleanPassageProse leaves boundary whitespace intact so code and surrounding
+// text retain their line boundaries when the cleaned segments are assembled.
+func cleanPassageProse(text string) string {
 	// 2. Unwrap LaTeX blocks so formula-only candidates remain rerankable.
 	text = reLatexBlock.ReplaceAllString(text, "$1")
 	// 3. Remove HTML tags
@@ -111,12 +160,14 @@ func CleanPassage(text string) string {
 	// 12. Collapse excessive newlines
 	text = reExcessiveNewlines.ReplaceAllString(text, "\n\n")
 
-	return strings.TrimSpace(text)
+	return text
 }
 
 // EnrichedPassage is the cleaned chunk body plus the image captions, OCR text
 // and generated questions attached to it. MMR compares candidates on this
 // text, so chunks of one document are not made similar by a shared title.
+// Generated questions are omitted when the knowledge base has turned question
+// generation off.
 func EnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 	combinedText := CleanPassage(result.Content)
 	var enrichments []string
@@ -145,8 +196,10 @@ func EnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 		var docMeta types.DocumentChunkMetadata
 		if err := json.Unmarshal(result.ChunkMetadata, &docMeta); err != nil {
 			logger.Warnf(ctx, "[Rerank] Failed to parse chunk metadata of chunk %s: %v", result.ID, err)
-		} else if questionStrings := docMeta.GetQuestionStrings(); len(questionStrings) > 0 {
-			enrichments = append(enrichments, strings.Join(questionStrings, "; "))
+		} else if includeGeneratedQuestions(result) {
+			if questionStrings := docMeta.GetQuestionStrings(); len(questionStrings) > 0 {
+				enrichments = append(enrichments, strings.Join(questionStrings, "; "))
+			}
 		}
 	}
 
@@ -157,6 +210,10 @@ func EnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 		combinedText += "\n\n"
 	}
 	return combinedText + strings.Join(enrichments, "\n")
+}
+
+func includeGeneratedQuestions(result *types.SearchResult) bool {
+	return result == nil || !result.SkipGeneratedQuestions
 }
 
 // ModelPassage is the text the rerank model scores: the document title

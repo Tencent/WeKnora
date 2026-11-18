@@ -154,11 +154,7 @@ func (c *Compactor) summarizeHistory(ctx context.Context, p *Preparation) (strin
 		ctx, p.MessagesToSummarize, p.OmittedHistory, p.PreviousSummary, instructions, c.settings.summaryBudget(),
 	)
 	if err != nil {
-		// The previous summary is still the best record of everything
-		// before this span, so the archive is appended to it rather than
-		// replacing it.
-		return joinNonEmpty(p.PreviousSummary,
-			rawArchive(p.MessagesToSummarize, c.settings.summaryBudget(), c.estimator)), true
+		return c.fallbackHistory(p), true
 	}
 	return text, false
 }
@@ -328,7 +324,10 @@ func validateSummary(content, finishReason string) error {
 	switch strings.ToLower(strings.TrimSpace(finishReason)) {
 	case types.FinishReasonIncomplete:
 		return errors.New(types.StreamEndedEarlyError)
-	case "length", "max_tokens", "max_output_tokens":
+	// model_context_window_exceeded is z.ai's length stop; #4589 normalized it
+	// for the engine and the Anthropic adapter, and a truncated summary is
+	// exactly as unusable here.
+	case "length", "max_tokens", "max_output_tokens", "model_context_window_exceeded":
 		return errors.New("generation hit the token cap and the summary is incomplete")
 	}
 	return nil

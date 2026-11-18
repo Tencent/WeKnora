@@ -10,7 +10,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/im"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -85,7 +87,7 @@ func (c *Client) CreatePost(ctx context.Context, channelID, rootID, message stri
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := im.ReadIMResponse(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("read mattermost create post response: %w", err)
 	}
@@ -124,7 +126,7 @@ func (c *Client) GetPost(ctx context.Context, postID string) (rootID string, err
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := im.ReadIMResponse(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("read mattermost get post response: %w", err)
 	}
@@ -162,7 +164,7 @@ func (c *Client) PatchPostMessage(ctx context.Context, postID, message string) e
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := im.ReadIMResponse(resp.Body)
 	if err != nil {
 		return fmt.Errorf("read mattermost patch post response: %w", err)
 	}
@@ -195,7 +197,7 @@ func (c *Client) GetFileInfo(ctx context.Context, fileID string) (*FileInfo, err
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := im.ReadIMResponse(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read mattermost file info response: %w", err)
 	}
@@ -225,7 +227,7 @@ func (c *Client) GetFileReader(ctx context.Context, fileID string) (io.ReadClose
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, readErr := io.ReadAll(resp.Body)
+		body, readErr := im.ReadIMResponse(resp.Body)
 		resp.Body.Close()
 		if readErr != nil {
 			return nil, fmt.Errorf("read mattermost get file error response (status=%d): %w", resp.StatusCode, readErr)
@@ -239,7 +241,13 @@ func truncateForErr(b []byte) string {
 	const max = 512
 	s := string(b)
 	if len(s) > max {
-		return s[:max] + "..."
+		// Back off to a rune boundary: a partial multi-byte rune is invalid
+		// UTF-8 in an error string that callers log and surface.
+		cut := max
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		return s[:cut] + "..."
 	}
 	return s
 }

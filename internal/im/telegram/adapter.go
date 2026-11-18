@@ -114,6 +114,7 @@ type telegramPhoto struct {
 }
 
 func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
+	im.LimitWebhookBody(c)
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
@@ -292,7 +293,7 @@ func (a *Adapter) callAPIWithResult(ctx context.Context, method string, body int
 		OK     bool            `json:"ok"`
 		Result json.RawMessage `json:"result"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &apiResp); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 	if !apiResp.OK {

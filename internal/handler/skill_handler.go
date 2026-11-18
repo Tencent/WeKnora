@@ -57,23 +57,26 @@ func NewSkillHandler(
 
 // SkillInfoResponse represents the skill info returned to frontend
 type SkillInfoResponse struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string `json:"name" extensions:"x-agent"`
+	Description string `json:"description" extensions:"x-agent"`
 }
 
 // ListSkills godoc
 // @Summary      获取当前沙箱配置上可执行的 Skills
-// @Description  返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。不传 sandbox_config_id 时列表为空。
+// @Description  返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。
+// @Description  不传 sandbox_config_id 时列表为空。
 // @Tags         Skills
 // @Accept       json
 // @Produce      json
-// @Param        sandbox_config_id      query  string  false  "Sandbox config ID; ignored for a shared agent"
+// @Param        sandbox_config_id      query  string  false  "Sandbox config ID from agent.get; ignored for a shared agent" extensions(x-agent,x-agent-required)
 // @Param        agent_id               query  string  false  "Agent ID; needs agent_source_tenant_id"
 // @Param        agent_source_tenant_id query  int     false  "Shared agent source workspace"
-// @Success      200  {object}  map[string]interface{}  "Skills列表"
+// @Success      200  {object}  handler.ListSkillsResponse  "Skills列表"
 // @Failure      403  {object}  errors.AppError         "无权使用该共享智能体"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"skill.list","risk":"read"}
+// @x-agent-hint "Lists usable skills, chosen by name. Pass sandbox_config_id from agent.get; when the agent has none, pass host (WeKnora Lite runs skills locally). An empty list means there are no usable skills there; if the agent has no sandbox, tell the user to choose one in the agent editor."
 // @Router       /skills [get]
 func (h *SkillHandler) ListSkills(c *gin.Context) {
 	// A shared agent runs its skills in its OWNER's workspace, on the sandbox

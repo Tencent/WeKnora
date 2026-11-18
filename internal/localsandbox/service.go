@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -41,6 +42,7 @@ type Service struct {
 	modes    ModeLookup
 	shell    []string
 	roots    *rootLocks
+	sessions *sessionStates
 }
 
 // NewService constructs the application-facing sandbox facade.
@@ -54,6 +56,7 @@ func NewService(
 		modes:    modes,
 		shell:    []string{"/bin/bash", "--noprofile", "--norc", "-c"},
 		roots:    newRootLocks(),
+		sessions: newSessionStates(),
 	}
 }
 
@@ -68,6 +71,12 @@ type RunRequest struct {
 	// pass only the keys this command needs (skill credentials, PATH tweaks).
 	// Do not copy os.Environ() into it.
 	Env map[string]string
+	// Spec is what approval reads. An empty Spec.Command means Command.
+	Spec ReviewSpec
+	// Approver asks the user (ModeAsk). Nil means nobody can be asked.
+	Approver Approver
+	// Reviewer is the review model (ModeAuto). Nil means auto refuses.
+	Reviewer Approver
 }
 
 // RunResult is the captured outcome of one Run.
@@ -76,6 +85,8 @@ type RunResult struct {
 	Stderr string
 	Exit   ExitStatus
 	Denial Denial
+	// Notice is a sandbox note for the model, appended to stderr by the caller.
+	Notice string
 }
 
 // workspaceFor resolves the session workspace and its policy.
@@ -87,10 +98,7 @@ func (s *Service) workspaceFor(
 		logger.Warnf(ctx, "[LocalSandbox] resolve workspace session=%s: %v", sessionID, err)
 		return Workspace{}, Policy{}, err
 	}
-	mode := ModeAuto
-	if s.modes != nil {
-		mode = s.modes.ModeForSession(ctx, sessionID)
-	}
+	mode := s.ModeForSession(ctx, sessionID)
 	// Strict enforcement boundary. Normalizing user input is the caller's job
 	// (see ParseApprovalMode); by the time a mode reaches here, honouring it
 	// or refusing are the only honest options — substituting a different
@@ -106,26 +114,54 @@ func (s *Service) workspaceFor(
 			sessionID, mode, ws.Root, err)
 		return Workspace{}, Policy{}, err
 	}
+	for _, g := range s.sessions.grants(sessionID) {
+		relaxed, err := s.builder.Relax(policy, g)
+		if err != nil {
+			// A grant stops fitting when the session's project changes.
+			logger.Warnf(ctx, "[LocalSandbox] drop session grant session=%s path=%s: %v",
+				sessionID, g.Path, err)
+			continue
+		}
+		policy = relaxed
+	}
 	logger.Debugf(ctx, "[LocalSandbox] workspace session=%s kind=%d root=%s mode=%s writable=%d",
 		sessionID, ws.Kind, ws.Root, mode, len(policy.WritableRoots))
 	return ws, policy, nil
 }
 
 // GuardForSession returns the path guard the trusted file tools must use.
-// It derives from the same Policy the backend compiles, which is what keeps
-// the two enforcement paths in agreement.
+// extra adds grants for this call only, such as a file write just approved.
 func (s *Service) GuardForSession(
-	ctx context.Context, sessionID string,
+	ctx context.Context, sessionID string, extra ...Grant,
 ) (*PathGuard, Workspace, error) {
 	ws, policy, err := s.workspaceFor(ctx, sessionID)
 	if err != nil {
 		return nil, Workspace{}, err
 	}
-	logger.Debugf(ctx, "[LocalSandbox] guard session=%s root=%s", sessionID, ws.Root)
+	for _, g := range extra {
+		relaxed, err := s.builder.Relax(policy, g)
+		if err != nil {
+			return nil, Workspace{}, err
+		}
+		policy = relaxed
+	}
+	logger.Debugf(ctx, "[LocalSandbox] guard session=%s root=%s extra=%d", sessionID, ws.Root, len(extra))
 	return NewPathGuard(policy), ws, nil
 }
 
-// Run executes one shell command inside the session's workspace.
+// SessionGrants returns the grants the user approved for the rest of a session.
+func (s *Service) SessionGrants(sessionID string) []Grant {
+	return s.sessions.grants(sessionID)
+}
+
+// ReleaseSession forgets every approval made in a session.
+func (s *Service) ReleaseSession(sessionID string) {
+	s.sessions.release(sessionID)
+}
+
+// Run executes one shell command inside the session's workspace. Approval
+// waits happen outside the root lock so parallel tool calls are not stalled
+// behind an approver that has not answered yet.
 func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	if err := s.ensureBackend(ctx); err != nil {
 		return nil, err
@@ -134,7 +170,25 @@ func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.runPolicy(ctx, ws.Root, policy, req)
+	cwd, err := commandCwd(policy, req.WorkDir)
+	if err != nil {
+		logger.Warnf(ctx, "[LocalSandbox] work_dir denied session=%s work_dir=%q: %v",
+			req.SessionID, req.WorkDir, err)
+		return nil, err
+	}
+	if req.Spec.Command == "" {
+		req.Spec.Command = req.Command
+	}
+	turn := s.newTurn(ctx, req, ws)
+	policy, refused, err := s.approveDelete(ctx, turn, policy, cwd)
+	if err != nil || refused != nil {
+		return refused, err
+	}
+	res, err := s.runPolicy(ctx, ws.Root, policy, req)
+	if err != nil || !res.Denial.IsDenied() {
+		return res, err
+	}
+	return s.escalate(ctx, turn, ws.Root, policy, cwd, res)
 }
 
 // RunWithPolicy runs one command under a policy the caller built. Skill
@@ -166,17 +220,17 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 	unlock := s.LockRoot(lockRoot)
 	defer unlock()
 
-	cwd := policy.Cwd
-	if req.WorkDir != "" {
-		// work_dir is a convenience for the model, not a privilege boundary;
-		// it is checked against the same guard the file tools use.
-		resolved, err := NewPathGuard(policy).CheckDir(req.WorkDir)
-		if err != nil {
-			logger.Warnf(ctx, "[LocalSandbox] work_dir denied session=%s work_dir=%q: %v",
-				req.SessionID, req.WorkDir, err)
-			return nil, err
-		}
-		cwd = resolved
+	// The approval that let this run may have been given just before the
+	// user stopped the turn; the lock wait is the last point to notice.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	cwd, err := commandCwd(policy, req.WorkDir)
+	if err != nil {
+		logger.Warnf(ctx, "[LocalSandbox] work_dir denied session=%s work_dir=%q: %v",
+			req.SessionID, req.WorkDir, err)
+		return nil, err
 	}
 
 	timeout := req.Timeout
@@ -251,6 +305,15 @@ func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy,
 	}, nil
 }
 
+func commandCwd(policy Policy, workDir string) (string, error) {
+	if workDir == "" {
+		return policy.Cwd, nil
+	}
+	// work_dir is a convenience for the model, not a privilege boundary;
+	// it is checked against the same guard the file tools use.
+	return NewPathGuard(policy).CheckDir(workDir)
+}
+
 func watchKill(ctx context.Context, done <-chan struct{}, proc Process) {
 	select {
 	case <-done:
@@ -273,7 +336,13 @@ func previewCommand(command string) string {
 	if len(command) <= commandLogLimit {
 		return command
 	}
-	return command[:commandLogLimit] + "…"
+	// Back up to a rune start so a multibyte character (a CJK file name or
+	// argument) is not split into invalid UTF-8 in the log line.
+	cut := commandLogLimit
+	for cut > 0 && !utf8.RuneStart(command[cut]) {
+		cut--
+	}
+	return command[:cut] + "…"
 }
 
 func drain(proc Process) (string, string) {

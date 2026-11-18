@@ -97,7 +97,11 @@ func (m *Manager) stageShellSkill(ctx context.Context, sessionID, name string) (
 	if len(resources) == 0 {
 		return "", fmt.Errorf("skill %q has no resources to stage", name)
 	}
-	dir := path.Join(sandbox.SessionWorkspaceRoot, ".skills", name, fmt.Sprintf("%x", digest.Sum(nil)[:12]))
+	root := sandbox.SessionWorkspaceRoot
+	if layout, ok := m.sessionLayout(ctx, sessionID); ok && layout.IsSharedRemote() {
+		root = layout.Root
+	}
+	dir := path.Join(root, ".skills", name, fmt.Sprintf("%x", digest.Sum(nil)[:12]))
 	payload := make([]sandbox.SessionWorkspaceFile, 0, len(resources))
 	for _, file := range resources {
 		payload = append(payload, sandbox.SessionWorkspaceFile{

@@ -126,6 +126,18 @@ type KnowledgeSearchOptions struct {
 	MatchCount           int
 	DisableKeywordsMatch bool
 	DisableVectorMatch   bool
+	// ParentSlotAggregation collapses same-parent child hits into one top-k
+	// slot. Off by default.
+	ParentSlotAggregation bool
 	// Rerank overrides the rerank stage. Nil reranks with the tenant config.
 	Rerank *RerankOptions
+	// QueryImage, when set, is the raw bytes of an image used as the vector
+	// query instead of Query text: recall runs in the same image vector space
+	// the index stored image_vector chunks in, so a page can find similar
+	// pages. Query text still feeds keyword recall and rerank. Empty keeps the
+	// existing text-only behaviour.
+	QueryImage []byte
+	// QueryImageMediaType is the image's MIME type (e.g. "image/png"),
+	// resolved from the request when QueryImage is set.
+	QueryImageMediaType string
 }

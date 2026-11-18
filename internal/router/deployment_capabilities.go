@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 )
 
 func deploymentCapabilitiesFromRouter(params RouterParams) handler.DeploymentCapabilitiesData {
@@ -21,11 +22,12 @@ func deploymentCapabilitiesFromRouter(params RouterParams) handler.DeploymentCap
 		WebSearch: params.WebSearchHandler != nil &&
 			params.WebSearchProviderHandler != nil &&
 			params.WebSearchCredentialsHandler != nil,
-		VectorStore:   params.VectorStoreHandler != nil,
-		Storage:       params.StorageBackendHandler != nil,
-		Sandbox:       params.SandboxConfigHandler != nil,
-		SandboxDocker: sandbox.DockerBackendEnabled(),
-		SandboxHost:   params.HostSandbox.Manager != nil,
-		SandboxRemote: params.SandboxConfigHandler != nil && !params.HostSandbox.Desktop,
+		VectorStore:           params.VectorStoreHandler != nil,
+		Storage:               params.StorageBackendHandler != nil,
+		Sandbox:               params.SandboxConfigHandler != nil,
+		SandboxDocker:         sandbox.DockerBackendEnabled(),
+		SandboxHost:           params.HostSandbox.Manager != nil,
+		SandboxRemote:         params.SandboxConfigHandler != nil && !params.HostSandbox.Desktop,
+		SandboxUserAllocation: allocation.UserModeAvailable(),
 	})
 }

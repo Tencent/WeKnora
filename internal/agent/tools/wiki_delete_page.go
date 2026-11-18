@@ -119,6 +119,7 @@ func (t *wikiDeletePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		Output:  outputMsg,
 		Data: map[string]interface{}{
 			"display_type":   "wiki_delete_page",
+			"data_change":    wikiDataChange("delete_page", kbID),
 			"slug":           params.Slug,
 			"title":          existingPage.Title,
 			"updated_count":  updatedCount,

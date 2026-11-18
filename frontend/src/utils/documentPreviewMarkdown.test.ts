@@ -89,3 +89,24 @@ test('raw HTML images cannot override preview loading attributes', () => {
   assert.equal(attributes.get('decoding'), 'async')
   assert.equal(attributes.get('fetchpriority'), 'low')
 })
+
+// GFM task lists must survive the preview pipeline as sanitizer-safe spans:
+// marked's default <input type="checkbox"> is stripped by the DOMPurify tag
+// allowlist, which degraded "- [x] 任务" to a plain bullet.
+test('task list items render styled checkbox spans, checked and unchecked', () => {
+  const html = renderDocumentPreviewMarkdown(
+    '- [x] 任务1\n\n- [ ] 任务2\n',
+    value => value,
+  )
+
+  assert.match(html, /<span class="task-checkbox checked"><\/span>任务1/)
+  assert.match(html, /<span class="task-checkbox"><\/span>任务2/)
+  assert.ok(!html.includes('<input'), 'no raw checkbox input may be emitted')
+})
+
+test('plain bullets are not affected by the task checkbox override', () => {
+  const html = renderDocumentPreviewMarkdown('- 普通项\n', value => value)
+
+  assert.match(html, /<li>普通项<\/li>/)
+  assert.ok(!html.includes('task-checkbox'))
+})

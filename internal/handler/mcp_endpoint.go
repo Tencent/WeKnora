@@ -204,7 +204,7 @@ func (h *MCPEndpointHandler) UpdateMCPEndpoint(c *gin.Context) {
 // @Tags         MCP端点
 // @Produce      json
 // @Param        endpoint_id  path      string  true  "端点 ID"
-// @Success      200          {object}  map[string]interface{}  "删除成功"
+// @Success      200          {object}  handler.SuccessResponse  "删除成功"
 // @Failure      404          {object}  map[string]interface{}  "端点不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth

@@ -63,7 +63,7 @@ type createInviteLinkRequest struct {
 // @Produce      json
 // @Param        id       path  string                   true  "空间 ID"
 // @Param        request  body  createInviteLinkRequest  true  "共享链接配置"
-// @Success      201  {object}  map[string]interface{}
+// @Success      201  {object}  handler.DataResponse{data=types.TenantInvitationResponse}
 // @Security     Bearer
 // @Router       /tenants/{id}/invite-links [post]
 func (h *TenantInvitationHandler) CreateInviteLink(c *gin.Context) {

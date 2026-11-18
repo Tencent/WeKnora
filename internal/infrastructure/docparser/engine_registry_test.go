@@ -5,7 +5,23 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
+
+// Locally advertised parser formats must pass the shared import gate used by
+// direct uploads, URL imports, workers and datasource connectors (#4598).
+// Check metadata even when a converter is not linked into this test build.
+func TestLocalParserFormatsPassImportValidation(t *testing.T) {
+	for _, engine := range ListAllEngines(true, nil, nil) {
+		t.Run(engine.Name, func(t *testing.T) {
+			for _, ext := range engine.FileTypes {
+				if !utils.IsSupportedImportExtension(ext) {
+					t.Errorf("engine advertises %q but the shared import gate rejects it", ext)
+				}
+			}
+		})
+	}
+}
 
 func TestListAllEnginesBuiltinIncludesDocumentFormats(t *testing.T) {
 	engines := ListAllEngines(true, nil, nil)
@@ -71,5 +87,40 @@ func TestPreferAnydocSkipsPDF(t *testing.T) {
 		if got := preferAnydocWhenAvailable(ft); got != "" {
 			t.Errorf("preferAnydocWhenAvailable(%q) = %q, want empty so PDFs stay on builtin", ft, got)
 		}
+	}
+}
+
+// Self-hosted MinerU parses xlsx natively since 3.1.0, so the engine must
+// advertise it; the parser settings UI only offers an engine for a file type
+// when the engine lists it (#4099). xls is deliberately not advertised: only
+// the 4.x docs list it and the engine cannot detect the server version, so an
+// older server would fail at parse time.
+func TestMinerUEngineAdvertisesXlsxOnly(t *testing.T) {
+	var found bool
+	for _, engine := range ListAllEngines(true, nil, nil) {
+		if engine.Name != MinerUEngineName {
+			continue
+		}
+		found = true
+		fileTypes := make(map[string]bool, len(engine.FileTypes))
+		for _, fileType := range engine.FileTypes {
+			fileTypes[fileType] = true
+		}
+		if !fileTypes["xlsx"] {
+			t.Errorf("mineru engine file types do not include %q: %v", "xlsx", engine.FileTypes)
+		}
+		// Guard against re-adding xls without a way to detect the server version.
+		if fileTypes["xls"] {
+			t.Errorf("mineru engine must not advertise %q: %v", "xls", engine.FileTypes)
+		}
+		// Formats it already served must stay.
+		for _, keep := range []string{"pdf", "docx", "pptx"} {
+			if !fileTypes[keep] {
+				t.Errorf("mineru engine dropped %q: %v", keep, engine.FileTypes)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("mineru engine not found")
 	}
 }

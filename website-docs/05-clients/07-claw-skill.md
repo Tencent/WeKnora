@@ -45,7 +45,7 @@ Claw Skill 和 MCP Server 均可供外部智能体调用，选择取决于客户
 | 面向 | OpenClaw / ClawHub 生态的 Agent | 支持 MCP 协议的客户端（Claude Desktop、Cursor、Claude Code、VS Code Copilot 等） |
 | 安装 | ClawHub 安装 Skill | 无需额外部署：在「设置 → 发布集成 → MCP Server」创建端点，客户端连接 `/mcp/<endpoint_id>` |
 | 认证 | 空间 API Key（`WEKNORA_API_KEY`） | 每个端点独立令牌，可轮换、停用 |
-| 传输 | 直接调 REST | Streamable HTTP；仅支持 stdio 的客户端通过 `mcp-remote` 桥接 |
+| 传输 | 直接调 REST | Streamable HTTP；无法使用原生 HTTP/Bearer 时，可用 `mcp-remote@0.15.1` 作为 STDIO 备用配置 |
 | 能力范围 | 导入、检索、浏览（5 类） | 按端点勾选：检索与阅读、问答（端点默认 Agent）、Wiki、写入；可限定知识库范围 |
 | 文档 | 本篇 | [MCP 集成](../03-features/08-mcp.md) |
 

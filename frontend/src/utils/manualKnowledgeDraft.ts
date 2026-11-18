@@ -34,6 +34,68 @@ export function deriveManualTitle(question: string, fallback: string): string {
   return cut.replace(TRAILING_PUNCTUATION_RE, '').trim() || head.trim()
 }
 
+/** A retrieved chunk reference, as persisted on an assistant message. */
+export interface ManualDraftReference {
+  knowledge_base_id?: string
+}
+
+/**
+ * Collect knowledge-base ids cited by a chat answer, in reference order.
+ *
+ * Used as a soft preference when opening the manual editor from chat: the
+ * editor resolves the first id that appears in its writable candidate list,
+ * and otherwise keeps the existing first-option fallback. Viewer-only shares,
+ * FAQ bases, and unknown ids are never force-inserted — those would reject
+ * a save or create an invisible FAQ document.
+ */
+export function collectManualDraftPreferredKbIds(
+  references?: ManualDraftReference[] | null,
+): string[] {
+  if (!Array.isArray(references)) return []
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const reference of references) {
+    const kbId = reference?.knowledge_base_id
+    if (typeof kbId !== 'string') continue
+    const trimmed = kbId.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    ids.push(trimmed)
+  }
+  return ids
+}
+
+/**
+ * Pick a preferred knowledge base that is already in the editor's candidates.
+ *
+ * Returns the first preferred id that appears in `candidateIds`, or the first
+ * candidate (or '') when nothing matches — matching the editor's historical
+ * `list[0]?.value ?? ''` fallback.
+ */
+export function resolvePreferredKnowledgeBaseId(
+  preferredIds: string[] | null | undefined,
+  candidateIds: string[],
+): string {
+  if (candidateIds.length === 0) return ''
+  const candidates = new Set(candidateIds)
+  for (const id of preferredIds || []) {
+    if (candidates.has(id)) return id
+  }
+  return candidateIds[0] ?? ''
+}
+
+/**
+ * @deprecated Prefer {@link collectManualDraftPreferredKbIds} + editor-side
+ * resolution against the writable candidate list. Kept as a thin first-id
+ * helper for call sites that only need the raw citation order.
+ */
+export function resolveManualDraftKnowledgeBaseId(
+  references?: ManualDraftReference[] | null,
+): string | null {
+  const ids = collectManualDraftPreferredKbIds(references)
+  return ids[0] ?? null
+}
+
 /**
  * Build the Markdown body seeded into the manual editor from a chat answer.
  *

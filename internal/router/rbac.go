@@ -32,10 +32,11 @@ import (
 //	YES — KB, Agent, Knowledge document, Chunk, WikiPage, FAQ entry,
 //	      KB tag, anything stamped with creator_id / created_by.
 //	      => Mutating routes use OwnedXxxOrAdmin.
-//	      The creator passes regardless of role; everyone else needs
-//	      Admin+. This is what makes "Contributor in my own KB acts
-//	      like Owner; Contributor in someone else's KB acts like
-//	      Viewer" hold uniformly.
+//	      The creator passes as a Contributor or above (a demoted
+//	      Viewer creator does not); everyone else needs Admin+. This
+//	      is what makes "Contributor in my own KB acts like Owner;
+//	      Contributor in someone else's KB acts like Viewer" hold
+//	      uniformly.
 //
 //	NO  — Tenant-wide infrastructure: Model, VectorStore, IM channel,
 //	      WebSearchProvider, DataSource, MCPService, WeKnoraCloud

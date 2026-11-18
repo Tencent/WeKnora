@@ -1,0 +1,7 @@
+node_modules
+out
+.DS_Store
+media/
+__pycache__/
+.venv-voice/
+local-notes/

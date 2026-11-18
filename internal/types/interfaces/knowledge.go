@@ -11,6 +11,11 @@ import (
 
 // KnowledgeService defines the interface for knowledge services.
 type KnowledgeService interface {
+	// ReplaceKnowledgeFromDataSource atomically retires the previous row and inserts
+	// its replacement before enqueueing parsing or deleting the previous resources.
+	ReplaceKnowledgeFromDataSource(ctx context.Context, knowledgeID string, item *types.FetchedItem,
+		metadata map[string]string, tagIDs []string, channel string) (*types.Knowledge, error)
+
 	// CreateKnowledgeFromFile creates knowledge from a file.
 	// channel identifies the ingestion channel (e.g. "web", "api", "wechat"); empty defaults to "web".
 	CreateKnowledgeFromFile(
@@ -242,6 +247,11 @@ type KnowledgeService interface {
 
 // KnowledgeRepository defines the interface for knowledge repositories.
 type KnowledgeRepository interface {
+	// ReplaceKnowledge soft-deletes before and inserts after with its tag relations
+	// in one short transaction.
+	// A stale before snapshot is rejected without deleting or inserting either row.
+	ReplaceKnowledge(ctx context.Context, before, after *types.Knowledge, tagIDs []string) error
+
 	CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	GetKnowledgeByID(ctx context.Context, tenantID uint64, id string) (*types.Knowledge, error)
 	// GetKnowledgeByIDOnly returns knowledge by ID without tenant filter (for permission resolution).
@@ -322,8 +332,9 @@ type KnowledgeRepository interface {
 	// given knowledge and promotes parse_status from "finalizing" to
 	// "completed" when the count reaches zero. Returns the post-decrement
 	// count, whether this caller's UPDATE was the one that promoted the
-	// row, and any error.
-	FinalizeSubtask(ctx context.Context, id string) (int, bool, error)
+	// row, and any error. Positive attempt values exclude superseded tasks;
+	// zero retains the behavior of tasks without attempt tracking.
+	FinalizeSubtask(ctx context.Context, id string, attempt int) (int, bool, error)
 	// SetFinalizing atomically transitions a row from "processing" to
 	// "finalizing" and writes the initial pending_subtasks_count. Returns
 	// whether the transition took place (false when the row's parse_status
@@ -334,6 +345,9 @@ type KnowledgeRepository interface {
 	CompleteProcessingWithoutSubtasks(ctx context.Context, id string) (bool, error)
 	// CountKnowledgeByKnowledgeBaseID counts the number of knowledge items in a knowledge base.
 	CountKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) (int64, error)
+	// CountAllKnowledgeByKnowledgeBaseID includes entries still marked deleting.
+	// Use for cleanup/model-change gates, not document-list display counts.
+	CountAllKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) (int64, error)
 	// CountKnowledgeByStatus counts the number of knowledge items with the specified parse status.
 	CountKnowledgeByStatus(ctx context.Context, tenantID uint64, kbID string, parseStatuses []string) (int64, error)
 	// SearchKnowledge searches knowledge items by keyword across the tenant.

@@ -29,9 +29,10 @@ func NewAuditLogHandler(auditService interfaces.AuditLogService) *AuditLogHandle
 // auditLogListResponse is the response envelope for ListTenantAuditLog. The
 // cursor is the integer id of the last entry, or 0 if no more rows remain.
 type auditLogListResponse struct {
-	Success    bool              `json:"success"`
-	Data       []*types.AuditLog `json:"data"`
-	NextCursor uint64            `json:"next_cursor"`
+	Success bool              `json:"success"`
+	Data    []*types.AuditLog `json:"data"`
+	// NextCursor is the id of the last entry on this page, 0 when it is empty.
+	NextCursor uint64 `json:"next_cursor" extensions:"x-agent"`
 }
 
 // ListTenantAuditLog godoc
@@ -112,17 +113,21 @@ func (h *AuditLogHandler) ListTenantAuditLog(c *gin.Context) {
 // workspace actors or configuration history.
 // @Summary      获取知识库活动记录
 // @Description  返回知识库的重要变更与后台任务入口。仅知识库创建者或所属空间管理员可读，共享空间不可读。
+// @Description  按 id 倒序；把 next_cursor 作为 after_id 取下一页，返回空列表表示没有更多。
 // @Tags         知识库
 // @Produce      json
-// @Param        id        path   string  true   "知识库ID"
-// @Param        after_id  query  int     false  "游标：返回 id 小于此值的记录"
-// @Param        limit     query  int     false  "页大小，1-100，默认 50"
-// @Param        action    query  string  false  "按 action 精确过滤"
-// @Param        outcome   query  string  false  "按 outcome 精确过滤"
+// @Param        id        path   string  true   "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        after_id  query  int     false  "游标：返回 id 小于此值的记录"  extensions(x-agent=cursor)
+// @Param        limit     query  int     false  "页大小"  minimum(1)  maximum(100)  default(50)  extensions(x-agent,x-agent-maximum=50)
+// @Param        action    query  string  false  "按 action 精确过滤，如 knowledge.deleted"  extensions(x-agent)
+// @Param        outcome   query  string  false  "结果过滤"  Enums(success,accepted,partial,failed,denied,canceled)  extensions(x-agent)
 // @Param        actor     query  string  false  "按 actor_user_id 精确过滤"
 // @Success      200  {object}  auditLogListResponse
-// @Failure      403  {object}  errors.AppError
+// @Failure      403  {object}  errors.AppError  "非创建者或管理员，或知识库来自其他空间"
+// @Failure      404  {object}  errors.AppError  "知识库不存在"
 // @Security     Bearer
+// @x-agent      {"id":"knowledge_base.list_activity","risk":"read","role":"contributor"}
+// @x-agent-hint "Newest first; only the creator or a workspace admin may read it. Assistant actions carry via=agent."
 // @Router       /knowledge-bases/{id}/activity [get]
 func (h *AuditLogHandler) ListKnowledgeBaseActivity(c *gin.Context) {
 	ctx := c.Request.Context()

@@ -113,3 +113,25 @@ test('EPUB paths resolve against their document and preview as epub', () => {
   assert.equal(resolveEpubPath('OEBPS/content.opf', 'ch1.xhtml'), 'OEBPS/ch1.xhtml')
   assert.equal(resolvePreviewKind('epub'), 'epub')
 })
+
+
+test('citation matching treats composed and decomposed accents as the same text', () => {
+  assert.equal(normalizeForMatch('Café'), normalizeForMatch('Cafe\u0301'))
+  assert.notEqual(normalizeForMatch('Café'), normalizeForMatch('Cafe'))
+  assert.equal(normalizeForMatch('Ångström'), normalizeForMatch('A\u030Angstro\u0308m'))
+  assert.equal(normalizeForMatch('각도'), normalizeForMatch('\u1100\u1161\u11A8도'))
+})
+
+test('canonical matching returns exact original UTF-16 spans including combining marks', () => {
+  for (const [text, quote, expected] of [
+    ['前言 Cafe\u0301 后记', 'Café', 'Cafe\u0301'],
+    ['前言 Café 后记', 'Cafe\u0301', 'Café'],
+    ['𝒜前言 cafe\u0301 后记', 'CAFÉ', 'cafe\u0301'],
+    ['前言 A\u030Angstro\u0308m 后记', 'Ångström', 'A\u030Angstro\u0308m'],
+    ['前言 \u1100\u1161\u11A8도 后记', '각도', '\u1100\u1161\u11A8도'],
+  ]) {
+    const hit = findInText(text, quote)
+    assert.ok(hit, text)
+    assert.equal(text.slice(hit.start, hit.end), expected)
+  }
+})

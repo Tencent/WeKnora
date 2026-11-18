@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/itchyny/gojq"
 	"github.com/spf13/cobra"
 
 	"github.com/Tencent/WeKnora/cli/internal/format"
@@ -85,11 +86,20 @@ func CheckFormatFlag(cmd *cobra.Command) (*FormatOptions, error) {
 	if f := cmd.Flags().Lookup("jq"); f != nil {
 		fopts.JQ = f.Value.String()
 	}
-	// --jq only meaningful for JSON-shaped output. Reject the explicit
-	// `--format text --jq ...` combination; the `--jq` with --format unset
-	// case is handled by ResolveDefault.
-	if fopts.JQ != "" && fopts.Mode == FormatText {
+	// --jq only makes sense for JSON-shaped output. Validate the effective
+	// mode before syntax so text selected by the environment has the same
+	// format error priority as an explicit text flag.
+	effectiveMode := fopts.Mode
+	if effectiveMode == "" {
+		effectiveMode = FormatMode(os.Getenv("WEKNORA_FORMAT"))
+	}
+	if fopts.JQ != "" && effectiveMode == FormatText {
 		return nil, NewFlagError(errors.New("--jq requires --format json|ndjson"))
+	}
+	if fopts.JQ != "" {
+		if _, err := gojq.Parse(fopts.JQ); err != nil {
+			return nil, mapJQError(&format.JQError{Err: fmt.Errorf("jq parse: %w", err)})
+		}
 	}
 	return fopts, nil
 }

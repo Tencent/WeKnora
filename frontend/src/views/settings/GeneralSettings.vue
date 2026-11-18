@@ -123,6 +123,8 @@
         </div>
       </div>
 
+      <HostApprovalDefaultSetting v-if="authStore.isLiteMode" />
+
       <!-- 自动下载更新开关 (Lite edition only) -->
       <div class="setting-row" v-if="authStore.isLiteMode">
         <div class="setting-info">
@@ -143,9 +145,11 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { normalizeMainLocale, setI18nLanguage } from '@/i18n'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
 import { useTheme, type ThemeMode } from '@/composables/useTheme'
+import HostApprovalDefaultSetting from './components/HostApprovalDefaultSetting.vue'
 import {
   useFont,
   SANS_STACKS,
@@ -171,13 +175,14 @@ const {
 } = useFont()
 
 // 本地状态
-const localLanguage = ref('zh-CN')
+const localLanguage = ref(locale.value || 'zh-CN')
 const localTheme = ref<ThemeMode>(currentTheme.value)
 const localSansFont = ref<FontKey>(currentSans.value)
 const localMonoFont = ref<MonoFontKey>(currentMono.value)
 const localFontSize = ref<FontSizeKey>(currentSize.value)
 
 // Keep the form in sync if preferences change externally (e.g. on user switch).
+watch(locale, (val) => { if (val) localLanguage.value = val })
 watch(currentTheme, (val) => { localTheme.value = val })
 watch(currentSans, (val) => { localSansFont.value = val })
 watch(currentMono, (val) => { localMonoFont.value = val })
@@ -221,23 +226,35 @@ const isAutoCheckUpdateEnabled = computed({
 })
 
 // 初始化加载
-onMounted(() => {
+onMounted(async () => {
   // 从 localStorage 加载语言设置
   const savedLocale = localStorage.getItem('locale')
   if (savedLocale) {
-    localLanguage.value = savedLocale
-    locale.value = savedLocale
+    try {
+      localLanguage.value = await setI18nLanguage(savedLocale)
+    } catch {
+      localLanguage.value = locale.value
+    }
   } else {
     localLanguage.value = locale.value
   }
 })
 
 // 处理语言变化
-const handleLanguageChange = () => {
-  locale.value = localLanguage.value
-  localStorage.setItem('locale', localLanguage.value)
-  MessagePlugin.success(t('language.languageSaved'))
+const handleLanguageChange = async () => {
+  const requested = normalizeMainLocale(localLanguage.value)
+  try {
+    const applied = await setI18nLanguage(requested)
+    localLanguage.value = applied
+    if (applied === requested) {
+      MessagePlugin.success(t('language.languageSaved'))
     }
+  } catch (err) {
+    localLanguage.value = locale.value
+    console.error('[WeKnora] Failed to switch language:', err)
+    MessagePlugin.error(t('common.failed'))
+  }
+}
 
 // 处理主题变化
 const handleThemeChange = (val: ThemeMode) => {

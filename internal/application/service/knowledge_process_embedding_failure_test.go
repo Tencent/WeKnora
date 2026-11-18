@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -64,6 +65,8 @@ func (s embedFailureModelService) GetEmbeddingModel(
 // attempt to keep processing past the missing embedder would panic and fail
 // this test, which is exactly the regression worth catching.
 func TestProcessChunksFailsKnowledgeWhenEmbeddingModelUnavailable(t *testing.T) {
+	tracker, db := setupSpanTrackerTest(t)
+	ctx := types.WithTaskRetryMetadata(context.Background(), 0, 3)
 	modelErr := errors.New("embedding model not found")
 	knowledge := &types.Knowledge{
 		ID:              "knowledge-1",
@@ -75,6 +78,7 @@ func TestProcessChunksFailsKnowledgeWhenEmbeddingModelUnavailable(t *testing.T) 
 	svc := &knowledgeService{
 		repo:         repo,
 		modelService: embedFailureModelService{err: modelErr},
+		spanTracker:  tracker,
 	}
 	kb := &types.KnowledgeBase{
 		ID:               "kb-1",
@@ -83,8 +87,12 @@ func TestProcessChunksFailsKnowledgeWhenEmbeddingModelUnavailable(t *testing.T) 
 		IndexingStrategy: types.IndexingStrategy{VectorEnabled: true},
 	}
 
-	svc.processChunks(context.Background(), kb, knowledge,
+	_, attempt, err := tracker.OpenAttempt(ctx, knowledge.ID, "")
+	require.NoError(t, err)
+	ctx = withAttempt(ctx, attempt)
+	err = svc.processChunks(ctx, kb, knowledge,
 		[]types.ParsedChunk{{Content: "body", Seq: 0, Start: 0, End: 4}})
+	require.NoError(t, err, "the task is acknowledged even though retry budget remains")
 
 	require.Len(t, repo.updates, 1, "the failure must be persisted exactly once")
 	require.Equal(t, types.ParseStatusFailed, repo.updates[0].ParseStatus)
@@ -93,6 +101,21 @@ func TestProcessChunksFailsKnowledgeWhenEmbeddingModelUnavailable(t *testing.T) 
 		"error_message should name the underlying cause, got %q", repo.updates[0].ErrorMessage,
 	)
 	require.Equal(t, types.ParseStatusFailed, knowledge.ParseStatus)
+	status, code, message := rootSpan(t, db, knowledge.ID, attempt)
+	require.Equal(t, types.SpanStatusFailed, status)
+	require.Equal(t, werrors.ErrCodeEmbeddingProviderFail, code)
+	require.Equal(t, knowledge.ErrorMessage, message)
+
+	// Housekeeping must not relabel this settled failure as TASK_STALLED.
+	require.NoError(t, db.Exec(knowledgeTestDDL).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO knowledges (id, parse_status, error_message) VALUES (?, ?, ?)",
+		knowledge.ID, knowledge.ParseStatus, knowledge.ErrorMessage).Error)
+	(&HousekeepingService{db: db}).reapTerminalSpans(ctx)
+	status, code, message = rootSpan(t, db, knowledge.ID, attempt)
+	require.Equal(t, types.SpanStatusFailed, status)
+	require.Equal(t, werrors.ErrCodeEmbeddingProviderFail, code)
+	require.Equal(t, knowledge.ErrorMessage, message)
 }
 
 // A cancelled context means the run was interrupted, not that the model is

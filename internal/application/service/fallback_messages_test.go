@@ -91,10 +91,10 @@ func TestPrepareFallbackMessagesKeepsHistoricalSourcesNonCitable(t *testing.T) {
 
 	messages, refs := prepareFallbackMessages(cm, "legacy fallback prompt")
 	require.Contains(t, messages[0].Content, "Source handling protocol")
-	require.Equal(t, `Previous <ref id="c1"/> <ref id="w1"/>`, messages[2].Content)
+	require.Equal(t, `Previous <ref id="chunk://1"/> <ref id="url://1"/>`, messages[2].Content)
 	// Fallback has no current retrieval evidence. Historical handles are kept
 	// for navigation but must not authorize citations in the new answer.
-	raw := `Answer <ref id="c1"/><ref id="w1"/>`
+	raw := `Answer <ref id="chunk://1"/><ref id="url://1"/>`
 	require.Equal(t, "Answer ", refs.DecodeOutputText(raw))
 	decoder := refs.StreamDecoder()
 	streamed := decoder.Feed(`Answer <ref id="c`) +
@@ -113,6 +113,6 @@ func TestPrepareFallbackMessagesSuppressesCitationsWhenDisabled(t *testing.T) {
 
 	messages, refs := prepareFallbackMessages(cm, "legacy fallback prompt")
 	require.Contains(t, messages[0].Content, "Source citations are disabled")
-	require.Equal(t, `Previous <ref id="c1"/>`, messages[2].Content)
-	require.Equal(t, "answer ", refs.DecodeOutputText(`answer <ref id="c1"/>`))
+	require.Equal(t, `Previous <ref id="chunk://1"/>`, messages[2].Content)
+	require.Equal(t, "answer ", refs.DecodeOutputText(`answer <ref id="chunk://1"/>`))
 }

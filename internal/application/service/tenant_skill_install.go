@@ -18,11 +18,13 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/service/sandboxalloc"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -1675,6 +1677,20 @@ func (s *TenantSkillService) startMaintenanceSession(
 	if sess == nil {
 		return nil, nil, fmt.Errorf("create %s session returned nil", operation)
 	}
+	if s.placer != nil {
+		if _, err := s.placer.Place(types.WithSandboxTenantID(ctx, tenantID), sandboxalloc.PlaceRequest{
+			SessionTenantID: tenantID, SessionID: sess.ID,
+			ConfigTenantID: tenantID, ConfigID: configID, Purpose: allocation.PurposeMaintenance,
+		}); err != nil {
+			// The row was created for this operation only and nothing has run
+			// in it; leaving it would keep a hidden, pinned session around.
+			if delErr := s.sessions.DeleteSession(context.WithoutCancel(ctx), sess.ID); delErr != nil {
+				logger.Warnf(ctx, "[skill] remove %s session %s after a failed placement: %v",
+					operation, sess.ID, delErr)
+			}
+			return nil, nil, fmt.Errorf("record %s sandbox placement: %w", operation, err)
+		}
+	}
 	return sess, mgr, nil
 }
 
@@ -2258,17 +2274,8 @@ func (s *TenantSkillService) resolveInstallerModel(
 	if err != nil {
 		return nil, fmt.Errorf("list models for installer: %w", err)
 	}
-	for _, model := range models {
-		if model != nil && model.Type == types.ModelTypeKnowledgeQA &&
-			model.Status == types.ModelStatusActive && model.IsDefault {
-			return s.models.GetChatModel(ctx, model.ID)
-		}
-	}
-	for _, model := range models {
-		if model != nil && model.Type == types.ModelTypeKnowledgeQA &&
-			model.Status == types.ModelStatusActive {
-			return s.models.GetChatModel(ctx, model.ID)
-		}
+	if model := types.PickChatModel(models, ""); model != nil {
+		return s.models.GetChatModel(ctx, model.ID)
 	}
 	return nil, fmt.Errorf("workspace %d has no active chat model for skill installer", tenantID)
 }
@@ -2523,8 +2530,8 @@ func (s *TenantSkillService) markConfigSandboxesStale(
 				configID, err)
 		} else if entity != nil && !entity.Config.RebuildsExistingOnSkillChange() {
 			logger.Infof(markCtx,
-				"[skill] config %s skill_rollout=%s; leaving live sandboxes on the previous image",
-				configID, types.SkillRolloutNewSession)
+				"[skill] config %s keeps existing sandboxes on the previous image after skill changes",
+				configID)
 			return
 		}
 	}

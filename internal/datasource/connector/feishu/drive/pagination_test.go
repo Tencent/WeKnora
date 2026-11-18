@@ -46,6 +46,20 @@ func TestClientDriveListFilesPagination(t *testing.T) {
 			wantRequests: 2,
 		},
 		{
+			name: "has_more true with missing token",
+			response: func(int) core.DriveFileListResponse {
+				return core.DriveFileListResponse{
+					Data: core.DriveFileListData{
+						Files:   []core.DriveFile{{Token: "file-1"}},
+						HasMore: true,
+					},
+				}
+			},
+			wantErr:      "missing page token",
+			wantRequests: 1,
+			wantFiles:    []string{},
+		},
+		{
 			// has_more=false is the authoritative stop signal: a residual
 			// non-empty token must not trigger another round trip.
 			name: "has_more false with stale token",

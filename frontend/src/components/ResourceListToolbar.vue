@@ -1,5 +1,5 @@
 <template>
-  <div class="resource-toolbar">
+  <div class="resource-toolbar" :class="{ 'resource-toolbar-compact': hideScopes }">
     <div v-if="!hideScopes" class="scope-filters">
       <div class="category-tabs" role="group" :aria-label="$t('listSpaceSidebar.all')">
         <button v-for="item in scopes" :key="item.value" type="button"
@@ -98,6 +98,11 @@ onMounted(() => { if (!props.hideScopes) orgStore.fetchOrganizations() })
 .space-filter { width: 180px; }
 .space-filter-icon-active { color: var(--td-brand-color); }
 .search-input { width: 260px; max-width: 100%; margin-left: auto; }
+.resource-toolbar-compact {
+  max-width: 100%;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
 @media (max-width: 720px) {
   .search-input { width: 100%; }
   .space-filter { max-width: 100%; }

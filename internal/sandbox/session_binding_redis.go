@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -78,22 +77,47 @@ return 1
 // image, which is what we want once no turn is actually using the sandbox.
 const sessionTurnLeaseTTL = 30 * time.Minute
 
-var beginTurnScript = redis.NewScript(`
+// KEYS[1] turn lease, KEYS[2] rewind lock, KEYS[3] background activity.
+// ARGV[1] TTL ms. A turn that opens while background work is live does not
+// arm its one rebuild: replacing the sandbox would destroy that work.
+var beginTurnScript = redis.NewScript(activityLiveCountLua + `
 if redis.call('EXISTS', KEYS[2]) == 1 then
 	return redis.error_reply('ERR_SESSION_REWIND_LOCKED')
 end
 local refs = redis.call('HINCRBY', KEYS[1], 'refs', 1)
 if refs == 1 then
-	redis.call('HSET', KEYS[1], 'rebuild', '1')
+	if live_count(KEYS[3], now_ms()) > 0 then
+		redis.call('HSET', KEYS[1], 'rebuild', '0')
+	else
+		redis.call('HSET', KEYS[1], 'rebuild', '1')
+	end
 end
 redis.call('PEXPIRE', KEYS[1], ARGV[1])
 return refs
 `)
 
-// KEYS[1] turn lease, KEYS[2] rewind lock. ARGV[1] owner token, ARGV[2] TTL ms.
-var tryLockRewindScript = redis.NewScript(`
+// KEYS[1] turn lease, KEYS[2] background activity. ARGV[1] turn TTL ms.
+// Returns {refs, rebuild, live background items}.
+var turnStateScript = redis.NewScript(activityLiveCountLua + `
+local live = live_count(KEYS[2], now_ms())
+local refs = 0
+local rebuild = '0'
+if redis.call('EXISTS', KEYS[1]) == 1 then
+	redis.call('PEXPIRE', KEYS[1], ARGV[1])
+	refs = tonumber(redis.call('HGET', KEYS[1], 'refs') or '0') or 0
+	rebuild = redis.call('HGET', KEYS[1], 'rebuild') or '0'
+end
+return {refs, rebuild, live}
+`)
+
+// KEYS[1] turn lease, KEYS[2] rewind lock, KEYS[3] background activity.
+// ARGV[1] owner token, ARGV[2] TTL ms.
+var tryLockRewindScript = redis.NewScript(activityLiveCountLua + `
 if redis.call('EXISTS', KEYS[1]) == 1 then
 	return redis.error_reply('ERR_SESSION_TURN_ACTIVE')
+end
+if live_count(KEYS[3], now_ms()) > 0 then
+	return redis.error_reply('ERR_SESSION_WORK_ACTIVE')
 end
 if redis.call('EXISTS', KEYS[2]) == 1 then
 	return 0
@@ -395,7 +419,8 @@ func (s *RedisSessionSandboxBindingStore) BeginTurn(
 	if ttlMS <= 0 {
 		ttlMS = (30 * time.Minute).Milliseconds()
 	}
-	if err := beginTurnScript.Run(ctx, s.client, []string{s.turnKey(key), s.rewindKey(key)}, ttlMS).Err(); err != nil {
+	keys := []string{s.turnKey(key), s.rewindKey(key), s.activityKey(key)}
+	if err := beginTurnScript.Run(ctx, s.client, keys, ttlMS).Err(); err != nil {
 		if isRewindLockedRedisErr(err) {
 			return ErrSessionRewindLocked
 		}
@@ -420,7 +445,9 @@ func (s *RedisSessionSandboxBindingStore) EndTurn(
 }
 
 // TurnState reports whether a chat turn is open and whether its first
-// resolve may still rebuild a stale sandbox.
+// resolve may still rebuild a stale sandbox. Live background work counts as an
+// open turn that may not rebuild: it runs outside any turn, and a resolve that
+// replaced the sandbox under it would destroy it.
 func (s *RedisSessionSandboxBindingStore) TurnState(
 	ctx context.Context,
 	key SessionSandboxKey,
@@ -428,19 +455,25 @@ func (s *RedisSessionSandboxBindingStore) TurnState(
 	if err := key.Validate(); err != nil {
 		return false, false, err
 	}
-	values, err := s.client.HGetAll(ctx, s.turnKey(key)).Result()
+	values, err := turnStateScript.Run(
+		ctx, s.client, []string{s.turnKey(key), s.activityKey(key)}, sessionTurnLeaseTTL.Milliseconds(),
+	).Slice()
 	if err != nil {
 		return false, false, fmt.Errorf("read sandbox turn lease: %w", err)
 	}
-	if len(values) == 0 {
-		return false, false, nil
+	if len(values) != 3 {
+		return false, false, fmt.Errorf("read sandbox turn lease: unexpected reply %v", values)
 	}
-	_ = s.client.PExpire(ctx, s.turnKey(key), sessionTurnLeaseTTL).Err()
-	refs, _ := strconv.Atoi(values["refs"])
+	refs, _ := values[0].(int64)
+	rebuild, _ := values[1].(string)
+	live, _ := values[2].(int64)
+	if live > 0 {
+		return true, false, nil
+	}
 	if refs <= 0 {
 		return false, false, nil
 	}
-	return true, values["rebuild"] == "1", nil
+	return true, rebuild == "1", nil
 }
 
 // ConsumeTurnRebuild spends the one rebuild allowed for the current turn.
@@ -460,11 +493,17 @@ func (s *RedisSessionSandboxBindingStore) ConsumeTurnRebuild(
 }
 
 func (s *RedisSessionSandboxBindingStore) turnKey(key SessionSandboxKey) string {
-	return "weknora:sandbox:session:{" + s.hashTag(key) + "}:turn"
+	if key.IsUserScoped() {
+		return s.keyBase(key) + ":session:" + key.SessionID + ":turn"
+	}
+	return s.keyBase(key) + ":turn"
 }
 
 func (s *RedisSessionSandboxBindingStore) rewindKey(key SessionSandboxKey) string {
-	return "weknora:sandbox:session:{" + s.hashTag(key) + "}:rewind"
+	if key.IsUserScoped() {
+		return s.keyBase(key) + ":session:" + key.SessionID + ":rewind"
+	}
+	return s.keyBase(key) + ":rewind"
 }
 
 // TryLockRewind takes a distributed exclusive rewind lock for key.
@@ -487,11 +526,14 @@ func (s *RedisSessionSandboxBindingStore) TryLockRewind(
 		ttlMS = sessionRewindLockTTL.Milliseconds()
 	}
 	acquired, err := tryLockRewindScript.Run(
-		ctx, s.client, []string{s.turnKey(key), s.rewindKey(key)}, token, ttlMS,
+		ctx, s.client, []string{s.turnKey(key), s.rewindKey(key), s.activityKey(key)}, token, ttlMS,
 	).Int64()
 	if err != nil {
 		if isTurnActiveRedisErr(err) {
 			return nil, ErrSessionTurnActive
+		}
+		if isWorkActiveRedisErr(err) {
+			return nil, ErrSessionWorkActive
 		}
 		return nil, fmt.Errorf("lock session rewind: %w", err)
 	}
@@ -535,6 +577,10 @@ func isRewindLockedRedisErr(err error) bool {
 
 func isTurnActiveRedisErr(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "ERR_SESSION_TURN_ACTIVE")
+}
+
+func isWorkActiveRedisErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "ERR_SESSION_WORK_ACTIVE")
 }
 
 func (s *RedisSessionSandboxBindingStore) rewindLease() time.Duration {
@@ -596,14 +642,23 @@ func (s *RedisSessionSandboxBindingStore) renewRewindLock(
 	}
 }
 
+// keyBase is the hash-tagged prefix of every key of one machine. User keys
+// carry the allocation digest, which already includes the namespace.
+func (s *RedisSessionSandboxBindingStore) keyBase(key SessionSandboxKey) string {
+	if key.IsUserScoped() {
+		return "weknora:sandbox:user:{" + key.User.Digest(s.namespace) + "}"
+	}
+	return "weknora:sandbox:session:{" + s.hashTag(key) + "}"
+}
+
 func (s *RedisSessionSandboxBindingStore) bindingKey(key SessionSandboxKey) string {
-	return "weknora:sandbox:session:{" + s.hashTag(key) + "}:binding"
+	return s.keyBase(key.Machine()) + ":binding"
 }
 
 func (s *RedisSessionSandboxBindingStore) lockKey(key SessionSandboxKey) string {
 	// Keep the historical suffix used by the saved multi-node Cube
 	// implementation so rolling upgrades serialize on the same lock.
-	return "weknora:sandbox:session:{" + s.hashTag(key) + "}:create-lock"
+	return s.keyBase(key.Machine()) + ":create-lock"
 }
 
 func (s *RedisSessionSandboxBindingStore) hashTag(key SessionSandboxKey) string {

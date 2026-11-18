@@ -2273,6 +2273,22 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		return fmt.Errorf("%w: FAQ task document does not belong to its KB", asynq.SkipRetry)
 	}
 
+	// A replay must not start writing progress for another accepted import.
+	// Missing markers can expire before a manual retry; retain that recovery
+	// path and the existing timestamp fallback for legacy task instances.
+	running, err := s.getRunningFAQImportInfo(ctx, payload.KBID)
+	if err != nil {
+		return fmt.Errorf("failed to check FAQ import instance: %w", err)
+	}
+	if running != nil {
+		if err := secutils.ValidateTaskID(running.TaskID); err != nil {
+			return fmt.Errorf("invalid running FAQ import task ID: %w", err)
+		}
+		if !runningFAQImportInfoMatches(running, payload.TaskID, payload.InstanceID, payload.EnqueuedAt) {
+			return fmt.Errorf("%w: another FAQ import instance owns this KB", asynq.SkipRetry)
+		}
+	}
+
 	// 获取任务重试信息，用于判断是否是最后一次重试
 	retryCount, _ := asynq.GetRetryCount(ctx)
 	maxRetry, _ := asynq.GetMaxRetry(ctx)
@@ -2281,7 +2297,10 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant: %v", err)
-		return nil
+		if errors.Is(err, repository.ErrTenantNotFound) {
+			return fmt.Errorf("%w: FAQ task tenant no longer exists", asynq.SkipRetry)
+		}
+		return fmt.Errorf("failed to get FAQ import tenant: %w", err)
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
 

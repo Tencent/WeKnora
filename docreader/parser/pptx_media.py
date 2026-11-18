@@ -69,7 +69,8 @@ def _rasterize_with_pillow(data: bytes) -> bytes | None:
         return None
     try:
         img = Image.open(io.BytesIO(data))
-        if img.mode not in ("RGB", "L"):
+        # These PNG-compatible modes retain alpha channels or palette transparency.
+        if img.mode not in ("RGB", "RGBA", "L", "LA", "P"):
             img = img.convert("RGB")
         out = io.BytesIO()
         img.save(out, format="PNG")

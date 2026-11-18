@@ -51,6 +51,7 @@ func (s *stubSessionServiceForEmbed) SetSessionOwnerID(_ context.Context, tenant
 		return errors.New("session not found")
 	}
 	sess.UserID = ownerID
+	sess.OwnerAuthSource = types.AuthSourceForBoundOwnerID(ownerID)
 	return nil
 }
 

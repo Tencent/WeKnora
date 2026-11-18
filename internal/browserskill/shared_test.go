@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,7 +46,7 @@ func TestAccountReportsConnectedExtensionVersion(t *testing.T) {
 	account, err := m.Account(ctx, scope)
 	require.NoError(t, err)
 	require.True(t, account.Connected)
-	require.Equal(t, "0.3.0", account.ExtensionVersion)
+	require.Equal(t, "0.4.1", account.ExtensionVersion)
 
 	require.NoError(t, fixture.ws.Close())
 	require.Eventually(t, func() bool { return !m.Status(scope, "").Connected }, time.Second, 10*time.Millisecond)
@@ -75,6 +74,69 @@ func TestConcurrentCommandsShareAutomaticSessionCreation(t *testing.T) {
 		require.NoError(t, <-done)
 	}
 	require.NotEmpty(t, m.Status(s, "chat").SessionID)
+}
+
+func TestSharedControlPassesExplicitReceiptsAndExpectations(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "shared-control"}
+	requests := make(chan map[string]any, 3)
+	connectSharedFixture(ctx, t, m, s, "", "browser", func(
+		f *sharedFixture, id, method string, params map[string]any,
+	) bool {
+		if method != "tool.cooperate" && method != "tool.fill" {
+			return false
+		}
+		requests <- params
+		_ = f.send(map[string]any{"id": id, "result": map[string]any{
+			"context_id": "observed-context", "observation_id": "observed-page", "control_policy": "target",
+		}})
+		return true
+	})
+	require.NoError(t, m.Control(ctx, s, "chat", "select"))
+	_, err := m.Call(ctx, s, "chat", "cooperate", map[string]any{"action": "sync"})
+	require.NoError(t, err)
+	sync := <-requests
+	require.Equal(t, "auto", sync["control_policy"])
+	require.Equal(t, m.Status(s, "chat").SessionID, sync["session_id"])
+	params := map[string]any{
+		"selector": "#name", "value": "new", "context_id": "observed-context", "observation_id": "observed-page",
+		"expect":     []any{map[string]any{"target": "#name", "field": "value", "equals": "  original\n"}},
+		"session_id": "foreign", "browser_instance_id": "foreign",
+	}
+	_, err = m.Call(ctx, s, "chat", "fill", params)
+	require.NoError(t, err)
+	forwarded := <-requests
+	require.Equal(t, sync["session_id"], forwarded["session_id"])
+	require.NotContains(t, forwarded, "browser_instance_id")
+	for _, field := range []string{"context_id", "observation_id", "expect", "selector", "value"} {
+		require.Equal(t, params[field], forwarded[field])
+	}
+	_, err = m.Call(ctx, s, "chat", "fill", map[string]any{"selector": "#name", "value": "unobserved"})
+	require.NoError(t, err)
+	require.NotContains(t, <-requests, "context_id", "the gateway must never manufacture a receipt")
+}
+
+func TestResumeRequiresBrowserControlHandback(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "browser-hold"}
+	var held atomic.Bool
+	held.Store(true)
+	connectSharedFixture(ctx, t, m, s, "", "browser", func(f *sharedFixture, id, method string, _ map[string]any) bool {
+		if method != "tool.cooperate" {
+			return false
+		}
+		_ = f.send(map[string]any{"id": id, "result": map[string]any{"stopped": held.Load()}})
+		return true
+	})
+	require.NoError(t, m.Control(ctx, s, "chat", "start"))
+	id := m.Status(s, "chat").SessionID
+	require.NoError(t, m.Control(ctx, s, "chat", "pause"))
+	require.ErrorContains(t, m.Control(ctx, s, "chat", "resume"), "BrowserSkill browser overlay")
+	require.True(t, m.Status(s, "chat").Paused)
+	held.Store(false)
+	require.NoError(t, m.Control(ctx, s, "chat", "resume"))
+	require.False(t, m.Status(s, "chat").Paused)
+	require.Equal(t, id, m.Status(s, "chat").SessionID)
 }
 
 func (f *sharedFixture) send(v any) error {
@@ -110,8 +172,8 @@ func connectSharedFixture(
 	require.NoError(
 		t,
 		ws.WriteJSON(map[string]any{"id": "handshake", "method": "system.handshake", "params": map[string]any{
-			"client": "browser-skill-extension", "version": "0.3.0",
-			"protocol_version": "1.3", "min_compatible_protocol": "1.0",
+			"client": "browser-skill-extension", "version": "0.4.1",
+			"protocol_version": "1.8", "min_compatible_protocol": "1.6",
 			"instance_id": claimedID, "label": scope.User,
 			"browser": map[string]string{"name": "chrome", "version": "125"},
 		}}),
@@ -850,22 +912,12 @@ func TestBorrowConfirmationBudgetReachesExtension(t *testing.T) {
 	}
 }
 
-func TestAgentClosingLastTabKeepsAgentWindow(t *testing.T) {
+func TestLastTabCloseRequiresExplicitPlaceholderAndFreshContext(t *testing.T) {
 	m, ctx := sharedTestManager(t)
 	s := Scope{1, "last-tab"}
 	var mu sync.Mutex
 	var methods []string
-	var created []map[string]any
-	var closeError string // error code the fixture returns when closing tab 9
-	var closeDrops bool   // the extension closed the tab before failing the reply
 	tabs := []map[string]any{{"tab_id": 7, "window_id": 100, "scope": "agent"}}
-	removeTab := func(id any) {
-		want, _ := numericID(id)
-		tabs = slices.DeleteFunc(tabs, func(tab map[string]any) bool {
-			got, _ := numericID(tab["tab_id"])
-			return got == want
-		})
-	}
 	connectSharedFixture(ctx, t, m, s, "", "browser", func(
 		f *sharedFixture, id, method string, params map[string]any,
 	) bool {
@@ -874,31 +926,20 @@ func TestAgentClosingLastTabKeepsAgentWindow(t *testing.T) {
 		var result any
 		switch method {
 		case "tool.tab_list":
-			if params["scope"] != "agent" {
-				_ = f.send(map[string]any{"id": id, "error": map[string]string{
-					"code": "invalid_params", "message": "fixture expects the agent scope",
-				}})
-				return true
-			}
-			result = map[string]any{"tabs": append([]map[string]any(nil), tabs...)}
+			result = map[string]any{"tabs": tabs}
 		case "tool.tab_create":
-			created = append(created, params)
 			tabs = append(tabs, map[string]any{"tab_id": 8, "window_id": 100, "scope": "agent"})
 			result = map[string]any{"tab_id": 8, "window_id": 100, "url": "about:blank"}
+		case "tool.cooperate":
+			result = map[string]any{"context_id": "fresh", "observation_id": "page"}
 		case "tool.tab_close":
-			methods = append(methods, fmt.Sprintf("tool.tab_close:%v", params["tab_id"]))
-			if target, _ := numericID(params["tab_id"]); closeError != "" && target == 9 {
-				if closeDrops {
-					removeTab(params["tab_id"])
-				}
+			if params["context_id"] != "fresh" || params["observation_id"] != "page" {
 				_ = f.send(map[string]any{"id": id, "error": map[string]string{
-					"code": closeError, "message": "fixture refused",
+					"code": "permission_denied", "message": "control context invalidated by tab_create",
 				}})
 				return true
 			}
-			removeTab(params["tab_id"])
-			_ = f.send(map[string]any{"id": id, "result": map[string]any{"tab_id": params["tab_id"]}})
-			return true
+			result = map[string]any{"tab_id": params["tab_id"]}
 		default:
 			return false
 		}
@@ -907,53 +948,23 @@ func TestAgentClosingLastTabKeepsAgentWindow(t *testing.T) {
 		return true
 	})
 	require.NoError(t, m.Control(ctx, s, "chat", "select"))
-	// The final agent tab gets a blank replacement so Chrome keeps the window.
-	_, err := m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": float64(7)})
-	require.NoError(t, err)
+	_, err := m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": 7, "context_id": "old"})
+	require.ErrorContains(t, err, "Before closing the last tab")
 	mu.Lock()
-	require.Equal(t, []string{"tool.tab_list", "tool.tab_create", "tool.tab_close:7"}, methods)
-	require.Len(t, created, 1)
-	require.Equal(t, "about:blank", created[0]["url"])
-	require.Equal(t, false, created[0]["active"])
-	require.NotEmpty(t, created[0]["session_id"])
+	require.Equal(t, []string{"tool.tab_list"}, methods, "preflight cannot mutate tabs or refresh caller evidence")
+	require.Len(t, tabs, 1)
 	methods = nil
-	tabs = []map[string]any{
-		{"tab_id": 8, "window_id": 100, "scope": "agent"},
-		{"tab_id": 9, "window_id": 100, "scope": "user"},
-	}
 	mu.Unlock()
-	// Any other tab in the Agent Window, even a user's, keeps it open.
-	_, err = m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": 8})
+	_, err = m.Call(ctx, s, "chat", "tab_create", map[string]any{"url": "about:blank", "active": false})
+	require.NoError(t, err)
+	_, err = m.Call(ctx, s, "chat", "cooperate", map[string]any{"action": "sync", "tab_id": 7})
+	require.NoError(t, err)
+	_, err = m.Call(ctx, s, "chat", "tab_close", map[string]any{
+		"tab_id": 7, "context_id": "fresh", "observation_id": "page",
+	})
 	require.NoError(t, err)
 	mu.Lock()
-	require.Equal(t, []string{"tool.tab_list", "tool.tab_close:8"}, methods)
-	// A refused close (unauthorized or borrowed tab) must not leave the
-	// placeholder behind: the target is still there, so the blank tab goes.
-	methods, created = nil, nil
-	tabs = []map[string]any{{"tab_id": 9, "window_id": 100, "scope": "agent"}}
-	closeError = "permission_denied"
+	require.Equal(t, []string{"tool.tab_create", "tool.cooperate", "tool.tab_list", "tool.tab_close"}, methods)
 	mu.Unlock()
-	_, err = m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": 9})
-	require.ErrorContains(t, err, "permission_denied")
-	mu.Lock()
-	require.Equal(t, []string{
-		"tool.tab_list", "tool.tab_create", "tool.tab_close:9", "tool.tab_list", "tool.tab_close:8",
-	}, methods)
-	require.Len(t, tabs, 1)
-	require.Equal(t, 9, tabs[0]["tab_id"])
 	require.False(t, m.Status(s, "chat").Paused)
-	// When the extension already removed the target before the reply failed,
-	// the placeholder is what keeps the window open and must stay.
-	methods, created = nil, nil
-	closeError, closeDrops = "cdp_failed", true
-	mu.Unlock()
-	_, err = m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": 9})
-	require.ErrorContains(t, err, "cdp_failed")
-	mu.Lock()
-	require.Equal(t, []string{
-		"tool.tab_list", "tool.tab_create", "tool.tab_close:9", "tool.tab_list",
-	}, methods)
-	require.Len(t, tabs, 1)
-	require.Equal(t, 8, tabs[0]["tab_id"])
-	mu.Unlock()
 }

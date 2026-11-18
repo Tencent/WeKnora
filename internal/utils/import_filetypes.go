@@ -9,13 +9,18 @@ import (
 // accepted by every knowledge import path: direct upload, file-URL download,
 // the worker's post-download re-check and data source connectors. Keeping one
 // set avoids the drift that let direct upload accept xlsx while URL import
-// rejected it (#2447).
+// rejected it (#2447). Locally registered parser formats are checked against
+// this set by docparser's contract test to prevent advertised-but-rejected
+// formats (#4598).
 var supportedImportFileExtensions = map[string]struct{}{
 	"pdf": {}, "txt": {}, "docx": {}, "doc": {}, "epub": {},
+	"docm": {}, "odt": {}, "rtf": {},
 	"html": {}, "htm": {}, "mhtml": {}, "md": {}, "markdown": {},
 	"xmind": {},
 	"png":   {}, "jpg": {}, "jpeg": {}, "gif": {},
+	"bmp": {}, "tiff": {}, "webp": {},
 	"csv": {}, "xlsx": {}, "xls": {}, "pptx": {}, "ppt": {}, "json": {},
+	"xlsm": {}, "ods": {}, "pptm": {}, "odp": {},
 	"mp3": {}, "wav": {}, "m4a": {}, "flac": {}, "ogg": {},
 }
 

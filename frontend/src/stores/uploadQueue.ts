@@ -60,6 +60,12 @@ export interface UploadQueueDeps {
   pollIntervalMs: number
   /** Most knowledge ids asked about in one status request. */
   pollChunkSize: number
+  /**
+   * Most status requests one poll keeps in flight. Each one holds a database
+   * connection on the server, so thousands of files still parsing must not
+   * turn into a burst of hundreds of parallel requests.
+   */
+  pollConcurrency: number
   /** Resolves or rejects with the API's response body; the queue classifies either. */
   upload: (
     batch: UploadBatch,
@@ -263,30 +269,37 @@ export function createUploadQueue(items: UploadItem[], batches: UploadBatch[], d
       byKb.get(kbId)!.push(item)
     }
 
-    const requests: Promise<void>[] = []
+    const chunks: Array<{ kbId: string; chunk: UploadItem[] }> = []
     for (const [kbId, group] of byKb) {
       for (let i = 0; i < group.length; i += deps.pollChunkSize) {
-        const chunk = group.slice(i, i + deps.pollChunkSize)
-        requests.push(deps.queryStatus(kbId, chunk.map(item => item.knowledgeId!)).then(rows => {
-          // A failed request just waits for the next tick.
-          if (!rows || startedIn !== generation) return
-          const byId = new Map(rows.map(row => [row.id, row]))
-          for (const item of chunk) {
-            const row = byId.get(item.knowledgeId!)
-            if (!row) {
-              const misses = (missingPolls.get(item.id) ?? 0) + 1
-              missingPolls.set(item.id, misses)
-              if (misses >= MISSING_POLLS_BEFORE_DELETED) item.parseStatus = 'deleted'
-              continue
-            }
-            missingPolls.delete(item.id)
-            item.parseStatus = row.parse_status
-            item.parseError = row.error_message || undefined
-          }
-        }, () => {}))
+        chunks.push({ kbId, chunk: group.slice(i, i + deps.pollChunkSize) })
       }
     }
-    await Promise.all(requests)
+
+    const queryChunk = async ({ kbId, chunk }: { kbId: string; chunk: UploadItem[] }) => {
+      const rows = await deps.queryStatus(kbId, chunk.map(item => item.knowledgeId!)).catch(() => null)
+      // A failed request just waits for the next tick.
+      if (!rows || startedIn !== generation) return
+      const byId = new Map(rows.map(row => [row.id, row]))
+      for (const item of chunk) {
+        const row = byId.get(item.knowledgeId!)
+        if (!row) {
+          const misses = (missingPolls.get(item.id) ?? 0) + 1
+          missingPolls.set(item.id, misses)
+          if (misses >= MISSING_POLLS_BEFORE_DELETED) item.parseStatus = 'deleted'
+          continue
+        }
+        missingPolls.delete(item.id)
+        item.parseStatus = row.parse_status
+        item.parseError = row.error_message || undefined
+      }
+    }
+
+    let next = 0
+    const worker = async () => {
+      while (next < chunks.length && startedIn === generation) await queryChunk(chunks[next++])
+    }
+    await Promise.all(Array.from({ length: Math.min(Math.max(1, deps.pollConcurrency), chunks.length) }, worker))
     if (startedIn === generation) schedulePoll()
   }
 

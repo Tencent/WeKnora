@@ -150,9 +150,9 @@ type WikiPageService interface {
 	// Used by rebuildIndexPage's first-time generation path.
 	ListByTypeRecent(ctx context.Context, kbID string, pageType string, limit int) ([]types.WikiIndexEntry, error)
 
-	// FindSimilarPages performs a pg_trgm similarity search over
-	// page titles. Used by the dedup pre-filter to surface candidate
-	// merge targets server-side.
+	// FindSimilarPages performs a title similarity search over page titles.
+	// PostgreSQL uses pg_trgm; Lite uses a SQLite-compatible fallback. Used by
+	// the dedup pre-filter to surface candidate merge targets server-side.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
 
 	// FindPagesByNormalizedTitle returns non-archived pages of pageType whose
@@ -218,6 +218,9 @@ type WikiPageService interface {
 	// SearchPages performs full-text search over wiki pages.
 	SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
+	// SearchPagesLiteral searches for query text without regular-expression interpretation.
+	SearchPagesLiteral(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
 	// SearchPagesAcross searches wiki pages across multiple knowledge bases
 	// with the same ranking as SearchPages, then returns a global top-N.
 	SearchPagesAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error)
@@ -258,11 +261,17 @@ type WikiPageRepository interface {
 	// UpdateMeta for bookkeeping-only writes instead.
 	Update(ctx context.Context, page *types.WikiPage) error
 
-	// UpdateMeta updates bookkeeping / provenance fields (in/out links,
-	// status, source_refs, chunk_refs, page_metadata, updated_at) without
-	// touching `version`. Safe for link maintenance, re-ingest with an
-	// unchanged body, and status-only transitions.
+	// UpdateMeta 更新状态、来源等元数据，不修改反链或版本；旧页面快照不得覆盖新的反链。
 	UpdateMeta(ctx context.Context, page *types.WikiPage) error
+
+	// AddInLink 在数据库当前数组上原子添加反链；已有反链、缺失或已删除目标均不产生写入。
+	AddInLink(ctx context.Context, tenantID uint64, kbID, targetSlug, sourceSlug string) error
+
+	// RemoveInLink 原子删除该来源的反链，保留其他来源；不存在的反链不更新目标页。
+	RemoveInLink(ctx context.Context, tenantID uint64, kbID, targetSlug, sourceSlug string) error
+
+	// UpdateLinks 仅保存链接重建结果；页面身份、旧链接、正文或版本不匹配时返回冲突。
+	UpdateLinks(ctx context.Context, previous, page *types.WikiPage) error
 
 	// UpdateAutoLinkedContent rewrites `content`, `out_links` and
 	// `updated_at` in place while leaving `version` untouched. Intended for
@@ -397,6 +406,9 @@ type WikiPageRepository interface {
 
 	// Search performs full-text search on wiki pages within a knowledge base.
 	Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
+	// SearchLiteral matches the query as text on every supported database.
+	SearchLiteral(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
 	// SearchAcross performs the same full-text search across multiple
 	// knowledge bases, then returns a global top-N by match_rank.

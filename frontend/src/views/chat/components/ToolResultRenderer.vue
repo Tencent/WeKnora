@@ -48,10 +48,27 @@
 
     <ShellExecResult
       v-else-if="displayType === 'shell_exec'"
-      :data="toolData as ShellExecData"
-      :output="output"
+      :data="shellExecData"
+      :output="shellExecOutput"
       :arguments="toolArguments"
     />
+
+    <div v-else-if="displayType === 'work_wait'" class="work-wait-results">
+      <p v-if="workNote" class="work-wait-note">{{ workNote }}</p>
+      <ShellExecResult
+        v-for="(item, index) in workItems"
+        :key="item.work_id || index"
+        :data="shellItemResult(item)"
+      />
+      <div v-if="!workItems.length" class="fallback-output">
+        <div class="fallback-header">
+          <span class="fallback-label">{{ $t('chat.rawOutputLabel') }}</span>
+        </div>
+        <div class="detail-output-wrapper">
+          <div class="detail-output">{{ output }}</div>
+        </div>
+      </div>
+    </div>
 
     <SandboxFilesResult
       v-else-if="displayType === 'list_sandbox_files'"
@@ -78,6 +95,28 @@
       :discovery="displayType === 'mcp_discovery'" :data="toolData"
       :output="output" :arguments="toolArguments" :success="success"
     />
+
+    <OperationsResult
+      v-else-if="displayType === 'find_operations' || displayType === 'run_operation'"
+      :mode="displayType === 'run_operation' ? 'run' : 'find'"
+      :output="output" :data="toolData" :success="success"
+    />
+
+    <WeKnoraDocResult
+      v-else-if="displayType === 'search_weknora_docs' || displayType === 'read_weknora_doc'"
+      :mode="displayType === 'read_weknora_doc' ? 'read' : 'search'"
+      :output="output" :data="toolData" :success="success"
+    />
+
+    <!-- Unmatched display types still reuse the shell card when the payload is a work list. -->
+    <div v-else-if="workItems.length" class="work-wait-results">
+      <p v-if="workNote" class="work-wait-note">{{ workNote }}</p>
+      <ShellExecResult
+        v-for="(item, index) in workItems"
+        :key="item.work_id || index"
+        :data="shellItemResult(item)"
+      />
+    </div>
 
     <!-- Fallback: Display raw output -->
     <div v-else class="fallback-output">
@@ -109,7 +148,6 @@ import type {
   GrepResultsData,
   KnowledgeChunksListData,
   WikiEditData,
-  ShellExecData,
   ListSandboxFilesData,
   WriteSandboxFileData,
   ReadSkillData,
@@ -136,6 +174,8 @@ import WriteSandboxFileResult from './tool-results/WriteSandboxFileResult.vue';
 import ReadSkillResult from './tool-results/ReadSkillResult.vue';
 import McpToolResult from './tool-results/McpToolResult.vue';
 import ImageViewResult from './tool-results/ImageViewResult.vue';
+import OperationsResult from './tool-results/OperationsResult.vue';
+import WeKnoraDocResult from './tool-results/WeKnoraDocResult.vue';
 
 interface Props {
   success?: boolean;
@@ -151,11 +191,54 @@ const displayType = computed(() => props.displayType);
 const toolData = computed(() => props.toolData || {});
 const output = computed(() => props.output || '');
 const toolArguments = computed(() => props.arguments || {});
+
+const shellExecData = computed(() => {
+  const nested = toolData.value.shell_job
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) return nested
+  return toolData.value
+})
+const shellExecOutput = computed(() => (
+  shellExecData.value === toolData.value ? output.value : ''
+))
+
+const workItems = computed(() => {
+  const data = toolData.value
+  if (Array.isArray(data.items)) return data.items
+  const nested = data.work
+  if (nested && typeof nested === 'object' && Array.isArray(nested.items)) return nested.items
+  return []
+})
+const workNote = computed(() => {
+  const data = toolData.value
+  if (typeof data.note === 'string' && data.note) return data.note
+  const nested = data.work
+  if (nested && typeof nested === 'object' && typeof nested.note === 'string') return nested.note
+  return ''
+})
+
+function shellItemResult(item: Record<string, any>) {
+  const result = item?.result
+  if (result && typeof result === 'object') return result
+  return {}
+}
 </script>
 
 <style lang="less" scoped>
 .tool-result-renderer {
   margin: 0;
+}
+
+.work-wait-results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.work-wait-note {
+  margin: 0;
+  font-size: var(--app-text-sm);
+  line-height: 1.4;
+  color: var(--td-text-color-placeholder);
 }
 
 .fallback-output {

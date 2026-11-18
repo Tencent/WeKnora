@@ -5,6 +5,8 @@
 # acceptance/contract envelope tests.
 *.go text eol=lf
 cli/acceptance/testdata/**/*.json text eol=lf
+docs/swagger.json text eol=lf linguist-generated=true
+docs/swagger.yaml text eol=lf linguist-generated=true
 
 # Trellis: append-only developer journals should merge cleanly across
 # parallel sessions/worktrees — each session only appends a new block, so

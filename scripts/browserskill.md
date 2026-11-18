@@ -1,15 +1,45 @@
 # BrowserSkill upstream integration
 
-The extension and daemon are based on the official `ext-v0.3.1` tag, commit
-`da6bf4eed2dd7256567e152df8c903c87f6598c3` (including the upstream PRs #291,
-#296, #297 and #318 that WeKnora previously pinned from `main`). Both report
-version `0.3.1`; the exact source baseline is recorded in
+The extension and daemon are based on the official `ext-v0.4.1` and
+`cli-v0.4.1` tags, both at commit
+`b8f2d4f0fa35c8c7c866229e1cf3b3329ae39de5`. Both report version `0.4.1`
+and protocol `1.8`; the exact source baseline is recorded in
 `scripts/browserskill-release.json`. The daemon is built with
-`cargo build --locked --release -p bsk` from the same commit because upstream
-has not published a matching CLI 0.3.1 binary. The store builds of extension
-0.3.1 match this baseline. Native builds
-require Rust/Cargo and a C compiler (plus CMake on Linux). Docker builds on the
-target architecture.
+`cargo build --locked --release -p bsk` from the same commit as the extension.
+Native builds require Rust/Cargo and a C compiler (plus CMake on Linux).
+Docker builds on the target architecture.
+
+The 0.4.1 extension requires daemon protocol 1.6 or later, so the previous
+0.3.1 daemon (protocol 1.3) cannot connect. Target-policy actions require
+protocol 1.8 on both peers. End active tasks, rebuild/redeploy the app and
+restart it to replace its running daemon, then update the frontend and extension.
+Updating a binary on disk alone does not replace a running daemon.
+
+## Shared control
+
+Upgrading the daemon alone is insufficient: new sessions enable shared control
+and reject page actions without an explicit observation/control receipt.
+WeKnora exposes the official `tool.cooperate` RPC as `local_browser` method
+`cooperate`, with `action:sync`, `action:status` and `action:wait`.
+
+- After the initial blank-tab navigation, call `cooperate` with `action:sync`
+  and inspect its `observation` or `changes` before choosing an action.
+- Sync defaults to `control_policy:auto`, selecting `target` for a new session
+  and retaining the negotiated policy thereafter. Pass the returned `context_id`
+  on page actions. DOM-targeted actions can reuse it across actions and reads.
+- Scripts, subsequent navigation and untargeted actions also need the sync's
+  single-use `observation_id`. Synchronize and inspect again before the next
+  such action. Passive `observe`/`snapshot` do not replace synchronization.
+- Preserve caller-supplied `expect` conditions literally. `depends_on` is only
+  available with `control_policy:strict`, whose contexts authorize one action.
+- Human input and navigation revoke control. Wait for hand-back, synchronize and
+  reconsider the live result. WeKnora never silently obtains a fresh receipt or
+  retries a rejected action. A stopped/held BrowserSkill overlay requires the
+  user to return control in the browser before resuming in WeKnora. If a browser
+  stop hid its toolbar, clicking Continue in WeKnora restores it with a passive
+  observe and keeps the task paused until the browser returns control.
+- Pages with human participation survive session stop. Moving a controlled tab
+  out of its Agent Window ends its upstream session and preserves the pages.
 
 `scripts/build_browserskill.sh` builds the unmodified upstream checkout. No
 BrowserSkill patches are applied or maintained downstream.
@@ -29,7 +59,7 @@ without discarding healthy frame content.
 | `02-gateway-task-controls.patch` | Upstream PR #296: the optional UI channel `ui.task_preview` / `ui.task_focus` (renamed from `gateway.*`). WeKnora calls the official methods. |
 | `03-vom-render-performance.patch` | Upstream PR #271 |
 | `04-task-popup-ownership.patch` | Upstream PR #297: popups opened by native click/key input inside the Agent Window become observed, controllable tabs that session stop preserves. |
-| `05-last-tab-lifecycle.patch` | Host side. `Manager.Call` runs `tool.tab_list` with `scope: "agent"` before `tool.tab_close`; when the target is the only tab in the Agent Window it first creates an agent-owned `about:blank` tab through `tool.tab_create`. Only official RPCs are involved. |
+| `05-last-tab-lifecycle.patch` | Host preflight. `Manager.Call` checks `tool.tab_list` with `scope: "agent"` before `tool.tab_close`. Closing the final tab requires an explicit `tab_create` of `about:blank`, then sync of the original tab. Automatic placeholder creation would invalidate the caller's context. |
 | `06-navigation-response-deadline.patch` | Upstream PR #291 (daemon navigation response grace). |
 
 Background execution and viewport/full-page screenshot support use upstream
@@ -47,7 +77,7 @@ stops preview polling in WeKnora. Completed tasks use native session stop.
 
 The preview and focus side channel is now the official optional UI channel
 documented in the upstream
-[remote connection contract](https://github.com/Tencent/BrowserSkill/blob/da6bf4eed2dd7256567e152df8c903c87f6598c3/docs/remote-extension-connection.md#optional-ui-channel).
+[remote connection contract](https://github.com/Tencent/BrowserSkill/blob/b8f2d4f0fa35c8c7c866229e1cf3b3329ae39de5/docs/remote-extension-connection.md#optional-ui-channel).
 Only authenticated remote sockets handle these request frames; they bypass the
 native automation queue and never start a session:
 
@@ -68,7 +98,7 @@ error except `unknown_method` to a transient preview failure. Extensions built
 before PR #296 answer `unknown_method`;
 WeKnora then disables preview polling and reports the extension as outdated.
 
-## Behavior of the 0.3.1 extension
+## Behavior of the 0.4.1 extension
 
 - Remote tasks use official dedicated Agent Windows. No `tabGroups` permission.
 - Popup attribution follows upstream PR #297: only a main-frame navigation
@@ -76,13 +106,14 @@ WeKnora then disables preview polling and reports the extension as outdated.
   same Agent Window, becomes an observed tab. Observed tabs are readable and
   closable but never enter the agent-created set; session stop preserves them and their window. Independent
   popup windows, late or unattributed targets use `tab_borrow` and `tab_return`.
-  An unowned tab that already sits in the Agent Window must be moved to a regular window before it
-  can be borrowed.
-- Closing the last tab of the Agent Window through `tab_close` keeps an
-  agent-owned blank tab until session stop (host-side, see above), so Chrome's
-  window removal is not misreported as a human interruption. If the close is
-  refused or interrupted while the target still exists, the blank tab is removed
-  again. Actual user window closure still pauses the task.
+  Unrelated user-created tabs are routed out of the Agent Window. An unowned tab
+  that remains inside must be moved to a regular window before it can be borrowed.
+- Closing the last tab of the Agent Window requires the caller to create an
+  agent-owned `about:blank` tab first, then synchronize the original target
+  before closing it. The host refuses an unprepared close without changing tabs
+  or refreshing caller evidence. The blank tab survives until session stop,
+  preventing normal cleanup from being mistaken for a human window closure.
+  Actual user window closure still pauses the task.
 - Borrow confirmation follows the browser's preference and uses an HTTP(S) page
   in a regular user window. The integration fixture supplies such a page; neither
   extension settings nor a popup window can host the prompt. Borrowed tabs cannot
@@ -92,7 +123,7 @@ WeKnora then disables preview polling and reports the extension as outdated.
 - Human help follows the upstream focus/confirmation behavior.
 - Remote upload/download remain unsupported, as defined upstream.
 
-Users need extension 0.3.1 or later, from the Chrome Web Store, Edge Add-ons or
+Users need extension 0.4.1 or later, from the Chrome Web Store, Edge Add-ons or
 the bundled ZIP. Upgrade unpacked installs by replacing the existing extension
 directory and reloading it after ending active tasks. Keeping the extension ID preserves the
 migrated credentials; installing under a new ID requires pairing again.
@@ -116,16 +147,17 @@ cargo test --locked -p bsk daemon::ipc::tests
 ```
 
 Run WeKnora's `TestRealExtension` with the built extension, pinned daemon and an
-isolated Chromium profile. It exercises actual pairing, screenshot and input RPC,
+isolated Chromium profile. It exercises actual pairing, explicit shared-control
+receipts, context reuse, rejected expectations, screenshot and input RPC,
 same-window target selection/read/close, independent popup borrow/read/return and
-access revocation, the in-window borrow rejection followed by borrow
-approval/revocation of a tab moved to a regular window,
+access revocation, unrelated user-tab routing followed by borrow approval/revocation,
 independent preview during help waits, focus, pause/resume, retained-session
 continuity and completed-task cleanup. It separately verifies that agent
-last-tab closure permits the next turn and manual window closure blocks
-automation until explicit resume. Cleanup checks preserve the exact initial and
-returned user tab IDs, permitting only the new-tab placeholder recorded from an
-official fallback return; arbitrary extra tabs still fail the test.
+last-tab closure permits the next turn and manual window closure or moving a
+controlled tab out blocks automation until explicit resume. Cleanup checks
+preserve the exact initial, returned, human-participated and moved-out tab IDs,
+plus the new-tab placeholder recorded from an official fallback return;
+arbitrary extra tabs still fail the test.
 
 ```sh
 BROWSERSKILL_TEST_EXTENSION=/path/to/unpacked/chrome-mv3 \

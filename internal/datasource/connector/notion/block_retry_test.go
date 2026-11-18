@@ -27,9 +27,32 @@ func (f *blockRetryFixture) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.URL.Path {
 	case "/v1/search":
-		_, _ = w.Write([]byte(`{"results":[` + retryPage("page", "workspace") + `],"has_more":false}`))
+		switch f.mode {
+		case "database":
+			_, _ = w.Write([]byte(`{"results":[` +
+				retryDataSource("page") + `,` + retryRecord("child", "page") +
+				`],"has_more":false}`))
+		case "record":
+			_, _ = w.Write([]byte(`{"results":[` + retryRecord("page", "ds") + `],"has_more":false}`))
+		default:
+			_, _ = w.Write([]byte(`{"results":[` + retryPage("page", "workspace") + `],"has_more":false}`))
+		}
 	case "/v1/pages/page":
+		if f.mode == "database" {
+			http.NotFound(w, r)
+			return
+		}
+		if f.mode == "record" {
+			_, _ = w.Write([]byte(retryRecord("page", "ds")))
+			return
+		}
 		_, _ = w.Write([]byte(retryPage("page", "workspace")))
+	case "/v1/data_sources/page":
+		_, _ = w.Write([]byte(retryDataSource("page")))
+	case "/v1/data_sources/ds":
+		_, _ = w.Write([]byte(retryDataSource("ds")))
+	case "/v1/data_sources/page/query":
+		_, _ = w.Write([]byte(`{"results":[` + retryRecord("child", "page") + `],"has_more":false}`))
 	case "/v1/pages/healthy":
 		_, _ = w.Write([]byte(retryPage("healthy", "workspace")))
 	case "/v1/pages/child":
@@ -51,11 +74,25 @@ func retryPage(id, parentType string) string {
 		`","parent":{"type":"` + parentType + `","page_id":"page"}}`
 }
 
+func retryDataSource(id string) string {
+	return `{"id":"` + id + `","object":"data_source","last_edited_time":"` + retryPageTime +
+		`","parent":{"type":"workspace"},"title":[{"plain_text":"Team Wiki"}]}`
+}
+
+func retryRecord(id, dataSourceID string) string {
+	return `{"id":"` + id + `","object":"page","last_edited_time":"` + retryPageTime +
+		`","parent":{"type":"data_source_id","data_source_id":"` + dataSourceID + `"},` +
+		`"properties":{"Name":{"type":"title","title":[{"plain_text":"Row"}]}}}`
+}
+
 func (f *blockRetryFixture) pageBlocks(w http.ResponseWriter, r *http.Request) {
 	switch f.mode {
 	case "child":
 		_, _ = w.Write([]byte(`{"results":[{"id":"child","type":"child_page",` +
 			`"child_page":{"title":"Child"}}],"has_more":false}`))
+	case "nested":
+		_, _ = w.Write([]byte("{\"results\":[{\"id\":\"child\",\"type\":\"toggle\",\"has_children\":true," +
+			"\"toggle\":{\"rich_text\":[{\"plain_text\":\"Parent\"}]}}],\"has_more\":false}"))
 	case "later_page":
 		if r.URL.Query().Get("start_cursor") == "later" {
 			f.content(w)
@@ -96,7 +133,8 @@ func newBlockRetryFixture(t *testing.T, mode string) (*blockRetryFixture, *types
 }
 
 func TestNotionBlockFailurePreservesRetry(t *testing.T) {
-	for _, mode := range []string{"page", "server_error", "later_page", "child"} {
+	modes := []string{"page", "server_error", "later_page", "child", "nested", "database", "record"}
+	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
 			fixture, config := newBlockRetryFixture(t, mode)
 			oldTime := time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC)
@@ -148,11 +186,104 @@ func TestNotionFirstSyncRejectsBlockFailure(t *testing.T) {
 }
 
 func TestNotionFullSyncRejectsBlockFailure(t *testing.T) {
-	_, config := newBlockRetryFixture(t, "child")
-	config.ResourceIDs = []string{"healthy", "page"}
-	items, err := NewConnector().FetchAll(context.Background(), config, config.ResourceIDs)
-	require.Error(t, err)
-	require.Nil(t, items, "discard earlier successful items when a later page fails")
+	for _, mode := range []string{"child", "database", "record"} {
+		t.Run(mode, func(t *testing.T) {
+			_, config := newBlockRetryFixture(t, mode)
+			config.ResourceIDs = []string{"healthy", "page"}
+			items, err := NewConnector().FetchAll(context.Background(), config, config.ResourceIDs)
+			require.Error(t, err)
+			require.Nil(t, items, "discard earlier successful items when a later resource fails")
+		})
+	}
+}
+
+func TestNotionUnsharedSyncedBlockPreservesHealthyContent(t *testing.T) {
+	allowNotionTestServer(t)
+	blocksWithUnsharedSync := func(text string) string {
+		return `{"results":[` +
+			`{"id":"unshared-sync","type":"synced_block","has_children":true,` +
+			`"synced_block":{"synced_from":{"type":"block_id","block_id":"private-orig"}}},` +
+			`{"id":"body","type":"paragraph","paragraph":{"rich_text":[` +
+			`{"type":"text","text":{"content":"` + text + `"},"plain_text":"` + text + `"}]}}` +
+			`],"has_more":false}`
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/search":
+			_, _ = w.Write([]byte(`{"results":[` +
+				retryPage("page", "workspace") + `,` +
+				retryPage("healthy", "workspace") + `,` +
+				retryDataSource("db-1") + `,` +
+				retryRecord("rec-db", "db-1") + `,` +
+				retryRecord("rec-direct", "ds") +
+				`],"has_more":false}`))
+		case "/v1/pages/page":
+			_, _ = w.Write([]byte(retryPage("page", "workspace")))
+		case "/v1/pages/healthy":
+			_, _ = w.Write([]byte(retryPage("healthy", "workspace")))
+		case "/v1/pages/rec-direct":
+			_, _ = w.Write([]byte(retryRecord("rec-direct", "ds")))
+		case "/v1/data_sources/db-1":
+			_, _ = w.Write([]byte(retryDataSource("db-1")))
+		case "/v1/data_sources/ds":
+			_, _ = w.Write([]byte(retryDataSource("ds")))
+		case "/v1/data_sources/db-1/query":
+			_, _ = w.Write([]byte(`{"results":[` + retryRecord("rec-db", "db-1") + `],"has_more":false}`))
+		case "/v1/blocks/page/children":
+			_, _ = w.Write([]byte(blocksWithUnsharedSync("Accessible page content")))
+		case "/v1/blocks/healthy/children":
+			_, _ = w.Write([]byte(blocksWithUnsharedSync("Healthy sibling content")))
+		case "/v1/blocks/rec-db/children":
+			_, _ = w.Write([]byte(blocksWithUnsharedSync("Accessible database record body")))
+		case "/v1/blocks/rec-direct/children":
+			_, _ = w.Write([]byte(blocksWithUnsharedSync("Direct record body")))
+		case "/v1/blocks/unshared-sync/children":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"status":404,"code":"object_not_found","message":"Could not find block."}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	resourceIDs := []string{"page", "healthy", "db-1", "rec-direct"}
+	config := makeNotionConfig(&Config{APIKey: "test-token"}, server.URL, resourceIDs)
+	connector := NewConnector()
+
+	assertAllAccessibleBodies := func(t *testing.T, items []types.FetchedItem) {
+		t.Helper()
+		byID := make(map[string]string, len(items))
+		for _, item := range items {
+			byID[item.ExternalID] = string(item.Content)
+		}
+		require.Contains(t, byID["page"], "Accessible page content")
+		require.Contains(t, byID["healthy"], "Healthy sibling content")
+		require.Contains(t, byID["db-1"], "Accessible database record body")
+		require.Contains(t, byID["rec-direct"], "Direct record body")
+	}
+
+	t.Run("full_sync", func(t *testing.T) {
+		items, err := connector.FetchAll(context.Background(), config, resourceIDs)
+		require.NoError(t, err)
+		assertAllAccessibleBodies(t, items)
+	})
+
+	t.Run("incremental_sync", func(t *testing.T) {
+		oldTime := time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC)
+		previous := buildCursor(map[string]time.Time{
+			"page": oldTime, "healthy": oldTime, "db-1": oldTime, "rec-direct": oldTime,
+		})
+		items, next, err := connector.FetchIncremental(context.Background(), config, previous)
+		require.NoError(t, err)
+		require.NotNil(t, next)
+		assertAllAccessibleBodies(t, items)
+
+		again, _, err := connector.FetchIncremental(context.Background(), config, next)
+		require.NoError(t, err)
+		require.Empty(t, again)
+	})
 }
 
 func TestNotionEmptyPageStillSucceeds(t *testing.T) {

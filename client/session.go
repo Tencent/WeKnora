@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -37,12 +36,14 @@ type SummaryConfig struct {
 // Sessions are now knowledge-base-independent and serve as conversation containers.
 // All configuration comes from custom agent at query time.
 type CreateSessionRequest struct {
+	Kind        string `json:"kind,omitempty"`
 	Title       string `json:"title"`       // Session title (optional)
 	Description string `json:"description"` // Session description (optional)
 }
 
 // Session session information
 type Session struct {
+	Kind        string `json:"kind"`
 	ID          string `json:"id"`
 	TenantID    uint64 `json:"tenant_id"`
 	Title       string `json:"title"`
@@ -97,11 +98,21 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (*Session, er
 	return &response.Data, nil
 }
 
-// GetSessionsByTenant gets all sessions for a tenant
-func (c *Client) GetSessionsByTenant(ctx context.Context, page int, pageSize int) ([]Session, int, error) {
+// SessionListOptions keeps assistant history opt-in for existing callers.
+type SessionListOptions struct {
+	Kind string
+}
+
+// GetSessionsByTenant gets normal sessions unless an explicit kind is requested.
+func (c *Client) GetSessionsByTenant(
+	ctx context.Context, page int, pageSize int, opts ...SessionListOptions,
+) ([]Session, int, error) {
 	queryParams := url.Values{}
 	queryParams.Add("page", strconv.Itoa(page))
 	queryParams.Add("page_size", strconv.Itoa(pageSize))
+	if len(opts) > 0 {
+		queryParams.Set("kind", opts[0].Kind)
+	}
 	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/sessions", nil, queryParams)
 	if err != nil {
 		return nil, 0, err
@@ -218,6 +229,16 @@ type QuestionOrigin struct {
 	KnowledgeID     string `json:"knowledge_id,omitempty"`
 }
 
+// PageContext identifies the open page. Knowledge-base resources must be in
+// the retrieval scope; agents must be visible in the current tenant.
+type PageContext struct {
+	AgentID         string   `json:"agent_id,omitempty"`
+	KnowledgeBaseID string   `json:"knowledge_base_id,omitempty"`
+	KnowledgeID     string   `json:"knowledge_id,omitempty"`
+	WikiSlug        string   `json:"wiki_slug,omitempty"`
+	WikiIssueIDs    []string `json:"wiki_issue_ids,omitempty"` // At most 20 are kept
+}
+
 // KnowledgeQARequest knowledge Q&A request
 type KnowledgeQARequest struct {
 	Query            string            `json:"query"`                     // Query text for knowledge base search
@@ -276,6 +297,7 @@ type StreamResponse struct {
 
 // KnowledgeQAStream knowledge Q&A streaming API.
 // Pass ResourceURLOptions to receive public HTTP(S) file URLs in the stream.
+// An unfinished SSE data frame at EOF returns an error wrapping io.ErrUnexpectedEOF.
 func (c *Client) KnowledgeQAStream(
 	ctx context.Context,
 	sessionID string,
@@ -299,8 +321,7 @@ func (c *Client) KnowledgeQAStream(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		err := newAPIError(resp.StatusCode, body)
+		err := newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 		debugLogger.Debug("request_error_status", "error", err)
 		return err
 	}
@@ -309,6 +330,7 @@ func (c *Client) KnowledgeQAStream(
 
 	// Use bufio to read SSE data line by line
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Split(newSSELineSplitter())
 	// Default 64KiB per-line cap truncates large SSE data lines (the
 	// references event bundles chunk contents that can reach hundreds of
 	// KiB). Raise the cap so those lines parse instead of erroring with
@@ -367,12 +389,16 @@ func (c *Client) KnowledgeQAStream(
 		return fmt.Errorf("failed to read SSE stream: %w", err)
 	}
 
+	if err := incompleteSSEDataError(dataBuffer); err != nil {
+		return err
+	}
 	debugLogger.Debug("knowledge_qa_stream_completed", "message_count", messageCount)
 	return nil
 }
 
 // ContinueStream continues to receive an active stream for a session.
 // Pass ResourceURLOptions to receive public HTTP(S) file URLs in the stream.
+// An unfinished SSE data frame at EOF returns an error wrapping io.ErrUnexpectedEOF.
 func (c *Client) ContinueStream(
 	ctx context.Context,
 	sessionID string,
@@ -395,12 +421,12 @@ func (c *Client) ContinueStream(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return newAPIError(resp.StatusCode, body)
+		return newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 	}
 
 	// Use bufio to read SSE data line by line
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Split(newSSELineSplitter())
 	// See KnowledgeQAStream: raise the per-line cap so large SSE data lines
 	// (references event) parse instead of erroring with "token too long".
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -412,7 +438,8 @@ func (c *Client) ContinueStream(
 
 		// Empty line indicates the end of an event
 		if line == "" {
-			if data := completeSSEData(dataBuffer); data != "" && eventType == "message" {
+			// An absent or empty event field defaults to "message" in SSE.
+			if data := completeSSEData(dataBuffer); data != "" && (eventType == "" || eventType == "message") {
 				var streamResponse StreamResponse
 				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
 					return fmt.Errorf("failed to parse SSE data: %w", err)
@@ -430,9 +457,10 @@ func (c *Client) ContinueStream(
 			continue
 		}
 
-		// Process lines with event: prefix
-		if strings.HasPrefix(line, "event:") {
-			eventType = strings.TrimPrefix(line[6:], " ") // Remove "event:" prefix
+		// Process the event field, including an empty colonless field.
+		if line == "event" || strings.HasPrefix(line, "event:") {
+			_, value, _ := strings.Cut(line, ":") // A colonless field has an empty value.
+			eventType = strings.TrimPrefix(value, " ")
 		}
 
 		// Process lines with data: prefix
@@ -445,7 +473,7 @@ func (c *Client) ContinueStream(
 		return fmt.Errorf("failed to read SSE stream: %w", err)
 	}
 
-	return nil
+	return incompleteSSEDataError(dataBuffer)
 }
 
 // StopSession stops the generation for a specific assistant message under a session.
@@ -539,8 +567,7 @@ func (c *Client) SearchKnowledgeDetailed(
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		err := newAPIError(resp.StatusCode, body)
+		err := newAPIError(resp.StatusCode, readErrorBody(resp.Body))
 		debugLogger.Debug("request_error_status", "error", err)
 		return nil, err
 	}

@@ -44,3 +44,58 @@ func TestBuildRetrievalParamsEmbedsWithAVectorKB(t *testing.T) {
 	require.NotEmpty(t, params)
 	require.Len(t, params[0].Embedding, 768)
 }
+
+// Document knowledge bases with question generation off must drop historical
+// question rows before TopK. FAQ knowledge bases use the same source-id shape
+// for their own similar questions, so they stay off that list.
+func TestBuildRetrievalParamsExcludesGeneratedQuestionsOnlyForDocumentKBs(t *testing.T) {
+	s := &knowledgeBaseService{}
+	engine := buildBoundComposite(t, &fakeRetrieveEngineService{
+		engineType: types.PostgresRetrieverEngineType,
+		support:    []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType},
+	})
+	docOff := &types.KnowledgeBase{
+		ID: "doc-off", TenantID: 1, Type: types.KnowledgeBaseTypeDocument,
+		EmbeddingModelID: "embed-1",
+		IndexingStrategy: types.IndexingStrategy{VectorEnabled: true, KeywordEnabled: true},
+	}
+	docOn := &types.KnowledgeBase{
+		ID: "doc-on", TenantID: 1, Type: types.KnowledgeBaseTypeDocument,
+		EmbeddingModelID:         "embed-1",
+		IndexingStrategy:         types.IndexingStrategy{VectorEnabled: true, KeywordEnabled: true},
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{Enabled: true},
+	}
+	faq := &types.KnowledgeBase{
+		ID: "faq", TenantID: 1, Type: types.KnowledgeBaseTypeFAQ,
+		EmbeddingModelID: "embed-1",
+		IndexingStrategy: types.IndexingStrategy{VectorEnabled: true, KeywordEnabled: true},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+
+	params, err := s.buildRetrievalParams(ctx, engine, docOff,
+		[]*types.KnowledgeBase{docOff, docOn, faq},
+		types.SearchParams{QueryText: "q", QueryEmbedding: []float32{1}}, 5)
+	require.NoError(t, err)
+
+	var docVector, faqVector, keyword *types.RetrieveParams
+	for i := range params {
+		p := &params[i]
+		switch {
+		case p.RetrieverType == types.VectorRetrieverType && p.KnowledgeType == types.KnowledgeTypeFAQ:
+			faqVector = p
+		case p.RetrieverType == types.VectorRetrieverType:
+			docVector = p
+		case p.RetrieverType == types.KeywordsRetrieverType:
+			keyword = p
+		}
+	}
+	require.NotNil(t, docVector)
+	require.NotNil(t, faqVector)
+	require.NotNil(t, keyword)
+	require.Equal(t, []string{"doc-off"}, docVector.ExcludeGeneratedQuestionKBIDs)
+	require.Empty(t, faqVector.ExcludeGeneratedQuestionKBIDs)
+	require.Equal(t, []string{"doc-off"}, keyword.ExcludeGeneratedQuestionKBIDs)
+	require.ElementsMatch(t, []string{"doc-off", "doc-on"}, docVector.KnowledgeBaseIDs)
+	require.Equal(t, []string{"faq"}, faqVector.KnowledgeBaseIDs)
+	require.NotContains(t, keyword.KnowledgeBaseIDs, "faq")
+}
