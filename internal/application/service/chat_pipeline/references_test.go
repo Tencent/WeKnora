@@ -36,7 +36,7 @@ func TestPrepareMessagesWithModelContextUsesChunkCentricContext(t *testing.T) {
 	require.Contains(t, messages[1].Content, `<chunk id="chunk://2" index="2" view="full">`)
 	require.False(t, strings.Contains(messages[1].Content, "chunk-1"))
 	require.Equal(t,
-		`<kb doc="Doc" chunk_id="chunk-1" kb_id="kb-1" />`,
+		`<kb doc="Doc" chunk_id="chunk-1" knowledge_id="doc-1" kb_id="kb-1" />`,
 		refs.DecodeOutputText(`<ref id="chunk://1"/>`),
 	)
 }

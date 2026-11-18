@@ -117,6 +117,7 @@ func (r *sourceRegistry) CompactPublicCitations(text string, evidence bool) stri
 		}
 		handle := r.registerChunk(ChunkReference{
 			ChunkID:         chunkID,
+			KnowledgeID:     publicAttr(documentAttrRE, tag),
 			KnowledgeBaseID: publicAttr(publicKBAttrRE, tag),
 			DocumentTitle:   publicAttr(docAttrRE, tag),
 		}, evidence)
@@ -226,6 +227,9 @@ func (r *sourceRegistry) citationTag(handle string) string {
 	}
 	if chunkID, chunkRef, ok := r.chunks.resolve(handle); ok {
 		attrs := fmt.Sprintf(`doc="%s" chunk_id="%s"`, escapeAttr(chunkRef.DocumentTitle), escapeAttr(chunkID))
+		if chunkRef.KnowledgeID != "" {
+			attrs += fmt.Sprintf(` knowledge_id="%s"`, escapeAttr(chunkRef.KnowledgeID))
+		}
 		if chunkRef.KnowledgeBaseID != "" {
 			attrs += fmt.Sprintf(` kb_id="%s"`, escapeAttr(chunkRef.KnowledgeBaseID))
 		}

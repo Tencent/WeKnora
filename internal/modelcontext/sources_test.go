@@ -109,7 +109,7 @@ func TestRegistryChunkAliasIsStableAndExpandsCanonicalCitation(t *testing.T) {
 	require.Equal(t, "chunk://1", first)
 	require.Equal(t, first, second)
 	require.Equal(t,
-		`claim <kb doc="Architecture.md" chunk_id="chunk-uuid-1" kb_id="kb-uuid-1" />`,
+		`claim <kb doc="Architecture.md" chunk_id="chunk-uuid-1" knowledge_id="knowledge-uuid-1" kb_id="kb-uuid-1" />`,
 		registry.ExpandText(`claim <ref id="chunk://1"/>`),
 	)
 }
@@ -265,7 +265,7 @@ func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
 		"legacy tool history does not authorize new citations")
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real"})
 	require.Equal(t,
-		`<kb doc="Legacy Doc" chunk_id="chunk-real" kb_id="kb-real" />`,
+		`<kb doc="Legacy Doc" chunk_id="chunk-real" knowledge_id="doc-real" kb_id="kb-real" />`,
 		registry.ExpandText(`<ref id="chunk://1"/>`),
 	)
 }
@@ -613,7 +613,7 @@ func TestModelOutputGraphResultsUseChunkAliases(t *testing.T) {
 	require.Contains(t, output, `<chunk id="chunk://1" index="4" view="full">`)
 	require.NotContains(t, output, "graph-chunk-real")
 	require.Equal(t,
-		`<kb doc="Graph Source" chunk_id="graph-chunk-real" kb_id="graph-kb-real" />`,
+		`<kb doc="Graph Source" chunk_id="graph-chunk-real" knowledge_id="graph-doc-real" kb_id="graph-kb-real" />`,
 		registry.ExpandText(`<ref id="chunk://1"/>`),
 	)
 }
