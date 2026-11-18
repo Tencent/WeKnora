@@ -1596,6 +1596,10 @@ export default {
     }
   },
   agentEditor: {
+    feishuGroupReplyRule: {
+      label: "自动回复飞书 / Lark 新话题",
+      desc: "自动回复话题首条消息；话题内后续和普通群仍需 {'@'} 当前机器人。需要接收全部群消息和读取群信息的权限。",
+    },
     builtinHint: '这是内置智能体，名称和描述不可修改，但可以调整配置参数',
     fileTypes: {
       label: '支持的文件类型',

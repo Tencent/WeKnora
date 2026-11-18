@@ -74,6 +74,9 @@ type Adapter struct {
 	// this bot from other bots in the same group.
 	botOpenIDMu sync.Mutex
 	botOpenID   string
+
+	topicPolicyMu sync.RWMutex
+	topicPolicy   func(context.Context) (bool, error)
 }
 
 // NewAdapter creates a new adapter for the given region (RegionFeishu or RegionLark).
@@ -362,7 +365,8 @@ type feishuMessage struct {
 }
 
 type feishuSender struct {
-	SenderID *feishuSenderID `json:"sender_id"`
+	SenderType string          `json:"sender_type"`
+	SenderID   *feishuSenderID `json:"sender_id"`
 }
 
 type feishuSenderID struct {
@@ -414,19 +418,18 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	}
 	msg := eventBody.Event.Message
 
-	// Keep webhook delivery in sync with the WebSocket path. In group chats
-	// Feishu may deliver every message when the app has the "receive all group
-	// messages" permission; only continue when this app's own bot is mentioned.
-	if msg.ChatType == "group" {
-		botOpenID, err := a.BotOpenID(c.Request.Context())
+	if isGroupChat(msg.ChatType) {
+		senderType := ""
+		if eventBody.Event.Sender != nil {
+			senderType = eventBody.Event.Sender.SenderType
+		}
+		allow, err := a.allowGroupMessage(c.Request.Context(), msg.ChatID, msg.MessageID,
+			msg.RootID, msg.ParentID, senderType, msg.Mentions)
 		if err != nil {
-			logger.Warnf(c.Request.Context(),
-				"[%s] failed to resolve bot open_id; ignoring group message: %v", a.region.Label, err)
+			logger.Warnf(c.Request.Context(), "[%s] group reply policy unavailable: %v", a.region.Label, err)
 			return nil, nil
 		}
-		if !mentionsBot(botOpenID, msg.Mentions) {
-			logger.Infof(c.Request.Context(),
-				"[%s] ignoring group message without this bot mention: msg_id=%q", a.region.Label, msg.MessageID)
+		if !allow {
 			return nil, nil
 		}
 	}
@@ -440,7 +443,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	// Determine chat type
 	chatType := im.ChatTypeDirect
 	chatID := ""
-	if msg.ChatType == "group" {
+	if isGroupChat(msg.ChatType) {
 		chatType = im.ChatTypeGroup
 		chatID = msg.ChatID
 	}

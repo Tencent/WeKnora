@@ -273,3 +273,11 @@ imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
 - 各平台适配器：`internal/im/{wecom,feishu,dingtalk,slack,telegram,mattermost,wechat,qqbot,yunzhijia}/`
 - HTTP 接口层：`internal/handler/im.go`
 - 路由：`internal/router/routes_agent.go` 的 `RegisterIMRoutes` / `RegisterIMChannelRoutes`
+
+### 可选的新话题自动回复
+
+在智能体基础设置中开启「自动回复飞书 / Lark 新话题」（`config.feishu_group_reply_rule: true`）。默认关闭，群消息仍须 @ 当前机器人。开启后，话题群内由用户发送的首条消息也会触发回复；话题后续消息和普通群仍须 @ 当前机器人。私聊不变。各渠道读取所绑定智能体的最新配置，无需重启。
+
+应用须能接收未 @ 机器人的群消息，并有读取群信息的权限（`GET /open-apis/im/v1/chats/:chat_id`）。请配置消息接收事件订阅及对应飞书 / Lark 应用权限；WeKnora 不会自动授予这些权限。权限不足、群模式未知或配置查询失败时，不触发新话题自动回复。无需数据库迁移。
+
+![智能体飞书 / Lark 新话题自动回复](/screenshots/feishu-topic-replies.jpg)
