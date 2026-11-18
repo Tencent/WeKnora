@@ -188,14 +188,21 @@ run_go_test_packages() {
 }
 
 run_client_checks() {
-  log_step "client: go vet && go test -race"
+  log_step "client: gofmt, go vet && go test -race"
   (
     cd "$ROOT/client"
+    local unformatted
+    unformatted="$(gofmt -l .)"
+    if [[ -n "$unformatted" ]]; then
+      log_fail "the following client Go files are not gofmt-formatted:"
+      printf '%s\n' "$unformatted" >&2
+      return 1
+    fi
     go vet ./...
     if [[ "${HOOK_SKIP_TEST:-}" == "1" ]]; then
       log_step "HOOK_SKIP_TEST=1; skip client go test"
     else
-      go test -race -count=1 ./...
+      WEKNORA_LOG_FORMAT="" go test -race -count=1 ./...
     fi
   )
   log_ok "client checks"
@@ -210,7 +217,7 @@ run_cli_checks() {
     if [[ "${HOOK_SKIP_TEST:-}" == "1" ]]; then
       log_step "HOOK_SKIP_TEST=1; skip cli go test"
     else
-      go test -count=1 ./...
+      WEKNORA_LOG_FORMAT="" go test -count=1 ./...
     fi
   )
   log_ok "cli checks"

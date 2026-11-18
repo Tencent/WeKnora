@@ -43,7 +43,9 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go }}
-          cache-dependency-path: cli/go.sum
+          cache-dependency-path: |
+            cli/go.sum
+            client/go.sum
       - name: Check client formatting
         if: runner.os == 'Linux'
         working-directory: client

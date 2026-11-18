@@ -16,6 +16,9 @@ on:
       - "go.sum"
       - "Makefile"
       - "config/**"
+      - "docs/swagger.json"
+      - "docs/swagger.yaml"
+      - "docs/swag.overrides"
       - "migrations/**"
       - "skills/preloaded/**"
       - "testdata/**"
@@ -49,6 +52,9 @@ on:
       - "go.sum"
       - "Makefile"
       - "config/**"
+      - "docs/swagger.json"
+      - "docs/swagger.yaml"
+      - "docs/swag.overrides"
       - "migrations/**"
       - "skills/preloaded/**"
       - "testdata/**"
@@ -228,10 +234,15 @@ jobs:
 
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go vet ./internal/localsandbox/...
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./internal/localsandbox/...
-          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go test -c ./internal/localsandbox/seatbelt -o /dev/null
+          for pkg in $(GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go list ./internal/localsandbox/...); do
+            GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go test -c "$pkg" -o /dev/null
+          done
 
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./internal/localsandbox/...
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./internal/localsandbox/...
+          for pkg in $(GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go list ./internal/localsandbox/...); do
+            GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -c "$pkg" -o /dev/null
+          done
 
       - name: Lite mode end-to-end smoke test
         run: go test -v -race -tags sqlite_fts5 -count=1 ./tests/lite_smoke/...

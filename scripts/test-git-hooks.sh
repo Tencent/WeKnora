@@ -65,4 +65,27 @@ for phase in list vet test; do
   diff -u "$fixture/failure-expected.log" "$HOOK_TEST_LOG"
 done
 
+mkdir -p "$fixture/client"
+cat > "$fixture/client/sample.go" <<'EOF'
+package client
+
+type Sample struct {
+	ID string
+}
+EOF
+: > "$HOOK_TEST_LOG"
+bash -c 'source "$1"; run_client_checks' bash "$fixture/scripts/git-hooks/common.sh" > /dev/null
+cat > "$fixture/client-expected.log" <<'EOF'
+vet ./...
+test -race -count=1 ./...
+EOF
+diff -u "$fixture/client-expected.log" "$HOOK_TEST_LOG"
+
+printf 'package client\ntype Bad struct{   ID string }\n' > "$fixture/client/bad.go"
+: > "$HOOK_TEST_LOG"
+if bash -c 'source "$1"; run_client_checks' bash "$fixture/scripts/git-hooks/common.sh" > "$fixture/client-fail.log" 2>&1; then
+  echo "run_client_checks accepted unformatted client Go code" >&2
+  exit 1
+fi
+
 echo 'Git hook coverage checks passed'
