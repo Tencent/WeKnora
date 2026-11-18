@@ -94,10 +94,12 @@ func (r *lkeapClient) Rerank(
 
 	results := make([]api.RerankResult, len(documents))
 	for i, score := range scores {
-		results[i] = api.RerankResult{Index: i, Text: documents[i]}
-		if score != nil {
-			results[i].Score = *score
+		// A null entry is not a zero score: ranking it as 0 would silently
+		// demote the document instead of reporting the malformed reply.
+		if score == nil {
+			return nil, fmt.Errorf("LKEAP rerank score is missing for document %d", i)
 		}
+		results[i] = api.RerankResult{Index: i, Score: *score, Text: documents[i]}
 	}
 	return results, nil
 }
