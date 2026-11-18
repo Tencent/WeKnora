@@ -85,6 +85,43 @@ var ErrUnavailable = errors.New("anydoc: binding not built into this binary")
 // the limit the converter reported.
 var ErrResourceLimit = errors.New("document is too large for the parser")
 
+// ErrEncrypted marks a permanent anydoc rejection: the document is
+// password-protected and no retry can open it. Callers detect it with
+// errors.Is and surface the reason instead of the generic parse message.
+var ErrEncrypted = errors.New("document is encrypted; upload a copy without a password")
+
+// encryptedDocument is the method set anydoc's *ConvertError uses to report
+// the typed encrypted rejection. The cgo binding implements it; the default
+// build does not import that package, so classification goes through this
+// interface.
+type encryptedDocument interface {
+	Encrypted() bool
+}
+
+// permanentEncrypted is the errors.Is(ErrEncrypted) wrapper.
+type permanentEncrypted struct {
+	cause error
+}
+
+func (e *permanentEncrypted) Error() string { return ErrEncrypted.Error() }
+
+func (e *permanentEncrypted) Unwrap() error { return e.cause }
+
+func (e *permanentEncrypted) Is(target error) bool { return target == ErrEncrypted }
+
+// markEncrypted wraps a converter error whose kind is encrypted. Other
+// errors are returned unchanged so transient failures keep retrying.
+func markEncrypted(err error) error {
+	if err == nil {
+		return nil
+	}
+	var encrypted encryptedDocument
+	if !errors.As(err, &encrypted) || !encrypted.Encrypted() {
+		return err
+	}
+	return &permanentEncrypted{cause: err}
+}
+
 // resourceLimiter is the method set anydoc's *ConvertError uses to report a
 // parser budget failure. The cgo binding implements it; the default build does
 // not import that package, so classification goes through this interface.
@@ -205,7 +242,7 @@ func Convert(data []byte, opts Options) (*Result, error) {
 	}
 	result, err := backendConvert(data, opts)
 	if err != nil {
-		err = markResourceLimit(err)
+		err = markEncrypted(markResourceLimit(err))
 	}
 	return result, err
 }

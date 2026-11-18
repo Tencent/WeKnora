@@ -129,6 +129,57 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 	}
 }
 
+// An anydoc encrypted rejection is a property of the file (#5642): the bytes
+// are password-protected and retries cannot open them. The knowledge row must
+// carry the encryption reason instead of the generic DocReader message, and
+// the task must not be retried.
+func TestConvertAnydocEncryptedIsPermanent(t *testing.T) {
+	rpcErr := fmt.Errorf("anydoc conversion failed for %q: %w",
+		"protected.xlsx", anydoc.ErrEncrypted)
+
+	tracker, db := setupSpanTrackerTest(t)
+	ctx := types.WithTaskRetryMetadata(context.Background(), 0, 3)
+	knowledge := &types.Knowledge{
+		ID: "doc", TenantID: 1, KnowledgeBaseID: "kb", FilePath: "protected.xlsx",
+		ParseStatus: types.ParseStatusProcessing,
+	}
+	_, attempt, err := tracker.OpenAttempt(ctx, knowledge.ID, "")
+	require.NoError(t, err)
+	ctx = withAttempt(ctx, attempt)
+	svc := &knowledgeService{
+		repo:           &embedFailureKnowledgeRepo{knowledge: knowledge},
+		spanTracker:    tracker,
+		tenantService:  &stubTenantServiceForModelDelete{},
+		fileSvc:        spanRetryFileService{},
+		documentReader: &spanRetryDocReader{err: rpcErr},
+	}
+	result, err := svc.convert(ctx, types.DocumentProcessPayload{
+		FilePath: "protected.xlsx", FileName: "protected.xlsx", FileType: "xlsx",
+	}, &types.KnowledgeBase{ID: "kb"}, knowledge, types.EffectiveProcessConfig{
+		ChunkingConfig: types.ChunkingConfig{
+			ParserEngineRules: []types.ParserEngineRule{{
+				FileTypes: []string{"xlsx"},
+				Engine:    "builtin",
+			}},
+		},
+	}, false)
+
+	// nil error is what ProcessDocument returns to asynq, so the task is not
+	// retried. ReadResult.Error is the existing permanent-failure path.
+	require.Nil(t, result)
+	require.NoError(t, err)
+	require.Equal(t, types.ParseStatusFailed, knowledge.ParseStatus)
+	require.NotContains(t, knowledge.ErrorMessage, "DocReader logs")
+	require.Contains(t, knowledge.ErrorMessage, "encrypted")
+	require.Contains(t, knowledge.ErrorMessage, "password")
+
+	status, code, message := rootSpan(t, db, knowledge.ID, attempt)
+	require.Equal(t, types.SpanStatusFailed, status)
+	require.Equal(t, werrors.ErrCodeDocReaderParseFailed, code)
+	require.NotEmpty(t, message)
+	require.Contains(t, message, "encrypted")
+}
+
 // An anydoc resource_limit is a property of the file. Retries burn memory and
 // still fail, and the knowledge row must say which parser limit was hit
 // instead of sending the user to DocReader logs (anydoc runs in-process).

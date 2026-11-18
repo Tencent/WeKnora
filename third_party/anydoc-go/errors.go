@@ -41,6 +41,12 @@ func (e *ConvertError) NeedsOCR() bool {
 	return e != nil && e.Kind == "needs_ocr"
 }
 
+// Encrypted reports the typed password-protected rejection. Retrying the
+// same bytes cannot succeed; the user must upload a decrypted copy.
+func (e *ConvertError) Encrypted() bool {
+	return e != nil && e.Kind == "encrypted"
+}
+
 // ResourceLimit reports a permanent parser budget rejection. Retrying the
 // same document cannot succeed.
 func (e *ConvertError) ResourceLimit() bool {

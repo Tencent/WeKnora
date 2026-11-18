@@ -4520,7 +4520,8 @@ func (s *knowledgeService) convert(
 		err = fmt.Errorf("document parser returned no result")
 	}
 	// Parser resource limits are permanent document rejections, not transient reader failures.
-	if errors.Is(err, docparser.ErrCSVMarkdownTooLarge) || errors.Is(err, anydoc.ErrResourceLimit) {
+	if errors.Is(err, docparser.ErrCSVMarkdownTooLarge) || errors.Is(err, anydoc.ErrResourceLimit) ||
+		errors.Is(err, anydoc.ErrEncrypted) {
 		result, err = &types.ReadResult{Error: err.Error()}, nil
 	}
 	if err != nil {
