@@ -161,8 +161,8 @@ run_app_vet_test() {
       log_fail "no application packages found"
       exit 1
     fi
-    log_step "go vet (all app packages, like CI)"
-    go vet "${pkgs[@]}"
+    log_step "go vet -tags sqlite_fts5 (all app packages, like CI)"
+    go vet -tags sqlite_fts5 "${pkgs[@]}"
     log_ok "go vet"
     run_go_test_packages "${pkgs[@]}"
   )
@@ -178,16 +178,31 @@ run_go_test_packages() {
     log_step "HOOK_SKIP_TEST=1; skip go test"
     return 0
   fi
-  log_step "go test (${#pkgs[@]} app package(s), like CI)"
+  log_step "go test -tags sqlite_fts5 (${#pkgs[@]} app package(s), like CI)"
   (
     cd "$ROOT"
     # Match app.yml: a developer's custom log template must not alter assertions.
-    WEKNORA_LOG_FORMAT="" go test -count=1 "${pkgs[@]}"
+    WEKNORA_LOG_FORMAT="" go test -tags sqlite_fts5 -count=1 "${pkgs[@]}"
   )
   log_ok "go test"
 }
 
+run_client_checks() {
+  log_step "client: go vet && go test -race"
+  (
+    cd "$ROOT/client"
+    go vet ./...
+    if [[ "${HOOK_SKIP_TEST:-}" == "1" ]]; then
+      log_step "HOOK_SKIP_TEST=1; skip client go test"
+    else
+      go test -race -count=1 ./...
+    fi
+  )
+  log_ok "client checks"
+}
+
 run_cli_checks() {
+  run_client_checks
   log_step "cli: go vet && go test"
   (
     cd "$ROOT/cli"

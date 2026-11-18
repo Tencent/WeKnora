@@ -22,8 +22,8 @@ func (c *Client) GetWebSearchProviders(ctx context.Context) ([]json.RawMessage, 
 	}
 
 	var result struct {
-		Success bool               `json:"success"`
-		Data    []json.RawMessage  `json:"data"`
+		Success bool              `json:"success"`
+		Data    []json.RawMessage `json:"data"`
 	}
 	if err := parseResponse(resp, &result); err != nil {
 		return nil, err

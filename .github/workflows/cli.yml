@@ -8,11 +8,14 @@ on:
     branches: [main]
     paths:
       - 'cli/**'
+      - 'client/**'
       - '.github/workflows/cli.yml'
   pull_request:
     paths:
       - 'cli/**'
+      - 'client/**'
       - '.github/workflows/cli.yml'
+  workflow_dispatch:
 
 defaults:
   run:
@@ -41,6 +44,22 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache-dependency-path: cli/go.sum
+      - name: Check client formatting
+        if: runner.os == 'Linux'
+        working-directory: client
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following client Go files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: client go build, vet, and test
+        working-directory: client
+        run: |
+          go build ./...
+          go vet ./...
+          go test -race ./...
       - name: go build
         run: go build ./...
       - name: go test

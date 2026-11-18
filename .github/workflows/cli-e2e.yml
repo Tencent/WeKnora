@@ -18,6 +18,7 @@ on:
     types: [labeled, synchronize]
     paths:
       - 'cli/**'
+      - 'client/**'
       - '.github/workflows/cli-e2e.yml'
 
 defaults:

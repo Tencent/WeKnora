@@ -55,7 +55,7 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
   pr_changed_go=()
   while IFS= read -r line; do
     [[ -n "$line" ]] && pr_changed_go+=("$line")
-  done < <(git diff --name-only --diff-filter=ACMR "$pr_diff" -- '*.go' ':!cli/**' || true)
+  done < <(git diff --name-only --diff-filter=ACMR "$pr_diff" -- '*.go' ':!cli/**' ':!client/**' || true)
 
   if [[ ${#pr_changed_go[@]} -gt 0 ]]; then
     go_files=()
@@ -73,7 +73,7 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
     log_ok "go build ./cmd/server"
   fi
 
-  if paths_match_prefix "cli/" "${pr_changed[@]}"; then
+  if paths_match_prefix "cli/" "${pr_changed[@]}" || paths_match_prefix "client/" "${pr_changed[@]}"; then
     run_cli_checks
   fi
   if paths_match_prefix "frontend/" "${pr_changed[@]}"; then
