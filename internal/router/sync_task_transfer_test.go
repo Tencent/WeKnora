@@ -312,8 +312,9 @@ func TestLiteKnowledgeMoveBatchEndToEndWithoutRedis(t *testing.T) {
 	// 1. Trigger multi-document move via HTTP handler -> SyncTaskExecutor -> KnowledgeService (redisClient == nil).
 	// Regression: previously SaveKnowledgeMoveProgress panicked with HTTP 500 AND
 	// ProcessKnowledgeMove panicked on saveKnowledgeMoveProgress after item 1, tearing the batch.
-	moveResp := h.doJSON(t, http.MethodPost, "/api/v1/knowledge/move",
-		`{"source_kb_id":"move-src-kb","target_kb_id":"move-dst-kb","knowledge_ids":["move-doc-1","move-doc-2"],"mode":"reuse_vectors"}`)
+	moveBody := `{"source_kb_id":"move-src-kb","target_kb_id":"move-dst-kb",` +
+		`"knowledge_ids":["move-doc-1","move-doc-2"],"mode":"reuse_vectors"}`
+	moveResp := h.doJSON(t, http.MethodPost, "/api/v1/knowledge/move", moveBody)
 	require.Equal(t, http.StatusOK, moveResp.Code, moveResp.Body.String())
 
 	var startBody struct {

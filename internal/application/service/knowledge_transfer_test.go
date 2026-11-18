@@ -736,3 +736,62 @@ func TestLiteTransferHonorsSyncExecutorRetryMetadata(t *testing.T) {
 	require.Equal(t, types.KBCloneStatusCompleted, cloneDone.Status)
 	require.Equal(t, 100, cloneDone.Progress)
 }
+
+type inlineReparseQueue struct {
+	onEnqueue func(task *asynq.Task)
+}
+
+func (q *inlineReparseQueue) Enqueue(task *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+	if q.onEnqueue != nil && task.Type() == types.TypeManualProcess {
+		q.onEnqueue(task)
+	}
+	return &asynq.TaskInfo{ID: "inline-reparse"}, nil
+}
+
+func TestMoveReparseConcurrentWorkerDoesNotPoisonTransferPhase(t *testing.T) {
+	f := liteTransferFixture(t, access.KBTransferMove)
+	row, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+	require.NoError(t, err)
+	require.NoError(t, row.SetManualMetadata(
+		types.NewManualKnowledgeMetadata("# content", types.ManualKnowledgeStatusPublish, 1),
+	))
+	require.NoError(t, f.repo.UpdateKnowledge(f.ctx, row))
+
+	// Simulate SyncTaskExecutor's goroutine loading the row while phase is still
+	// "reparse_pending", validating it, and saving parse_status="completed" AFTER
+	// acknowledgeMovedReparse returns.
+	var workerSnapshot *types.Knowledge
+	f.svc.task = &inlineReparseQueue{
+		onEnqueue: func(_ *asynq.Task) {
+			loaded, loadErr := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+			require.NoError(t, loadErr)
+			require.NoError(t, validateProcessingKnowledge(loaded, 7, "other", "doc"))
+			loaded.ParseStatus = types.ParseStatusProcessing
+			require.NoError(t, f.repo.UpdateKnowledge(f.ctx, loaded))
+			workerSnapshot = loaded
+		},
+	}
+
+	require.NoError(t, f.svc.ProcessKnowledgeMove(context.Background(), moveTask(t, []string{"doc"}, "reparse")))
+	require.NotNil(t, workerSnapshot)
+
+	// Worker finishes indexing and writes its in-memory struct via full-row Save.
+	workerSnapshot.ParseStatus = types.ParseStatusCompleted
+	require.NoError(t, f.repo.UpdateKnowledge(f.ctx, workerSnapshot))
+
+	persisted, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+	require.NoError(t, err)
+	state, err := transferState(persisted)
+	require.NoError(t, err)
+	require.Equal(t, "done", state.Phase)
+
+	// Moving the document back to the original KB must succeed (not fail with
+	// "has an unfinished transfer").
+	returnRaw, err := json.Marshal(types.KnowledgeMovePayload{
+		TenantID: 7, TaskID: "return-move", SourceKBID: "other", TargetKBID: "kb",
+		KnowledgeIDs: []string{"doc"}, Mode: "reuse_vectors",
+	})
+	require.NoError(t, err)
+	returnTask := asynq.NewTask(types.TypeKnowledgeMove, returnRaw)
+	require.NoError(t, f.svc.ProcessKnowledgeMove(context.Background(), returnTask))
+}
