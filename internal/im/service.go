@@ -2030,7 +2030,8 @@ func (s *Service) executeQARequest(req *qaRequest) {
 		defer stopTyping()
 	}
 	answer, err := s.runQA(
-		ctx, req.session, req.msg.Content, req.agent, kbIDs, attachments, imageURLs, req.userKey, req.msg.Quote, cancelTyping,
+		ctx, req.session, req.msg.Content, req.agent, kbIDs, attachments, imageURLs,
+		req.userKey, req.msg.Quote, cancelTyping,
 	)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
