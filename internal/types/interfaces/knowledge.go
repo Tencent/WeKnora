@@ -133,6 +133,17 @@ type KnowledgeService interface {
 		knowledgeID string,
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
+	// ReprocessKnowledgeImages re-runs image understanding (caption/OCR) for
+	// the images a document already has stored, without re-parsing the
+	// document or changing its identity. Guarded: the document must be in a
+	// terminal parse state with no image tasks in flight, and the knowledge
+	// base must have image processing enabled.
+	ReprocessKnowledgeImages(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	// BatchReprocessKnowledgeImages offers documents of a knowledge base an
+	// image reprocess run (all documents when ids is nil, the named subset
+	// otherwise); each document is accepted or skipped independently and the
+	// result counts both.
+	BatchReprocessKnowledgeImages(ctx context.Context, kbID string, ids []string) (*types.BatchReprocessResult, error)
 	// ReplaceKnowledgeFile replaces the source file of an existing file knowledge
 	// while preserving its ID, then re-parses it. A path-qualified customFileName
 	// also sets the folder; a bare filename keeps the current folder. Metadata

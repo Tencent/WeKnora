@@ -4767,6 +4767,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			KnowledgeBaseID:     kb.ID,
 			ChunkID:             chunkID,
 			ImageURL:            img.ServingURL,
+			Trigger:             imageTaskTriggerFromContext(ctx),
 			ImagePipelineID:     eff.ImagePipelineID,
 			ImagePipelineParams: eff.ImagePipelineParams,
 			ImageAttrsEnabled:   eff.ImageAttrsEnabled,

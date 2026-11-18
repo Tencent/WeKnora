@@ -162,6 +162,16 @@ func (order KnowledgeListSortOrder) Valid() bool {
 	return order == KnowledgeListSortAscending || order == KnowledgeListSortDescending
 }
 
+// BatchReprocessResult is the per-run accounting a batch image reprocess
+// returns: how many documents were accepted, and why the rest were not.
+// Lives in types because the service interface references it.
+type BatchReprocessResult struct {
+	Accepted int            `json:"accepted"`
+	Skipped  int            `json:"skipped"`
+	Failed   int            `json:"failed"`
+	Reasons  map[string]int `json:"skipped_reasons"`
+}
+
 // Knowledge represents a knowledge entity in the system.
 // It contains metadata about the knowledge source, its processing status,
 // and references to the physical file if applicable.
