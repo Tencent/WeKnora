@@ -29247,9 +29247,14 @@ paths:
     get:
       description: |-
         Retrieve a paginated list of every user across tenants (SystemAdmin only).
-        Supports `offset` (default 0) and `limit` (default 50, max 200).
+        Supports `q` (case-insensitive username/email substring filter), `offset` (default 0) and `limit` (default 50, max 200).
         Password/hashes are never serialised — only the redacted UserInfo shape.
       parameters:
+      - description: Filter by username or email
+        in: query
+        name: q
+        type: string
+        x-agent: true
       - default: 0
         description: Page offset
         in: query
@@ -29288,10 +29293,10 @@ paths:
         risk: read
         root: users
         system_admin: true
-      x-agent-hint: 'Lists platform users across workspaces, including account enabled
-        state and system administrator flag. Follow has_more using offset + limit.
-        tenant_id is the home workspace, not a list of memberships. No search or role
-        filter is supported: paginate before drawing conclusions.'
+      x-agent-hint: Lists platform users across workspaces, including account enabled
+        state and system administrator flag. q filters username or email (not role);
+        follow has_more using offset + limit. tenant_id is the home workspace, not
+        a list of memberships.
   /system/admin/users/create:
     post:
       consumes:

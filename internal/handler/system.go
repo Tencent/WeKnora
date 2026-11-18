@@ -1564,20 +1564,22 @@ type ListAllUsersResponse struct {
 // ListUsers godoc
 // @Summary      查询平台用户（List platform users）
 // @Description  Retrieve a paginated list of every user across tenants (SystemAdmin only).
-// @Description  Supports `offset` (default 0) and `limit` (default 50, max 200).
+// @Description  Supports `q` (case-insensitive username/email substring filter), `offset` (default 0) and `limit` (default 50, max 200).
 // @Description  Password/hashes are never serialised — only the redacted UserInfo shape.
 // @Tags         System Admin
 // @Produce      json
-// @Param        offset query int false "Page offset" default(0) minimum(0) extensions(x-agent,x-agent-maximum=1000000)
-// @Param        limit  query int false "Page size (max 200)" default(50) minimum(1) maximum(200) extensions(x-agent,x-agent-maximum=50)
+// @Param        q      query string false "Filter by username or email" extensions(x-agent)
+// @Param        offset query int    false "Page offset" default(0) minimum(0) extensions(x-agent,x-agent-maximum=1000000)
+// @Param        limit  query int    false "Page size (max 200)" default(50) minimum(1) maximum(200) extensions(x-agent,x-agent-maximum=50)
 // @Success      200  {object}  ListAllUsersResponse  "Users retrieved successfully"
 // @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
 // @x-agent {"id":"system_admin.list_users","risk":"read","system_admin":true,"root":"users","max_items":50}
-// @x-agent-hint "Lists platform users across workspaces, including account enabled state and system administrator flag. Follow has_more using offset + limit. tenant_id is the home workspace, not a list of memberships. No search or role filter is supported: paginate before drawing conclusions."
+// @x-agent-hint "Lists platform users across workspaces, including account enabled state and system administrator flag. q filters username or email (not role); follow has_more using offset + limit. tenant_id is the home workspace, not a list of memberships."
 // @Router       /system/admin/users [get]
 func (h *SystemHandler) ListUsers(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 
+	q := strings.TrimSpace(c.Query("q"))
 	offset := 0
 	limit := 50
 	if v := c.Query("offset"); v != "" {
@@ -1594,7 +1596,7 @@ func (h *SystemHandler) ListUsers(c *gin.Context) {
 		limit = 200
 	}
 
-	users, hasMore, err := h.userSvc.ListAllUsers(ctx, offset, limit)
+	users, hasMore, err := h.userSvc.ListAllUsers(ctx, q, offset, limit)
 	if err != nil {
 		logger.Errorf(ctx, "Error listing users: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list users"})
