@@ -242,7 +242,8 @@ func (g *pgRepository) Retrieve(ctx context.Context, params types.RetrieveParams
 func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
-	logger.GetLogger(ctx).Infof("[Postgres] Keywords retrieval: query=%s, topK=%d", params.Query, params.TopK)
+	logger.GetLogger(ctx).Infof("[Postgres] Keywords retrieval: query=%s, topK=%d, threshold=%.4f",
+		params.Query, params.TopK, params.Threshold)
 	scoreFunction, err := g.resolveKeywordScoreFunction(ctx)
 	if err != nil {
 		return nil, err
@@ -319,16 +320,32 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 		return nil, err
 	}
 
-	logger.GetLogger(ctx).Infof("[Postgres] Keywords retrieval found %d results", len(embeddingDBList))
-	results := make([]*types.IndexWithScore, len(embeddingDBList))
-	const maxKeywordResultLog = 8
-	for i := range embeddingDBList {
-		results[i] = fromDBVectorEmbeddingWithScore(&embeddingDBList[i], types.MatchTypeKeywords)
-		if i < maxKeywordResultLog {
-			logger.GetLogger(ctx).Debugf("[Postgres] Keywords result %d: chunk=%s, score=%f",
-				i, results[i].ChunkID, results[i].Score)
+	// BM25 is unbounded. Interpret the UI's [0, 1] keyword threshold on the
+	// same scale as keyword-only fusion: score / max(1, best candidate score).
+	// Compute the denominator before filtering, within this query's scope;
+	// otherwise changing the cutoff would change the scores being compared.
+	// Keep raw scores in the returned results for tracing and existing fusion.
+	scoreScale := 1.0
+	for _, row := range embeddingDBList {
+		if row.Score > scoreScale {
+			scoreScale = row.Score
 		}
 	}
+	results := make([]*types.IndexWithScore, 0, len(embeddingDBList))
+	const maxKeywordResultLog = 8
+	for i := range embeddingDBList {
+		if params.Threshold > 0 && embeddingDBList[i].Score/scoreScale < params.Threshold {
+			continue
+		}
+		result := fromDBVectorEmbeddingWithScore(&embeddingDBList[i], types.MatchTypeKeywords)
+		results = append(results, result)
+		if len(results) <= maxKeywordResultLog {
+			logger.GetLogger(ctx).Debugf("[Postgres] Keywords result %d: chunk=%s, score=%f",
+				len(results)-1, result.ChunkID, result.Score)
+		}
+	}
+	logger.GetLogger(ctx).Infof("[Postgres] Keywords retrieval: candidates=%d, passing threshold=%d",
+		len(embeddingDBList), len(results))
 	if len(results) > maxKeywordResultLog {
 		logger.GetLogger(ctx).Debugf(
 			"[Postgres] Keywords result summary: total=%d logged=%d truncated=%d",
