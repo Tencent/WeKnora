@@ -161,3 +161,10 @@ test('remaining time is rounded into a stable unit', () => {
   assert.deepEqual(splitDuration(610), { unit: 'minutes', value: 11 })
   assert.deepEqual(splitDuration(5400), { unit: 'hours', value: 1.5 })
 })
+
+test('a deferred upload settles without polling the parser', () => {
+  const saved = item({ transfer: 'uploaded', knowledgeId: 'deferred-doc', parseStatus: 'deferred' })
+  assert.equal(itemPhase(saved), 'ready')
+  assert.equal(needsParsePolling(saved), false)
+  assert.equal(summarizeItems([saved]).stage, 'done')
+})

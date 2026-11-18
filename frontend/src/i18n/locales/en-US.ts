@@ -1255,6 +1255,11 @@ export default {
     batchTagFailed: 'Batch tag failed',
     confirmBatchReparseDocument: 'Rebuild {count} selected documents? Existing content will be cleared and each document will be re-parsed.',
     confirmBatchReparse: 'Confirm and reparse',
+    statusDeferred: 'Saved, awaiting parsing',
+    startParse: 'Start parsing',
+    startParseSubmitted: 'Parsing submitted',
+    startParseFailed: 'Could not start parsing',
+    batchReparseSkippedDeferred: 'Start parsing deferred files from their document menus.',
     batchReparseSuccess: 'Submitted {count} rebuild tasks',
     batchReparseFailed: 'Batch rebuild failed',
     batchReparseSkippedInFlight: 'Skipped {count} document(s) still being parsed',
@@ -1306,6 +1311,7 @@ export default {
     chunkLoadFailed: 'Failed to load chunks'
   },
   uploadConfirm: {
+    deferParsing: 'Save files for later parsing',
     imageEmbeddingModel: "Image indexing embedding model",
     imageIndexInherited: "Image indexing uses the embedding model assigned to this knowledge base. Change it in knowledge base settings.",
     imageVectorIndex: "Image vector indexing for this import",

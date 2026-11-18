@@ -569,6 +569,9 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
             <t-icon name="chart-bar" />
           </button>
         </div>
+        <div v-else-if="item.parse_status === 'deferred'" class="card-draft">
+          <t-tag size="small" theme="warning" variant="light-outline">{{ $t('knowledgeBase.statusDeferred') }}</t-tag>
+        </div>
         <div v-else-if="item.parse_status === 'draft'" class="card-draft">
           <t-tag size="small" theme="warning" variant="light-outline">{{ $t('knowledgeBase.draft') }}</t-tag>
           <span class="card-draft-tip">{{ $t('knowledgeBase.draftTip') }}</span>
@@ -645,6 +648,9 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
             :auto-poll="false"
             :compact="true"
           />
+        </div>
+        <div v-else-if="hoveredCardItem.parse_status === 'deferred'" class="card-popover-status draft">
+          {{ $t('knowledgeBase.statusDeferred') }}
         </div>
         <div v-else-if="hoveredCardItem.parse_status === 'draft'" class="card-popover-status draft">
           {{ $t('knowledgeBase.draft') }}

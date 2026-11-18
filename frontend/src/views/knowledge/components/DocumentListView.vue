@@ -171,6 +171,9 @@ const computeStatus = (item: KnowledgeItem): StatusInfo => {
   if (item.parse_status === 'cancelled') {
     return { label: t('knowledgeBase.statusCancelled'), theme: 'default', icon: 'stop-circle' };
   }
+  if (item.parse_status === 'deferred') {
+    return { label: t('knowledgeBase.statusDeferred'), theme: 'warning', icon: 'time' };
+  }
   if (item.parse_status === 'draft') {
     return { label: t('knowledgeBase.statusDraft'), theme: 'warning' };
   }

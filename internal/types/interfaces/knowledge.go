@@ -16,6 +16,14 @@ type KnowledgeService interface {
 	ReplaceKnowledgeFromDataSource(ctx context.Context, knowledgeID string, item *types.FetchedItem,
 		metadata map[string]string, tagIDs []string, channel string) (*types.Knowledge, error)
 
+	// CreateDeferredKnowledgeFromFile saves the upload for an explicit start.
+	CreateDeferredKnowledgeFromFile(
+		ctx context.Context, kbID string, file *multipart.FileHeader, metadata map[string]string,
+		enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
+		processOverrides *types.KnowledgeProcessOverrides,
+	) (*types.Knowledge, error)
+	StartDeferredKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+
 	// CreateKnowledgeFromFile creates knowledge from a file.
 	// channel identifies the ingestion channel (e.g. "web", "api", "wechat"); empty defaults to "web".
 	CreateKnowledgeFromFile(
@@ -316,6 +324,7 @@ type KnowledgeRepository interface {
 	// NULL/empty hashes are handled correctly, letting a clone converge).
 	AminusB(ctx context.Context, Atenant uint64, A string, Btenant uint64, B string) ([]string, error)
 	UpdateKnowledgeColumn(ctx context.Context, id string, column string, value interface{}) error
+	TransitionDeferredKnowledge(ctx context.Context, knowledge *types.Knowledge, from, to string) (bool, error)
 	// UpdateKnowledgeColumns updates multiple columns of a knowledge row in a single
 	// statement so callers that flip several related fields (e.g. parse_status +
 	// error_message) cannot leave the row in a half-updated state.
