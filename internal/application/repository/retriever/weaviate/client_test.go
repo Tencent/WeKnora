@@ -2,7 +2,10 @@ package weaviate
 
 import (
 	"context"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -178,5 +181,62 @@ func TestNewClientWithRetryGivesUp(t *testing.T) {
 	t.Run("at once on a configuration it cannot use", func(t *testing.T) {
 		_, err := NewClientWithRetry(context.Background(), ClientConfig{Host: "localhost:8080", Scheme: "ftp"})
 		require.ErrorContains(t, err, "unsupported scheme")
+	})
+}
+
+// The SDK joins host and port with a colon, so an IPv6 literal has to reach it
+// in brackets or neither the REST URL nor the gRPC target is an address.
+func TestClientReachesAnIPv6Server(t *testing.T) {
+	assert.Equal(t, "[::1]", sdkHost("::1"))
+	assert.Equal(t, "[2001:db8::5]", sdkHost("2001:db8::5"))
+	assert.Equal(t, "weaviate", sdkHost("weaviate"))
+	assert.Equal(t, "10.0.0.5", sdkHost("10.0.0.5"))
+
+	searched := false
+	fake := &fakeWeaviate{
+		ipv6:   true,
+		rest:   schemaExists(),
+		search: func(*pb.SearchRequest) (*pb.SearchReply, error) { searched = true; return &pb.SearchReply{}, nil },
+	}
+	repo := fake.repository(t, "Weknora_embeddings")
+	require.Contains(t, fake.restAddress, "[::1]:")
+	require.Contains(t, fake.grpcAddress, "[::1]:")
+
+	_, err := repo.VectorRetrieve(context.Background(), types.RetrieveParams{Embedding: []float32{1, 0}, TopK: 1})
+	require.NoError(t, err)
+	assert.True(t, searched, "the search must reach the gRPC server")
+}
+
+// The SDK opens its gRPC channel lazily. A REST address that answers next to a
+// gRPC address that does not must fail while connecting, not on the first
+// search, or a connection test would pass for a store that cannot retrieve.
+func TestNewClientRefusesAnUnreachableGRPCAddress(t *testing.T) {
+	fake := &fakeWeaviate{}
+	fake.start(t)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	closedPort := listener.Addr().String()
+	require.NoError(t, listener.Close())
+
+	t.Run("nothing listens there", func(t *testing.T) {
+		_, err := NewClient(context.Background(), ClientConfig{Host: fake.restAddress, GrpcAddress: closedPort})
+		require.ErrorIs(t, err, ErrGRPCUnavailable)
+	})
+	t.Run("the REST port given as the gRPC address", func(t *testing.T) {
+		// Any HTTP/1.1 server stands in for the REST port here.
+		rest := httptest.NewServer(http.NotFoundHandler())
+		defer rest.Close()
+		_, err := NewClient(context.Background(), ClientConfig{
+			Host: fake.restAddress, GrpcAddress: strings.TrimPrefix(rest.URL, "http://"),
+		})
+		require.ErrorIs(t, err, ErrGRPCUnavailable)
+	})
+	t.Run("both answer", func(t *testing.T) {
+		client, err := NewClient(context.Background(), ClientConfig{
+			Host: fake.restAddress, GrpcAddress: fake.grpcAddress,
+		})
+		require.NoError(t, err)
+		require.NoError(t, client.Close())
 	})
 }

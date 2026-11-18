@@ -16,7 +16,9 @@ import (
 	"github.com/stretchr/testify/require"
 	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 // fakeWeaviate stands in for a Weaviate node: an HTTP server for the REST API
@@ -31,6 +33,8 @@ type fakeWeaviate struct {
 	batchObjects func(*pb.BatchObjectsRequest) (*pb.BatchObjectsReply, error)
 	batchDelete  func(*pb.BatchDeleteRequest) (*pb.BatchDeleteReply, error)
 
+	// ipv6 serves on the IPv6 loopback address instead of the IPv4 one.
+	ipv6 bool
 	// version is what /v1/meta reports; empty means a current server.
 	version string
 	// metaFailures is how many /v1/meta requests are answered with 503 first,
@@ -48,7 +52,16 @@ type fakeWeaviate struct {
 // start serves f on loopback until the test ends.
 func (f *fakeWeaviate) start(t *testing.T) {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	loopback := "127.0.0.1:0"
+	if f.ipv6 {
+		loopback = "[::1]:0"
+	}
+	restListener, err := net.Listen("tcp", loopback)
+	if err != nil && f.ipv6 {
+		t.Skipf("no IPv6 loopback: %v", err)
+	}
+	require.NoError(t, err)
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		isMeta := r.Method == http.MethodGet && r.URL.Path == "/v1/meta"
 		f.mu.Lock()
 		f.restHeaders = append(f.restHeaders, r.Header.Clone())
@@ -78,10 +91,13 @@ func (f *fakeWeaviate) start(t *testing.T) {
 		}
 		f.rest(w, r)
 	}))
+	_ = server.Listener.Close()
+	server.Listener = restListener
+	server.Start()
 	t.Cleanup(server.Close)
 	f.restAddress = strings.TrimPrefix(server.URL, "http://")
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", loopback)
 	require.NoError(t, err)
 	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(func(ctx context.Context, req any,
 		_ *grpc.UnaryServerInfo, handler grpc.UnaryHandler,
@@ -112,6 +128,10 @@ func (f *fakeWeaviate) repository(t *testing.T, baseName string) *weaviateReposi
 }
 
 func (f *fakeWeaviate) Search(_ context.Context, req *pb.SearchRequest) (*pb.SearchReply, error) {
+	// The client probes gRPC while it connects; answer the way Weaviate does.
+	if req.GetCollection() == grpcProbeCollection {
+		return nil, status.Error(codes.Unknown, "could not find class "+grpcProbeCollection+" in schema")
+	}
 	if f.search == nil {
 		return f.UnimplementedWeaviateServer.Search(context.Background(), req)
 	}

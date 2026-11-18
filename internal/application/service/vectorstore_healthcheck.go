@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -267,6 +268,9 @@ func testWeaviateConnection(ctx context.Context, config types.ConnectionConfig) 
 	// the same whitelist-first policy before dialing instead: env and saved
 	// stores reach this test without validateAndTestConnection, and a saved
 	// store's DNS may have changed since it was created.
+	// This is weaker than the injected client was: it checks the address once,
+	// not each request, so it does not stop the server from redirecting a
+	// request elsewhere. Closing that needs the SDK to accept an HTTP client.
 	if err := validateConnectionAddrSSRF(types.WeaviateRetrieverEngineType, types.ConnectionConfig{
 		Host:        host,
 		GrpcAddress: grpcAddress,
@@ -274,8 +278,8 @@ func testWeaviateConnection(ctx context.Context, config types.ConnectionConfig) 
 		return "", err
 	}
 
-	// The client reads /v1/meta while it connects, so an unreachable server
-	// fails here.
+	// The client reads /v1/meta and probes the gRPC address while it connects,
+	// so a server that is unreachable on either, or too old, fails here.
 	client, err := weaviateRepo.NewClient(testCtx, weaviateRepo.ClientConfig{
 		Host:        host,
 		GrpcAddress: grpcAddress,
@@ -284,7 +288,15 @@ func testWeaviateConnection(ctx context.Context, config types.ConnectionConfig) 
 	})
 	if err != nil {
 		logger.Warnf(ctx, "Weaviate connection test failed: %v", err)
-		return "", errors.NewBadRequestError("failed to create weaviate client: invalid configuration")
+		switch {
+		case stderrors.Is(err, weaviateRepo.ErrUnsupportedServer):
+			return "", errors.NewBadRequestError("weaviate server is too old: version 1.33 or newer is required")
+		case stderrors.Is(err, weaviateRepo.ErrGRPCUnavailable):
+			return "", errors.NewBadRequestError(
+				"failed to connect to weaviate: the gRPC address is unreachable or refused the credentials")
+		}
+		return "", errors.NewBadRequestError(
+			"failed to connect to weaviate: server unreachable, invalid configuration or authentication failed")
 	}
 	defer func() { _ = client.Close() }()
 

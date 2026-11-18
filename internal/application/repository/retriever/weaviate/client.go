@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"github.com/weaviate/weaviate-go-client/v6"
+	"github.com/weaviate/weaviate-go-client/v6/query"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -28,6 +31,13 @@ const (
 	// search targets.
 	minServerMajor, minServerMinor = 1, 33
 
+	// grpcProbeCollection is the collection the gRPC probe searches. It does
+	// not exist: the probe only needs the server to answer.
+	grpcProbeCollection = "WeknoraConnectionProbe"
+	// grpcProbeTimeout bounds the probe, so an address that swallows packets
+	// does not use up the caller's whole connect budget.
+	grpcProbeTimeout = 5 * time.Second
+
 	// connectRetryInterval is how long NewClientWithRetry waits between
 	// attempts.
 	connectRetryInterval = 2 * time.Second
@@ -36,6 +46,11 @@ const (
 // ErrUnsupportedServer is returned when the Weaviate server is older than the
 // oldest version this repository supports.
 var ErrUnsupportedServer = errors.New("weaviate: unsupported server version")
+
+// ErrGRPCUnavailable is returned when the REST address answers but the gRPC
+// address does not, or refuses the credentials. Search, batch insert and batch
+// delete all go over gRPC, so such a client could not do its job.
+var ErrGRPCUnavailable = errors.New("weaviate: gRPC endpoint unavailable")
 
 // IntegrationVersion is the WeKnora version reported in the
 // X-Weaviate-Client-Integration header. The container sets it from the version
@@ -59,8 +74,9 @@ type ClientConfig struct {
 }
 
 // NewClient connects to Weaviate. The SDK reads /v1/meta before returning, so
-// an unreachable REST address fails here rather than on the first query, and so
-// does a server too old to be used (ErrUnsupportedServer).
+// an unreachable REST address fails here rather than on the first query. So
+// does a server too old to be used (ErrUnsupportedServer) and a gRPC address
+// that does not answer (ErrGRPCUnavailable).
 func NewClient(ctx context.Context, cfg ClientConfig) (*weaviate.Client, error) {
 	options, err := clientOptions(cfg)
 	if err != nil {
@@ -100,11 +116,35 @@ func connect(ctx context.Context, options []weaviate.Option) (*weaviate.Client, 
 	if err == nil {
 		err = checkServerVersion(meta.Version)
 	}
+	if err == nil {
+		err = probeGRPC(ctx, client)
+	}
 	if err != nil {
 		_ = client.Close()
 		return nil, err
 	}
 	return client, nil
+}
+
+// probeGRPC checks that the gRPC address answers. The SDK opens its gRPC
+// channel lazily, so without this a wrong address goes unnoticed until the
+// first search. The probe searches a collection that does not exist: a server
+// that says so has been reached and has accepted the credentials.
+func probeGRPC(ctx context.Context, client *weaviate.Client) error {
+	ctx, cancel := context.WithTimeout(ctx, grpcProbeTimeout)
+	defer cancel()
+	_, err := client.Collections.Use(grpcProbeCollection).Query.OverAll(ctx, query.OverAll{Limit: 1})
+	if err == nil {
+		return nil
+	}
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.Unauthenticated:
+		return fmt.Errorf("%w: %w", ErrGRPCUnavailable, err)
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("%w: %w", ErrGRPCUnavailable, err)
+	}
+	return nil
 }
 
 // checkServerVersion refuses a server older than the minimum. A version it
@@ -133,9 +173,9 @@ func clientOptions(cfg ClientConfig) ([]weaviate.Option, error) {
 	}
 	options := []weaviate.Option{
 		weaviate.WithScheme(scheme),
-		weaviate.WithHTTPHost(restHost),
+		weaviate.WithHTTPHost(sdkHost(restHost)),
 		weaviate.WithHTTPPort(restPort),
-		weaviate.WithGRPCHost(grpcHost),
+		weaviate.WithGRPCHost(sdkHost(grpcHost)),
 		weaviate.WithGRPCPort(grpcPort),
 		weaviate.WithHeader(http.Header{headerIntegration: {integrationHeaderValue()}}),
 	}
@@ -183,6 +223,16 @@ func resolveAddresses(cfg ClientConfig) (scheme, restHost, restPort, grpcHost, g
 		return "", "", "", "", "", fmt.Errorf("weaviate: invalid gRPC address %q: %w", cfg.GrpcAddress, err)
 	}
 	return scheme, restHost, restPort, grpcHost, grpcPort, nil
+}
+
+// sdkHost is host in the form the SDK needs. It builds the REST URL and the
+// gRPC target by joining host and port with a colon, which is only an address
+// for an IPv6 literal when the literal is in brackets.
+func sdkHost(host string) string {
+	if strings.Contains(host, ":") {
+		return "[" + host + "]"
+	}
+	return host
 }
 
 func integrationHeaderValue() string {

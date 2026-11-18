@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"net/http"
 	"os"
@@ -69,6 +70,23 @@ func integrationRepository(t *testing.T) *weaviateRepository {
 		_ = client.Close()
 	})
 	return repo
+}
+
+// integrationREST sends a request straight to the server's REST API, with the
+// same credentials the repository uses.
+func integrationREST(t *testing.T, method, path string, body io.Reader) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(method, "http://"+os.Getenv("WEAVIATE_INTEGRATION_HOST")+path, body)
+	require.NoError(t, err)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if key := os.Getenv("WEAVIATE_INTEGRATION_API_KEY"); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	return resp
 }
 
 func integrationSave(t *testing.T, repo *weaviateRepository, chunks ...integrationChunk) {
@@ -287,10 +305,9 @@ func TestIntegrationCollectionSchema(t *testing.T) {
 	repo.replicationFactor = 1
 	require.NoError(t, repo.ensureCollection(context.Background(), integrationDimension))
 
-	host := os.Getenv("WEAVIATE_INTEGRATION_HOST")
-	resp, err := http.Get("http://" + host + "/v1/schema/" + repo.getCollectionName(integrationDimension))
-	require.NoError(t, err)
+	resp := integrationREST(t, http.MethodGet, "/v1/schema/"+repo.getCollectionName(integrationDimension), nil)
 	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var class struct {
 		VectorConfig map[string]struct {
 			VectorIndexType   string         `json:"vectorIndexType"`
@@ -467,19 +484,11 @@ func TestIntegrationChunkWithGeneratedQuestions(t *testing.T) {
 func TestIntegrationReadsDataWrittenByTheV5Client(t *testing.T) {
 	repo := integrationRepository(t)
 	collection := repo.getCollectionName(integrationDimension)
-	base := "http://" + os.Getenv("WEAVIATE_INTEGRATION_HOST")
 	post := func(path string, body any) {
 		t.Helper()
 		raw, err := json.Marshal(body)
 		require.NoError(t, err)
-		req, err := http.NewRequest(http.MethodPost, base+path, bytes.NewReader(raw))
-		require.NoError(t, err)
-		req.Header.Set("Content-Type", "application/json")
-		if key := os.Getenv("WEAVIATE_INTEGRATION_API_KEY"); key != "" {
-			req.Header.Set("Authorization", "Bearer "+key)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		require.NoError(t, err)
+		resp := integrationREST(t, http.MethodPost, path, bytes.NewReader(raw))
 		defer func() { _ = resp.Body.Close() }()
 		var answer bytes.Buffer
 		_, _ = answer.ReadFrom(resp.Body)
