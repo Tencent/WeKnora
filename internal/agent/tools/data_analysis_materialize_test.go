@@ -162,3 +162,125 @@ func TestMaterializeKnowledgeFile_PreservesExtension(t *testing.T) {
 		})
 	}
 }
+
+// cancelAfterFirstReadReader models a storage reader that does not implement
+// context cancellation itself: it cancels ctx after its first successful
+// read while still having data available.
+type cancelAfterFirstReadReader struct {
+	cancel context.CancelFunc
+	chunks [][]byte
+	reads  int
+}
+
+func (r *cancelAfterFirstReadReader) Read(p []byte) (int, error) {
+	r.reads++
+	if r.reads == 1 {
+		r.cancel()
+	}
+	if len(r.chunks) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, r.chunks[0])
+	r.chunks = r.chunks[1:]
+	return n, nil
+}
+
+func (r *cancelAfterFirstReadReader) Close() error { return nil }
+
+// leftoverTempFiles returns the names of temp files created by
+// materializeKnowledgeFile that are still present.
+func leftoverTempFiles(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(os.TempDir())
+	if err != nil {
+		t.Fatalf("read temp dir: %v", err)
+	}
+	var left []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "weknora-data-analysis-") {
+			left = append(left, e.Name())
+		}
+	}
+	return left
+}
+
+// TestMaterializeKnowledgeFileStopsAfterCancellation is the regression guard
+// for issue #5662: once cancellation is observable, the helper must stop
+// further copy reads, return an error wrapping the context cancellation,
+// and remove the partial temp file.
+func TestMaterializeKnowledgeFileStopsAfterCancellation(t *testing.T) {
+	newReader := func() *cancelAfterFirstReadReader {
+		var chunks [][]byte
+		for i := 0; i < 8; i++ {
+			chunks = append(chunks, []byte("chunk-data\n"))
+		}
+		return &cancelAfterFirstReadReader{chunks: chunks}
+	}
+	newTool := func(reader *cancelAfterFirstReadReader) *DataAnalysisTool {
+		fs := &fakeFileService{
+			readers: map[string]func() (io.ReadCloser, error){
+				"tenants/42/data.csv": func() (io.ReadCloser, error) { return reader, nil },
+			},
+		}
+		return &DataAnalysisTool{fileService: fs, sessionID: "test-cancel"}
+	}
+	knowledge := &types.Knowledge{ID: "k-cancel", FileType: "csv", FilePath: "tenants/42/data.csv"}
+
+	t.Run("cancelled mid-copy stops reading", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		reader := newReader()
+		reader.cancel = cancel
+
+		before := leftoverTempFiles(t)
+		path, cleanup, err := newTool(reader).materializeKnowledgeFile(ctx, knowledge)
+		defer cleanup()
+		if err == nil {
+			t.Fatal("expected error for cancelled copy, got nil")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("expected error wrapping context.Canceled, got: %v", err)
+		}
+		if path != "" {
+			t.Errorf("expected no temp path on cancellation, got %q", path)
+		}
+		// The copy must stop once cancellation is observable instead of
+		// draining all eight chunks plus EOF (nine reads pre-fix).
+		if reader.reads != 1 {
+			t.Errorf("expected copy to stop after the first read, got %d reads", reader.reads)
+		}
+		for _, name := range leftoverTempFiles(t) {
+			found := false
+			for _, b := range before {
+				if b == name {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("partial temp file leaked after cancellation: %s", name)
+			}
+		}
+	})
+
+	t.Run("already cancelled before copy reads nothing", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		reader := newReader()
+		reader.cancel = cancel
+
+		path, cleanup, err := newTool(reader).materializeKnowledgeFile(ctx, knowledge)
+		defer cleanup()
+		if err == nil {
+			t.Fatal("expected error for pre-cancelled context, got nil")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("expected error wrapping context.Canceled, got: %v", err)
+		}
+		if path != "" {
+			t.Errorf("expected no temp path on cancellation, got %q", path)
+		}
+		if reader.reads != 0 {
+			t.Errorf("expected zero reads for pre-cancelled context, got %d", reader.reads)
+		}
+	})
+}

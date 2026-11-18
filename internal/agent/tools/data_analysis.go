@@ -802,6 +802,24 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 	}
 }
 
+// contextAwareWriter aborts a copy as soon as ctx is cancelled. io.Copy
+// issues one Write per source Read, so checking ctx.Err() here makes
+// cancellation observable between reads even when the storage reader itself
+// does not implement cancellation. A backend blocked inside a single read
+// still needs its own cancellation behavior; this only closes the
+// between-reads gap.
+type contextAwareWriter struct {
+	ctx context.Context
+	w   io.Writer
+}
+
+func (c contextAwareWriter) Write(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, fmt.Errorf("copy aborted: %w", err)
+	}
+	return c.w.Write(p)
+}
+
 // materializeKnowledgeFile copies the knowledge's backing blob into a fresh
 // temp file on the local filesystem so DuckDB can open it with ordinary path
 // semantics. It returns the temp path and a cleanup closure that removes the
@@ -839,7 +857,21 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 		}
 	}
 
-	if _, err := io.Copy(tmp, reader); err != nil {
+	// A context cancelled before the copy starts must issue zero reads and
+	// leave no partial temp file behind.
+	if err := ctx.Err(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return "", noop, fmt.Errorf("failed to copy knowledge '%s' to temp file: %w", knowledge.ID, err)
+	}
+
+	// Copy through a context-aware writer: io.Copy issues one Write per
+	// source Read, so checking ctx.Err() on every Write makes cancellation
+	// observable between reads even when the storage reader itself does not
+	// implement cancellation. Without this, a plain local-file reader keeps
+	// streaming until EOF after the chat/tool context was cancelled, and the
+	// helper returns a successful temp path for an abandoned operation.
+	if _, err := io.Copy(contextAwareWriter{ctx: ctx, w: tmp}, reader); err != nil {
 		_ = tmp.Close()
 		cleanup()
 		return "", noop, fmt.Errorf("failed to copy knowledge '%s' to temp file: %w", knowledge.ID, err)
