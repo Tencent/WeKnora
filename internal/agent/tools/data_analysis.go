@@ -549,6 +549,11 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 	logger.Infof(ctx, "[Tool][DataAnalysis] Loading CSV file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
 
 	if !t.loadedTables[tableName] {
+		csvPath, cleanup, err := prepareCSVForDuckDB(ctx, filename)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare CSV for DuckDB: %w", err)
+		}
+		defer cleanup()
 		// Keep cleanup tracking even if CREATE fails; only successful creation
 		// makes the table reusable by a later call.
 		t.recordCreatedTable(tableName)
@@ -558,10 +563,10 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 		// Table will be created in the session schema
 		createTableSQL := fmt.Sprintf(
 			"CREATE TABLE \"%s\" AS SELECT * FROM read_csv_auto('%s', header=true, all_varchar=true)",
-			tableName, sqlSingleQuoteEscape(filename),
+			tableName, sqlSingleQuoteEscape(csvPath),
 		)
 
-		_, err := t.db.ExecContext(ctx, createTableSQL)
+		_, err = t.db.ExecContext(ctx, createTableSQL)
 		if err != nil {
 			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from CSV: %v", err)
 			return nil, fmt.Errorf("failed to create table from CSV: %w", err)
