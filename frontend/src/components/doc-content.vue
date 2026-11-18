@@ -40,6 +40,7 @@ const authStore = useAuthStore();
 // 传下来（包含 KB creator / Admin / 组织分享 editor 三种来源），未
 // 传时按更严格的 Admin 兜底，避免 Viewer 看到一个会 403 的入口。
 const canDeleteGeneratedQuestion = computed(() => {
+  if (props.readOnly) return false;
   if (props.canEditKB === true) return true;
   return authStore.hasRole('admin');
 });
@@ -242,7 +243,10 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId", "readOnly", "zIndex"]);
+// Task inspection can stack this drawer above the task drawer without changing
+// the regular knowledge-base drawer's existing layer order.
+const drawerZIndex = computed(() => props.zIndex ?? 2000);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange"]);
 const assistant = useAssistantStore();
 const readingAssistantActions = computed(() => {
@@ -845,6 +849,7 @@ watch(() => viewMode.value, (mode) => {
 watch(() => props.visible, (visible) => {
   if (!visible) {
     cancelSummaryEdit();
+    timelineDrawerVisible.value = false;
   } else if (viewMode.value === 'chunks' || viewMode.value === 'merged') {
     runMarkdownPostRenderPipeline();
   }
@@ -1589,12 +1594,12 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
 <template>
   <div class="doc_content" ref="mdContentWrap">
     <teleport to="body">
-      <div v-if="visible" class="doc-drawer-resize-handle" :style="{ right: `${mainDrawerWidth}px` }" role="separator"
+      <div v-if="visible" class="doc-drawer-resize-handle" :style="{ right: `${mainDrawerWidth}px`, zIndex: drawerZIndex + 1 }" role="separator"
         aria-orientation="vertical" @mousedown.prevent="onMainDrawerResizeStart">
         <div class="doc-drawer-resize-line" />
       </div>
     </teleport>
-    <t-drawer :visible="visible" :zIndex="2000" :size="`${mainDrawerWidth}px`" attach="body" :closeBtn="true"
+    <t-drawer :visible="visible" :zIndex="drawerZIndex" :size="`${mainDrawerWidth}px`" attach="body" :closeBtn="true"
       :footer="false" :class="['doc-main-drawer', { 'doc-main-drawer--resizing': mainDrawerResizing }]"
       @close="handleClose">
       <template #header>
@@ -1638,13 +1643,13 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
       <!-- 二级抽屉：完整 Langfuse-style waterfall -->
       <teleport to="body">
         <div v-if="timelineDrawerVisible" class="trace-drawer-resize-handle"
-          :style="{ right: `${timelineDrawerWidth}px` }" role="separator" aria-orientation="vertical"
+          :style="{ right: `${timelineDrawerWidth}px`, zIndex: drawerZIndex + 101 }" role="separator" aria-orientation="vertical"
           :aria-label="$t('knowledgeStages.resizeDrawer')" :title="$t('knowledgeStages.resizeDrawer')"
           @mousedown.prevent="onTraceDrawerResizeStart">
           <div class="trace-drawer-resize-line" />
         </div>
       </teleport>
-      <t-drawer :visible="timelineDrawerVisible" :zIndex="2100" :size="`${timelineDrawerWidth}px`" attach="body"
+      <t-drawer :visible="timelineDrawerVisible" :zIndex="drawerZIndex + 100" :size="`${timelineDrawerWidth}px`" attach="body"
         :closeBtn="false" :footer="false" :header="false" :showOverlay="true" :closeOnOverlayClick="true"
         placement="right" :class="['kp-secondary-drawer', { 'kp-secondary-drawer--resizing': timelineDrawerResizing }]"
         @close="closeTimeline">
