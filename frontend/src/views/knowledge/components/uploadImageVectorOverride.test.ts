@@ -8,6 +8,7 @@ import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createRenderer, h } from 'vue'
 import * as imageProcessingConfig from '../../../utils/imageProcessingConfig'
+import * as graphExtractValidation from '../settings/graphExtractValidation'
 
 const require = createRequire(import.meta.url)
 const filename = fileURLToPath(new URL('./UploadConfirmDialog.vue', import.meta.url))
@@ -19,18 +20,22 @@ const compiled = ts.transpileModule(script, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText
 
-function fixture(kbInfo: any) {
+function fixture(kbInfo: any, mode: 'file' | 'reparse' = 'file') {
   const exports: any = {}
+  const warnings: string[] = []
   runInNewContext(compiled, {
     exports, console,
+    document: { querySelector: () => null },
     require(name: string) {
       if (name === 'vue') return require('vue')
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key, te: () => false }) }
       if (name === '@/stores/chatResources') return { useChatResourcesStore: () => ({}) }
-      if (name === '@/stores/editorResources') return { useEditorResourcesStore: () => ({}) }
+      if (name === '@/stores/editorResources') return { useEditorResourcesStore: () => ({ systemInfo: { graph_database_engine: 'Neo4j' } }) }
       if (name === '@/stores/ui') return { useUIStore: () => ({}) }
       if (name === '@/api/knowledge-base') return { mergeImageActions: () => ({ ocr: { on: [] } }) }
       if (name === '@/utils/imageProcessingConfig') return imageProcessingConfig
+      if (name === '../settings/graphExtractValidation') return graphExtractValidation
+      if (name === 'tdesign-vue-next') return { MessagePlugin: { warning: (key: string) => warnings.push(key) } }
       return { default: {} }
     },
   })
@@ -41,10 +46,99 @@ function fixture(kbInfo: any) {
     parentNode: () => null, nextSibling: () => null,
   })
   let vm: any
-  const app = renderer.createApp({ setup: () => () => h(exports.default, { visible: false, kbInfo, ref: (value: any) => { vm = value } }) })
+  const app = renderer.createApp({ setup: () => () => h(exports.default, { visible: false, kbInfo, mode, ref: (value: any) => { vm = value } }) })
   app.mount({})
   vm.initFromKbInfo(kbInfo)
-  return { vm, dispose: () => app.unmount() }
+  return { vm, warnings, dispose: () => app.unmount() }
+}
+
+// 上传和重解析的空字段表示继承 KB，验证对话框实际的确认入口及提交数据。
+const graphKb = () => ({
+  indexing_strategy: { graph_enabled: true },
+  extract_config: {
+    enabled: true,
+    text: 'A knows B.',
+    tags: ['Knows'],
+    nodes: [{ name: 'A', attributes: [] }, { name: 'B', attributes: [] }],
+    relations: [{ node1: 'A', node2: 'B', type: 'Knows' }],
+  },
+})
+
+for (const mode of ['file', 'reparse'] as const) {
+  test(`${mode}: removing the last relation in place preserves KB defaults for inheritance`, () => {
+    const kb = graphKb()
+    const snapshot = structuredClone(kb)
+    const f = fixture(kb, mode)
+    try {
+      // 对应 GraphSettings.removeRelation，而不是用新数组替换整个字段。
+      f.vm.uiState.nodeExtractConfig.relations.splice(0, 1)
+      f.vm.handleNodeExtractUpdate(f.vm.uiState.nodeExtractConfig)
+      assert.deepEqual(kb, snapshot)
+      assert.equal(f.vm.validateBeforeConfirm(), true)
+      assert.deepEqual(f.warnings, [])
+      assert.deepEqual(JSON.parse(JSON.stringify(f.vm.buildProcessOverrides().extract_config.relations)), [])
+    } finally { f.dispose() }
+  })
+
+  test(`${mode}: editing a relation object does not change the KB example`, () => {
+    const kb = graphKb()
+    const snapshot = structuredClone(kb)
+    const f = fixture(kb, mode)
+    try {
+      const relation = f.vm.uiState.nodeExtractConfig.relations[0]
+      relation.node1 = 'B'
+      relation.node2 = 'A'
+      f.vm.handleNodeExtractUpdate(f.vm.uiState.nodeExtractConfig)
+      assert.deepEqual(kb, snapshot)
+      assert.equal(f.vm.validateBeforeConfirm(), true)
+      assert.deepEqual(JSON.parse(JSON.stringify(f.vm.buildProcessOverrides().extract_config.relations)),
+        [{ node1: 'B', node2: 'A', type: 'Knows' }])
+    } finally { f.dispose() }
+  })
+
+  for (const field of ['text', 'tags', 'nodes', 'relations', 'all'] as const) {
+    test(`${mode}: cleared extraction ${field} inherits the KB example without rewriting the override`, () => {
+      const kb = graphKb()
+      const snapshot = structuredClone(kb)
+      const f = fixture(kb, mode)
+      try {
+        const cleared = { text: '', tags: [], nodes: [], relations: [] }
+        const override = { enabled: true, ...(field === 'all' ? cleared : { [field]: cleared[field] }) }
+        if (mode === 'reparse') {
+          f.vm.applyOverridesToState({ extract_config: override })
+        } else {
+          f.vm.handleNodeExtractUpdate({ ...f.vm.uiState.nodeExtractConfig, ...override })
+        }
+        assert.equal(f.vm.validateBeforeConfirm(), true)
+        assert.deepEqual(f.warnings, [])
+        const submitted = JSON.parse(JSON.stringify(f.vm.buildProcessOverrides().extract_config))
+        for (const key of (field === 'all' ? ['text', 'tags', 'nodes', 'relations'] : [field])) {
+          assert.deepEqual(submitted[key], cleared[key as keyof typeof cleared])
+        }
+        assert.deepEqual(kb, snapshot)
+      } finally { f.dispose() }
+    })
+  }
+
+  test(`${mode}: inherited extraction data must still be complete`, () => {
+    const kb = graphKb()
+    kb.extract_config.text = ''
+    const f = fixture(kb, mode)
+    try {
+      assert.equal(f.vm.validateBeforeConfirm(), false)
+      assert.deepEqual(f.warnings, ['graphSettings.extractIncompleteWarning'])
+      assert.equal(f.vm.activeSection, 'graph')
+    } finally { f.dispose() }
+  })
+
+  test(`${mode}: a nonempty invalid override must not fall back to the valid KB example`, () => {
+    const f = fixture(graphKb(), mode)
+    try {
+      f.vm.applyOverridesToState({ extract_config: { enabled: true, nodes: [{ name: '' }] } })
+      assert.equal(f.vm.validateBeforeConfirm(), false)
+      assert.deepEqual(f.warnings, ['graphSettings.extractIncompleteWarning'])
+    } finally { f.dispose() }
+  })
 }
 
 for (const enabled of [false, true]) {

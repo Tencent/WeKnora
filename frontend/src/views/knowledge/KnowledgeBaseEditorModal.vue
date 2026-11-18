@@ -541,6 +541,7 @@
       <div v-if="!isFAQ && currentSection === 'graph'" class="section">
         <GraphSettings
           v-if="formData"
+          ref="graphSettingsRef"
           :graph-extract="formData.nodeExtractConfig"
           :model-id="formData.modelConfig.llmModelId"
           :all-models="allModels"
@@ -616,7 +617,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import KbCreateContextualGuide from '@/components/KbCreateContextualGuide.vue'
 import { KB_EDITOR_FOCUS_SECTION_EVENT, markContextualGuideDone } from '@/config/contextualGuides'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
@@ -672,6 +673,7 @@ import KBVectorStoreSettings from './settings/KBVectorStoreSettings.vue'
 import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
+import { getGraphExtractIssues } from './settings/graphExtractValidation'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
@@ -1487,6 +1489,8 @@ const handleNodeExtractUpdate = (config: any) => {
   }
 }
 
+const graphSettingsRef = ref<any>()
+
 // 验证表单
 const validateForm = (): boolean => {
   if (!formData.value) return false
@@ -1542,6 +1546,19 @@ const validateForm = (): boolean => {
     MessagePlugin.warning(t('knowledgeEditor.messages.indexModeRequired'))
     currentSection.value = 'faq'
     return false
+  }
+
+  // 知识图谱抽取必填项（与后端 validateExtractConfig 同规则）：
+  // 开启提取但 few-shot 配置不完整时，保存会撞上 400 "text cannot be empty"。
+  // 这里先拦截并跳到图谱分区，面板挂载后由行内错误标出具体缺项。
+  if (formData.value.type !== 'faq' && formData.value.nodeExtractConfig?.enabled) {
+    const graphIssues = getGraphExtractIssues(formData.value.nodeExtractConfig)
+    if (graphIssues.length > 0) {
+      MessagePlugin.warning(t('graphSettings.extractIncompleteWarning'))
+      currentSection.value = 'graph'
+      nextTick(() => graphSettingsRef.value?.validate?.())
+      return false
+    }
   }
 
   return true

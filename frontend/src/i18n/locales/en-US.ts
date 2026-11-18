@@ -3066,7 +3066,17 @@ export default {
     checkingAvailability: 'Checking knowledge graph availability…',
     checkAvailabilityFailed: 'Unable to check knowledge graph availability. Please retry.',
     disabledWarning: 'Knowledge graph database is not enabled, entity-relationship extraction will not be available',
-    howToEnable: 'How to enable knowledge graph?'
+    howToEnable: 'How to enable knowledge graph?',
+    requiredReminder: 'Once extraction is enabled, relation types, sample text, entities and relations are all required (they serve as few-shot examples for the LLM). Use "Generate Random Tags/Text" or "Default Example" to fill them quickly',
+    extractIncompleteWarning: 'Knowledge graph extraction config is incomplete: fill in sample text, relation types, entities and relations before saving',
+    textRequired: 'Sample text is required',
+    tagsRequired: 'Add at least one relation type',
+    tagsItemEmpty: 'Some relation types are empty',
+    nodesRequired: 'Add at least one entity (or enter sample text and click "Start Extraction" to generate them)',
+    nodesDuplicate: 'Entity names must be unique',
+    relationsRequired: 'Add at least one relation (or enter sample text and click "Start Extraction" to generate them)',
+    relationIncomplete: 'Some relations are incomplete (entity/relation type cannot be empty)',
+    relationNodeMismatch: 'Relations reference entities that do not exist in the entity list'
   },
   initialization: {
     skip: 'Skip',

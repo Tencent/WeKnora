@@ -3066,7 +3066,17 @@ export default {
     checkingAvailability: 'ナレッジグラフの利用状況を確認中…',
     checkAvailabilityFailed: 'ナレッジグラフの利用状況を確認できませんでした。再試行してください。',
     disabledWarning: 'ナレッジグラフのデータベースが有効になっていないため、エンティティとリレーションの抽出は利用できません',
-    howToEnable: 'ナレッジグラフを有効にするには？'
+    howToEnable: 'ナレッジグラフを有効にするには？',
+    requiredReminder: '抽出を有効にすると、関係タイプ、サンプルテキスト、エンティティ、関係はすべて必須です（LLM 抽出のfew-shot 例として使用）。ランダムタグ/テキスト生成やデフォルト例で入力を済ませられます',
+    extractIncompleteWarning: 'ナレッジグラフ抽出の設定が不完全です。サンプルテキスト・関係タイプ・エンティティ・関係を記入してから保存してください',
+    textRequired: 'サンプルテキストを入力してください',
+    tagsRequired: '関係タイプを 1 つ以上追加してください',
+    tagsItemEmpty: '空の関係タイプがあります',
+    nodesRequired: 'エンティティを 1 つ以上追加してください（サンプルテキストを入力して「抽出を開始」で自動生成できます）',
+    nodesDuplicate: 'エンティティ名は重複できません',
+    relationsRequired: '関係を 1 つ以上追加してください（サンプルテキストを入力して「抽出を開始」で自動生成できます）',
+    relationIncomplete: '入力が不完全な関係があります（エンティティ/関係タイプは空にできません）',
+    relationNodeMismatch: '関係が参照するエンティティはエンティティ一覧に存在しません'
   },
   initialization: {
     skip: 'スキップ',

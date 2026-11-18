@@ -6919,7 +6919,17 @@ export default {
     checkingAvailability: '正在检查知识图谱服务…',
     checkAvailabilityFailed: '无法检查知识图谱服务，请重试。',
     disabledWarning: '知识图谱数据库未启用，实体关系提取功能将无法使用',
-    howToEnable: '如何启用知识图谱？'
+    howToEnable: '如何启用知识图谱？',
+    requiredReminder: '开启提取后，关系类型、示例文本、实体和关系均为必填项（作为大模型抽取的示例），可用「生成随机标签/文本」或「默认示例」快速填写',
+    extractIncompleteWarning: '知识图谱抽取配置不完整：请补全示例文本、关系类型、实体和关系后再保存',
+    textRequired: '请填写示例文本',
+    tagsRequired: '请至少添加一个关系类型',
+    tagsItemEmpty: '关系类型中存在空项',
+    nodesRequired: '请至少添加一个实体（可先填写示例文本后点击「开始提取」自动生成）',
+    nodesDuplicate: '实体名称不能重复',
+    relationsRequired: '请至少添加一条关系（可先填写示例文本后点击「开始提取」自动生成）',
+    relationIncomplete: '存在未填完整的关系（实体/关系类型不能为空）',
+    relationNodeMismatch: '关系引用的实体在实体列表中不存在'
   },
   retrievalSettings: {
     recallTab: '召回',

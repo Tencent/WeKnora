@@ -52,6 +52,12 @@
         </div>
       </div>
 
+      <!-- 开启后的必填项提示：与后端 validateExtractConfig 的强校验保持一致 -->
+      <div v-if="localGraphExtract.enabled" class="control-tip required-reminder">
+        <t-icon name="info-circle" class="tip-icon" />
+        <span>{{ t('graphSettings.requiredReminder') }}</span>
+      </div>
+
       <div v-if="localGraphExtract.enabled" class="setting-row vertical">
         <div class="setting-info">
           <label>{{ t('graphSettings.customInstructionsLabel') }}</label>
@@ -69,9 +75,9 @@
       </div>
 
       <!-- 关系类型配置 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+      <div v-if="localGraphExtract.enabled" class="setting-row vertical" :class="{ 'is-missing': showErrors && missing.tags }">
         <div class="setting-info">
-          <label>{{ t('graphSettings.tagsLabel') }}</label>
+          <label>{{ t('graphSettings.tagsLabel') }} <span class="required">*</span></label>
           <p class="desc">{{ t('graphSettings.tagsDescription') }}</p>
         </div>
         <div class="setting-control full-width">
@@ -102,13 +108,17 @@
             <t-icon name="info-circle" class="tip-icon" />
             <span>{{ t('graphSettings.completeModelConfig') }}</span>
           </div>
+          <div v-if="showErrors && missing.tags" class="control-error">
+            <t-icon name="error-circle" class="error-icon" />
+            <span>{{ missing.tagsMsg }}</span>
+          </div>
         </div>
       </div>
 
       <!-- 示例文本 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row vertical">
+      <div v-if="localGraphExtract.enabled" class="setting-row vertical" :class="{ 'is-missing': showErrors && missing.text }">
         <div class="setting-info">
-          <label>{{ t('graphSettings.sampleTextLabel') }}</label>
+          <label>{{ t('graphSettings.sampleTextLabel') }} <span class="required">*</span></label>
           <p class="desc">{{ t('graphSettings.sampleTextDescription') }}</p>
         </div>
         <div class="setting-control full-width">
@@ -137,6 +147,10 @@
           <div v-if="!modelStatus.llm.available" class="control-tip">
             <t-icon name="info-circle" class="tip-icon" />
             <span>{{ t('graphSettings.completeModelConfig') }}</span>
+          </div>
+          <div v-if="showErrors && missing.text" class="control-error">
+            <t-icon name="error-circle" class="error-icon" />
+            <span>{{ missing.textMsg }}</span>
           </div>
         </div>
       </div>
@@ -197,18 +211,24 @@
       </div>
 
       <!-- 添加实体按钮 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row">
+      <div v-if="localGraphExtract.enabled" class="setting-row" :class="{ 'is-missing': showErrors && missing.nodes }">
         <div class="setting-info">
-          <label>{{ t('graphSettings.manageEntitiesLabel') }}</label>
+          <label>{{ t('graphSettings.manageEntitiesLabel') }} <span class="required">*</span></label>
           <p class="desc">{{ t('graphSettings.manageEntitiesDescription') }}</p>
         </div>
         <div class="setting-control">
-          <t-button
-            theme="primary"
-            @click="addNode"
-          >
-            {{ t('graphSettings.addEntity') }}
-          </t-button>
+          <div class="control-with-error">
+            <t-button
+              theme="primary"
+              @click="addNode"
+            >
+              {{ t('graphSettings.addEntity') }}
+            </t-button>
+            <div v-if="showErrors && missing.nodes" class="control-error">
+              <t-icon name="error-circle" class="error-icon" />
+              <span>{{ missing.nodesMsg }}</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -278,18 +298,24 @@
       </div>
 
       <!-- 添加关系按钮 -->
-      <div v-if="localGraphExtract.enabled" class="setting-row">
+      <div v-if="localGraphExtract.enabled" class="setting-row" :class="{ 'is-missing': showErrors && missing.relations }">
         <div class="setting-info">
-          <label>{{ t('graphSettings.manageRelationsLabel') }}</label>
+          <label>{{ t('graphSettings.manageRelationsLabel') }} <span class="required">*</span></label>
           <p class="desc">{{ t('graphSettings.manageRelationsDescription') }}</p>
         </div>
         <div class="setting-control">
-          <t-button
-            theme="primary"
-            @click="addRelation"
-          >
-            {{ t('graphSettings.addRelation') }}
-          </t-button>
+          <div class="control-with-error">
+            <t-button
+              theme="primary"
+              @click="addRelation"
+            >
+              {{ t('graphSettings.addRelation') }}
+            </t-button>
+            <div v-if="showErrors && missing.relations" class="control-error">
+              <t-icon name="error-circle" class="error-icon" />
+              <span>{{ missing.relationsMsg }}</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -334,6 +360,7 @@ import { ref, watch, onMounted, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
+import { getGraphExtractIssues } from './graphExtractValidation'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useAuthStore } from '@/stores/auth'
 import { docsUrl } from '@/utils/docsUrl'
@@ -383,6 +410,49 @@ const localGraphExtract = ref<GraphExtractConfig>({
   relations: props.graphExtract.relations || [],
   customInstructions: props.graphExtract.customInstructions || ''
 })
+
+// 校验：规则来自 graphExtractValidation.ts，与后端 validateExtractConfig
+// (internal/handler/knowledgebase.go) 对齐——开启提取后 text/tags/nodes/
+// relations 均为必填，否则保存时接口直接 400。行内红色错误在 validate()
+// 被调用后展示（面板挂载时宿主可经 ref 调用；未挂载时宿主的
+// getGraphExtractIssues 校验 + 提示条兜底）。字段补全后自动收起。
+const showErrors = ref(false)
+
+const issues = computed(() => getGraphExtractIssues(localGraphExtract.value))
+
+// 每个字段取首个问题：布尔供高亮、翻译文案供行内错误显示
+const missing = computed(() => {
+  const firstMsg: Record<string, string> = { text: '', tags: '', nodes: '', relations: '' }
+  for (const issue of issues.value) {
+    if (!firstMsg[issue.field]) firstMsg[issue.field] = t(issue.key)
+  }
+  return {
+    active: issues.value.length > 0,
+    text: !!firstMsg.text,
+    tags: !!firstMsg.tags,
+    nodes: !!firstMsg.nodes,
+    relations: !!firstMsg.relations,
+    textMsg: firstMsg.text,
+    tagsMsg: firstMsg.tags,
+    nodesMsg: firstMsg.nodes,
+    relationsMsg: firstMsg.relations,
+  }
+})
+
+watch(issues, (list) => {
+  if (list.length === 0) showErrors.value = false
+})
+
+const validate = (): boolean => {
+  showErrors.value = true
+  return issues.value.length === 0
+}
+
+const clearValidation = () => {
+  showErrors.value = false
+}
+
+defineExpose({ validate, clearValidation, missing })
 
 // 加载状态
 const tagFabring = ref(false)
@@ -768,6 +838,48 @@ onMounted(async () => {
   .tip-icon {
     color: var(--td-brand-color);
   }
+}
+
+.required-reminder {
+  padding: 8px 12px;
+  margin: 4px 0 0;
+  border-radius: var(--app-radius-md);
+  background: var(--td-warning-color-light);
+
+  .tip-icon {
+    color: var(--td-warning-color);
+  }
+}
+
+.control-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--app-text-md);
+  color: var(--td-error-color);
+
+  .error-icon {
+    flex-shrink: 0;
+  }
+}
+
+.control-with-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.setting-row.is-missing {
+  .setting-info label {
+    color: var(--td-error-color);
+  }
+}
+
+.required {
+  color: var(--td-error-color);
+  margin-left: 2px;
+  font-weight: 500;
 }
 
 .node-list {
