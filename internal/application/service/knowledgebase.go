@@ -137,6 +137,9 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb *types.KnowledgeBase,
 ) (*types.KnowledgeBase, error) {
 	// Generate UUID and set creation timestamps
+	if err := kb.ExtractConfig.ValidateSchema(); err != nil {
+		return nil, apperrors.NewBadRequestError(err.Error())
+	}
 	if kb.ID == "" {
 		kb.ID = uuid.New().String()
 	}
@@ -655,6 +658,9 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			kb.ProfileConfig = config.ProfileConfig
 		}
 		if config.ExtractConfig != nil {
+			if err := config.ExtractConfig.ValidateSchema(); err != nil {
+				return nil, apperrors.NewBadRequestError(err.Error())
+			}
 			kb.ExtractConfig = config.ExtractConfig
 			changedFields = append(changedFields, "extract_config")
 		}
@@ -675,6 +681,9 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			} else if config.IndexingStrategy.GraphEnabled {
 				kb.ExtractConfig = &types.ExtractConfig{Enabled: true}
 			}
+		}
+		if err := kb.ExtractConfig.ValidateSchema(); err != nil {
+			return nil, apperrors.NewBadRequestError(err.Error())
 		}
 		if config.EmbeddingModelID != nil {
 			next := strings.TrimSpace(*config.EmbeddingModelID)

@@ -824,14 +824,16 @@ func (c *ASRConfig) Scan(value interface{}) error {
 
 // ExtractConfig represents the extract configuration for a knowledge base
 type ExtractConfig struct {
+	Schema *GraphSchema `yaml:"schema,omitempty" json:"schema,omitempty"`
 	// Enabled turns graph extraction on. Node and relation types are edited in the knowledge base editor.
 	Enabled bool `yaml:"enabled"   json:"enabled" extensions:"x-agent=extract_enabled"`
 	// Text is the extraction prompt. Required when extraction is on and no text is saved yet.
 	Text string `yaml:"text"      json:"text,omitempty" extensions:"x-agent=extract_text,x-agent-detail,x-agent-max-bytes=8000"`
 	// Tags are the entity labels extraction may use.
-	Tags      []string         `yaml:"tags"      json:"tags,omitempty" extensions:"x-agent=extract_tags,x-agent-maximum=50"`
-	Nodes     []*GraphNode     `yaml:"nodes"     json:"nodes,omitempty"`
-	Relations []*GraphRelation `yaml:"relations" json:"relations,omitempty"`
+	// Preserve explicit empty lists in upload overrides; nil means inherit.
+	Tags      []string         `yaml:"tags"      json:"tags,omitzero" extensions:"x-agent=extract_tags,x-agent-maximum=50"`
+	Nodes     []*GraphNode     `yaml:"nodes"     json:"nodes,omitzero"`
+	Relations []*GraphRelation `yaml:"relations" json:"relations,omitzero"`
 	// CustomInstructions adds domain guidance. The graph output format stays fixed.
 	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty" extensions:"x-agent=extract_instructions,x-agent-detail,x-agent-max-bytes=4000"`
 }

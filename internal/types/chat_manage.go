@@ -197,14 +197,15 @@ type PipelineState struct {
 	// History (a first turn) is not fetched again by a later stage.
 	HistoryLoaded bool `json:"-"`
 
-	SearchResult     []*SearchResult `json:"-"`
-	RerankResult     []*SearchResult `json:"-"`
-	MergeResult      []*SearchResult `json:"-"`
-	Entity           []string        `json:"-"`
-	EntityKBIDs      []string        `json:"-"`
-	GraphResult      *GraphData      `json:"-"`
-	UserContent      string          `json:"-"`
-	RenderedContexts string          `json:"-"`
+	SearchResult     []*SearchResult         `json:"-"`
+	RerankResult     []*SearchResult         `json:"-"`
+	MergeResult      []*SearchResult         `json:"-"`
+	Entity           []string                `json:"-"`
+	EntityKBIDs      []string                `json:"-"`
+	EntityQueries    map[string][]GraphQuery `json:"-"`
+	GraphResult      *GraphData              `json:"-"`
+	UserContent      string                  `json:"-"`
+	RenderedContexts string                  `json:"-"`
 	// ContextImages are retrieved images, as data URIs, shown to a vision
 	// chat model beside the contexts they belong to; see INTO_CHAT_MESSAGE.
 	ContextImages []string `json:"-"`
@@ -313,6 +314,13 @@ func (c *ChatManage) Clone() *ChatManage {
 
 	entityKBIDs := make([]string, len(c.EntityKBIDs))
 	copy(entityKBIDs, c.EntityKBIDs)
+	var entityQueries map[string][]GraphQuery
+	if c.EntityQueries != nil {
+		entityQueries = make(map[string][]GraphQuery, len(c.EntityQueries))
+		for kbID, queries := range c.EntityQueries {
+			entityQueries[kbID] = append([]GraphQuery{}, queries...)
+		}
+	}
 
 	return &ChatManage{
 		PipelineRequest: PipelineRequest{
@@ -375,6 +383,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			ContextImageChunkIDs: slices.Clone(c.ContextImageChunkIDs),
 			Entity:               entity,
 			EntityKBIDs:          entityKBIDs,
+			EntityQueries:        entityQueries,
 		},
 	}
 }

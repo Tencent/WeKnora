@@ -353,6 +353,10 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
+	if extractCfg.HasSchema() {
+		template.Schema = extractCfg.Schema
+		template.Description = extractCfg.CustomInstructions
+	}
 	extractor := chatpipeline.NewExtractor(chatModel, template)
 	graph, err := extractor.Extract(ctx, chunk.Content)
 	if errors.Is(err, chatpipeline.ErrModelDeclined) {

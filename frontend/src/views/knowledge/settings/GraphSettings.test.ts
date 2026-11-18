@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
+import * as graphSchema from '../../../types/graphSchema.ts'
 
 const { descriptor } = parse(readFileSync(new URL('./GraphSettings.vue', import.meta.url), 'utf8'))
 const script = compileScript(descriptor, { id: 'graph-settings-test', inlineTemplate: true }).content
@@ -47,10 +48,12 @@ const flush = async () => {
 
 type Request = { force: boolean; resolve: (info: unknown) => void; reject: (error: Error) => void }
 
-function fixture(t: TestContext, embedded: boolean) {
+function fixture(t: TestContext, embedded: boolean, allowEdits = false) {
   const requests: Request[] = []
   const events: unknown[] = []
   const opened: unknown[][] = []
+  const extractionRequests: any[] = []
+  const generationRequests: any[] = []
   const graphExtract = {
     enabled: true,
     text: 'A sample passage',
@@ -58,6 +61,11 @@ function fixture(t: TestContext, embedded: boolean) {
     nodes: [{ name: 'Book', attributes: ['Fiction'] }],
     relations: [{ node1: 'Book', node2: 'Writer', type: 'Author' }],
     customInstructions: 'Extract authors and their books.',
+    schema: {
+      enabled: false,
+      entity_types: [{ name: 'Person' }, { name: 'Book' }],
+      relation_types: [{ name: 'WRITES', source_type: 'Person', target_type: 'Book' }],
+    },
   }
   const snapshot = structuredClone(graphExtract)
   const store = {
@@ -78,10 +86,35 @@ function fixture(t: TestContext, embedded: boolean) {
       if (name === '@/stores/editorResources') return { useEditorResourcesStore: () => store }
       if (name === '@/stores/auth') return { useAuthStore: () => ({ hasRole: () => true }) }
       if (name === '@/utils/docsUrl') return { docsUrl: () => 'https://example.com/knowledge-graph' }
-      if (name === 'tdesign-vue-next') return { MessagePlugin: {} }
+      if (name === '@/types/graphSchema') return graphSchema
+      if (name === './GraphSchemaEditor.vue') return {
+        __esModule: true, default: vue.defineComponent({
+          props: ['schema'],
+          emits: ['update:schema'],
+          render() {
+            return vue.h('schema-editor', {
+              onSchemaChange: (value: unknown) => this.$emit('update:schema', value),
+            })
+          },
+        }),
+      }
+      if (name === './GraphSchemaPreview.vue') return {
+        __esModule: true, default: vue.defineComponent({
+          props: ['visible'], render() { return this.visible ? vue.h('schema-preview') : null },
+        }),
+      }
+      if (name === 'tdesign-vue-next') return { MessagePlugin: { success() {}, warning() {}, error() {} } }
       if (name === '@/api/initialization') return {
-        extractTextRelations: () => assert.fail('Availability checks must not extract relations'),
-        fabriText: () => assert.fail('Availability checks must not generate text'),
+        extractTextRelations: (request: any) => {
+          if (!allowEdits) assert.fail('Availability checks must not extract relations')
+          extractionRequests.push(request)
+          return Promise.resolve({ nodes: [], relations: [] })
+        },
+        fabriText: (request: any) => {
+          if (!allowEdits) assert.fail('Availability checks must not generate text')
+          generationRequests.push(request)
+          return Promise.resolve({ text: 'Generated sample passage' })
+        },
         fabriTag: () => assert.fail('Availability checks must not generate tags'),
       }
       throw new Error(`Unexpected import: ${name}`)
@@ -93,7 +126,7 @@ function fixture(t: TestContext, embedded: boolean) {
     embedded,
     'onUpdate:graphExtract': (value: unknown) => events.push(value),
   })
-  for (const name of ['t-button', 't-icon', 't-input', 't-option', 't-select', 't-switch', 't-textarea']) {
+  for (const name of ['t-button', 't-icon', 't-input', 't-option', 't-select', 't-switch', 't-textarea', 't-tooltip']) {
     app.component(name, vue.defineComponent({
       inheritAttrs: false,
       setup: (_props, { attrs, slots }) => () => vue.h(name, attrs, slots.message?.() ?? slots.default?.()),
@@ -104,7 +137,7 @@ function fixture(t: TestContext, embedded: boolean) {
   t.after(() => {
     app.unmount()
     assert.deepEqual(graphExtract, snapshot)
-    assert.deepEqual(events, [])
+    if (!allowEdits) assert.deepEqual(events, [])
   })
   const elements = (type: string) => all(root, el => el.type === type)
   const classes = (name: string) => all(root, el => hasClass(el, name))
@@ -138,18 +171,167 @@ function fixture(t: TestContext, embedded: boolean) {
       assert.equal(inputValue('t-textarea', 'customInstructionsPlaceholder'), snapshot.customInstructions)
       assert.equal(inputValue('t-textarea', 'sampleTextPlaceholder'), snapshot.text)
       assert.deepEqual([...inputValue('t-select', 'tagsPlaceholder')], snapshot.tags)
-      assert.deepEqual(classes('node-name-input').map(el => el.props.modelValue), snapshot.nodes.map(value => value.name))
+      assert.deepEqual(classes('node-name-input').map(el => el.props.modelValue ?? el.props['model-value']), snapshot.nodes.map(value => value.name))
       assert.deepEqual(classes('attribute-input').map(el => el.props.modelValue), snapshot.nodes.flatMap(value => value.attributes))
       assert.deepEqual(classes('relation-select').map(el => el.props.modelValue), snapshot.relations.flatMap(value => [value.node1, value.type, value.node2]))
     }
   }
   assert.equal(requests.length, 1)
   assert.equal(requests[0]!.force, false)
-  return { requests, elements, opened, retry, expectState }
+  return { requests, elements, classes, opened, retry, expectState, events, snapshot, extractionRequests, generationRequests }
 }
 
 for (const embedded of [false, true]) {
   const mode = embedded ? 'embedded' : 'standalone'
+
+  test(`${mode}: random text stays available and sends schema only when enabled`, async t => {
+    const f = fixture(t, embedded, true)
+    f.requests[0]!.resolve({ graph_database_engine: 'Neo4j' })
+    await flush()
+    assert.equal(f.elements('t-tooltip')[0]!.props.content, 'graphSettings.schema.modeDescription')
+    const generate = () => f.elements('t-button')
+      .find(el => textOf(el).trim() === 'graphSettings.generateRandomText')!
+    assert.equal(generate().props.disabled, false)
+    await generate().props.onClick()
+    await flush()
+    assert.equal(f.generationRequests[0].schema, undefined)
+    assert.deepEqual([...f.generationRequests[0].tags], f.snapshot.tags)
+    const toggle = f.elements('t-switch')[1]!
+    toggle.props['onUpdate:modelValue'](true)
+    toggle.props.onChange(true)
+    await flush()
+    assert.equal(generate().props.disabled, false)
+    await generate().props.onClick()
+    await flush()
+    assert.deepEqual(JSON.parse(JSON.stringify(f.generationRequests[1].schema)), { ...f.snapshot.schema, enabled: true })
+    assert.equal(f.generationRequests[1].model_id, 'model')
+    const updated = JSON.parse(JSON.stringify(f.events.at(-1)))
+    assert.equal(updated.text, 'Generated sample passage')
+    assert.deepEqual(updated.nodes, f.snapshot.nodes)
+    assert.deepEqual(updated.relations, f.snapshot.relations)
+    f.elements('schema-editor')[0]!.props.onSchemaChange({
+      enabled: true, entity_types: [], relation_types: [],
+    })
+    await flush()
+    assert.equal(generate().props.disabled, true)
+    await generate().props.onClick()
+    assert.equal(f.generationRequests.length, 2)
+  })
+
+  test(`${mode}: schema retains example editors and opens preview only on demand`, async t => {
+    const f = fixture(t, embedded, true)
+    f.requests[0]!.resolve({ graph_database_engine: 'Neo4j' })
+    await flush()
+    f.expectState('enabled')
+    const toggle = async (index: number, value: boolean) => {
+      const control = f.elements('t-switch')[index]!
+      control.props['onUpdate:modelValue'](value)
+      control.props.onChange(value)
+      await flush()
+    }
+    await toggle(1, true)
+    assert.equal(f.elements('schema-editor').length, 1)
+    assert.equal(f.classes('schema-example-error').length, 1)
+    assert.equal(f.elements('t-textarea').some(el => el.props.placeholder === 'graphSettings.sampleTextPlaceholder'), true)
+    assert.equal(f.elements('t-select').some(el => el.props.placeholder === 'graphSettings.tagsPlaceholder'), false)
+    assert.equal(f.elements('t-textarea').some(el => el.props.placeholder === 'graphSettings.customInstructionsPlaceholder'), true)
+    assert.equal(f.elements('schema-preview').length, 0)
+    const button = (key: string) => f.elements('t-button').find(el => textOf(el).trim() === key)!
+    assert.ok(button('graphSettings.addEntity'))
+    assert.ok(button('graphSettings.addRelation'))
+    assert.ok(button('graphSettings.startExtraction'))
+    button('graphSettings.schema.previewAction').props.onClick()
+    await flush()
+    assert.equal(f.elements('schema-preview').length, 1)
+    const enabled = JSON.parse(JSON.stringify(f.events.at(-1)))
+    assert.deepEqual(enabled.tags, f.snapshot.tags)
+    assert.deepEqual(enabled.nodes, f.snapshot.nodes)
+    assert.equal(enabled.schema.enabled, true)
+    assert.deepEqual(enabled.schema.entity_types, f.snapshot.schema.entity_types)
+    await toggle(0, false)
+    assert.equal(f.elements('schema-editor').length, 0)
+    assert.equal(f.elements('schema-preview').length, 0)
+    const disabled = JSON.parse(JSON.stringify(f.events.at(-1)))
+    assert.equal(disabled.enabled, false)
+    assert.deepEqual(disabled.schema, enabled.schema)
+    assert.deepEqual(disabled.nodes, enabled.nodes)
+    await toggle(0, true)
+    assert.equal(f.elements('schema-preview').length, 0)
+    await toggle(1, false)
+    f.expectState('enabled')
+    const restored = JSON.parse(JSON.stringify(f.events.at(-1)))
+    assert.equal(restored.schema.enabled, false)
+    assert.deepEqual(restored.schema.entity_types, enabled.schema.entity_types)
+    assert.deepEqual(restored.relations, f.snapshot.relations)
+  })
+
+  test(`${mode}: example extraction sends schema only while enabled`, async t => {
+    const f = fixture(t, embedded, true)
+    f.requests[0]!.resolve({ graph_database_engine: 'Neo4j' })
+    await flush()
+    const extract = async () => {
+      await f.elements('t-button').find(el => textOf(el).trim() === 'graphSettings.startExtraction')!.props.onClick()
+      await flush()
+    }
+    await extract()
+    assert.equal(f.extractionRequests[0].schema, undefined)
+    const toggle = f.elements('t-switch')[1]!
+    toggle.props['onUpdate:modelValue'](true)
+    toggle.props.onChange(true)
+    await flush()
+    await extract()
+    assert.deepEqual(JSON.parse(JSON.stringify(f.extractionRequests[1].schema)), { ...f.snapshot.schema, enabled: true })
+    assert.equal(f.extractionRequests[1].custom_instructions, f.snapshot.customInstructions)
+  })
+
+  test(`${mode}: schema default example uses declared entity and endpoint types`, async t => {
+    const f = fixture(t, embedded, true)
+    f.requests[0]!.resolve({ graph_database_engine: 'Neo4j' })
+    await flush()
+    const toggle = f.elements('t-switch')[1]!
+    toggle.props['onUpdate:modelValue'](true)
+    toggle.props.onChange(true)
+    await flush()
+    f.elements('t-button').find(el => textOf(el).trim() === 'graphSettings.defaultExample')!.props.onClick()
+    await flush()
+    const example = JSON.parse(JSON.stringify(f.events.at(-1)))
+    assert.deepEqual(example.nodes.map((node: any) => node.entity_type), ['Person', 'Book'])
+    assert.deepEqual(example.nodes.map((node: any) => node.attributes), [[], []])
+    assert.deepEqual(example.relations, [{
+      node1: 'Person_1', node2: 'Book_2', type: 'WRITES', source_type: 'Person', target_type: 'Book',
+    }])
+    assert.deepEqual(example.schema, { ...f.snapshot.schema, enabled: true })
+    assert.equal(f.classes('schema-example-error').length, 0)
+  })
+
+  test(`${mode}: same-named typed example nodes retain separate relation identities`, async t => {
+    const f = fixture(t, embedded, true)
+    f.requests[0]!.resolve({ graph_database_engine: 'Neo4j' })
+    await flush()
+    const toggle = f.elements('t-switch')[1]!
+    toggle.props['onUpdate:modelValue'](true)
+    toggle.props.onChange(true)
+    await flush()
+    f.elements('t-button').find(el => textOf(el).trim() === 'graphSettings.defaultExample')!.props.onClick()
+    await flush()
+    for (let index = 0; index < 2; index++) {
+      f.classes('node-name-input')[index]!.props.onChange('Alex')
+      await flush()
+    }
+    const example = JSON.parse(JSON.stringify(f.events.at(-1)))
+    assert.deepEqual(example.relations, [{
+      node1: 'Alex', node2: 'Alex', type: 'WRITES', source_type: 'Person', target_type: 'Book',
+    }])
+    const endpoints = f.classes('relation-select')
+    assert.equal(endpoints[0]!.props['model-value'], '["Alex","Person"]')
+    assert.equal(endpoints[2]!.props['model-value'], '["Alex","Book"]')
+    assert.equal(f.classes('schema-example-error').length, 0)
+    f.classes('node-header')[0]!.children.find(el => el.type === 't-button')!.props.onClick()
+    await flush()
+    const removed = JSON.parse(JSON.stringify(f.events.at(-1)))
+    assert.deepEqual(removed.nodes.map((node: any) => [node.name, node.entity_type]), [['Alex', 'Book']])
+    assert.deepEqual(removed.relations, [])
+  })
 
   test(`${mode}: pending system information does not show a disabled database warning`, async t => {
     const f = fixture(t, embedded)

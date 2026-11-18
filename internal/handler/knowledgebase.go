@@ -1740,6 +1740,12 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		config.Enabled = false
 		return nil
 	}
+	if config.HasSchema() {
+		if err := config.ValidateSchema(); err != nil {
+			return apperrors.NewBadRequestError(err.Error())
+		}
+		return nil
+	}
 	// Validate text field
 	if config.Text == "" {
 		return apperrors.NewBadRequestError("text cannot be empty")

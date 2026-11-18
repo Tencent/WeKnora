@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -104,6 +105,34 @@ func TestResolveProcessConfig_GraphRequiresExtractEnabled(t *testing.T) {
 	eff := ResolveProcessConfig(kb, overrides)
 	require.False(t, eff.ExtractConfig.Enabled)
 	require.False(t, eff.GraphEnabled)
+}
+
+func TestResolveProcessConfigPreservesAndReplacesSchema(t *testing.T) {
+	schema := &types.GraphSchema{Enabled: true, EntityTypes: []types.GraphEntityType{{Name: "Person"}}}
+	kb := testKBWithGraphEnabled(true)
+	kb.ExtractConfig.Schema = schema
+	kb.ExtractConfig.Tags = []string{"legacy"}
+	for _, tc := range []struct {
+		name   string
+		schema *types.GraphSchema
+	}{
+		{"absent preserves", nil},
+		{"explicit disable", &types.GraphSchema{Enabled: false}},
+		{"replacement", &types.GraphSchema{Enabled: true, EntityTypes: []types.GraphEntityType{{Name: "Book"}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+				ExtractConfig: &types.ExtractConfig{Enabled: true, Schema: tc.schema},
+			}).ExtractConfig
+			want := tc.schema
+			if want == nil {
+				want = schema
+			}
+			require.Equal(t, want, config.Schema)
+			require.Equal(t, []string{"legacy"}, config.Tags)
+			require.Equal(t, schema, kb.ExtractConfig.Schema, "defaults must not be mutated")
+		})
+	}
 }
 
 func TestResolveProcessConfig_NilOverridesUsesKBDefaults(t *testing.T) {
@@ -312,6 +341,68 @@ func TestResolveProcessConfig_ExtractConfigFieldMerge(t *testing.T) {
 	require.True(t, eff.ExtractConfig.Enabled)
 	require.Equal(t, "base text", eff.ExtractConfig.Text)
 	require.Equal(t, []string{"override-tag"}, eff.ExtractConfig.Tags)
+}
+
+func TestResolveProcessConfig_ExtractConfigListOverrides(t *testing.T) {
+	base := types.ExtractConfig{
+		Enabled: true,
+		Text:    "base text",
+		Tags:    []string{"base-tag"},
+		Nodes:   []*types.GraphNode{{Name: "Alex", EntityType: "Person"}},
+		Relations: []*types.GraphRelation{
+			{Node1: "Alex", Node2: "Acme", Type: "WORKS_AT"},
+		},
+	}
+	for _, schemaEnabled := range []bool{false, true} {
+		for _, enabled := range []bool{false, true} {
+			for _, tc := range []struct {
+				name  string
+				input string
+				want  int
+			}{
+				{"omitted inherits", `{}`, 1},
+				{"null inherits", `{"tags":null,"nodes":null,"relations":null}`, 1},
+				{"empty clears", `{"tags":[],"nodes":[],"relations":[]}`, 0},
+				{"nonempty replaces", `{"tags":["new-tag"],"nodes":[{"name":"New"}],` +
+					`"relations":[{"node1":"New","node2":"Other","type":"NEW_RELATION"}]}`, 1},
+			} {
+				name := strconv.FormatBool(schemaEnabled) + "/" + strconv.FormatBool(enabled) + "/" + tc.name
+				t.Run(name, func(t *testing.T) {
+					kbConfig := base
+					kbConfig.Schema = &types.GraphSchema{
+						Enabled: schemaEnabled, EntityTypes: []types.GraphEntityType{{Name: "Person"}},
+					}
+					kb := &types.KnowledgeBase{ExtractConfig: &kbConfig}
+					var override types.ExtractConfig
+					require.NoError(t, json.Unmarshal([]byte(tc.input), &override))
+					override.Enabled = enabled
+					knowledge := &types.Knowledge{}
+					require.NoError(t, knowledge.SetProcessOverrides(
+						&types.KnowledgeProcessOverrides{ExtractConfig: &override}))
+					persisted, err := knowledge.ProcessOverrides()
+					require.NoError(t, err)
+					got := ResolveProcessConfig(kb, persisted).ExtractConfig
+					require.Equal(t, enabled, got.Enabled)
+					require.Equal(t, base.Text, got.Text)
+					require.Len(t, got.Tags, tc.want)
+					require.Len(t, got.Nodes, tc.want)
+					require.Len(t, got.Relations, tc.want)
+					if tc.name == "nonempty replaces" {
+						require.Equal(t, override.Tags, got.Tags)
+						require.Equal(t, override.Nodes, got.Nodes)
+						require.Equal(t, override.Relations, got.Relations)
+					} else if tc.want == 1 {
+						require.Equal(t, base.Tags, got.Tags)
+						require.Equal(t, base.Nodes, got.Nodes)
+						require.Equal(t, base.Relations, got.Relations)
+					}
+					require.Equal(t, base.Tags, kb.ExtractConfig.Tags)
+					require.Equal(t, base.Nodes, kb.ExtractConfig.Nodes)
+					require.Equal(t, base.Relations, kb.ExtractConfig.Relations)
+				})
+			}
+		}
+	}
 }
 
 func TestResolveProcessConfig_PreservesKnowledgeBasePromptInstructions(t *testing.T) {

@@ -1,10 +1,39 @@
 package types
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestExtractConfigOverrideListsRoundtrip(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		input string
+	}{
+		{"omitted", `{"enabled":true}`},
+		{"empty", `{"enabled":true,"tags":[],"nodes":[],"relations":[]}`},
+		{"nonempty", `{"enabled":true,"tags":["WORKS_AT"],"nodes":[{"name":"Alex"}],` +
+			`"relations":[{"node1":"Alex","node2":"Acme","type":"WORKS_AT"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var config ExtractConfig
+			require.NoError(t, json.Unmarshal([]byte(tc.input), &config))
+			k := &Knowledge{}
+			require.NoError(t, k.SetProcessOverrides(&KnowledgeProcessOverrides{ExtractConfig: &config}))
+			got, err := k.ProcessOverrides()
+			require.NoError(t, err)
+			require.NotNil(t, got.ExtractConfig)
+			require.Equal(t, config.Tags, got.ExtractConfig.Tags)
+			require.Equal(t, config.Nodes, got.ExtractConfig.Nodes)
+			require.Equal(t, config.Relations, got.ExtractConfig.Relations)
+			serialized, err := json.Marshal(got.ExtractConfig)
+			require.NoError(t, err)
+			require.JSONEq(t, tc.input, string(serialized))
+		})
+	}
+}
 
 func boolPtr(v bool) *bool {
 	return &v

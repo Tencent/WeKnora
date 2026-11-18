@@ -89,7 +89,9 @@ export interface InitializationConfig {
         text: string,
         tags: string[],
         nodes: Node[],
-        relations: Relation[]
+        relations: Relation[],
+        schema?: import('@/types/graphSchema').GraphSchema,
+        customInstructions?: string
     }
 }
 
@@ -157,6 +159,7 @@ export interface KBModelConfigRequest {
         nodes: Node[]
         relations: Relation[]
         customInstructions?: string
+        schema?: import('@/types/graphSchema').GraphSchema
     }
     questionGeneration?: {
         modelId?: string
@@ -505,19 +508,24 @@ export function testMultimodalFunction(testData: {
 // 文本内容关系提取接口
 export interface TextRelationExtractionRequest {
     text: string;
-    tags: string[];
+    tags?: string[];
     model_id: string;
+    schema?: import('@/types/graphSchema').GraphSchema;
+    custom_instructions?: string;
 }
 
 export interface Node {
     name: string;
     attributes: string[];
+    entity_type?: string;
 }
 
 export interface Relation {
     node1: string;
     node2: string;
     type: string;
+    source_type?: string;
+    target_type?: string;
 }
 
 export interface TextRelationExtractionResponse {
@@ -542,6 +550,7 @@ export function extractTextRelations(request: TextRelationExtractionRequest): Pr
 export interface FabriTextRequest {
     tags: string[];
     model_id: string;
+    schema?: import('@/types/graphSchema').GraphSchema;
 }
 
 export interface FabriTextResponse {

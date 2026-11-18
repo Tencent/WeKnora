@@ -3534,6 +3534,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelation'
         type: array
+      schema:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphSchema'
       tags:
         description: Tags are the entity labels extraction may use.
         items:
@@ -4066,6 +4068,13 @@ definitions:
         description: ROUGE-L score
         type: number
     type: object
+  github_com_Tencent_WeKnora_internal_types.GraphEntityType:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.GraphNode:
     properties:
       attributes:
@@ -4076,6 +4085,8 @@ definitions:
         items:
           type: string
         type: array
+      entity_type:
+        type: string
       name:
         type: string
     type: object
@@ -4085,8 +4096,36 @@ definitions:
         type: string
       node2:
         type: string
+      source_type:
+        type: string
+      target_type:
+        type: string
       type:
         type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.GraphRelationType:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+      source_type:
+        type: string
+      target_type:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.GraphSchema:
+    properties:
+      enabled:
+        type: boolean
+      entity_types:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphEntityType'
+        type: array
+      relation_types:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelationType'
+        type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.GraphSearchEntity:
     properties:
@@ -4094,6 +4133,8 @@ definitions:
         items:
           type: string
         type: array
+      entity_type:
+        type: string
       id:
         type: string
       knowledge_id:
@@ -11425,6 +11466,8 @@ definitions:
     properties:
       model_id:
         type: string
+      schema:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphSchema'
       tags:
         items:
           type: string
@@ -11654,30 +11697,20 @@ definitions:
         type: object
       nodeExtract:
         properties:
+          customInstructions:
+            type: string
           enabled:
             type: boolean
           nodes:
             items:
-              properties:
-                attributes:
-                  items:
-                    type: string
-                  type: array
-                name:
-                  type: string
-              type: object
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphNode'
             type: array
           relations:
             items:
-              properties:
-                node1:
-                  type: string
-                node2:
-                  type: string
-                type:
-                  type: string
-              type: object
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelation'
             type: array
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphSchema'
           tags:
             items:
               type: string
@@ -11776,6 +11809,8 @@ definitions:
             items:
               $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelation'
             type: array
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphSchema'
           tags:
             items:
               type: string
@@ -13590,8 +13625,12 @@ definitions:
     type: object
   internal_handler.TextRelationExtractionRequest:
     properties:
+      custom_instructions:
+        type: string
       model_id:
         type: string
+      schema:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphSchema'
       tags:
         items:
           type: string
@@ -13600,7 +13639,6 @@ definitions:
         type: string
     required:
     - model_id
-    - tags
     - text
     type: object
   internal_handler.TextRelationExtractionResponse:
@@ -18367,7 +18405,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 根据标签生成示例文本
+      description: 根据关系标签或启用的图谱 Schema 生成示例文本
       parameters:
       - description: 生成请求
         in: body

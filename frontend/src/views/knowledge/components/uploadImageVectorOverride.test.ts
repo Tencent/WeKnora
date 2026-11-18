@@ -8,6 +8,7 @@ import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createRenderer, h } from 'vue'
 import * as imageProcessingConfig from '../../../utils/imageProcessingConfig'
+import * as graphSchema from '../../../types/graphSchema'
 
 const require = createRequire(import.meta.url)
 const filename = fileURLToPath(new URL('./UploadConfirmDialog.vue', import.meta.url))
@@ -31,6 +32,7 @@ function fixture(kbInfo: any) {
       if (name === '@/stores/ui') return { useUIStore: () => ({}) }
       if (name === '@/api/knowledge-base') return { mergeImageActions: () => ({ ocr: { on: [] } }) }
       if (name === '@/utils/imageProcessingConfig') return imageProcessingConfig
+      if (name === '@/types/graphSchema') return graphSchema
       return { default: {} }
     },
   })

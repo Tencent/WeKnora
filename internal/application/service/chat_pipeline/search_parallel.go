@@ -99,9 +99,13 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 		return next()
 	}
 
+	hasEntities := len(chatManage.Entity) > 0
+	for _, queries := range chatManage.EntityQueries {
+		hasEntities = hasEntities || len(queries) > 0
+	}
 	pipelineInfo(ctx, "SearchParallel", "start", map[string]interface{}{
 		"session_id":    chatManage.SessionID,
-		"has_entities":  len(chatManage.Entity) > 0,
+		"has_entities":  hasEntities,
 		"rewrite_query": chatManage.RewriteQuery,
 	})
 
@@ -131,7 +135,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 		{
 			Name: "entity_search",
 			Run: func() *PluginError {
-				if len(chatManage.Entity) == 0 {
+				if !hasEntities {
 					pipelineInfo(ctx, "SearchParallel", "entity_search_skip", map[string]interface{}{
 						"reason": "no_entities",
 					})

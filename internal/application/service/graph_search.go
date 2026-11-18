@@ -154,6 +154,9 @@ func (s *graphSearchService) Search(
 			continue
 		}
 		id := graphSearchPublicID("entity", kb.ID, node.KnowledgeID, node.Name)
+		if node.EntityType != "" {
+			id = graphSearchPublicID("entity", kb.ID, node.KnowledgeID, node.Name, node.EntityType)
+		}
 		if publicIDs[id] {
 			continue
 		}
@@ -180,6 +183,7 @@ func (s *graphSearchService) Search(
 		}
 		entity := types.GraphSearchEntity{
 			ID: id, Name: node.Name, KnowledgeID: node.KnowledgeID,
+			EntityType: node.EntityType,
 			Attributes: attributes, SourceChunkIDs: chunkIDs,
 		}
 		nodes[node.ID] = entity

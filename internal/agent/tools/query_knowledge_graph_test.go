@@ -19,6 +19,54 @@ type stubKnowledgeBaseService struct {
 	getKBPanicIDs map[string]bool
 }
 
+func TestGraphVisualizationSeparatesTypedNamesAndPreservesLegacyIDs(t *testing.T) {
+	data := buildGraphVisualizationData(nil, []*types.GraphRelation{
+		{Node1: "Alex", SourceType: "Person", Node2: "Alex", TargetType: "Company", Type: "WORKS_AT"},
+		{Node1: "Alex", Node2: "Alex", Type: "LEGACY"},
+	})
+	nodes := data["nodes"].([]map[string]interface{})
+	edges := data["edges"].([]map[string]interface{})
+	require.Len(t, nodes, 3)
+	require.NotEqual(t, edges[0]["source"], edges[0]["target"])
+	require.Equal(t, "Person", nodes[0]["entity_type"])
+	require.Equal(t, "Company", nodes[1]["entity_type"])
+	require.Equal(t, "entity:Alex", edges[1]["source"])
+	require.Equal(t, "entity:Alex", edges[1]["target"])
+}
+
+func TestQueryKnowledgeGraphSchemaConfigurationAndInvalidFilters(t *testing.T) {
+	schema := &types.GraphSchema{
+		Enabled:       true,
+		EntityTypes:   []types.GraphEntityType{{Name: "Person"}, {Name: "Company"}},
+		RelationTypes: []types.GraphRelationType{{Name: "WORKS_AT", SourceType: "Person", TargetType: "Company"}},
+	}
+	repo := &stubGraphRepo{graph: &types.GraphData{}}
+	tool := NewQueryKnowledgeGraphTool(&stubKnowledgeBaseService{
+		kb: &types.KnowledgeBase{ID: "kb", ExtractConfig: &types.ExtractConfig{Enabled: true, Schema: schema}},
+	}).WithGraph(repo, nil)
+	for _, entityType := range []string{"Person", "Undefined"} {
+		t.Run(entityType, func(t *testing.T) {
+			repo.terms = nil
+			args, err := json.Marshal(QueryKnowledgeGraphInput{
+				KnowledgeBaseIDs: []string{"kb"}, Query: "Alex", EntityType: entityType,
+			})
+			require.NoError(t, err)
+			result, err := tool.Execute(context.Background(), args)
+			require.NoError(t, err)
+			if entityType == "Undefined" {
+				require.Empty(t, repo.terms, "invalid schema must never reach the graph backend")
+				require.Contains(t, result.Output, "undefined schema type")
+				return
+			}
+			require.Equal(t, []string{"Alex"}, repo.terms)
+			config := result.Data["graph_config"].(map[string]interface{})
+			require.Contains(t, config["nodes"], "Person")
+			require.Contains(t, config["relations"], "WORKS_AT")
+			require.NotContains(t, result.Output, "graph extraction not configured")
+		})
+	}
+}
+
 func (s *stubKnowledgeBaseService) CreateKnowledgeBase(context.Context, *types.KnowledgeBase) (*types.KnowledgeBase, error) {
 	return nil, nil
 }

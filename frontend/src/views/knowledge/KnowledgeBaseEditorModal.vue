@@ -672,6 +672,7 @@ import KBVectorStoreSettings from './settings/KBVectorStoreSettings.vue'
 import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
+import { cloneGraphSchema, graphSchemaError } from '@/types/graphSchema'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
@@ -1013,16 +1014,20 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     },
     nodeExtractConfig: {
       enabled: false,
+      schema: cloneGraphSchema(),
       text: '',
       tags: [] as string[],
       nodes: [] as Array<{
         name: string
         attributes: string[]
+        entity_type?: string
       }>,
       relations: [] as Array<{
         node1: string
         node2: string
         type: string
+        source_type?: string
+        target_type?: string
       }>,
       customInstructions: ''
     },
@@ -1186,10 +1191,11 @@ const loadKBData = async (
       },
       nodeExtractConfig: {
         enabled: kb.extract_config?.enabled || false,
+        schema: cloneGraphSchema(kb.extract_config?.schema),
         text: kb.extract_config?.text || '',
         tags: kb.extract_config?.tags || [],
         nodes: (kb.extract_config?.nodes || []).map((node: any) => ({
-          name: node.name,
+          ...node,
           attributes: node.attributes || []
         })),
         relations: kb.extract_config?.relations || [],
@@ -1490,7 +1496,13 @@ const handleNodeExtractUpdate = (config: any) => {
 // 验证表单
 const validateForm = (): boolean => {
   if (!formData.value) return false
-
+  if (formData.value.nodeExtractConfig.enabled) {
+    const error = graphSchemaError(formData.value.nodeExtractConfig.schema)
+    if (error) {
+      MessagePlugin.warning(t(`graphSettings.schema.errors.${error}`))
+      return false
+    }
+  }
   // 验证基本信息
   if (!formData.value.name || !formData.value.name.trim()) {
     MessagePlugin.warning(t('knowledgeEditor.messages.nameRequired'))
@@ -1706,6 +1718,7 @@ const buildSubmitData = () => {
   if (formData.value.nodeExtractConfig) {
     data.extract_config = {
       enabled: !!formData.value.nodeExtractConfig.enabled,
+      schema: cloneGraphSchema(formData.value.nodeExtractConfig.schema),
       text: formData.value.nodeExtractConfig.text || '',
       tags: formData.value.nodeExtractConfig.tags || [],
       nodes: formData.value.nodeExtractConfig.nodes || [],
@@ -1799,6 +1812,8 @@ const doSubmit = async () => {
       if (formData.value.type !== 'faq') {
         updateConfig.auto_tag_config = data.auto_tag_config
         updateConfig.profile_config = data.profile_config
+        // Validate the new schema together with its indexing toggle, not the saved draft.
+        updateConfig.extract_config = data.extract_config
         updateConfig.indexing_strategy = {
           vector_enabled: formData.value.indexingStrategy?.vectorEnabled ?? true,
           keyword_enabled: formData.value.indexingStrategy?.keywordEnabled ?? true,
@@ -1847,6 +1862,7 @@ const doSubmit = async () => {
         storageProvider: data.storage_provider_config?.provider || data.storage_config?.provider || 'local',
         nodeExtract: {
           enabled: data.extract_config?.enabled || false,
+          schema: cloneGraphSchema(data.extract_config?.schema),
           text: data.extract_config?.text || '',
           tags: data.extract_config?.tags || [],
           nodes: data.extract_config?.nodes || [],

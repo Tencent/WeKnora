@@ -15,3 +15,10 @@ type RetrieveGraphRepository interface {
 	// SearchNode searches for nodes in the repository
 	SearchNode(ctx context.Context, namespace types.NameSpace, nodes []string) (*types.GraphData, error)
 }
+
+// SchemaGraphRepository is optional so legacy graph adapters remain compatible.
+type SchemaGraphRepository interface {
+	SearchNodeWithSchema(
+		ctx context.Context, namespace types.NameSpace, queries []types.GraphQuery,
+	) (*types.GraphData, error)
+}

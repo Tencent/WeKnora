@@ -45,15 +45,19 @@ export interface QuestionGenerationConfigOverride {
 export interface GraphNodeOverride {
   name: string
   attributes?: string[]
+  entity_type?: string
 }
 
 export interface GraphRelationOverride {
   node1: string
   node2: string
   type: string
+  source_type?: string
+  target_type?: string
 }
 
 export interface ExtractConfigOverride {
+  schema?: import('@/types/graphSchema').GraphSchema
   enabled?: boolean
   text?: string
   tags?: string[]

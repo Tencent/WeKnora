@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -13,8 +14,10 @@ import (
 
 // Neo4jRepository is a repository for Neo4j
 type Neo4jRepository struct {
-	driver     neo4j.Driver
-	nodePrefix string
+	driver                neo4j.Driver
+	nodePrefix            string
+	schemaConstraintMu    sync.Mutex
+	schemaConstraintReady bool
 }
 
 const (
@@ -68,25 +71,66 @@ func (n *Neo4jRepository) AddGraph(ctx context.Context, namespace types.NameSpac
 
 // addGraph adds a graph to the Neo4j repository
 func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpace, graph *types.GraphData) error {
+	if graphHasTypedEntities(graph) {
+		if namespace.KnowledgeBase == "" || namespace.Knowledge == "" {
+			return fmt.Errorf("typed graph writes require a knowledge base and document")
+		}
+		if err := n.ensureSchemaConstraint(ctx); err != nil {
+			return err
+		}
+	}
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
 
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		// Node import query
+		// Backfill only the legacy identity discriminator in this document.
+		// No extraction or historical graph reinterpretation is performed.
+		legacy, err := tx.Run(ctx, `MATCH (n:`+n.quotedGraphLabel(namespace)+` {kg: $kg})
+			WHERE n.entity_type IS NULL SET n.entity_type = ''`,
+			map[string]interface{}{"kg": namespace.Knowledge})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := legacy.Consume(ctx); err != nil {
+			return nil, err
+		}
+		if graphHasTypedEntities(graph) {
+			// Upgrade pre-constraint records in this document, without changing their identity.
+			// Existing duplicates fail explicitly; they must be rebuilt, not silently discarded.
+			upgrade, err := tx.Run(ctx, `MATCH (n:`+n.quotedGraphLabel(namespace)+` {kg: $kg})
+				WHERE n.entity_type IS NOT NULL AND n.entity_type <> ''
+				  AND NOT n:WEKNORA_SCHEMA_ENTITY
+				SET n:WEKNORA_SCHEMA_ENTITY, n.schema_scope = $scope`,
+				map[string]interface{}{"kg": namespace.Knowledge, "scope": namespace.KnowledgeBase})
+			if err != nil {
+				return nil, fmt.Errorf(
+					"failed to upgrade schema entities; rebuild graphs with duplicate identities: %w", err)
+			}
+			if _, err := upgrade.Consume(ctx); err != nil {
+				return nil, fmt.Errorf(
+					"failed to upgrade schema entities; rebuild graphs with duplicate identities: %w", err)
+			}
+		}
+		// Merge with namespace labels first so pre-label typed nodes upgrade in place.
 		node_import_query := `
 			UNWIND $data AS row
-			CALL apoc.merge.node(row.labels, {name: row.name, kg: row.knowledge_id}, row.props, {}) YIELD node
-			SET node.chunks = apoc.coll.union(node.chunks, row.chunks)
+			CALL apoc.merge.node(row.labels, row.identity, row.props, {}) YIELD node
+			CALL apoc.create.addLabels(node, row.type_labels) YIELD node AS typed_node
+			SET typed_node.chunks = apoc.coll.union(typed_node.chunks, row.chunks)
 			RETURN distinct 'done' AS result
 		`
 		nodeData := []map[string]interface{}{}
 		for _, node := range graph.Node {
+			props := map[string]interface{}{}
+			if node.EntityType == "" {
+				props["attributes"] = node.Attributes
+			}
 			nodeData = append(nodeData, map[string]interface{}{
-				"name":         node.Name,
-				"knowledge_id": namespace.Knowledge,
-				"props":        map[string][]string{"attributes": node.Attributes},
-				"chunks":       node.Chunks,
-				"labels":       n.Labels(namespace),
+				"identity":    graphWriteIdentity(node.Name, node.EntityType, namespace),
+				"props":       props,
+				"chunks":      node.Chunks,
+				"labels":      n.graphWriteLabels(namespace, node.EntityType),
+				"type_labels": graphTypeLabels(node.EntityType),
 			})
 		}
 		// Keep driver errors recognizable by ExecuteWrite's bounded retry.
@@ -102,20 +146,23 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		// Relationship import query
 		rel_import_query := `
 			UNWIND $data AS row
-			CALL apoc.merge.node(row.source_labels, {name: row.source, kg: row.knowledge_id}, {}, {}) YIELD node as source
-			CALL apoc.merge.node(row.target_labels, {name: row.target, kg: row.knowledge_id}, {}, {}) YIELD node as target
-			CALL apoc.merge.relationship(source, row.type, {}, row.attributes, target) YIELD rel
+			CALL apoc.merge.node(row.source_labels, row.source_identity, {}, {}) YIELD node as source
+			CALL apoc.merge.node(row.target_labels, row.target_identity, {}, {}) YIELD node as target
+			CALL apoc.create.addLabels(source, row.source_type_labels) YIELD node AS typed_source
+			CALL apoc.create.addLabels(target, row.target_type_labels) YIELD node AS typed_target
+			CALL apoc.merge.relationship(typed_source, row.type, {}, {}, typed_target) YIELD rel
 			RETURN distinct 'done'
 		`
 		relData := []map[string]interface{}{}
 		for _, rel := range graph.Relation {
 			relData = append(relData, map[string]interface{}{
-				"source":        rel.Node1,
-				"target":        rel.Node2,
-				"knowledge_id":  namespace.Knowledge,
-				"type":          rel.Type,
-				"source_labels": n.Labels(namespace),
-				"target_labels": n.Labels(namespace),
+				"source_identity":    graphWriteIdentity(rel.Node1, rel.SourceType, namespace),
+				"target_identity":    graphWriteIdentity(rel.Node2, rel.TargetType, namespace),
+				"type":               rel.Type,
+				"source_labels":      n.graphWriteLabels(namespace, rel.SourceType),
+				"target_labels":      n.graphWriteLabels(namespace, rel.TargetType),
+				"source_type_labels": graphTypeLabels(rel.SourceType),
+				"target_type_labels": graphTypeLabels(rel.TargetType),
 			})
 		}
 		result, err = tx.Run(ctx, rel_import_query, map[string]interface{}{"data": relData})
@@ -213,6 +260,112 @@ func (n *Neo4jRepository) SearchNode(
 	namespace types.NameSpace,
 	nodes []string,
 ) (*types.GraphData, error) {
+	query, params := graphSearchCypher(n.Label(namespace), nodes)
+	return n.search(ctx, query, params)
+}
+
+func graphNodeIdentity(name, entityType, knowledgeID string) map[string]interface{} {
+	return map[string]interface{}{"name": name, "kg": knowledgeID, "entity_type": entityType}
+}
+
+const schemaEntityLabel = "WEKNORA_SCHEMA_ENTITY"
+
+const schemaEntityConstraintQuery = `CREATE CONSTRAINT weknora_schema_entity_identity IF NOT EXISTS
+	FOR (n:WEKNORA_SCHEMA_ENTITY)
+	REQUIRE (n.schema_scope, n.kg, n.name, n.entity_type) IS UNIQUE`
+
+func (n *Neo4jRepository) ensureSchemaConstraint(ctx context.Context) error {
+	n.schemaConstraintMu.Lock()
+	defer n.schemaConstraintMu.Unlock()
+	if n.schemaConstraintReady {
+		return nil
+	}
+	// Schema DDL must run in a separate transaction from entity writes.
+	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer func() { _ = session.Close(ctx) }()
+	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
+		result, err := tx.Run(ctx, schemaEntityConstraintQuery, nil)
+		if err != nil {
+			return nil, err
+		}
+		_, err = result.Consume(ctx)
+		return nil, err
+	})
+	if err != nil {
+		return fmt.Errorf("failed to ensure schema entity uniqueness: %w", err)
+	}
+	n.schemaConstraintReady = true
+	return nil
+}
+
+func graphHasTypedEntities(graph *types.GraphData) bool {
+	for _, node := range graph.Node {
+		if node.EntityType != "" {
+			return true
+		}
+	}
+	for _, rel := range graph.Relation {
+		if rel.SourceType != "" || rel.TargetType != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func graphWriteIdentity(name, entityType string, namespace types.NameSpace) map[string]interface{} {
+	identity := graphNodeIdentity(name, entityType, namespace.Knowledge)
+	if entityType != "" {
+		identity["schema_scope"] = namespace.KnowledgeBase
+	}
+	return identity
+}
+
+func (n *Neo4jRepository) graphWriteLabels(namespace types.NameSpace, entityType string) []string {
+	labels := n.Labels(namespace)
+	if entityType != "" {
+		labels = append(labels, schemaEntityLabel)
+	}
+	return labels
+}
+
+const graphTypeLabelPrefix = "TYPE_"
+
+func graphTypeLabel(entityType string) string {
+	if entityType == "" {
+		return ""
+	}
+	return graphTypeLabelPrefix + entityType
+}
+
+func graphTypeLabels(entityType string) []string {
+	if entityType == "" {
+		return []string{}
+	}
+	return []string{graphTypeLabel(entityType)}
+}
+
+// The property remains authoritative; pre-label schema records are readable
+// until they are touched by a write. A mismatched type label alone cannot qualify.
+func graphTypePredicate(node, entityType, label string) string {
+	return fmt.Sprintf(`(%s = '' OR (%s.entity_type = %s AND
+		(%s IN labels(%s) OR NONE(typeLabel IN labels(%s) WHERE typeLabel STARTS WITH '%s'))))`,
+		entityType, node, entityType, label, node, node, graphTypeLabelPrefix)
+}
+
+// SearchNodeWithSchema searches bounded one-hop relations using optional schema hints.
+func (n *Neo4jRepository) SearchNodeWithSchema(
+	ctx context.Context, namespace types.NameSpace, queries []types.GraphQuery,
+) (*types.GraphData, error) {
+	if namespace.KnowledgeBase == "" {
+		return nil, fmt.Errorf("schema graph search requires a knowledge base")
+	}
+	query, params := schemaGraphSearchCypher(n.quotedGraphLabel(namespace), queries)
+	return n.search(ctx, query, params)
+}
+
+func (n *Neo4jRepository) search(
+	ctx context.Context, query string, params map[string]interface{},
+) (*types.GraphData, error) {
 	if n.driver == nil {
 		logger.Warnf(ctx, "NOT SUPPORT RETRIEVE GRAPH")
 		return nil, nil
@@ -221,7 +374,6 @@ func (n *Neo4jRepository) SearchNode(
 	defer session.Close(ctx)
 
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		query, params := graphSearchCypher(n.Label(namespace), nodes)
 		result, err := tx.Run(ctx, query, params)
 		if err != nil {
 			return nil, fmt.Errorf("failed to run query: %v", err)
@@ -304,6 +456,7 @@ func decodeGraphSearchResult(ctx context.Context, result neo4j.Result) (*types.G
 			graph.Relation = append(graph.Relation, &types.GraphRelation{
 				Node1: nodeSeen[source.ElementId].Name, Node2: nodeSeen[target.ElementId].Name, Type: r.Type,
 				ID: r.ElementId, SourceID: source.ElementId, TargetID: target.ElementId,
+				SourceType: nodeSeen[source.ElementId].EntityType, TargetType: nodeSeen[target.ElementId].EntityType,
 			})
 		}
 	}
@@ -327,10 +480,73 @@ func decodeGraphNode(node neo4j.Node) (*types.GraphNode, error) {
 		return nil, fmt.Errorf("graph node %q has invalid attributes", node.ElementId)
 	}
 	knowledgeID, _ := node.Props["kg"].(string)
+	entityType, _ := node.Props["entity_type"].(string)
 	return &types.GraphNode{
 		Name: name, Chunks: listI2listS(chunks), Attributes: listI2listS(attributes),
-		ID: node.ElementId, KnowledgeID: knowledgeID,
+		ID: node.ElementId, KnowledgeID: knowledgeID, EntityType: entityType,
 	}, nil
+}
+
+// Schema hints are parameters, never interpolated labels or executable Cypher.
+// Deduplication happens after directional filtering so another seed cannot hide
+// an edge that is valid only from this seed's perspective.
+func schemaGraphSearchCypher(labelExpr string, queries []types.GraphQuery) (string, map[string]interface{}) {
+	seeds := make([]map[string]interface{}, 0, len(queries))
+	seenQueries := make(map[types.GraphQuery]bool, len(queries))
+	for _, q := range queries {
+		if seenQueries[q] {
+			continue
+		}
+		seenQueries[q] = true
+		seeds = append(seeds, map[string]interface{}{
+			"name": q.Name, "entity_type": q.EntityType, "relation_type": q.RelationType,
+			"direction": q.Direction, "target_type": q.TargetType,
+			"entity_label": graphTypeLabel(q.EntityType), "target_label": graphTypeLabel(q.TargetType),
+		})
+	}
+	query := `
+		UNWIND $queries AS q
+		MATCH (n:` + labelExpr + `)
+		WHERE n.name CONTAINS q.name
+		  AND ` + graphTypePredicate("n", "q.entity_type", "q.entity_label") + `
+		  AND EXISTS {
+		    MATCH (n)-[candidate]-(neighbor:` + labelExpr + `)
+		    WHERE (q.relation_type = '' OR type(candidate) = q.relation_type)
+		      AND ` + graphTypePredicate("neighbor", "q.target_type", "q.target_label") + `
+		      AND (q.direction = '' OR
+		        (q.direction = 'out' AND startNode(candidate) = n) OR
+		        (q.direction = 'in' AND endNode(candidate) = n))
+		  }
+		WITH n, q, CASE WHEN n.name = q.name THEN 0 ELSE 1 END AS seed_rank
+		ORDER BY seed_rank, size(n.name), n.name, n.kg, elementId(n),
+		  q.entity_type, q.relation_type, q.direction, q.target_type
+		LIMIT $maxSeedNodes
+		WITH collect({node: n, query: q}) AS seeds
+		UNWIND range(0, size(seeds) - 1) AS seed_index
+		WITH seeds[seed_index].node AS n, seeds[seed_index].query AS q,
+		  seeds[0..seed_index] AS earlier_seeds, seed_index
+		MATCH (n)-[r]-(m:` + labelExpr + `)
+		WHERE (q.relation_type = '' OR type(r) = q.relation_type)
+		  AND ` + graphTypePredicate("m", "q.target_type", "q.target_label") + `
+		  AND (q.direction = '' OR
+		    (q.direction = 'out' AND startNode(r) = n) OR
+		    (q.direction = 'in' AND endNode(r) = n))
+		  AND NOT ANY(previous IN earlier_seeds WHERE previous.node IN [n, m]
+		    AND (previous.query.relation_type = '' OR type(r) = previous.query.relation_type)
+		    AND ((previous.node = n AND ` +
+		graphTypePredicate("m", "previous.query.target_type", "previous.query.target_label") + `) OR
+		      (previous.node = m AND ` +
+		graphTypePredicate("n", "previous.query.target_type", "previous.query.target_label") + `))
+		    AND (previous.query.direction = '' OR
+		      (previous.query.direction = 'out' AND startNode(r) = previous.node) OR
+		      (previous.query.direction = 'in' AND endNode(r) = previous.node)))
+		WITH n, r, m, seed_index
+		ORDER BY seed_index, elementId(r)
+		LIMIT $maxRows
+		RETURN n, r, m`
+	return query, map[string]interface{}{
+		"queries": seeds, "maxSeedNodes": graphSearchMaxSeedNodes, "maxRows": graphSearchMaxRows,
+	}
 }
 
 // graphSearchCypher builds the bounded graph-search query and its parameters

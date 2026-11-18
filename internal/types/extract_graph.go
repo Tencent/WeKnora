@@ -10,15 +10,17 @@ type ChunkContext struct {
 
 // PromptTemplateStructured represents the prompt template structured
 type PromptTemplateStructured struct {
-	Description string      `json:"description"`
-	Tags        []string    `json:"tags"`
-	Examples    []GraphData `json:"examples"`
+	Description string       `json:"description"`
+	Tags        []string     `json:"tags"`
+	Examples    []GraphData  `json:"examples"`
+	Schema      *GraphSchema `json:"schema,omitempty"`
 }
 
 type GraphNode struct {
 	Name       string   `json:"name,omitempty"`
 	Chunks     []string `json:"chunks,omitempty"`
 	Attributes []string `json:"attributes,omitempty"`
+	EntityType string   `json:"entity_type,omitempty"`
 	// Retrieval identities are local to the graph query, not extraction configuration.
 	ID          string `json:"-" yaml:"-"`
 	KnowledgeID string `json:"-" yaml:"-"`
@@ -26,9 +28,11 @@ type GraphNode struct {
 
 // GraphRelation represents the relation of the graph
 type GraphRelation struct {
-	Node1 string `json:"node1,omitempty"`
-	Node2 string `json:"node2,omitempty"`
-	Type  string `json:"type,omitempty"`
+	Node1      string `json:"node1,omitempty"`
+	Node2      string `json:"node2,omitempty"`
+	Type       string `json:"type,omitempty"`
+	SourceType string `json:"source_type,omitempty"`
+	TargetType string `json:"target_type,omitempty"`
 	// Names are for display; these identities link to the actual document instances.
 	ID       string `json:"-" yaml:"-"`
 	SourceID string `json:"-" yaml:"-"`
