@@ -162,3 +162,91 @@ func TestMaterializeKnowledgeFile_PreservesExtension(t *testing.T) {
 		})
 	}
 }
+
+// cancelAfterReadReader cancels ctx on its n-th read (1-based; 0 = the
+// context is already canceled before the first read) and counts every
+// read issued, including the terminal EOF read.
+type cancelAfterReadReader struct {
+	cancel     context.CancelFunc
+	cancelAt   int
+	chunk      []byte
+	emitted    int
+	chunkSize  int
+	totalReads int
+}
+
+func (r *cancelAfterReadReader) Read(p []byte) (int, error) {
+	r.totalReads++
+	if r.cancelAt > 0 && r.totalReads == r.cancelAt {
+		r.cancel()
+	}
+	if r.emitted >= len(r.chunk) {
+		return 0, io.EOF
+	}
+	n := len(p)
+	if r.chunkSize > 0 && n > r.chunkSize {
+		n = r.chunkSize
+	}
+	if rest := len(r.chunk) - r.emitted; n > rest {
+		n = rest
+	}
+	copy(p, r.chunk[r.emitted:r.emitted+n])
+	r.emitted += n
+	return n, nil
+}
+
+func (r *cancelAfterReadReader) Close() error { return nil }
+
+// TestMaterializeKnowledgeFileStopsAfterCancellation pins #5662: once
+// cancellation is observable (before the call or from an early read),
+// materialization must stop issuing reads, wrap ctx.Err(), and remove
+// the partial temp file instead of returning a successful path.
+func TestMaterializeKnowledgeFileStopsAfterCancellation(t *testing.T) {
+	payload := bytes.Repeat([]byte("0123456789"), 8)
+	k := &types.Knowledge{ID: "k-cancel", FileType: "csv", FilePath: "tenants/42/data.csv"}
+
+	newTool := func(cancelAt int) (*DataAnalysisTool, *cancelAfterReadReader, context.Context) {
+		ctx, cancel := context.WithCancel(context.Background())
+		reader := &cancelAfterReadReader{cancel: cancel, chunk: payload, chunkSize: 10, cancelAt: cancelAt}
+		fs := &fakeFileService{
+			readers: map[string]func() (io.ReadCloser, error){
+				"tenants/42/data.csv": func() (io.ReadCloser, error) { return reader, nil },
+			},
+		}
+		return &DataAnalysisTool{fileService: fs, sessionID: "test-cancel"}, reader, ctx
+	}
+
+	t.Run("canceled before call", func(t *testing.T) {
+		tool, reader, _ := newTool(0)
+		cancelCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, cleanup, err := tool.materializeKnowledgeFile(cancelCtx, k)
+		cleanup()
+		if err == nil {
+			t.Fatal("canceled context must fail materialization")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error must wrap context.Canceled, got %v", err)
+		}
+		if reader.totalReads != 0 {
+			t.Fatalf("no reads allowed on a pre-canceled context, got %d", reader.totalReads)
+		}
+	})
+
+	t.Run("canceled during copy", func(t *testing.T) {
+		tool, reader, ctx := newTool(2)
+		_, cleanup, err := tool.materializeKnowledgeFile(ctx, k)
+		cleanup()
+		if err == nil {
+			t.Fatal("canceled context must fail materialization")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error must wrap context.Canceled, got %v", err)
+		}
+		// Cancellation becomes observable at read 2 of 8 chunks + EOF; the
+		// copy must not drain the remaining chunks.
+		if reader.totalReads > 3 {
+			t.Fatalf("copy kept reading after cancellation: %d reads", reader.totalReads)
+		}
+	})
+}
