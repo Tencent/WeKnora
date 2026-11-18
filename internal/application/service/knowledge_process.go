@@ -4519,8 +4519,15 @@ func (s *knowledgeService) convert(
 	if err == nil && result == nil {
 		err = fmt.Errorf("document parser returned no result")
 	}
-	// Parser resource limits are permanent document rejections, not transient reader failures.
-	if errors.Is(err, docparser.ErrCSVMarkdownTooLarge) || errors.Is(err, anydoc.ErrResourceLimit) {
+	// These rejections cannot succeed on a retry of the same document.
+	var rejectionCause error
+	switch {
+	case errors.Is(err, anydoc.ErrEncrypted):
+		rejectionCause = err
+		result, err = &types.ReadResult{
+			Error: "This document is encrypted. Upload a copy without password protection.",
+		}, nil
+	case errors.Is(err, docparser.ErrCSVMarkdownTooLarge), errors.Is(err, anydoc.ErrResourceLimit):
 		result, err = &types.ReadResult{Error: err.Error()}, nil
 	}
 	if err != nil {
@@ -4546,7 +4553,7 @@ func (s *knowledgeService) convert(
 			logger.Errorf(ctx, "failed to persist parser error for %s: %v", knowledge.ID, err)
 		}
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
-			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
+			werrors.ErrCodeDocReaderParseFailed, result.Error, rejectionCause)
 		return nil, nil
 	}
 	if !isURL {

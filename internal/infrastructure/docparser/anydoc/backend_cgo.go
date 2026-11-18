@@ -32,6 +32,14 @@ func backendPDFInvalidStructure(err error) (malformed, typed bool) {
 	return convertErr != nil && convertErr.Kind == "malformed", true
 }
 
+func markEncrypted(err error) error {
+	var convertErr *upstream.ConvertError
+	if errors.As(err, &convertErr) && convertErr != nil && convertErr.Kind == "encrypted" {
+		return fmt.Errorf("%w: %w", ErrEncrypted, err)
+	}
+	return err
+}
+
 func backendConvert(data []byte, opts Options) (*Result, error) {
 	format, err := upstreamFormat(opts.Format)
 	if err != nil {
@@ -41,7 +49,7 @@ func backendConvert(data []byte, opts Options) (*Result, error) {
 	if !opts.WithAssets {
 		markdown, err := upstream.ToMarkdownBytes(data, format)
 		if err != nil {
-			return nil, fmt.Errorf("anydoc: markdown conversion failed: %w", err)
+			return nil, fmt.Errorf("anydoc: markdown conversion failed: %w", markEncrypted(err))
 		}
 		return &Result{Markdown: markdown}, nil
 	}
@@ -53,7 +61,7 @@ func backendConvert(data []byte, opts Options) (*Result, error) {
 	if err != nil {
 		markdown, mdErr := upstream.ToMarkdownBytes(data, format)
 		if mdErr != nil {
-			return nil, fmt.Errorf("anydoc: markdown conversion failed: %w", mdErr)
+			return nil, fmt.Errorf("anydoc: markdown conversion failed: %w", markEncrypted(mdErr))
 		}
 		return &Result{
 			Markdown:    markdown,
