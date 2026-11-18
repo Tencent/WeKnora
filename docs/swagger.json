@@ -42545,6 +42545,11 @@
                     "type": "string",
                     "x-agent": true
                 },
+                "pending_restart": {
+                    "description": "Nil without live heartbeats; true when any instance differs from configuration.",
+                    "type": "boolean",
+                    "x-agent": true
+                },
                 "queue_count": {
                     "type": "integer",
                     "x-agent": true

@@ -618,6 +618,7 @@ export interface QueueStat {
 export interface RuntimeWorkerPool {
   name: string
   concurrency: number
+  pending_restart?: boolean | null
   queue_count: number
   instances: number
   cluster_capacity: number
