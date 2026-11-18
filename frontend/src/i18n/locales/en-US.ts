@@ -3017,6 +3017,8 @@ export default {
     }
   },
   graphSettings: {
+    maxGraphChunksLabel: "Maximum graph chunks per document",
+    maxGraphChunksDescription: "Caps graph-extraction LLM tasks for one document. 0 keeps it unlimited; 1000–5000 is a practical guard for very large tables.",
     title: 'Knowledge Graph Configuration',
     description: 'Configure entity-relationship extraction to automatically build a knowledge graph from text (note: this is different from the "page-link graph" inside the Wiki — that one shows references between Wiki pages, while this one is an LLM-extracted entity-relationship graph)',
     enableLabel: 'Enable Entity-Relationship Extraction',

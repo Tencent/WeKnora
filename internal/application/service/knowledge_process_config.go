@@ -239,6 +239,11 @@ func validateEffectiveProcessOverrides(eff types.EffectiveProcessConfig, fileTyp
 	if err := types.ValidateEffectiveProcessPromptInstructions(eff); err != nil {
 		return werrors.NewBadRequestError(err.Error())
 	}
+	if limit := eff.ExtractConfig.MaxGraphChunksPerDocument; limit != nil &&
+		(*limit < 0 || *limit > 100000) {
+		return werrors.NewBadRequestError(
+			"max_graph_chunks_per_document must be between 0 and 100000")
+	}
 	if eff.EnableMultimodel {
 		if err := ValidateImagePipelineParams(eff.ImagePipelineID, eff.ImagePipelineParams); err != nil {
 			return werrors.NewBadRequestError(err.Error())
@@ -376,6 +381,9 @@ func mergeExtractConfig(base types.ExtractConfig, override *types.ExtractConfig)
 	}
 	if override.CustomInstructions != "" {
 		result.CustomInstructions = override.CustomInstructions
+	}
+	if override.MaxGraphChunksPerDocument != nil {
+		result.MaxGraphChunksPerDocument = override.MaxGraphChunksPerDocument
 	}
 	return result
 }

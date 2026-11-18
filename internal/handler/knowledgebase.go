@@ -1736,6 +1736,12 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 	if config == nil {
 		return nil
 	}
+	if config.MaxGraphChunksPerDocument != nil {
+		limit := *config.MaxGraphChunksPerDocument
+		if limit < 0 || limit > 100000 {
+			return apperrors.NewBadRequestError("max_graph_chunks_per_document must be between 0 and 100000")
+		}
+	}
 	if !config.Enabled {
 		config.Enabled = false
 		return nil

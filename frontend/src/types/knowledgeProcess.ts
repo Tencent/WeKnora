@@ -60,6 +60,7 @@ export interface ExtractConfigOverride {
   nodes?: GraphNodeOverride[]
   relations?: GraphRelationOverride[]
   custom_instructions?: string
+  max_graph_chunks_per_document?: number
 }
 
 export interface KnowledgeProcessOverrides {

@@ -1193,7 +1193,8 @@ const loadKBData = async (
           attributes: node.attributes || []
         })),
         relations: kb.extract_config?.relations || [],
-        customInstructions: kb.extract_config?.custom_instructions || ''
+        customInstructions: kb.extract_config?.custom_instructions || '',
+        maxGraphChunksPerDocument: kb.extract_config?.max_graph_chunks_per_document || 0
       },
       questionGenerationConfig: {
         modelId: kb.question_generation_config?.model_id || '',
@@ -1710,7 +1711,8 @@ const buildSubmitData = () => {
       tags: formData.value.nodeExtractConfig.tags || [],
       nodes: formData.value.nodeExtractConfig.nodes || [],
       relations: formData.value.nodeExtractConfig.relations || [],
-      custom_instructions: formData.value.nodeExtractConfig.customInstructions || ''
+      custom_instructions: formData.value.nodeExtractConfig.customInstructions || '',
+      max_graph_chunks_per_document: formData.value.nodeExtractConfig.maxGraphChunksPerDocument || 0
     }
   }
 
