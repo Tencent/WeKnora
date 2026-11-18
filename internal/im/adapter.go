@@ -23,6 +23,7 @@ const (
 	PlatformWeChat     Platform = "wechat"
 	PlatformQQBot      Platform = "qqbot"
 	PlatformYunzhijia  Platform = "yunzhijia"
+	PlatformLine       Platform = "line"
 )
 
 // SessionMode determines how IM sessions are resolved.
@@ -118,6 +119,10 @@ type ReplyMessage struct {
 	IsStreaming bool
 	// IsFinal marks the last chunk of a streaming reply.
 	IsFinal bool
+	// PlainText marks machine/system replies (command results, queue and rate
+	// limit notices, hints) that must not be dressed up as an answer. Adapters
+	// with a rich format — LINE Flex Message — send these as plain text.
+	PlainText bool
 	// Extra holds platform-specific fields.
 	Extra map[string]string
 }
