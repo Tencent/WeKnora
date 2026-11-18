@@ -26,10 +26,15 @@ func NewFactory(region Region) im.AdapterFactory {
 		verificationToken := im.GetString(creds, "verification_token")
 		encryptKey := im.GetString(creds, "encrypt_key")
 		apiBaseURL := im.GetString(creds, "api_base_url")
+		replyInThread := im.GetBool(creds, "reply_in_thread")
 
 		// Always create the HTTP adapter (needed for SendReply in both modes).
 		// apiBaseURL is validated here; an invalid value fails the channel.
-		adapter, err := NewAdapter(region, appID, appSecret, verificationToken, encryptKey, apiBaseURL)
+		var opts []AdapterOption
+		if replyInThread {
+			opts = append(opts, WithReplyInThread(true))
+		}
+		adapter, err := NewAdapter(region, appID, appSecret, verificationToken, encryptKey, apiBaseURL, opts...)
 		if err != nil {
 			return nil, nil, fmt.Errorf("create %s adapter: %w", region.Platform, err)
 		}

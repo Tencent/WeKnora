@@ -1765,6 +1765,8 @@ export default {
       wecomWSEndpointHint: '可選，私有化部署時填寫自定義 WebSocket 地址，留空則使用預設公有雲地址。內網地址需將域名加入 SSRF_WHITELIST 環境變數',
       wecomAPIBaseURLHint: '可選，私有化部署時填寫自定義 API 地址，留空則使用預設公有雲地址。內網地址需將域名加入 SSRF_WHITELIST 環境變數',
       feishuAPIBaseURLHint: '可選。若伺服器能直連外網則留空；若需透過代理才能存取飛書，填寫反向代理地址（如 nginx，http://host:port）。內網地址需將域名加入 SSRF_WHITELIST 環境變數',
+      feishuReplyInThread: '群聊回覆摺疊為話題',
+      feishuReplyInThreadHint: '開啟後，群聊中機器人的回覆以話題形式錨定在提問訊息上（顯示「N 條話題回覆」），每個問答自動摺疊成一個話題而不是平鋪回覆。單聊不受影響',
       fileKnowledgeBase: '檔案儲存知識庫',
       fileKnowledgeBasePlaceholder: '選擇知識庫（可選）',
       fileKnowledgeBaseHint: '設定後，使用者傳送的檔案將自動儲存到該知識庫中',

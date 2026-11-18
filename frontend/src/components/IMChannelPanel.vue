@@ -325,6 +325,18 @@
                 <t-input v-model="formData.credentials.api_base_url" placeholder="https://open.feishu.cn" />
                 <p class="form-desc">{{ $t('agentEditor.im.feishuAPIBaseURLHint') }}</p>
               </div>
+              <div class="settings-group">
+                <div class="setting-row setting-row--last">
+                  <div class="setting-info">
+                    <label>{{ $t('agentEditor.im.feishuReplyInThread') }}</label>
+                    <p class="desc">{{ $t('agentEditor.im.feishuReplyInThreadHint') }}</p>
+                  </div>
+                  <div class="setting-control">
+                    <t-switch :value="!!formData.credentials.reply_in_thread" size="small"
+                      @change="(v: boolean) => { formData.credentials.reply_in_thread = v }" />
+                  </div>
+                </div>
+              </div>
               <template v-if="formData.mode === 'webhook'">
                 <div class="form-item">
                   <label class="form-label">Verification Token</label>

@@ -1763,6 +1763,8 @@ export default {
       wecomWSEndpointHint: '선택 사항. 프라이빗 WeCom 배포 시 사용자 정의 WebSocket 주소를 입력하세요. 비워두면 기본 퍼블릭 클라우드 주소를 사용합니다. 내부 네트워크 주소의 경우 SSRF_WHITELIST 환경 변수에 호스트명을 추가하세요.',
       wecomAPIBaseURLHint: '선택 사항. 프라이빗 WeCom 배포 시 사용자 정의 API 기본 URL을 입력하세요. 비워두면 기본 퍼블릭 클라우드 주소를 사용합니다. 내부 네트워크 주소의 경우 SSRF_WHITELIST 환경 변수에 호스트명을 추가하세요.',
       feishuAPIBaseURLHint: '선택 사항. 서버가 외부 인터넷에 직접 연결 가능하면 비워두세요. 프록시를 통해서만 접근 가능한 경우 역방향 프록시 URL(예: nginx, http://host:port)을 입력하세요. 내부 네트워크 주소는 SSRF_WHITELIST 환경 변수에 호스트명을 추가하세요.',
+      feishuReplyInThread: '그룹 답장을 토픽으로',
+      feishuReplyInThreadHint: '활성화하면 그룹 채팅에서 봇의 답장이 질문 메시지에 고정된 토픽으로 전송되어(토픽 답장 N개 표시) 각 Q&A가 평평한 답장 목록 대신 접힌 토픽으로 표시됩니다. 개인 채팅에는 영향을 주지 않습니다',
       fileKnowledgeBase: '파일 저장 지식 베이스',
       fileKnowledgeBasePlaceholder: '지식 베이스 선택 (선택 사항)',
       fileKnowledgeBaseHint: '설정 시 사용자가 보낸 파일이 자동으로 해당 지식 베이스에 저장됩니다',
