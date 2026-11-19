@@ -24,48 +24,31 @@ import (
 
 // Knowledge represents knowledge information
 type Knowledge struct {
-	ID                string          `json:"id"`
-	TenantID          uint64          `json:"tenant_id"`
-	KnowledgeBaseID   string          `json:"knowledge_base_id"`
-	ParentKnowledgeID string          `json:"parent_knowledge_id,omitempty"`
-	CustomMetadata    json.RawMessage `json:"custom_metadata,omitempty"`
-	TagID             string          `json:"tag_id"`
-	Type              string          `json:"type"`
-	Title             string          `json:"title"`
-	Description       string          `json:"description"`
-	Source            string          `json:"source"`
-	Channel           string          `json:"channel"`
-	ParseStatus       string          `json:"parse_status"`
-	SummaryStatus     string          `json:"summary_status"`
-	EnableStatus      string          `json:"enable_status"`
-	EmbeddingModelID  string          `json:"embedding_model_id"`
-	FileName          string          `json:"file_name"`
-	FolderPath        string          `json:"folder_path"`
-	FileType          string          `json:"file_type"`
-	FileSize          int64           `json:"file_size"`
-	FileHash          string          `json:"file_hash"`
-	FilePath          string          `json:"file_path"`
-	StorageSize       int64           `json:"storage_size"`
-	Metadata          json.RawMessage `json:"metadata"` // Extensible metadata for storing machine information, paths, etc.
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
-	ProcessedAt       *time.Time      `json:"processed_at"`
-	ErrorMessage      string          `json:"error_message"`
-}
-
-// ManualContent returns the Markdown body stored for a manual knowledge entry.
-// Other knowledge types carry no inline body and return an empty string.
-func (k *Knowledge) ManualContent() (string, error) {
-	if k == nil || len(k.Metadata) == 0 {
-		return "", nil
-	}
-	var meta struct {
-		Content string `json:"content"`
-	}
-	if err := json.Unmarshal(k.Metadata, &meta); err != nil {
-		return "", err
-	}
-	return meta.Content, nil
+	ID               string          `json:"id"`
+	TenantID         uint64          `json:"tenant_id"`
+	KnowledgeBaseID  string          `json:"knowledge_base_id"`
+	TagID            string          `json:"tag_id"`
+	Type             string          `json:"type"`
+	Title            string          `json:"title"`
+	Description      string          `json:"description"`
+	Source           string          `json:"source"`
+	Channel          string          `json:"channel"`
+	ParseStatus      string          `json:"parse_status"`
+	SummaryStatus    string          `json:"summary_status"`
+	EnableStatus     string          `json:"enable_status"`
+	EmbeddingModelID string          `json:"embedding_model_id"`
+	FileName         string          `json:"file_name"`
+	FolderPath       string          `json:"folder_path"`
+	FileType         string          `json:"file_type"`
+	FileSize         int64           `json:"file_size"`
+	FileHash         string          `json:"file_hash"`
+	FilePath         string          `json:"file_path"`
+	StorageSize      int64           `json:"storage_size"`
+	Metadata         json.RawMessage `json:"metadata"` // Extensible metadata for storing machine information, paths, etc.
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+	ProcessedAt      *time.Time      `json:"processed_at"`
+	ErrorMessage     string          `json:"error_message"`
 }
 
 // KnowledgeResponse represents the API response containing a single knowledge entry
@@ -859,9 +842,6 @@ type CreateManualKnowledgeRequest struct {
 type UpdateManualKnowledgeRequest struct {
 	Title   string `json:"title,omitempty"`
 	Content string `json:"content,omitempty"`
-	// Status keeps the document's visibility. The server defaults an omitted
-	// status to draft, so callers editing a published entry must send publish.
-	Status string `json:"status,omitempty"`
 }
 
 // BatchUpdateKnowledgeTagsRequest sets tags on documents.

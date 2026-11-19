@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -248,22 +247,10 @@ func buildClientFromEnv(f *Factory) (client *sdk.Client, handled bool, err error
 			"WEKNORA_TOKEN / WEKNORA_API_KEY is set but no host is available").
 			WithHint("set WEKNORA_HOST (e.g. https://kb.example.com) or configure a profile host")
 	}
-	var opts []sdk.ClientOption
-	if tenant := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_ID")); tenant != "" {
-		// Platform API keys are tenant-scoped by header, not by the key alone.
-		id, err := strconv.ParseUint(tenant, 10, 64)
-		if err != nil || id == 0 {
-			return nil, true, NewError(CodeInputInvalidArgument,
-				"WEKNORA_TENANT_ID must be a positive integer workspace id")
-		}
-		opts = append(opts, sdk.WithTenantID(id))
-	}
 	if token != "" {
-		opts = append(opts, sdk.WithBearerToken(token))
-	} else {
-		opts = append(opts, sdk.WithAPIKey(apiKey))
+		return sdk.NewClient(host, sdk.WithBearerToken(token)), true, nil
 	}
-	return sdk.NewClient(host, opts...), true, nil
+	return sdk.NewClient(host, sdk.WithAPIKey(apiKey)), true, nil
 }
 
 // AddKBFlag registers the standard `--kb` flag that ResolveKB reads. Use this

@@ -26,6 +26,5 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(NewCmdStatus(f))
 	cmd.AddCommand(NewCmdCheck(f))
 	cmd.AddCommand(NewCmdConfig(f)) // `config` also hosts the `config set` write subcommand
-	cmd.AddCommand(NewCmdRewriteImageHosts(f))
 	return cmd
 }
