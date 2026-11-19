@@ -269,10 +269,16 @@ func TestListSessionsAPISourceRequiresAdminAndReturnsAllKeys(t *testing.T) {
 		UserID:   types.SessionOwnerAPIExternalUserPrefix + "1:external-u1",
 		Title:    "external user",
 	}
+	platformKey := &types.Session{
+		TenantID: 1,
+		UserID:   types.SessionOwnerAPIPlatformPrefix + "99",
+		Title:    "platform key session",
+	}
 	web := &types.Session{TenantID: 1, UserID: "alice", Title: "alice web"}
 	require.NoError(t, db.Create(key1).Error)
 	require.NoError(t, db.Create(key2).Error)
 	require.NoError(t, db.Create(externalUser).Error)
+	require.NoError(t, db.Create(platformKey).Error)
 	require.NoError(t, db.Create(web).Error)
 
 	// A non-admin (viewer) web user is rejected.
@@ -287,7 +293,7 @@ func TestListSessionsAPISourceRequiresAdminAndReturnsAllKeys(t *testing.T) {
 	adminCtx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin)
 	result, err := svc.ListSessions(adminCtx, &types.SessionListQuery{Source: types.SessionSourceAPI})
 	require.NoError(t, err)
-	require.EqualValues(t, 3, result.Total)
+	require.EqualValues(t, 4, result.Total)
 }
 
 func TestGetSessionAllowsAdminToReadAPIExternalUserSession(t *testing.T) {

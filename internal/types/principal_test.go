@@ -55,6 +55,26 @@ func TestSessionOwnerIDFromContextFallsBackToUserID(t *testing.T) {
 	}
 }
 
+func TestSessionOwnerIDFromContextUsesPlatformAPIKey(t *testing.T) {
+	ctx := WithPrincipal(context.Background(), Principal{
+		Type: PrincipalAPIPlatform,
+		ID:   "27",
+	})
+	ctx = context.WithValue(ctx, UserIDContextKey, "api_platform:27")
+
+	if got := SessionOwnerIDFromContext(ctx); got != "api_platform:27" {
+		t.Fatalf("SessionOwnerIDFromContext() = %q, want api_platform:27", got)
+	}
+}
+
+func TestIsAPISessionOwnerID(t *testing.T) {
+	require.True(t, IsAPISessionOwnerID("api_tenant_key:1:2"))
+	require.True(t, IsAPISessionOwnerID("api_platform:27"))
+	require.True(t, IsAPISessionOwnerID("api_external_user:1:alice"))
+	require.False(t, IsAPISessionOwnerID("user-123"))
+	require.False(t, IsAPISessionOwnerID(""))
+}
+
 func TestSessionOwnerIDFromContextIsolatesTenantAPIKeys(t *testing.T) {
 	ctx := WithPrincipal(context.Background(), Principal{Type: PrincipalAPITenant, ID: "7"})
 	ctx = context.WithValue(ctx, TenantIDContextKey, uint64(7))
