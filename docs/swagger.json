@@ -10906,6 +10906,68 @@
                 }
             }
         },
+        "/knowledge/{id}/content": {
+            "put": {
+                "description": "用提交的全文覆盖 md/markdown/txt 文件知识的原始存储对象并触发重解析；二进制格式仍走文件替换上传",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "在线编辑文本类文件原文",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_id",
+                        "description": "知识ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "新全文",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.UpdateKnowledgeContentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "重解析中的知识",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
         "/knowledge/{id}/download": {
             "get": {
                 "description": "下载知识条目关联的原始文件",
@@ -43210,6 +43272,15 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
                         }
                     ]
+                }
+            }
+        },
+        "internal_handler.UpdateKnowledgeContentRequest": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "description": "Complete new file content; saved as the new source and re-parsed.",
+                    "type": "string"
                 }
             }
         },
