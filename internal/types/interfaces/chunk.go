@@ -212,6 +212,14 @@ type ChunkService interface {
 	// DeleteGeneratedQuestion deletes a single generated question from a chunk by question ID
 	// This updates the chunk metadata and removes the corresponding vector index
 	DeleteGeneratedQuestion(ctx context.Context, chunkID string, questionID string) error
+	// CreateManualChunk appends a user-authored text chunk to a document.
+	CreateManualChunk(ctx context.Context, knowledgeID string, content string, isEnabled *bool) (*types.Chunk, error)
+	// MergeChunks folds 2..N adjacent text chunks into the first one.
+	MergeChunks(ctx context.Context, knowledgeID string, chunkIDs []string,
+		expectedRevisions []int) (*types.Chunk, error)
+	// SplitChunk divides one text chunk at a rune offset into two rows.
+	SplitChunk(ctx context.Context, chunkID string, splitAt int,
+		expectedRevision *int, isEnabled *bool) ([]*types.Chunk, error)
 	// UpdateDocumentChunk applies a revision-checked edit and synchronizes retrieval indices.
 	UpdateDocumentChunk(ctx context.Context, chunkID string, content *string, isEnabled *bool, expectedRevision *int) (*types.Chunk, error)
 	// ListChunkRevisions lists immutable snapshots for a chunk.
