@@ -9,7 +9,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -33,19 +35,28 @@ type replayedBody struct {
 // loggerResponseBodyWriter 自定义ResponseWriter用于捕获响应内容（用于logger中间件）
 type loggerResponseBodyWriter struct {
 	gin.ResponseWriter
-	body *bytes.Buffer
+	body      *bytes.Buffer
+	truncated bool
 }
 
 // Write 重写Write方法，同时写入buffer和原始writer
 // 限制buffer大小，避免SSE等流式响应导致内存无限增长
-func (r loggerResponseBodyWriter) Write(b []byte) (int, error) {
+// 截断点回退到字符边界，避免把多字节字符切成一半
+func (r *loggerResponseBodyWriter) Write(b []byte) (int, error) {
 	if r.body.Len() < maxBodySize {
 		remaining := maxBodySize - r.body.Len()
 		if len(b) <= remaining {
 			r.body.Write(b)
 		} else {
-			r.body.Write(b[:remaining])
+			r.truncated = true
+			end := remaining
+			for end > 0 && !utf8.RuneStart(b[end]) {
+				end--
+			}
+			r.body.Write(b[:end])
 		}
+	} else {
+		r.truncated = true
 	}
 	return r.ResponseWriter.Write(b)
 }
@@ -145,13 +156,9 @@ func readRequestBody(c *gin.Context) string {
 		return "[读取请求体失败]"
 	}
 
-	// 用于日志的body（限制大小）
+	// 用于日志的body（限制大小，且不把多字节字符切一半）
 	truncated := len(bodyBytes) > maxBodySize
-	if truncated {
-		bodyBytes = bodyBytes[:maxBodySize]
-	}
-
-	bodyStr := string(bodyBytes)
+	bodyStr := common.TruncateUTF8Bytes(string(bodyBytes), maxBodySize)
 	if truncated {
 		bodyStr += bodyTruncatedMarker
 	}
@@ -266,8 +273,8 @@ func Logger() gin.HandlerFunc {
 			} else if strings.Contains(contentType, "application/json") ||
 				strings.Contains(contentType, "text/") {
 				bodyBytes := responseBody.Bytes()
-				if len(bodyBytes) >= maxBodySize {
-					responseBodyStr = string(bodyBytes[:maxBodySize]) + "... [内容过长，已截断]"
+				if responseWriter.truncated {
+					responseBodyStr = string(bodyBytes) + bodyTruncatedMarker
 				} else {
 					responseBodyStr = string(bodyBytes)
 				}
