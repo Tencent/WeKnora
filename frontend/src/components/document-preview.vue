@@ -177,17 +177,6 @@ function toggleFullscreen() {
   }
 }
 
-// 文档预览里的 mermaid 代码块由 renderDocumentPreviewMarkdown 输出成
-// <pre class="mermaid" data-mermaid="false">，这里在 DOM 更新后统一渲染成 SVG。
-watch(
-  markdownHtml,
-  async (html) => {
-    if (!html || !html.includes('data-mermaid="false"')) return;
-    await nextTick();
-    await renderMermaidInContainer(previewContent.value);
-  },
-  { flush: 'post' },
-);
 
 let fallbackOverflow: string | null = null;
 let fullscreenDisposed = false;
@@ -275,6 +264,18 @@ function ensureBlobType(blob: Blob, ft: string): Blob {
   if (blob.type === expected) return blob;
   return new Blob([blob], { type: expected });
 }
+
+// 文档预览里的 mermaid 代码块由 renderDocumentPreviewMarkdown 输出成
+// <pre class="mermaid" data-mermaid="false">，这里在 DOM 更新后统一渲染成 SVG。
+watch(
+  markdownHtml,
+  async (html) => {
+    if (!html || !html.includes('data-mermaid="false"')) return;
+    await nextTick();
+    await renderMermaidInContainer(previewContent.value);
+  },
+  { flush: 'post' },
+);
 
 function getHighlightLang(ft: string): string {
   return resolveHighlightLang(ft);
