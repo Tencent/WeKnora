@@ -1534,6 +1534,10 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			if entry.IsEnabled != nil {
 				isEnabled = *entry.IsEnabled
 			}
+			flags := types.ChunkFlagRecommended
+			if entry.IsRecommended != nil && !*entry.IsRecommended {
+				flags = 0
+			}
 			// ChunkIndex计算：startChunkIndex + (i+idx) + initialProcessed
 			chunk := &types.Chunk{
 				ID:              uuid.New().String(),
@@ -1543,6 +1547,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 				Content:         buildFAQChunkContent(meta, indexMode),
 				// ChunkIndex:      0,
 				IsEnabled: isEnabled,
+				Flags:     flags,
 				ChunkType: types.ChunkTypeFAQ,
 				TagID:     tagID,                        // 使用解析后的 TagID
 				Status:    int(types.ChunkStatusStored), // store but not indexed
