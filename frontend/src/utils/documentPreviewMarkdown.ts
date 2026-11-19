@@ -45,6 +45,11 @@ function createPreviewMarkdownRenderer(): Renderer {
   }
   renderer.code = ({ text, lang }) => {
     const source = typeof text === 'string' ? text : ''
+    // Mermaid 代码块交给 renderMermaidInContainer 处理：这里只输出一个带
+    // data-mermaid="false" 的占位节点，渲染完成后会被替换成 SVG。
+    if (lang === 'mermaid') {
+      return `<pre class="mermaid" data-mermaid="false">${escapeHTML(source)}</pre>`
+    }
     return `<pre><code class="hljs">${highlightPreviewCode(source, lang)}</code></pre>`
   }
   return renderer

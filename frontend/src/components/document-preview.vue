@@ -13,6 +13,7 @@ import { sanitizeHTML, sanitizeMarkdownHTML, hydrateProtectedFileImages } from '
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { findMarkdownSourceRange } from '@/utils/markdownSourceLocate';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
+import { renderMermaidInContainer } from '@/utils/mermaidShared';
 import {
   neutralizeRelativePreviewImages,
   PREVIEW_IMAGE_PAGE_SIZE,
@@ -158,6 +159,18 @@ watch(
     // While downloading, focus rests on the preview root. Transfer it only
     // if it is still there when the content arrives (never steal input focus).
     if (document.activeElement === previewRoot.value) focusPreviewContent();
+  },
+  { flush: 'post' },
+);
+
+// 文档预览里的 mermaid 代码块由 renderDocumentPreviewMarkdown 输出成
+// <pre class="mermaid" data-mermaid="false">，这里在 DOM 更新后统一渲染成 SVG。
+watch(
+  markdownHtml,
+  async (html) => {
+    if (!html || !html.includes('data-mermaid="false"')) return;
+    await nextTick();
+    await renderMermaidInContainer(previewContent.value);
   },
   { flush: 'post' },
 );

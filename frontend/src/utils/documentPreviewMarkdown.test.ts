@@ -110,3 +110,25 @@ test('plain bullets are not affected by the task checkbox override', () => {
   assert.match(html, /<li>普通项<\/li>/)
   assert.ok(!html.includes('task-checkbox'))
 })
+
+test('preview Markdown emits a mermaid placeholder instead of a code block', () => {
+  const html = renderDocumentPreviewMarkdown(
+    '\u0060\u0060\u0060mermaid\ngraph TD;\nA-->B;\n\u0060\u0060\u0060',
+    value => value,
+  )
+
+  assert.match(html, /<pre class="mermaid" data-mermaid="false">/)
+  // 源码要转义后放进占位节点，mermaid.run 读 textContent 时会自动还原。
+  assert.match(html, /A--&gt;B;/)
+  assert.doesNotMatch(html, /class="hljs"/)
+})
+
+test('preview Markdown keeps non-mermaid code blocks highlighted', () => {
+  const html = renderDocumentPreviewMarkdown(
+    '\u0060\u0060\u0060js\nconst a = 1;\n\u0060\u0060\u0060',
+    value => value,
+  )
+
+  assert.match(html, /<pre><code class="hljs">/)
+  assert.doesNotMatch(html, /data-mermaid/)
+})

@@ -36,6 +36,9 @@ type SecurityHooks = {
 };
 
 const DOCUMENT_PREVIEW_IMAGE_ATTRS = ['loading', 'decoding', 'fetchpriority'] as const;
+// 文档预览里的 mermaid 代码块靠 data-mermaid="false" 标记待渲染节点，
+// 渲染完成后由 renderMermaidInContainer 改成 "true"。
+const DOCUMENT_PREVIEW_MERMAID_ATTRS = ['data-mermaid'] as const;
 
 function sanitizeWithSecurityHooks(
   html: string,
@@ -136,7 +139,11 @@ export function applyDocumentPreviewImageAttributes(currentNode: Node): void {
 export const documentPreviewDomPurifyConfig = {
   ...DOMPurifyConfig,
   // 在基础 ADD_ATTR 上追加，而不是覆盖，否则链接的 target="_blank" 又会被剥掉。
-  ADD_ATTR: [...DOMPurifyConfig.ADD_ATTR, ...DOCUMENT_PREVIEW_IMAGE_ATTRS],
+  ADD_ATTR: [
+    ...DOMPurifyConfig.ADD_ATTR,
+    ...DOCUMENT_PREVIEW_IMAGE_ATTRS,
+    ...DOCUMENT_PREVIEW_MERMAID_ATTRS,
+  ],
 };
 
 const documentPreviewSecurityHooks: SecurityHooks = {
