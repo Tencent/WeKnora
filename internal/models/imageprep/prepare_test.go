@@ -94,3 +94,22 @@ func TestPrepareImageRejectsWhatIsNotAnImage(t *testing.T) {
 	_, err = Prepare(nil, Limits{})
 	assert.ErrorContains(t, err, "empty")
 }
+
+func TestPrepareImageRejectsExtremeAspectRatio(t *testing.T) {
+	// Tall decorative strip: 1x250 (aspect ratio 250 >= 200)
+	tallData := encoded(t, 1, 250, pngEncode, noise())
+	_, err := Prepare(tallData, Limits{MaxAspectRatio: 200})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "extreme aspect ratio")
+
+	// Wide decorative line: 250x1 (aspect ratio 250 >= 200)
+	wideData := encoded(t, 250, 1, pngEncode, noise())
+	_, err = Prepare(wideData, Limits{MaxAspectRatio: 200})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "extreme aspect ratio")
+
+	// Normal aspect ratio (e.g. 100x80) passes
+	normalData := encoded(t, 100, 80, pngEncode, noise())
+	_, err = Prepare(normalData, Limits{MaxAspectRatio: 200})
+	require.NoError(t, err)
+}

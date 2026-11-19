@@ -356,7 +356,9 @@ func (s *ImageMultimodalService) processImage(
 	// A successful storage read can still return an empty object or an HTML/
 	// JSON error body. Do not let the VLM turn that into a successful caption
 	// such as "please provide an image" and persist it in the gallery.
-	if _, err := imageprep.Prepare(imgBytes, imageprep.Limits{}); err != nil {
+	// Also guard against extreme aspect ratio images (>= 200, such as 1x526 decorative
+	// lines or table borders) which are permanently rejected by VLM preprocessors with 400.
+	if _, err := imageprep.Prepare(imgBytes, imageprep.Limits{MaxAspectRatio: 200}); err != nil {
 		out["input_error"] = err.Error()
 		handleErr = fmt.Errorf("%w: invalid source image: %v", asynq.SkipRetry, err)
 		return handleErr

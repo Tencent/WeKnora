@@ -37,8 +37,9 @@ const (
 // Limits describes what one image may be. Zero values mean the vendor
 // documents no limit.
 type Limits struct {
-	MaxBytes  int
-	MIMETypes []string
+	MaxBytes       int
+	MIMETypes      []string
+	MaxAspectRatio float64
 }
 
 // LimitsOf renders an endpoint's image settings as Limits.
@@ -58,6 +59,20 @@ func Prepare(data []byte, limits Limits) (api.EmbedImage, error) {
 	if !strings.HasPrefix(mime, "image/") {
 		return api.EmbedImage{}, fmt.Errorf("not an image (%s)", mime)
 	}
+
+	if limits.MaxAspectRatio > 0 {
+		cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+		if err == nil && cfg.Width > 0 && cfg.Height > 0 {
+			ratio := float64(cfg.Width) / float64(cfg.Height)
+			if ratio < 1.0 {
+				ratio = 1.0 / ratio
+			}
+			if ratio >= limits.MaxAspectRatio {
+				return api.EmbedImage{}, fmt.Errorf("extreme aspect ratio %.1f exceeds limit %.1f", ratio, limits.MaxAspectRatio)
+			}
+		}
+	}
+
 	if acceptsMIME(limits, mime) && fitsBytes(limits, len(data)) {
 		return api.EmbedImage{Data: data, MIMEType: mime}, nil
 	}
