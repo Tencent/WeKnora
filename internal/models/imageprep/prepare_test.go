@@ -94,3 +94,31 @@ func TestPrepareImageRejectsWhatIsNotAnImage(t *testing.T) {
 	_, err = Prepare(nil, Limits{})
 	assert.ErrorContains(t, err, "empty")
 }
+
+func TestPrepareImageConvertsGrayscaleToRGB(t *testing.T) {
+	// Create a grayscale PNG
+	gray := image.NewGray(image.Rect(0, 0, 10, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			gray.SetGray(x, y, color.Gray{Y: uint8(x * 20)})
+		}
+	}
+	var buf bytes.Buffer
+	require.NoError(t, png.Encode(&buf, gray))
+	grayBytes := buf.Bytes()
+
+	// Verify original is decoded as grayscale
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(grayBytes))
+	require.NoError(t, err)
+	require.Equal(t, color.GrayModel, cfg.ColorModel)
+
+	// Prepare with RequireRGB: true
+	prep, err := Prepare(grayBytes, Limits{RequireRGB: true, MIMETypes: []string{"image/png"}})
+	require.NoError(t, err)
+
+	// Verify converted image is no longer grayscale
+	cfgOut, _, err := image.DecodeConfig(bytes.NewReader(prep.Data))
+	require.NoError(t, err)
+	require.NotEqual(t, color.GrayModel, cfgOut.ColorModel)
+	require.NotEqual(t, color.Gray16Model, cfgOut.ColorModel)
+}

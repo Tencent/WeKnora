@@ -356,10 +356,16 @@ func (s *ImageMultimodalService) processImage(
 	// A successful storage read can still return an empty object or an HTML/
 	// JSON error body. Do not let the VLM turn that into a successful caption
 	// such as "please provide an image" and persist it in the gallery.
-	if _, err := imageprep.Prepare(imgBytes, imageprep.Limits{}); err != nil {
+	// Also ensure single-channel grayscale images are converted to 3-channel RGB
+	// so upstream VLM tensor preprocessing does not fail with shape mismatch [1, 1, H, W] vs [1, 3, H, W].
+	prepImg, err := imageprep.Prepare(imgBytes, imageprep.Limits{RequireRGB: true})
+	if err != nil {
 		out["input_error"] = err.Error()
 		handleErr = fmt.Errorf("%w: invalid source image: %v", asynq.SkipRetry, err)
 		return handleErr
+	}
+	if len(prepImg.Data) > 0 {
+		imgBytes = prepImg.Data
 	}
 
 	imageInfo := types.ImageInfo{

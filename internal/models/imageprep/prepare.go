@@ -37,8 +37,9 @@ const (
 // Limits describes what one image may be. Zero values mean the vendor
 // documents no limit.
 type Limits struct {
-	MaxBytes  int
-	MIMETypes []string
+	MaxBytes   int
+	MIMETypes  []string
+	RequireRGB bool
 }
 
 // LimitsOf renders an endpoint's image settings as Limits.
@@ -58,7 +59,7 @@ func Prepare(data []byte, limits Limits) (api.EmbedImage, error) {
 	if !strings.HasPrefix(mime, "image/") {
 		return api.EmbedImage{}, fmt.Errorf("not an image (%s)", mime)
 	}
-	if acceptsMIME(limits, mime) && fitsBytes(limits, len(data)) {
+	if (!limits.RequireRGB || !isGrayscale(data)) && acceptsMIME(limits, mime) && fitsBytes(limits, len(data)) {
 		return api.EmbedImage{Data: data, MIMEType: mime}, nil
 	}
 
@@ -76,6 +77,12 @@ func Prepare(data []byte, limits Limits) (api.EmbedImage, error) {
 	}
 
 	img := src
+	if limits.RequireRGB && isImageGrayscale(src) {
+		b := src.Bounds()
+		rgba := image.NewRGBA(b)
+		draw.Draw(rgba, b, src, b.Min, draw.Src)
+		img = rgba
+	}
 	for {
 		out, err := encodeImage(img, target)
 		if err != nil {
@@ -121,4 +128,21 @@ func encodeImage(img image.Image, mime string) ([]byte, error) {
 		return nil, fmt.Errorf("encode %s: %w", mime, err)
 	}
 	return buf.Bytes(), nil
+}
+
+func isGrayscale(data []byte) bool {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return false
+	}
+	return cfg.ColorModel == color.GrayModel || cfg.ColorModel == color.Gray16Model
+}
+
+func isImageGrayscale(img image.Image) bool {
+	switch img.(type) {
+	case *image.Gray, *image.Gray16:
+		return true
+	default:
+		return img.ColorModel() == color.GrayModel || img.ColorModel() == color.Gray16Model
+	}
 }
