@@ -152,7 +152,8 @@ func (s spaceVisibilityKBSvc) GetKnowledgeBaseByIDOnly(ctx context.Context, kbID
 }
 
 func (s spaceVisibilityKBSvc) ListKnowledgeBasesByTenantID(
-	ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error) {
+	ctx context.Context, tenantID uint64,
+) ([]*types.KnowledgeBase, error) {
 	return s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
 }
 
