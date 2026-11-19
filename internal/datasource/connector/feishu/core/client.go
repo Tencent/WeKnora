@@ -46,6 +46,41 @@ const maxJSONResponseBytes = 16 << 20
 // request returns the same oversized body, so callers must not retry it.
 var errResponseTooLarge = errors.New("response exceeds maximum size")
 
+const (
+	// feishuErrCodeWikiNotFound is Feishu Wiki's "not found" error code
+	// (e.g. "not found: node has been deleted", "node not found").
+	feishuErrCodeWikiNotFound = 131005
+	// feishuErrCodeDriveNotFound is Feishu Drive's "not found" error code.
+	feishuErrCodeDriveNotFound = 1061003
+)
+
+type feishuAPIError struct {
+	statusCode int
+	code       int
+	body       string
+}
+
+func newFeishuAPIError(statusCode int, respBody []byte) error {
+	var apiResp ApiResponse
+	_ = json.Unmarshal(respBody, &apiResp)
+	return &feishuAPIError{
+		statusCode: statusCode,
+		code:       apiResp.Code,
+		body:       string(respBody),
+	}
+}
+
+func (e *feishuAPIError) Error() string {
+	return fmt.Sprintf("feishu api error: status=%d body=%s", e.statusCode, e.body)
+}
+
+func (e *feishuAPIError) Unwrap() error {
+	if e.code == feishuErrCodeWikiNotFound || e.code == feishuErrCodeDriveNotFound {
+		return datasource.ErrResourceNotFound
+	}
+	return nil
+}
+
 // readCapped reads a response body, refusing anything larger than limit instead
 // of buffering it. Oversized payloads are reported as an error: a truncated
 // body would be indexed as if it were the whole document. A non-positive limit
@@ -315,7 +350,7 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("feishu api error: status=%d body=%s", resp.StatusCode, string(respBody))
+			return newFeishuAPIError(resp.StatusCode, respBody)
 		}
 
 		if result != nil {
@@ -369,7 +404,7 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 	for {
 		path := "/open-apis/wiki/v2/spaces?page_size=50"
 		if pageToken != "" {
-			path += "&page_token=" + pageToken
+			path += "&page_token=" + url.QueryEscape(pageToken)
 		}
 
 		var resp WikiSpaceListResponse
@@ -388,8 +423,11 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 
 		allSpaces = append(allSpaces, resp.Data.Items...)
 
-		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+		if !resp.Data.HasMore {
 			break
+		}
+		if resp.Data.PageToken == "" {
+			return nil, fmt.Errorf("feishu wiki space pagination: has_more=true with a missing page token")
 		}
 		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
 			return nil, fmt.Errorf("feishu wiki space pagination repeated page token %q", resp.Data.PageToken)
@@ -415,7 +453,7 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			path += "&parent_node_token=" + parentNodeToken
 		}
 		if pageToken != "" {
-			path += "&page_token=" + pageToken
+			path += "&page_token=" + url.QueryEscape(pageToken)
 		}
 
 		var resp WikiNodeListResponse
@@ -423,6 +461,12 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			return nil, fmt.Errorf("list wiki nodes: %w", err)
 		}
 		if resp.Code != 0 {
+			if resp.Code == feishuErrCodeWikiNotFound {
+				return nil, fmt.Errorf(
+					"list wiki nodes error: code=%d msg=%s: %w",
+					resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+				)
+			}
 			return nil, fmt.Errorf("list wiki nodes error: code=%d msg=%s", resp.Code, resp.Msg)
 		}
 
@@ -436,8 +480,11 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			allNodes = append(allNodes, node)
 		}
 
-		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+		if !resp.Data.HasMore {
 			break
+		}
+		if resp.Data.PageToken == "" {
+			return nil, fmt.Errorf("feishu wiki node pagination: has_more=true with a missing page token")
 		}
 		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
 			return nil, fmt.Errorf("feishu wiki node pagination repeated page token %q", resp.Data.PageToken)
@@ -458,6 +505,12 @@ func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken stri
 		return WikiNode{}, fmt.Errorf("get wiki node: %w", err)
 	}
 	if resp.Code != 0 {
+		if resp.Code == feishuErrCodeWikiNotFound {
+			return WikiNode{}, fmt.Errorf(
+				"get wiki node error: code=%d msg=%s: %w",
+				resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+			)
+		}
 		return WikiNode{}, fmt.Errorf("get wiki node error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
@@ -900,6 +953,12 @@ func (c *Client) listDriveFiles(
 		return nil, "", false, fmt.Errorf("list drive files: %w", err)
 	}
 	if resp.Code != 0 {
+		if resp.Code == feishuErrCodeDriveNotFound {
+			return nil, "", false, fmt.Errorf(
+				"list drive files error: code=%d msg=%s: %w",
+				resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+			)
+		}
 		return nil, "", false, fmt.Errorf("list drive files error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
@@ -923,6 +982,12 @@ func (c *Client) GetDriveFolderMeta(ctx context.Context, folderToken string) (dr
 		return resp, fmt.Errorf("get drive folder meta: %w", err)
 	}
 	if resp.Code != 0 {
+		if resp.Code == feishuErrCodeDriveNotFound {
+			return resp, fmt.Errorf(
+				"get drive folder meta error: code=%d msg=%s: %w",
+				resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+			)
+		}
 		return resp, fmt.Errorf("get drive folder meta error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	return resp, nil
@@ -939,8 +1004,11 @@ func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string)
 			return nil, err
 		}
 		all = append(all, files...)
-		if !hasMore || next == "" {
+		if !hasMore {
 			break
+		}
+		if next == "" {
+			return nil, fmt.Errorf("feishu drive file pagination: has_more=true with a missing page token")
 		}
 		if _, exists := seenPageTokens[next]; exists {
 			return nil, fmt.Errorf("feishu drive file pagination repeated page token %q", next)
@@ -991,6 +1059,9 @@ func WalkDriveTree(
 		}
 
 		for _, f := range entries {
+			if f.ParentToken == "" {
+				f.ParentToken = folderToken
+			}
 			switch f.Type {
 			case "folder":
 				name := SanitizeFileName(f.Name)
@@ -1022,6 +1093,7 @@ func ExpandDriveShortcut(f DriveFile) (DriveFile, bool) {
 	if f.ShortcutInfo == nil || f.ShortcutInfo.TargetToken == "" || f.ShortcutInfo.TargetType == "folder" {
 		return DriveFile{}, false
 	}
+	f.ShortcutToken = f.Token
 	f.Token, f.Type = f.ShortcutInfo.TargetToken, f.ShortcutInfo.TargetType
 	f.ShortcutInfo = nil
 	return f, true

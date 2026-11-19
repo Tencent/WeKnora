@@ -197,6 +197,11 @@ type SearchResult struct {
 	// MatchedImages survives merging, deduplication and stored reference replay.
 	// It contains storage references, never image bytes.
 	MatchedImages []MatchedImage `json:"matched_images,omitempty" gorm:"-"`
+	// EvidenceHandles records storage references that citation sources of this
+	// result expose to the model even though merge scoping kept them out of
+	// Content and ImageInfo. The message-scoped file proxy reads them as
+	// retrieval evidence (#5069); prompts and UI do not consume them.
+	EvidenceHandles []string `json:"evidence_handles,omitempty" gorm:"-"`
 
 	// Knowledge file name
 	// Used for file type knowledge, contains the original file name

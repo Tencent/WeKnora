@@ -625,12 +625,13 @@ func (s *userService) SetUserActive(ctx context.Context, userID, actorID string,
 }
 
 // ListAllUsers lists every platform user newest-first for the system-admin
-// user-management UI. It fetches limit+1 rows to derive has_more without a
-// separate COUNT. Role gating is the handler's responsibility.
+// user-management UI, optionally filtered by username or email. It fetches
+// limit+1 rows to derive has_more without a separate COUNT. Role gating is the
+// handler's responsibility.
 func (s *userService) ListAllUsers(
-	ctx context.Context, offset, limit int,
+	ctx context.Context, query string, offset, limit int,
 ) ([]*types.User, bool, error) {
-	rows, err := s.userRepo.ListUsers(ctx, offset, limit+1)
+	rows, err := s.userRepo.ListUsers(ctx, strings.TrimSpace(query), offset, limit+1)
 	if err != nil {
 		return nil, false, err
 	}

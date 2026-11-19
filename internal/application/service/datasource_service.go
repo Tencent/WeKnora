@@ -626,6 +626,21 @@ func (s *DataSourceService) GetSyncLog(ctx context.Context, syncLogID string) (*
 	return log, nil
 }
 
+// syncCompletionPersisted reports whether the data-source completion write for
+// this round finished. updateSyncRunResult writes the terminal log first, so the
+// log alone cannot prove completion. LastSyncAt must belong to this round, and
+// a pending resync marker still requires the post-completion cleanup write.
+func syncCompletionPersisted(ds *types.DataSource, syncLog *types.SyncLog) bool {
+	if ds.LastSyncAt == nil || ds.LastSyncAt.Before(syncLog.StartedAt) {
+		return false
+	}
+	config, err := ds.ParseConfig()
+	if err != nil {
+		return false
+	}
+	return !resyncRequired(config)
+}
+
 // ProcessSync handles the actual sync operation (called by asynq task)
 func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) error {
 	var payload types.DataSourceSyncPayload
@@ -639,14 +654,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 
 	logger.Infof(ctx, "processing data source sync: ds=%s syncLog=%s", payload.DataSourceID, payload.SyncLogID)
 
-	// Get data source
-	ds, err := s.GetDataSource(ctx, payload.DataSourceID)
-	sourceMissing := errors.Is(err, datasource.ErrDataSourceNotFound)
-	if err != nil && !sourceMissing {
-		return fmt.Errorf("read data source for sync: %w", err)
-	}
-
-	// Get sync log
+	// Get sync log. It is loaded before the data source so that a redelivery of
+	// an already finished round is recognised even when the data source has been
+	// deleted in the meantime, instead of having its log rewritten to canceled.
 	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
 	if errors.Is(err, datasource.ErrSyncLogNotFound) {
 		return nil
@@ -654,12 +664,41 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	if err != nil {
 		return fmt.Errorf("read sync log: %w", err)
 	}
+
+	// Canceled rounds were stopped on purpose and have no completion write to
+	// verify. Keep recognizing them before the data-source lookup so deletion
+	// cannot rewrite the log.
+	if syncLog.Status == types.SyncLogStatusCanceled {
+		logger.Infof(ctx, "sync log already finished, skipping replay: ds=%s syncLog=%s status=%s",
+			payload.DataSourceID, payload.SyncLogID, syncLog.Status)
+		return nil
+	}
+
+	// Get data source
+	ds, err := s.GetDataSource(ctx, payload.DataSourceID)
+	sourceMissing := errors.Is(err, datasource.ErrDataSourceNotFound)
+	if err != nil && !sourceMissing {
+		return fmt.Errorf("read data source for sync: %w", err)
+	}
+	terminalResult := syncLog.Status == types.SyncLogStatusSuccess || syncLog.Status == types.SyncLogStatusPartial
 	if sourceMissing {
+		if terminalResult {
+			// The source is gone, so there is no completion write left to repair.
+			// Preserve the finished log rather than rewriting it as canceled.
+			logger.Infof(ctx, "sync log already finished, skipping replay: ds=%s syncLog=%s status=%s",
+				payload.DataSourceID, payload.SyncLogID, syncLog.Status)
+			return nil
+		}
 		logger.Warnf(ctx, "data source not found, cancelling sync: ds=%s", payload.DataSourceID)
-		syncLog.Status = types.SyncLogStatusCanceled
-		syncLog.FinishedAt = timePtr(time.Now().UTC())
-		syncLog.ErrorMessage = "data source has been deleted"
-		_ = s.syncLogRepo.Update(ctx, syncLog)
+		return s.cancelSyncLog(ctx, syncLog, "data source has been deleted")
+	}
+
+	// A terminal log without its source completion must fall through so an
+	// asynq retry can finish the writes. failed and running also fall through:
+	// failed resumes from its cursor, and running is the attempt to recover.
+	if terminalResult && syncCompletionPersisted(ds, syncLog) {
+		logger.Infof(ctx, "sync log already finished, skipping replay: ds=%s syncLog=%s status=%s",
+			payload.DataSourceID, payload.SyncLogID, syncLog.Status)
 		return nil
 	}
 
@@ -670,11 +709,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		}
 		logger.Warnf(ctx, "knowledge base not found, cancelling sync: kb=%s ds=%s",
 			ds.KnowledgeBaseID, payload.DataSourceID)
-		syncLog.Status = types.SyncLogStatusCanceled
-		syncLog.FinishedAt = timePtr(time.Now().UTC())
-		syncLog.ErrorMessage = "knowledge base has been deleted"
-		_ = s.syncLogRepo.Update(ctx, syncLog)
-		return nil
+		return s.cancelSyncLog(ctx, syncLog, "knowledge base has been deleted")
 	}
 
 	ctx, err = access.WithKBTaskWrite(ctx, kb, ds.TenantID)
@@ -695,7 +730,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 
@@ -711,7 +746,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 	// Streaming path: connectors that support it interleave fetch→ingest→
@@ -768,7 +803,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return fetchErr
 	}
 
@@ -791,7 +826,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			ds.Status = types.DataSourceStatusError
 		}
 		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
+		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
@@ -897,6 +932,75 @@ func recordSyncError(result *types.SyncResult, item types.SyncItemError) {
 	}
 }
 
+// recordSyncDeletedItem appends a source-deleted item sample to
+// result.DeletedItems (capped at maxSyncResultErrors and deduplicated),
+// resolving a human-readable title from the item, KB row, or prior sync result.
+func recordSyncDeletedItem(
+	result *types.SyncResult, ds *types.DataSource,
+	existing *types.Knowledge, item *types.FetchedItem,
+) {
+	if result == nil || item == nil || len(result.DeletedItems) >= maxSyncResultErrors {
+		return
+	}
+	for _, d := range result.DeletedItems {
+		if d.ExternalID == item.ExternalID && d.SourceResourceID == item.SourceResourceID {
+			return
+		}
+	}
+	result.DeletedItems = append(result.DeletedItems, types.SyncDeletedItem{
+		ExternalID:       item.ExternalID,
+		SourceResourceID: item.SourceResourceID,
+		Title:            resolveDeletedItemTitle(ds, existing, item),
+	})
+}
+
+func resolveDeletedItemTitle(
+	ds *types.DataSource, existing *types.Knowledge, item *types.FetchedItem,
+) string {
+	if t := strings.TrimSpace(item.Title); t != "" {
+		return t
+	}
+	if existing != nil {
+		if t := strings.TrimSpace(existing.Title); t != "" {
+			return t
+		}
+		if t := strings.TrimSpace(existing.FileName); t != "" {
+			return t
+		}
+	}
+	if ds != nil && len(ds.LastSyncResult) > 0 {
+		var prev types.SyncResult
+		if err := json.Unmarshal(ds.LastSyncResult, &prev); err == nil {
+			if item.ExternalID != "" {
+				for _, d := range prev.DeletedItems {
+					if d.Title != "" && d.ExternalID == item.ExternalID {
+						return d.Title
+					}
+				}
+			}
+			if item.SourceResourceID != "" {
+				matchedTitle := ""
+				ambiguous := false
+				for _, d := range prev.DeletedItems {
+					if d.Title == "" || d.SourceResourceID != item.SourceResourceID {
+						continue
+					}
+					if matchedTitle == "" {
+						matchedTitle = d.Title
+					} else if matchedTitle != d.Title {
+						ambiguous = true
+						break
+					}
+				}
+				if matchedTitle != "" && !ambiguous {
+					return matchedTitle
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // fetchFailureSyncError maps a connector error item into a structured, user-
 // facing sample. Connectors that classify their errors (Feishu) provide a stable
 // i18n code + params via metadata so the frontend localises it to the viewer's
@@ -928,7 +1032,18 @@ func (s *DataSourceService) applyFetchedItem(
 	tagIDs []string, result *types.SyncResult,
 ) (nonBlockingFailure bool, ingestErr error) {
 	if item.IsDeleted {
+		selectedDeleted := item.Metadata[types.MetaKeySelectedResourceDeleted] == "true"
 		if !ds.SyncDeletions {
+			if selectedDeleted {
+				var existing *types.Knowledge
+				if s.knowledgeService != nil && s.knowledgeService.GetRepository() != nil && item.ExternalID != "" {
+					existing, _ = s.knowledgeService.GetRepository().FindByDataSourceExternalID(
+						ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID,
+					)
+				}
+				result.Skipped++
+				recordSyncDeletedItem(result, ds, existing, item)
+			}
 			// Sync deletion disabled: neither count nor delete.
 			return false, nil
 		}
@@ -958,7 +1073,11 @@ func (s *DataSourceService) applyFetchedItem(
 		if existing == nil {
 			// Deletion is idempotent: the source item may already have been
 			// removed manually or by an earlier sync.
+			s.sweepStaleSubtree(ctx, ds, item)
 			result.Skipped++
+			if selectedDeleted {
+				recordSyncDeletedItem(result, ds, nil, item)
+			}
 			return false, nil
 		}
 		if deleteErr := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); deleteErr != nil {
@@ -988,7 +1107,9 @@ func (s *DataSourceService) applyFetchedItem(
 			})
 			return false, nil
 		}
+		s.sweepStaleSubtree(ctx, ds, item)
 		result.Deleted++
+		recordSyncDeletedItem(result, ds, existing, item)
 		return false, nil
 	}
 
@@ -1333,6 +1454,52 @@ func (s *DataSourceService) processSyncStreaming(
 	return nil
 }
 
+// cancelSyncLog persists the canceled terminal state for a sync whose data
+// source or knowledge base was deleted. The caller must return its error:
+// an Asynq retry is the only path that can write the state after a transient
+// failure, and acknowledging with the log still "running" leaves the round
+// stuck until the next sync.
+func (s *DataSourceService) cancelSyncLog(
+	ctx context.Context, syncLog *types.SyncLog, message string,
+) error {
+	syncLog.Status = types.SyncLogStatusCanceled
+	syncLog.FinishedAt = timePtr(time.Now().UTC())
+	syncLog.ErrorMessage = message
+	if err := s.syncLogRepo.Update(ctx, syncLog); err != nil {
+		return fmt.Errorf("record canceled sync log: %w", err)
+	}
+	return nil
+}
+
+func mergeDeletedItems(cur, prev []types.SyncDeletedItem) []types.SyncDeletedItem {
+	if len(prev) == 0 {
+		return cur
+	}
+	out := make([]types.SyncDeletedItem, 0, min(len(cur)+len(prev), maxSyncResultErrors))
+	for _, d := range cur {
+		if len(out) >= maxSyncResultErrors {
+			return out
+		}
+		out = append(out, d)
+	}
+	for _, p := range prev {
+		if len(out) >= maxSyncResultErrors {
+			break
+		}
+		seen := false
+		for _, existing := range out {
+			if existing.ExternalID == p.ExternalID && existing.SourceResourceID == p.SourceResourceID {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func (s *DataSourceService) updateSyncRunResult(
 	ctx context.Context,
 	ds *types.DataSource,
@@ -1368,7 +1535,20 @@ func (s *DataSourceService) updateSyncRunResult(
 		ds.Status = types.DataSourceStatusActive
 	}
 	ds.ErrorMessage = errorMessage
-	ds.LastSyncResult = resultJSON
+	dsResultJSON := resultJSON
+	if status == types.SyncLogStatusFailed && result != nil {
+		if prev, err := ds.ParseSyncResult(); err == nil && prev != nil && len(prev.DeletedItems) > 0 {
+			mergedItems := mergeDeletedItems(result.DeletedItems, prev.DeletedItems)
+			if len(mergedItems) > len(result.DeletedItems) {
+				merged := *result
+				merged.DeletedItems = mergedItems
+				if b, merr := merged.ToJSON(); merr == nil {
+					dsResultJSON = b
+				}
+			}
+		}
+	}
+	ds.LastSyncResult = dsResultJSON
 	sourceErr := s.dsRepo.UpdateSyncState(ctx, ds)
 	if sourceErr != nil {
 		logger.Errorf(ctx, "failed to update data source: %v", sourceErr)

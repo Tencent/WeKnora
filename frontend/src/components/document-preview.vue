@@ -20,6 +20,7 @@ import {
 } from '@/utils/markdownPreviewImages';
 import { buildHtmlPreview } from '@/utils/htmlPreview';
 import MermaidFilePreview from './mermaid-file/MermaidFilePreview.vue';
+import { renderMermaidImages } from './mermaid-file/renderImages';
 import {
   FILE_PREVIEW_SNIFF_BYTES,
   getHighlightLang as resolveHighlightLang,
@@ -350,6 +351,41 @@ function renderTextContent(text: string, fileType: string) {
   highlightedCode.value = auto.value;
 }
 
+const markdownBody = ref<HTMLElement | null>(null);
+
+watch([() => props.active, markdownHtml, markdownBody], ([active, , body], _, onCleanup) => {
+  if (!active || !body) return;
+  const blocks = [...body.querySelectorAll<HTMLPreElement>('pre[data-preview-mermaid]:not([hidden])')];
+  if (!blocks.length) return;
+  const controller = new AbortController();
+  onCleanup(() => controller.abort());
+  void renderMarkdownDiagrams(blocks, controller.signal);
+}, { flush: 'post' });
+
+async function renderMarkdownDiagrams(blocks: HTMLPreElement[], signal: AbortSignal) {
+  try {
+    const images = await renderMermaidImages(blocks.map(block => block.textContent ?? ''), signal);
+    const replaced = await Promise.all(blocks.map(async (block, index) => {
+      const src = images[index];
+      if (!src || signal.aborted) return false;
+      const image = document.createElement('img');
+      image.className = 'markdown-mermaid-diagram';
+      image.alt = t('mermaid.diagram');
+      image.src = src;
+      // Keep the source visible if the browser cannot load the generated image.
+      await image.decode().catch(() => {});
+      if (!image.naturalWidth || signal.aborted || !block.isConnected) return false;
+      block.after(image);
+      // Keep the original text in the source index for citations that span the diagram.
+      block.hidden = true;
+      return true;
+    }));
+    if (!signal.aborted && replaced.some(Boolean)) scheduleLocate();
+  } catch {
+    // The sanitized code blocks remain visible if the renderer is unavailable.
+  }
+}
+
 async function renderMarkdown(blob: Blob) {
   const text = await blob.text();
 
@@ -364,6 +400,7 @@ async function renderMarkdown(blob: Blob) {
   const previewOptions = {
     // 预览工具栏已经显示文件名；正文第一行的同名 H1 属于重复标题。
     titles: [props.fileName],
+    renderMermaid: true,
   };
   // Relative images stay on a data URI unless a sibling file replaces them.
   // Painting the original href makes the browser request it from the page route.
@@ -1043,7 +1080,7 @@ onUnmounted(() => {
 
     <!-- Markdown -->
     <div v-else-if="previewType === 'markdown' && markdownHtml" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-markdown">
-      <div class="markdown-body" v-html="markdownHtml" />
+      <div ref="markdownBody" class="markdown-body" v-html="markdownHtml" />
     </div>
 
     <!-- Text / Code -->
@@ -1617,6 +1654,11 @@ onUnmounted(() => {
     font-size: 0.92em;
   }
   img { max-width: 100%; border-radius: var(--app-radius-xs); }
+  .markdown-mermaid-diagram {
+    display: block;
+    height: auto;
+    margin: 12px auto;
+  }
   hr { border: none; border-top: 1px solid @border-color; margin: 20px 0; }
   a { color: @accent; text-decoration: none; &:hover { color: @accent-hover; text-decoration: underline; } }
   strong { font-weight: 600; }

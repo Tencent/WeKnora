@@ -57,9 +57,15 @@ func newFakeDriveTree(t *testing.T, folders map[string][]core.DriveFile) *fakeDr
 			_, _ = w.Write([]byte(`{"code":1663,"msg":"internal error"}`))
 			return
 		}
+		files, ok := f.folders[token]
+		if !ok {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"code":1061002,"msg":"params error"}`))
+			return
+		}
 		writeJSON(w, core.DriveFileListResponse{
 			ApiResponse: core.ApiResponse{Code: 0},
-			Data:        core.DriveFileListData{Files: f.folders[token]},
+			Data:        core.DriveFileListData{Files: files},
 		})
 	})
 	mux.HandleFunc("/open-apis/drive/v1/files/", func(w http.ResponseWriter, r *http.Request) {
@@ -424,5 +430,90 @@ func TestDriveSelectedShortcutKeepsDisplayNameAndTarget(t *testing.T) {
 				t.Fatalf("shortcut must not trigger folder probes: %v", f.listCalls)
 			}
 		})
+	}
+}
+
+func TestDriveNestedSelectedShortcutSyncsDeletesAndResolvesAncestors(t *testing.T) {
+	var shortcut core.DriveFile
+	raw := `{"token":"shortcut-nested","type":"shortcut","name":"reference.pdf","modified_time":"100",
+		"shortcut_info":{"target_token":"target-doc","target_type":"file"}}`
+	if err := json.Unmarshal([]byte(raw), &shortcut); err != nil {
+		t.Fatal(err)
+	}
+	f := newFakeDriveTree(t, map[string][]core.DriveFile{
+		"root": {
+			driveFolder("sub", "Sub", "root"),
+			driveFolder("orig", "Orig", "root"),
+			driveFile("live-b", "b.pdf", "root", "100"),
+		},
+		"sub":  {shortcut},
+		"orig": {driveFile("target-doc", "original.pdf", "orig", "100")},
+	})
+	f.metaNames = map[string]string{"root": "Root", "sub": "Sub", "orig": "Orig"}
+
+	conn := NewDriveConnector(core.RegionFeishuDrive)
+	cfg := makeDriveConfig(f.cfg, []string{"root:shortcut-nested", "root:live-b"})
+
+	// Step 2 picker: nested shortcut resolves full ancestor chain ["root", "root:sub"]
+	// and ListResources("root:sub") assigns ParentID = "root:sub" even when parent_token was omitted.
+	ancestors, err := conn.ResolveResourceAncestors(
+		context.Background(), cfg, []string{"root:shortcut-nested", "root:missing"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors error: %v", err)
+	}
+	if len(ancestors) != 2 || ancestors[0] != "root" || ancestors[1] != "root:sub" {
+		t.Fatalf("ancestors = %+v, want [root root:sub]", ancestors)
+	}
+	subResources, err := conn.ListResources(context.Background(), cfg, "root:sub")
+	if err != nil {
+		t.Fatalf("ListResources(root:sub) error: %v", err)
+	}
+	if len(subResources) != 1 ||
+		subResources[0].ExternalID != "root:shortcut-nested" ||
+		subResources[0].ParentID != "root:sub" {
+		t.Fatalf("unexpected sub resources: %+v", subResources)
+	}
+
+	// Sync 1: live nested shortcut must match its shortcut token (not be falsely
+	// marked deleted after ExpandDriveShortcut swaps Token -> target-doc) and
+	// keep its own Sub folder path rather than matching orig/original.pdf.
+	items1, cursor1, err := conn.FetchIncremental(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatalf("first sync error: %v", err)
+	}
+	got1 := fetchedByToken(items1)
+	if len(got1) != 2 ||
+		got1["target-doc"].FileName != "Root/Sub/reference.pdf" ||
+		got1["live-b"].FileName != "Root/b.pdf" {
+		t.Fatalf("unexpected items on first sync: %+v", items1)
+	}
+	if ids := deletedIDs(items1); len(ids) != 0 {
+		t.Fatalf("live nested shortcut must not be marked deleted: %v", ids)
+	}
+
+	// Sync 2: delete the nested shortcut in Sub (while original.pdf in Orig still exists)
+	// and update live-b -> shortcut selection must emit IsDeleted for target-doc and continue.
+	f.folders["sub"] = nil
+	f.folders["root"][2] = driveFile("live-b", "b.pdf", "root", "200")
+	ancestorsAfterDelete, err := conn.ResolveResourceAncestors(
+		context.Background(), cfg, []string{"root:shortcut-nested"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors after delete error: %v", err)
+	}
+	if len(ancestorsAfterDelete) != 0 {
+		t.Fatalf("deleted shortcut must not return ancestors, got %+v", ancestorsAfterDelete)
+	}
+
+	items2, _, err := conn.FetchIncremental(context.Background(), cfg, cursor1)
+	if err != nil {
+		t.Fatalf("second sync error: %v", err)
+	}
+	if ids := deletedIDs(items2); len(ids) != 1 || ids[0] != "target-doc" {
+		t.Fatalf("deleted ids = %v, want [target-doc]", ids)
+	}
+	if got2 := fetchedByToken(items2); len(got2) != 1 || got2["live-b"].FileName != "Root/b.pdf" {
+		t.Fatalf("remaining live file did not update: %+v", items2)
 	}
 }

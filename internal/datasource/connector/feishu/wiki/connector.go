@@ -140,25 +140,47 @@ func (c *Connector) ResolveResourceAncestors(
 			// there is nothing above it to reveal.
 			continue
 		}
-		// The space's direct children must be loaded to reveal the top-level node.
-		add(spaceID)
 
-		// Walk up from the selection to the top, loading each intermediate
-		// parent so the path down to the selection becomes visible.
+		// Walk up from the selection to the top, collecting each intermediate
+		// parent. Commit spaceID and the parent chain only once the selection
+		// resolves cleanly up to the space root, so a deleted node or an
+		// inaccessible space never returns an unexpandable ancestor in Step 2.
+		var chain []string
 		current := nodeToken
+		broken := false
+		visited := make(map[string]bool)
 		for current != "" {
+			if visited[current] {
+				broken = true
+				break
+			}
+			visited[current] = true
 			node, err := client.GetWikiNode(ctx, spaceID, current)
 			if err != nil {
 				// Best-effort: a broken path just stays collapsed, the rest of
 				// the selections are still revealed.
 				logger.Warnf(ctx, "[Feishu] resolve ancestors: get node %s:%s: %v", spaceID, current, err)
+				broken = true
+				break
+			}
+			if node.SpaceID != "" && node.SpaceID != spaceID {
+				logger.Warnf(ctx, "[Feishu] resolve ancestors: node %s moved from space %s to %s",
+					current, spaceID, node.SpaceID)
+				broken = true
 				break
 			}
 			if node.ParentNodeID == "" {
 				break
 			}
-			add(makeWikiNodeResourceID(spaceID, node.ParentNodeID))
+			chain = append(chain, makeWikiNodeResourceID(spaceID, node.ParentNodeID))
 			current = node.ParentNodeID
+		}
+		if broken {
+			continue
+		}
+		add(spaceID)
+		for i := len(chain) - 1; i >= 0; i-- {
+			add(chain[i])
 		}
 	}
 
@@ -286,6 +308,10 @@ func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID stri
 	spaceID, nodeToken := parseWikiResourceID(resourceID)
 	nodes, err := client.ListWikiNodesWithShortcuts(ctx, spaceID, nodeToken)
 	if err != nil {
+		if nodeToken != "" && errors.Is(err, datasource.ErrResourceNotFound) {
+			logger.Warnf(ctx, "[Feishu] selected wiki node %s has been deleted, skipping: %v", resourceID, err)
+			return nil, &core.SelectedResourceDeletedError{Token: nodeToken, Cause: err}, nil
+		}
 		var partial *core.PartialWikiNodeListError
 		if !errors.As(err, &partial) {
 			// Total listing failure: nothing usable — abort the sync.

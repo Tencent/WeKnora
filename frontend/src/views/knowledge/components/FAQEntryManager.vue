@@ -936,6 +936,7 @@ interface FAQEntryPayload {
   tag_name?: string
   is_enabled?: boolean
   is_recommended?: boolean
+  answer_strategy?: 'all' | 'random'
 }
 
 const props = defineProps<{
@@ -1905,6 +1906,8 @@ const parseCSVFile = async (file: File): Promise<FAQEntryPayload[]> => {
             })
 
             const isDisabled = parseBooleanField(record['是否停用'], false)
+            const answerAll = parseBooleanField(record['是否全部回复'], false)
+            const notRecommended = parseBooleanField(record['是否禁止被推荐'], false)
             payloads.push(
               normalizePayload({
                 standard_question: record['问题'] || record['standard_question'] || record['question'] || '',
@@ -1914,6 +1917,8 @@ const parseCSVFile = async (file: File): Promise<FAQEntryPayload[]> => {
                 tag_id: record['tag_id'] ? Number(record['tag_id']) : undefined,
                 tag_name: record['标签'] || record['分类'] || record['tag_name'] || '',
                 is_enabled: isDisabled !== undefined ? !isDisabled : undefined, // 是否停用：FALSE表示启用，TRUE表示停用，所以取反
+                answer_strategy: answerAll === undefined ? undefined : answerAll ? 'all' : 'random',
+                is_recommended: notRecommended === undefined ? undefined : !notRecommended,
               }),
             )
           })
@@ -1953,6 +1958,8 @@ const parseExcelFile = async (file: File): Promise<FAQEntryPayload[]> => {
     })
 
     const isDisabled = parseBooleanField(normalizedRow['是否停用'], false)
+    const answerAll = parseBooleanField(normalizedRow['是否全部回复'], false)
+    const notRecommended = parseBooleanField(normalizedRow['是否禁止被推荐'], false)
     return normalizePayload({
       standard_question: normalizedRow['问题'] || normalizedRow['standard_question'] || normalizedRow['question'] || '',
       answers: splitByDelimiter(normalizedRow['机器人回答'] || normalizedRow['answers']),
@@ -1961,6 +1968,8 @@ const parseExcelFile = async (file: File): Promise<FAQEntryPayload[]> => {
       tag_id: normalizedRow['tag_id'] ? Number(normalizedRow['tag_id']) : undefined,
       tag_name: normalizedRow['标签'] || normalizedRow['分类'] || normalizedRow['tag_name'] || '',
       is_enabled: isDisabled !== undefined ? !isDisabled : undefined, // 是否停用：FALSE表示启用，TRUE表示停用，所以取反
+      answer_strategy: answerAll === undefined ? undefined : answerAll ? 'all' : 'random',
+      is_recommended: notRecommended === undefined ? undefined : !notRecommended,
     })
   })
 }
@@ -2004,6 +2013,8 @@ const normalizePayload = (payload: Partial<FAQEntryPayload>): FAQEntryPayload =>
   tag_id: payload.tag_id || undefined,
   tag_name: payload.tag_name || '',
   is_enabled: payload.is_enabled !== undefined ? payload.is_enabled : undefined,
+  answer_strategy: payload.answer_strategy,
+  is_recommended: payload.is_recommended,
 })
 
 const stopPolling = () => {

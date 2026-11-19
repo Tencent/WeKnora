@@ -162,8 +162,10 @@ func deleteExtractedImages(
 			logger.Infof(ctx, "Keeping extracted image %s: another owner may still reference it", url)
 			continue
 		}
-		if err := fileSvc.DeleteFile(ctx, url); err != nil {
-			logger.Errorf(ctx, "Failed to delete extracted image %s: %v", url, err)
+		if fileSvc != nil {
+			if err := fileSvc.DeleteFile(ctx, url); err != nil {
+				logger.Errorf(ctx, "Failed to delete extracted image %s: %v", url, err)
+			}
 		}
 	}
 }

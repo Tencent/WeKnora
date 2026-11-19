@@ -137,7 +137,8 @@ make package-mac-app  # 打 macOS .app（scripts/package-mac-app.sh）
 | `fmt` | `go fmt ./...` |
 | `lint` | `golangci-lint run` |
 | `deps` | `go mod download` |
-| `docs` | `swag init`（参数见 Makefile，含 `--overridesFile ./docs/swag.overrides`）生成 Swagger 文档 |
+| `docs` | `go run ./scripts/swagger-gen -o ./docs`（固定 `go.mod` 中的 `swag` 版本，含 `./docs/swag.overrides`）生成 `docs/swagger.json` 与 `docs/swagger.yaml`（`docs/docs.go` 通过 `//go:embed swagger.json` 复用） |
+| `docs-check` | `go test ./docs/...`，校验 Swagger 生成物与 Go 注解同步及路由/Schema 契约 |
 | `install-swagger` | 安装 `swag` CLI |
 
 ### Docker 镜像与服务管理 {#_3-2-docker-镜像与服务管理}

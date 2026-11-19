@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -150,6 +152,38 @@ func runSync[N any](
 		if err != nil {
 			return nil, fmt.Errorf("list %s for resource %s: %w", ops.ResourceNoun(), resourceID, err)
 		}
+		var deletedRes *SelectedResourceDeletedError
+		if errors.As(partial, &deletedRes) {
+			tokens := make([]string, 0, len(prevTimes[resourceID])+1)
+			if prevTimes != nil {
+				for tok := range prevTimes[resourceID] {
+					tokens = append(tokens, tok)
+				}
+				slices.Sort(tokens)
+			}
+			if len(tokens) == 0 && deletedRes.Token != "" {
+				tokens = append(tokens, deletedRes.Token)
+			}
+			for _, tok := range tokens {
+				if eerr := h.Emit(ctx, types.FetchedItem{
+					ExternalID:       tok,
+					IsDeleted:        true,
+					ReplacesSubtree:  true,
+					SourceResourceID: resourceID,
+					Metadata: map[string]string{
+						types.MetaKeySelectedResourceDeleted: "true",
+					},
+				}); eerr != nil {
+					return nil, eerr
+				}
+			}
+			delete(newTimes, resourceID)
+			processed++
+			maybeCheckpoint()
+			logger.Infof(ctx, "%s selected resource deleted in source resource=%s token=%s",
+				ops.LogTag(), resourceID, deletedRes.Token)
+			continue
+		}
 		if partial != nil {
 			for _, item := range ops.ListFailureItems(resourceID, partial) {
 				if eerr := h.Emit(ctx, item); eerr != nil {
@@ -235,6 +269,7 @@ func runSync[N any](
 						if eerr := h.Emit(ctx, types.FetchedItem{
 							ExternalID:       tok,
 							IsDeleted:        true,
+							ReplacesSubtree:  true,
 							SourceResourceID: resourceID,
 						}); eerr != nil {
 							return nil, eerr
