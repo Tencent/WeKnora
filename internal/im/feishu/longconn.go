@@ -205,13 +205,13 @@ func convertEvent(region Region, botOpenID string, event *larkim.P2MessageReceiv
 
 	switch msgType {
 	case "text":
-		return convertTextEvent(region, msg, openID, chatID, chatType, messageID)
+		return convertTextEvent(region, msg, openID, chatID, chatType, messageID, botOpenID)
 	case "file":
 		return convertFileEvent(region, msg, openID, chatID, chatType, messageID)
 	case "image":
 		return convertImageEvent(region, msg, openID, chatID, chatType, messageID)
 	case "post":
-		return convertPostEvent(region, msg, openID, chatID, chatType, messageID)
+		return convertPostEvent(region, msg, openID, chatID, chatType, messageID, botOpenID)
 	default:
 		return nil
 	}
@@ -260,6 +260,7 @@ func describeMentions(mentions []*larkim.MentionEvent) []string {
 func convertTextEvent(
 	region Region, msg *larkim.EventMessage,
 	openID, chatID string, chatType im.ChatType, messageID string,
+	botOpenID string,
 ) *im.IncomingMessage {
 	var textContent struct {
 		Text string `json:"text"`
@@ -271,17 +272,7 @@ func convertTextEvent(
 		return nil
 	}
 
-	content := textContent.Text
-	if chatType == im.ChatTypeGroup {
-		for strings.HasPrefix(content, "@_user_") {
-			idx := strings.Index(content, " ")
-			if idx >= 0 {
-				content = content[idx+1:]
-			} else {
-				break
-			}
-		}
-	}
+	content := resolveFeishuMentions(textContent.Text, msg.Mentions, chatType, botOpenID)
 
 	return &im.IncomingMessage{
 		Platform:    region.Platform,
@@ -362,6 +353,7 @@ func convertImageEvent(
 func convertPostEvent(
 	region Region, msg *larkim.EventMessage,
 	openID, chatID string, chatType im.ChatType, messageID string,
+	botOpenID string,
 ) *im.IncomingMessage {
 	if msg.Content == nil {
 		return nil
@@ -389,6 +381,8 @@ func convertPostEvent(
 				Tag      string `json:"tag"`
 				Text     string `json:"text"`
 				ImageKey string `json:"image_key"`
+				UserID   string `json:"user_id"`
+				UserName string `json:"user_name"`
 			}
 			if err := json.Unmarshal(elem, &tag); err != nil {
 				continue
@@ -401,7 +395,27 @@ func convertPostEvent(
 					imageKey = tag.ImageKey
 				}
 			case "at":
-				// Skip @mentions
+				if chatType == im.ChatTypeGroup && tag.UserID == botOpenID {
+					continue
+				}
+				if tag.UserID == "all" {
+					lineText.WriteString("@所有人")
+				} else if tag.UserName != "" {
+					lineText.WriteString("@" + tag.UserName)
+				} else if tag.UserID != "" {
+					foundName := ""
+					for _, m := range msg.Mentions {
+						if m != nil && m.Id != nil && m.Id.OpenId != nil && *m.Id.OpenId == tag.UserID {
+							if m.Name != nil && *m.Name != "" {
+								foundName = *m.Name
+								break
+							}
+						}
+					}
+					if foundName != "" {
+						lineText.WriteString("@" + foundName)
+					}
+				}
 			}
 		}
 		if t := strings.TrimSpace(lineText.String()); t != "" {
@@ -409,17 +423,7 @@ func convertPostEvent(
 		}
 	}
 
-	content := strings.Join(textParts, "\n")
-	if chatType == im.ChatTypeGroup {
-		for strings.HasPrefix(content, "@_user_") {
-			idx := strings.Index(content, " ")
-			if idx >= 0 {
-				content = content[idx+1:]
-			} else {
-				break
-			}
-		}
-	}
+	content := resolveFeishuMentions(strings.Join(textParts, "\n"), msg.Mentions, chatType, botOpenID)
 
 	content = strings.TrimSpace(content)
 	if content == "" && imageKey == "" {

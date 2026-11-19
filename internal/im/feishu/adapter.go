@@ -417,8 +417,10 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	// Keep webhook delivery in sync with the WebSocket path. In group chats
 	// Feishu may deliver every message when the app has the "receive all group
 	// messages" permission; only continue when this app's own bot is mentioned.
+	botOpenID := ""
 	if msg.ChatType == "group" {
-		botOpenID, err := a.BotOpenID(c.Request.Context())
+		var err error
+		botOpenID, err = a.BotOpenID(c.Request.Context())
 		if err != nil {
 			logger.Warnf(c.Request.Context(),
 				"[%s] failed to resolve bot open_id; ignoring group message: %v", a.region.Label, err)
@@ -461,18 +463,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			return nil, fmt.Errorf("unmarshal text content: %w", err)
 		}
 
-		// Strip @bot mention from group messages
-		content := textContent.Text
-		if chatType == im.ChatTypeGroup {
-			for strings.HasPrefix(content, "@_user_") {
-				idx := strings.Index(content, " ")
-				if idx >= 0 {
-					content = content[idx+1:]
-				} else {
-					break
-				}
-			}
-		}
+		content := resolveFeishuMentions(textContent.Text, msg.Mentions, chatType, botOpenID)
 
 		return &im.IncomingMessage{
 			Platform:    a.region.Platform,
@@ -548,8 +539,10 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			var lineText strings.Builder
 			for _, elem := range line {
 				var tag struct {
-					Tag  string `json:"tag"`
-					Text string `json:"text"`
+					Tag      string `json:"tag"`
+					Text     string `json:"text"`
+					UserID   string `json:"user_id"`
+					UserName string `json:"user_name"`
 				}
 				if err := json.Unmarshal(elem, &tag); err != nil {
 					continue
@@ -557,6 +550,28 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 				switch tag.Tag {
 				case "text", "a":
 					lineText.WriteString(tag.Text)
+				case "at":
+					if chatType == im.ChatTypeGroup && tag.UserID == botOpenID {
+						continue
+					}
+					if tag.UserID == "all" {
+						lineText.WriteString("@所有人")
+					} else if tag.UserName != "" {
+						lineText.WriteString("@" + tag.UserName)
+					} else if tag.UserID != "" {
+						foundName := ""
+						for _, m := range msg.Mentions {
+							if m != nil && m.Id != nil && m.Id.OpenId != nil && *m.Id.OpenId == tag.UserID {
+								if m.Name != nil && *m.Name != "" {
+									foundName = *m.Name
+									break
+								}
+							}
+						}
+						if foundName != "" {
+							lineText.WriteString("@" + foundName)
+						}
+					}
 				}
 			}
 			if t := strings.TrimSpace(lineText.String()); t != "" {
@@ -564,17 +579,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			}
 		}
 
-		content := strings.Join(textParts, "\n")
-		if chatType == im.ChatTypeGroup {
-			for strings.HasPrefix(content, "@_user_") {
-				idx := strings.Index(content, " ")
-				if idx >= 0 {
-					content = content[idx+1:]
-				} else {
-					break
-				}
-			}
-		}
+		content := resolveFeishuMentions(strings.Join(textParts, "\n"), msg.Mentions, chatType, botOpenID)
 		content = strings.TrimSpace(content)
 		if content == "" {
 			return nil, nil
