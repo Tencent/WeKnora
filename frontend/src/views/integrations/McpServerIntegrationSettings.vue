@@ -451,6 +451,12 @@ function goToWizardStep(step: number) {
   if (step < 0 || step >= stepTitles.value.length) return
   if (step > 0 && !editing.value) return
   wizardStep.value = step
+  // Entering the config step from the connection step (e.g. via "连接配置"
+  // then "上一步") must load the KB/agent candidates too: openEdit only
+  // loads them for step 0, so without this the KB scope shows raw IDs and
+  // the dropdown is empty. loadOptions replaces the lists, so re-entering
+  // step 0 never duplicates candidates.
+  if (step === 0) void loadOptions()
 }
 
 function closeDrawer() {
