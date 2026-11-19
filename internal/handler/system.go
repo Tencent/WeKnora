@@ -1564,7 +1564,8 @@ type ListAllUsersResponse struct {
 // ListUsers godoc
 // @Summary      查询平台用户（List platform users）
 // @Description  Retrieve a paginated list of every user across tenants (SystemAdmin only).
-// @Description  Supports `q` (case-insensitive username/email substring filter), `offset` (default 0) and `limit` (default 50, max 200).
+// @Description  Supports `offset` (default 0), `limit` (default 50, max 200), and optional `q`.
+// @Description  `q` performs case-insensitive substring matching against username or email.
 // @Description  Password/hashes are never serialised — only the redacted UserInfo shape.
 // @Tags         System Admin
 // @Produce      json

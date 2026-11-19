@@ -137,9 +137,11 @@ const resetVisibleId = ref<string | null>(null)
 const resetBusy = ref(false)
 const createVisible = ref(false)
 let requestSeq = 0
+let inFlightQuery: string | null = null
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 let unmounted = false
 
+const rowActionBlocked = computed(() => busyId.value !== null || resetVisibleId.value !== null || resetBusy.value)
 const locked = computed(() => busyId.value !== null || resetVisibleId.value !== null || createVisible.value)
 const hasPendingSearch = computed(() => search.value.trim() !== appliedQuery.value)
 const roleOptions = computed(() => [
@@ -168,12 +170,12 @@ function errorMessage(error: any, key: string): string {
 }
 function announce(message: string) { emit('announced', message) }
 async function fetchPage(nextOffset: number, query = search.value.trim()) {
-  if (unmounted || busyId.value !== null || resetVisibleId.value !== null || resetBusy.value) return
+  if (unmounted || rowActionBlocked.value) return
   clearSearchTimer()
   const normalizedQuery = query.trim()
   const safeOffset = Math.max(0, nextOffset)
   const seq = ++requestSeq
-  appliedQuery.value = normalizedQuery
+  inFlightQuery = normalizedQuery
   loading.value = true
   loadError.value = ''
   pendingRole.value = null
@@ -184,7 +186,7 @@ async function fetchPage(nextOffset: number, query = search.value.trim()) {
       limit,
       q: normalizedQuery || undefined,
     })
-    if (unmounted || seq !== requestSeq || busyId.value !== null || resetVisibleId.value !== null || resetBusy.value) return
+    if (unmounted || seq !== requestSeq || rowActionBlocked.value) return
     if (safeOffset > 0 && response.users.length === 0) {
       await fetchPage(Math.max(0, safeOffset - limit), normalizedQuery)
       return
@@ -192,11 +194,15 @@ async function fetchPage(nextOffset: number, query = search.value.trim()) {
     users.value = response.users
     hasMore.value = response.has_more
     offset.value = response.offset
+    appliedQuery.value = normalizedQuery
   } catch (error) {
     if (unmounted || seq !== requestSeq) return
     loadError.value = errorMessage(error, 'system.globalSettings.userList.loadFailed')
   } finally {
-    if (!unmounted && seq === requestSeq) loading.value = false
+    if (!unmounted && seq === requestSeq) {
+      inFlightQuery = null
+      loading.value = false
+    }
   }
 }
 function applySearchNow() {
@@ -236,7 +242,14 @@ async function changeRole(row: SystemAdminUser) {
 watch(search, value => {
   clearSearchTimer()
   const nextQuery = value.trim()
-  if (nextQuery === appliedQuery.value && !loadError.value) return
+  const effectiveQuery = inFlightQuery ?? appliedQuery.value
+  if (nextQuery === effectiveQuery && !loadError.value) return
+  if (inFlightQuery !== null) {
+    requestSeq++
+    inFlightQuery = null
+    loading.value = false
+  }
+  if (!props.active) return
   if (nextQuery === '') {
     void fetchPage(0, '')
     return
@@ -246,6 +259,11 @@ watch(search, value => {
     if (!props.active) return
     void fetchPage(0, search.value.trim())
   }, SEARCH_DEBOUNCE_MS)
+})
+watch(() => locked.value || resetBusy.value, blocked => {
+  if (!blocked && props.active && hasPendingSearch.value && searchTimer === undefined && !loading.value && !loadError.value) {
+    void fetchPage(0, search.value.trim())
+  }
 })
 watch(() => props.active, active => {
   if (active && !locked.value && !resetBusy.value) refreshUsers()
@@ -258,6 +276,7 @@ watch(() => props.active, active => {
 onBeforeUnmount(() => {
   unmounted = true
   requestSeq++
+  inFlightQuery = null
   clearSearchTimer()
 })
 </script>

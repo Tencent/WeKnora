@@ -29247,7 +29247,8 @@ paths:
     get:
       description: |-
         Retrieve a paginated list of every user across tenants (SystemAdmin only).
-        Supports `q` (case-insensitive username/email substring filter), `offset` (default 0) and `limit` (default 50, max 200).
+        Supports `offset` (default 0), `limit` (default 50, max 200), and optional `q`.
+        `q` performs case-insensitive substring matching against username or email.
         Password/hashes are never serialised — only the redacted UserInfo shape.
       parameters:
       - description: Filter by username or email

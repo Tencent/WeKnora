@@ -151,8 +151,8 @@ func TestListUsers_SearchAcrossPagesDisabledWildcardsAndDeleted(t *testing.T) {
 		},
 		{
 			ID:           "u-percent-literal",
-			Username:     "ops%bot",
-			Email:        "ops%bot@other.example",
+			Username:     `ops%\bot`,
+			Email:        `ops%\bot@other.example`,
 			PasswordHash: "secret",
 			IsActive:     true,
 			CreatedAt:    baseTime.Add(3 * time.Second),
@@ -197,15 +197,30 @@ func TestListUsers_SearchAcrossPagesDisabledWildcardsAndDeleted(t *testing.T) {
 		}
 	}
 
-	// 1. Unfiltered page 1 (limit=20) only contains recent accounts, not the older ones.
+	// 1. Unfiltered page 1 (limit=20) only contains recent accounts with deterministic id tie-breaking.
 	firstPage := getListUsers(t, r, "offset=0&limit=20")
 	if len(firstPage.Users) != 20 || !firstPage.HasMore {
-		t.Fatalf("expected 20 users with has_more=true, got len=%d has_more=%v", len(firstPage.Users), firstPage.HasMore)
+		t.Fatalf(
+			"expected 20 users with has_more=true, got len=%d has_more=%v",
+			len(firstPage.Users),
+			firstPage.HasMore,
+		)
+	}
+	if firstPage.Users[0]["id"] != "u-recent-00" || firstPage.Users[19]["id"] != "u-recent-19" {
+		t.Fatalf(
+			"expected deterministic id ASC tie-break on page 1, got first=%v last=%v",
+			firstPage.Users[0]["id"],
+			firstPage.Users[19]["id"],
+		)
 	}
 	for _, u := range firstPage.Users {
 		if u["id"] == "u-oldest-active" || u["id"] == "u-oldest-disabled" {
 			t.Fatalf("expected older user %v to be off page 1", u["id"])
 		}
+	}
+	secondPage := getListUsers(t, r, "offset=20&limit=20")
+	if len(secondPage.Users) != 6 || secondPage.HasMore || secondPage.Users[0]["id"] != "u-recent-20" {
+		t.Fatalf("expected deterministic page 2 starting at u-recent-20 with 6 rows, got %+v", secondPage)
 	}
 
 	// 2. Searching by username/email finds page-2+ users (case-insensitive) AND escapes `_` wildcard.
@@ -216,14 +231,20 @@ func TestListUsers_SearchAcrossPagesDisabledWildcardsAndDeleted(t *testing.T) {
 
 	// 3. Disabled accounts remain searchable so system admins can locate and re-enable them.
 	foundDisabled := getListUsers(t, r, "offset=0&limit=20&q="+url.QueryEscape("BOB.LEGACY@CORP"))
-	if len(foundDisabled.Users) != 1 || foundDisabled.Users[0]["id"] != "u-oldest-disabled" || foundDisabled.Users[0]["is_active"] != false {
+	if len(foundDisabled.Users) != 1 ||
+		foundDisabled.Users[0]["id"] != "u-oldest-disabled" ||
+		foundDisabled.Users[0]["is_active"] != false {
 		t.Fatalf("expected disabled user u-oldest-disabled to be searchable, got %+v", foundDisabled)
 	}
 
-	// 4. `%` is escaped rather than matching the entire users table; soft-deleted users stay excluded.
+	// 4. `%` and `\` are escaped rather than acting as LIKE wildcards; soft-deleted users stay excluded.
 	foundPercent := getListUsers(t, r, "offset=0&limit=20&q="+url.QueryEscape("%"))
 	if len(foundPercent.Users) != 1 || foundPercent.Users[0]["id"] != "u-percent-literal" {
 		t.Fatalf("expected literal %% match only, got %+v", foundPercent)
+	}
+	foundBackslash := getListUsers(t, r, "offset=0&limit=20&q="+url.QueryEscape(`%\`))
+	if len(foundBackslash.Users) != 1 || foundBackslash.Users[0]["id"] != "u-percent-literal" {
+		t.Fatalf("expected literal %%\\ match only, got %+v", foundBackslash)
 	}
 
 	// 5. Filtered search supports multi-page pagination and excludes soft-deleted @corp.example row.

@@ -253,4 +253,139 @@ test('clamps empty upper page, refreshes on user creation while dialog stays ope
   const beforeResetCalls = calls.length
   await vm.fetchPage(0, 'other')
   assert.equal(calls.length, beforeResetCalls)
+  vm.resetVisibleId = null
+  await flush()
+
+  // A debounced search blocked by an open ResetPasswordDialog flushes automatically once the dialog closes.
+  vm.search = 'user-05'
+  await flush()
+  vm.resetVisibleId = 'u-01'
+  await flush()
+  t.mock.timers.tick(250)
+  await flush()
+  assert.equal(calls.length, beforeResetCalls, 'debounced search must not fire while reset dialog is open')
+  assert.equal(vm.hasPendingSearch, true)
+
+  vm.resetVisibleId = null
+  await flush()
+  await flush()
+  assert.equal(calls.at(-1), '/api/v1/system/admin/users?q=user-05&offset=0&limit=20')
+  assert.equal(vm.hasPendingSearch, false)
+})
+
+test('failed search from page 2 keeps appliedQuery intact, disables stale pagination, and retries from offset 0', async t => {
+  let failAlice = true
+  const seenUrls: string[] = []
+
+  const { vm } = mountUserManagement(t, async (url: string) => {
+    seenUrls.push(url)
+    const parsed = new URL(url, 'http://localhost')
+    const offset = Number(parsed.searchParams.get('offset') ?? '0')
+    const q = parsed.searchParams.get('q') ?? ''
+    if (q === 'alice' && failAlice) {
+      throw new Error('backend unavailable')
+    }
+    if (q === 'alice') {
+      return {
+        users: [makeUser(25, { id: 'u-alice', username: 'alice' })],
+        offset,
+        limit: 20,
+        has_more: false,
+      } satisfies ListAllUsersResponse
+    }
+    return {
+      users: Array.from({ length: 20 }, (_, i) => makeUser(i + 1)),
+      offset,
+      limit: 20,
+      has_more: offset === 0,
+    } satisfies ListAllUsersResponse
+  })
+  await flush()
+
+  // Move to page 2 of unfiltered list.
+  await vm.fetchPage(20, '')
+  assert.equal(vm.offset, 20)
+
+  // Search "alice" fails: appliedQuery must remain "" so stale pagination stays disabled and refresh retries offset=0.
+  vm.search = 'alice'
+  await flush()
+  t.mock.timers.tick(250)
+  await flush()
+  assert.equal(vm.loadError, 'backend unavailable')
+  assert.equal(vm.appliedQuery, '')
+  assert.equal(vm.hasPendingSearch, true)
+  assert.equal(vm.offset, 20)
+
+  // Refresh retries from offset=0 (not stale offset=20).
+  failAlice = false
+  vm.refreshUsers()
+  await flush()
+  assert.equal(seenUrls.at(-1), '/api/v1/system/admin/users?q=alice&offset=0&limit=20')
+  assert.equal(vm.loadError, '')
+  assert.equal(vm.appliedQuery, 'alice')
+  assert.equal(vm.hasPendingSearch, false)
+  assert.equal(vm.offset, 0)
+  assert.deepEqual(vm.users.map((u: SystemAdminUser) => u.id), ['u-alice'])
+})
+
+test('editing search invalidates in-flight request before debounce fires', async t => {
+  const initial = deferred<ListAllUsersResponse>()
+  const stale = deferred<ListAllUsersResponse>()
+  const seenUrls: string[] = []
+
+  const { vm } = mountUserManagement(t, (url: string) => {
+    seenUrls.push(url)
+    if (url.includes('q=al&')) return stale.promise
+    if (url.includes('q=alice&')) {
+      return Promise.resolve({
+        users: [makeUser(25, { id: 'u-alice', username: 'alice' })],
+        offset: 0,
+        limit: 20,
+        has_more: false,
+      } satisfies ListAllUsersResponse)
+    }
+    return initial.promise
+  })
+
+  initial.resolve({ users: [makeUser(1)], offset: 0, limit: 20, has_more: false })
+  await flush()
+
+  // Start "al" request, then keep typing "alice" without pressing Enter.
+  vm.search = 'al'
+  await flush()
+  t.mock.timers.tick(250)
+  await flush()
+  assert.equal(vm.loading, true)
+
+  vm.search = 'alice'
+  await flush()
+  assert.equal(vm.loading, false)
+
+  // Stale "al" response arrives during the debounce window and must be ignored.
+  stale.resolve({
+    users: [makeUser(2, { id: 'u-stale', username: 'albert' })],
+    offset: 0,
+    limit: 20,
+    has_more: true,
+  })
+  await flush()
+  assert.deepEqual(vm.users.map((u: SystemAdminUser) => u.id), ['u-01'])
+
+  t.mock.timers.tick(250)
+  await flush()
+  assert.deepEqual(vm.users.map((u: SystemAdminUser) => u.id), ['u-alice'])
+})
+
+test('inactive tab ignores clearing search without firing background requests', async t => {
+  const inactiveCalls: string[] = []
+  const { vm } = mountUserManagement(t, async (url: string) => {
+    inactiveCalls.push(url)
+    return { users: [], offset: 0, limit: 20, has_more: false } satisfies ListAllUsersResponse
+  }, false)
+  await flush()
+  vm.search = 'temp'
+  await flush()
+  vm.search = ''
+  await flush()
+  assert.equal(inactiveCalls.length, 0)
 })

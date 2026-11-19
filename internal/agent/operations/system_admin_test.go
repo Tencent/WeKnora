@@ -52,7 +52,11 @@ func TestSystemAdminOperationsRequireIndependentPermission(t *testing.T) {
 
 func TestSystemAdminPaginationAndSafeProjections(t *testing.T) {
 	users, _ := Builtin().Get("system_admin.list_users")
-	call, err := users.Build(map[string]json.RawMessage{"q": raw("alice@example.com"), "offset": raw(50), "limit": raw(50)})
+	call, err := users.Build(map[string]json.RawMessage{
+		"q":      raw("alice@example.com"),
+		"offset": raw(50),
+		"limit":  raw(50),
+	})
 	require.NoError(t, err)
 	assert.Contains(t, call.URI(), "q=alice%40example.com")
 	assert.Contains(t, call.URI(), "offset=50")
