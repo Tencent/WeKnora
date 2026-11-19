@@ -20,7 +20,8 @@ type PluginMerge struct {
 
 // NewPluginMerge creates and registers a new PluginMerge instance
 func NewPluginMerge(eventManager *EventManager, chunkRepo interfaces.ChunkRepository,
-	chunkService interfaces.ChunkService, modelService interfaces.ModelService) *PluginMerge {
+	chunkService interfaces.ChunkService, modelService interfaces.ModelService,
+) *PluginMerge {
 	res := &PluginMerge{
 		chunkRepo:    chunkRepo,
 		chunkService: chunkService,
