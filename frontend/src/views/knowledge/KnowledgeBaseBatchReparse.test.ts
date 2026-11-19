@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import * as vue from 'vue'
+import * as fileTypeVerification from '../../utils/fileTypeVerification.ts'
 import * as stall from '../../utils/knowledgeProcessingStall.ts'
 import { fixture, flush } from '../../test-utils/vueFixture.ts'
 
@@ -94,6 +95,7 @@ async function setup(t: TestContext, initialRows: Row[] = [row('doc')]) {
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/utils/kbPermission': { permissionCanEditKB: () => true, permissionCanManageKB: () => true },
     '@/utils/knowledgeDeletion': {}, '@/utils/knowledgeTrace': {},
+    '@/utils/fileTypeVerification': fileTypeVerification,
     '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
     '@/api/knowledge-base/index': {
       batchQueryKnowledge, batchReparseKnowledge,

@@ -680,6 +680,10 @@ export default {
     copy: 'Copy',
     addToKnowledgeBase: 'Add to Knowledge Base',
     artifactDrawer: {
+      saveToKnowledge: 'Add file',
+      knowledgeDestination: 'Destination knowledge base',
+      noWritableKnowledgeBases: 'No writable knowledge bases are available.',
+      knowledgeLoadFailed: 'Could not load knowledge bases. Please try again.',
       buttonTitle: 'View files generated in this reply',
       title: 'Generated files',
       empty: 'No downloadable files were generated this turn.',

@@ -31,6 +31,19 @@
         </template>
       </t-button>
       <t-button
+        class="artifact-download"
+        variant="text"
+        shape="square"
+        size="small"
+        :title="$t('agent.addToKnowledgeBase')"
+        :aria-label="$t('agent.addToKnowledgeBase')"
+        @click="openSaveToKnowledge(previewItem)"
+      >
+        <template #icon>
+          <t-icon name="bookmark-add" size="16px" />
+        </template>
+      </t-button>
+      <t-button
         class="artifact-download artifact-delete"
         variant="text"
         shape="square"
@@ -138,6 +151,19 @@
             </template>
           </t-button>
           <t-button
+            class="artifact-download"
+            variant="text"
+            shape="square"
+            size="small"
+            :title="$t('agent.addToKnowledgeBase')"
+            :aria-label="$t('agent.addToKnowledgeBase')"
+            @click.stop="openSaveToKnowledge(item)"
+          >
+            <template #icon>
+              <t-icon name="bookmark-add" size="16px" />
+            </template>
+          </t-button>
+          <t-button
             class="artifact-download artifact-delete"
             variant="text"
             shape="square"
@@ -154,6 +180,11 @@
         </li>
       </ul>
     </template>
+    <SaveArtifactToKnowledgeDialog
+      v-if="active && artifactToSave && artifactToSave.sessionId === sessionId"
+      :artifact="artifactToSave"
+      @close="artifactToSave = null"
+    />
   </div>
 </template>
 
@@ -172,6 +203,7 @@ import { useChatSandboxPanel, type ArtifactPanelFocusState } from '@/composables
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import DocumentPreview from '@/components/document-preview.vue'
 import ArtifactFileIcon from './ArtifactFileIcon.vue'
+import SaveArtifactToKnowledgeDialog from './SaveArtifactToKnowledgeDialog.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -194,6 +226,7 @@ const { t } = useI18n()
 const panel = useChatSandboxPanel()
 const confirmDelete = useConfirmDelete()
 const previewActions = ref<HTMLElement | null>(null)
+const artifactToSave = ref<InstanceType<typeof SaveArtifactToKnowledgeDialog>['$props']['artifact'] | null>(null)
 const listRef = ref<HTMLElement | null>(null)
 const previewItem = ref<SessionArtifactItem | null>(null)
 const downloading = reactive<Record<string, boolean>>({})
@@ -370,6 +403,19 @@ async function handleDownload(item: SessionArtifactItem) {
     downloading[key] = false
   }
 }
+
+function openSaveToKnowledge(item: SessionArtifactItem) {
+  if (!props.sessionId || !item.messageId) return
+  artifactToSave.value = {
+    sessionId: props.sessionId,
+    messageId: item.messageId,
+    index: item.index,
+    fileName: item.file_name,
+    fileSize: item.file_size,
+  }
+}
+
+watch([() => props.sessionId, () => props.active], () => { artifactToSave.value = null })
 </script>
 
 <style scoped lang="less">
