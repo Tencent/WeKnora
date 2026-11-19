@@ -460,6 +460,64 @@ func (h *EmbedChannelHandler) EmbedStopSession(c *gin.Context) {
 	h.sessionHandler.StopSession(c)
 }
 
+// EmbedContinueStream lets the embed page attach to a run it never POSTed: an
+// a2ui confirm (kickConfirmRun) or an ask_user answer runs in a goroutine with
+// skipSSE, so its events land only in the stream replay buffer and the
+// assistant row keeps content = "" until the completion path
+// (completeAssistantMessage) persists it. With no
+// route like this one, the embed plane's sole read path is the message list —
+// which therefore shows an empty assistant row for the entire run and repaints
+// it in a single frame at the end. This is the embed-plane twin of
+// GET /api/v1/sessions/continue-stream/:session_id, which sits behind the global
+// Auth middleware and answers 401 to a channel token.
+//
+// ensureEmbedSession is what makes the twin safe: it pins the caller to one
+// session (tenant + channel marker + signed HMAC handle) and replaces the ctx
+// principal with the EmbedSessionPrincipal that is the row's recorded owner —
+// without that swap the delegate's owner-scoped GetSession/GetMessage would
+// 404 for every embed caller. The delegate replays events already buffered for
+// (session_id, message_id) and starts, steers and stops nothing.
+func (h *EmbedChannelHandler) EmbedContinueStream(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	h.sessionHandler.ContinueStream(c)
+}
+
+// EmbedExecuteAgentCardAction delegates the A2UI button click to the single
+// embed session (tenant + channel marker + signed HMAC handle) and replaced
+// the ctx principal with the per-session EmbedSessionPrincipal — which is the
+// owner recorded on the session row, so the executor's GetOwnedSession passes
+// for exactly this session and refuses every other. EmbedAuth injects the
+// synthetic channel role (Viewer), which is the confirm action's role floor,
+// so no RBAC plumbing is duplicated here.
+//
+// The body's session_id must equal the path's. Owner-scoping already refuses
+// a foreign session, but only the explicit equality gives a clear 400 instead
+// of a 404 produced by another session's lookup path. The body is re-seated
+// for the delegate afterwards (io.ReadAll consumed it).
+func (h *EmbedChannelHandler) EmbedExecuteAgentCardAction(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		return
+	}
+	sessionID := c.Param("session_id")
+	var probe struct {
+		SessionID string `json:"session_id"`
+	}
+	if json.Unmarshal(body, &probe) == nil && probe.SessionID != "" && probe.SessionID != sessionID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id does not match the path"})
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	c.Request.ContentLength = int64(len(body))
+	h.sessionHandler.ExecuteAgentCardAction(c)
+}
+
 func (h *EmbedChannelHandler) EmbedEnsureMessageSuggestions(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return

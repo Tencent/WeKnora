@@ -230,6 +230,32 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	g.apiKeyRoute(r, http.MethodPost, "/shared-agents/disabled", apiKeyManageSpaces(apiKeyFullAccess()), g.Admin(), orgHandler.SetSharedAgentDisabledByMe)
 }
 
+// embedPublicGroup builds the /api/v1/embed/:channel_id group.
+//
+// It installs AuditServiceProvider on the group itself, not only via the
+// engine-level r.Use in NewRouter: these routes are deliberately registered
+// BEFORE the global Auth middleware (they authenticate with the channel publish
+// token), and the audit provider sits after Auth. Gin snapshots the handler
+// chain at route-registration time, so a route registered before the engine
+// r.Use never sees it — which made middleware.AuditServiceFromContext nil in
+// every embed handler, so emitAgentCardAudit bailed at its nil check and the
+// embed plane lost every card-action row without a trace. Confirm-once reads
+// exactly those rows (CardActionAlreadyExecuted), so a second click re-ran the
+// confirmed action. Keep the provider here even if the engine-level wiring
+// ever moves earlier; the guard test is TestEmbedPublicGroupCarriesAuditServiceProvider.
+func embedPublicGroup(
+	r *gin.Engine,
+	embedService interfaces.EmbedChannelService,
+	tenantService interfaces.TenantService,
+	redisClient *redis.Client,
+	auditSvc interfaces.AuditLogService,
+) *gin.RouterGroup {
+	return r.Group("/api/v1/embed/:channel_id",
+		middleware.AuditServiceProvider(auditSvc),
+		middleware.EmbedAuth(embedService, tenantService, redisClient),
+	)
+}
+
 // RegisterEmbedPublicRoutes registers anonymous embed endpoints secured by publish tokens.
 func RegisterEmbedPublicRoutes(
 	r *gin.Engine,
@@ -239,6 +265,7 @@ func RegisterEmbedPublicRoutes(
 	redisClient *redis.Client,
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	auditSvc interfaces.AuditLogService,
 	resourceCatalogs ...interfaces.ResourceCatalog,
 ) {
 	if embedHandler == nil || embedService == nil {
@@ -247,7 +274,7 @@ func RegisterEmbedPublicRoutes(
 	// Nginx uses this read-only subrequest to put the channel CSP on embed.html.
 	// No token is required: framing policy must be available before JS bootstrap.
 	r.GET("/api/v1/embed-frame-policy", embedFramePolicyHandler(embedService))
-	embed := r.Group("/api/v1/embed/:channel_id", middleware.EmbedAuth(embedService, tenantService, redisClient))
+	embed := embedPublicGroup(r, embedService, tenantService, redisClient, auditSvc)
 	{
 		embed.POST("/exchange", embedHandler.ExchangeEmbedSession)
 		embed.GET("/config", embedHandler.GetEmbedConfig)
@@ -257,6 +284,11 @@ func RegisterEmbedPublicRoutes(
 		embed.POST("/knowledge-chat/:session_id", embedHandler.EmbedKnowledgeChat)
 		embed.POST("/agent-chat/:session_id", embedHandler.EmbedAgentChat)
 		embed.GET("/messages/:session_id/load", embedHandler.EmbedLoadMessages)
+		// A server-started run (a2ui confirm, ask_user resume) shows nothing on the
+		// embed page without this route: its events live in the stream replay buffer
+		// and the row's content stays empty until completion, while the tenant-side
+		// continue-stream sits behind the global Auth and 401s a channel token.
+		embed.GET("/sessions/:session_id/continue-stream", embedHandler.EmbedContinueStream)
 		embed.POST("/sessions/:session_id/stop", embedHandler.EmbedStopSession)
 		embed.GET("/sessions/:session_id/messages/:message_id/suggestions", embedHandler.EmbedGetMessageSuggestions)
 		embed.POST("/sessions/:session_id/messages/:message_id/suggestions", embedHandler.EmbedEnsureMessageSuggestions)
@@ -268,6 +300,11 @@ func RegisterEmbedPublicRoutes(
 		embed.GET("/sessions/:session_id/mcp-services/:id/oauth/status", embedHandler.EmbedMCPOAuthStatus)
 		embed.POST("/sessions/:session_id/tool-approvals/:pending_id", embedHandler.EmbedResolveToolApproval)
 		embed.POST("/sessions/:session_id/prompts/:prompt_id", embedHandler.EmbedResolveAgentPrompt)
+		// executor after ensureEmbedSession pinned the caller to this one
+		// session; the executor re-derives the button from the persisted
+		// answer, so a tampered embed client is refused exactly like a
+		// tampered tenant client (same six form_* denials).
+		embed.POST("/sessions/:session_id/agent-actions/execute", embedHandler.EmbedExecuteAgentCardAction)
 		// Serve images embedded in bot replies (e.g. chart exports). EmbedAuth
 		// injects the channel's tenant, and the handler enforces that the
 		// requested path belongs to that tenant.

@@ -281,6 +281,7 @@ import {
     notifySessionMutation,
     SESSION_MUTATION_EVENT,
 } from '@/components/sessionMutations';
+import { A2UI_CONFIRM_EVENT } from './components/a2ui/a2uiEvents';
 import {
     ensureMessageSuggestions,
     getMessageSuggestions,
@@ -1953,6 +1954,60 @@ onBeforeMount(async () => {
     await loadSessionAndHydrate(session_id.value);
 });
 
+// A confirm card click (A2uiCard.vue) posts to the server-side executor and
+// dispatches A2UI_CONFIRM_EVENT with the server-persisted follow-up text and
+// the new assistant message id. We mirror the user's own send path: local
+// user row, then attach to the server run via continue-stream — with the
+// same brief retry loop as resumeSuspendedRun, because the run is kicked in
+// a background goroutine and its stream may not exist on the first attach.
+const handleA2uiConfirm = async (event) => {
+    const detail = event?.detail;
+    if (!detail || detail.sessionId !== session_id.value) return;
+    if (detail.status === 'already_executed') {
+        MessagePlugin.info('已确认，无需重复操作');
+        return;
+    }
+    if (detail.status !== 'started') return;
+    if (isReplying.value || loading.value) {
+        MessagePlugin.warning('请等本轮回答结束后再确认');
+        return;
+    }
+    messagesList.push({
+        id: detail.messageId,
+        content: detail.text,
+        role: 'user',
+        channel: 'a2ui',
+        created_at: new Date().toISOString(),
+    });
+    userHasScrolledUp.value = false;
+    scrollToBottom(true);
+    isReplying.value = true;
+    currentAssistantMessageId.value = detail.assistantMessageId;
+    attachingResumedRun = true;
+    try {
+        for (let attempt = 0; attempt < 60; attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            if (session_id.value !== detail.sessionId) return;
+            await startStream({
+                session_id: detail.sessionId,
+                query: detail.assistantMessageId,
+                method: 'GET',
+                url: '/api/v1/sessions/continue-stream',
+            });
+            if (!error.value) return;
+        }
+    } finally {
+        attachingResumedRun = false;
+    }
+    if (error.value && session_id.value === detail.sessionId) {
+        MessagePlugin.error(error.value);
+        isReplying.value = false;
+        loading.value = false;
+        currentAssistantMessageId.value = '';
+    }
+};
+window.addEventListener(A2UI_CONFIRM_EVENT, handleA2uiConfirm);
+
 onMounted(async () => {
     window.addEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
     messagesList.splice(0);
@@ -2008,6 +2063,7 @@ onUnmounted(() => {
     if (!props.embeddedMode) sessionActivity.detach(activitySessionId.value);
     activitySessionId.value = '';
     window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
+    window.removeEventListener(A2UI_CONFIRM_EVENT, handleA2uiConfirm);
     if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
     backgroundPoller.dispose();
     clearComposerApproval();

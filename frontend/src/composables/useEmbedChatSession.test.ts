@@ -8,6 +8,7 @@ import * as vue from 'vue'
 import * as historyPagination from '../utils/historyPagination.ts'
 import * as suspendedRun from '../utils/suspendedRun.ts'
 import * as embedContext from '../utils/embedContext.ts'
+import * as steerStreamFork from '../utils/steerStreamFork.ts'
 import type { useEmbedChatSession as EmbedChatSession } from './useEmbedChatSession.ts'
 
 const require = createRequire(import.meta.url)
@@ -41,6 +42,8 @@ test('embedded history remains retryable after a transient page failure', async 
     exports,
     console,
     queueMicrotask,
+    // The composable registers its A2UI confirm listener on window at setup.
+    window: { addEventListener: () => {}, removeEventListener: () => {} },
     setTimeout: (callback: () => void) => {
       queueMicrotask(callback)
       return 1
@@ -50,7 +53,11 @@ test('embedded history remains retryable after a transient page failure', async 
       if (id === 'vue') return { ...vue, onMounted: (callback: () => void) => callback(), onUnmounted: () => {} }
       if (id === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       if (id === '@/utils/historyPagination') return historyPagination
+      if (id === '@/views/chat/components/a2ui/a2uiEvents') return { A2UI_CONFIRM_EVENT: 'weknora:a2ui-confirm' }
       if (id === '@/utils/suspendedRun') return suspendedRun
+      // The resume leg resolves the row id through the real helper, so this
+      // harness hands out the real module rather than a copy of its rule.
+      if (id === '@/utils/steerStreamFork') return steerStreamFork
       if (id === '@/utils/embedToast') return { embedToast: () => {} }
       if (id === '@/utils/embedContext') return embedContext
       if (id === '@/utils/embedFile') return { fileToDataURI: async () => '' }
@@ -133,6 +140,9 @@ test('getUserQuery strips injected host context from the preceding user message'
     exports,
     console,
     queueMicrotask,
+    // Same reason as the harness above: the composable registers its A2UI confirm
+    // listener on window while it is being set up, not on mount.
+    window: { addEventListener: () => {}, removeEventListener: () => {} },
     setTimeout: (callback: () => void) => {
       queueMicrotask(callback)
       return 1
@@ -142,7 +152,9 @@ test('getUserQuery strips injected host context from the preceding user message'
       if (id === 'vue') return { ...vue, onMounted: (callback: () => void) => callback(), onUnmounted: () => {} }
       if (id === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       if (id === '@/utils/historyPagination') return historyPagination
+      if (id === '@/views/chat/components/a2ui/a2uiEvents') return { A2UI_CONFIRM_EVENT: 'weknora:a2ui-confirm' }
       if (id === '@/utils/suspendedRun') return suspendedRun
+      if (id === '@/utils/steerStreamFork') return steerStreamFork
       if (id === '@/utils/embedToast') return { embedToast: () => {} }
       if (id === '@/utils/embedContext') return embedContext
       if (id === '@/utils/embedFile') return { fileToDataURI: async () => '' }

@@ -191,6 +191,12 @@ import {
     renderMermaidInContainer,
     enhanceMarkdownContainer,
 } from '@/utils/mermaidShared';
+import {
+    createSurfaceAwareCodeRenderer,
+    markA2uiTagBlocks,
+    mountA2uiSurfaces,
+    unmountA2uiSurfaces,
+} from '@/utils/a2uiSurface';
 import { refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useTypewriter } from '@/composables/useTypewriter';
@@ -388,7 +394,7 @@ const closePreImg = () => {
 }
 
 const markdownRenderer = createChatMarkdownRenderer({
-    codeRenderer: createMermaidCodeRenderer('mermaid-botmsg'),
+    codeRenderer: createSurfaceAwareCodeRenderer(props.embeddedMode, createMermaidCodeRenderer('mermaid-botmsg')),
     imageRenderer: ({ href, title, text }) => {
         // A sandbox-generated file shares the resource:// form with every other
         // protected image, so it is matched against this message's artifacts
@@ -459,6 +465,9 @@ const renderedHTML = computed(() => {
         sanitizeHtml: sanitizeMarkdownHTML,
         streaming: !props.session?.is_completed,
         knowledgeReferences: props.session?.knowledge_references,
+        // Official <a2ui-json> tag form (the prompt has taught this shape from the start). Skipped when
+        // embedded: that plane emits no placeholder by design — see createSurfaceAwareCodeRenderer's comment.
+        markA2uiTags: props.embeddedMode ? undefined : markA2uiTagBlocks,
     });
 });
 
@@ -533,6 +542,34 @@ watch(renderedHTML, () => {
     });
 });
 
+// A2UI official cards. The registry key is the persisted assistant message id — the same one the execute
+// endpoint accepts. The key is frozen into a per-component-instance constant on the first mount: a streamed
+// answer finishes rendering before the persisted id arrives, so the unmount path would then read a different
+// value and the entry could never be found again (the nested app and its onEvent subscription are dropped
+// with the DOM yet stay in the module-level Map forever). Mount and unmount therefore always share one key.
+// What /api/v1/agent/actions/execute receives is still props.messageId in A2uiCard, unrelated to this key.
+// (This file's <script setup> is plain JS — see the "plain JS" NOTE in this file — so no type annotations.)
+const a2uiSessionId = () => props.sessionId || '';
+let a2uiMountId = null;
+
+// Mount only once the typewriter has fully revealed the ```a2ui fence body (decoding half a JSON before that
+// is guaranteed to fail). Each placeholder div gets its own nested Vue app, and handlers are isolated per
+// message, so frames never cross. See utils/a2uiSurface.ts.
+function mountA2uiSurfacesIfDone() {
+    if (!answerFullyRendered.value) return;
+    if (a2uiMountId === null) {
+        a2uiMountId = persistedAssistantId(props.session) || String(props.session?.id || '');
+    }
+    void mountA2uiSurfaces(parentMd.value, a2uiSessionId(), a2uiMountId);
+}
+
+// Vue only honours app.unmount(): if the host is destroyed and the nested app is merely dropped along with the
+// DOM, the app and its onEvent subscription leak as a whole. Never mounted means nothing registered — just return.
+function releaseA2uiSurfaces() {
+    if (a2uiMountId === null) return;
+    unmountA2uiSurfaces(a2uiSessionId(), a2uiMountId);
+}
+
 // 渲染 Mermaid 图表的函数
 onUpdated(() => {
     nextTick(async () => {
@@ -542,6 +579,8 @@ onUpdated(() => {
         if (props.session?.is_completed) {
             await renderMermaidInContainer(parentMd.value);
         }
+        // A2UI cards (mount criteria and registry: see mountA2uiSurfacesIfDone above)
+        mountA2uiSurfacesIfDone();
     });
 });
 
@@ -555,10 +594,16 @@ onMounted(async () => {
         await hydrateProtectedFileImages(parentMd.value, protectedFileAccess.value);
         await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
         await enhanceMarkdownContainer(parentMd.value);
+        // Also on mount: opening a finished conversation from history may never
+        // trigger onUpdated, and the card would then stay an empty placeholder.
+        mountA2uiSurfacesIfDone();
     });
 });
 
 onBeforeUnmount(() => {
+    // Not gated on parentMd: releasing the surface apps needs only the ids, and
+    // skipping it here would leak every card this message mounted.
+    releaseA2uiSurfaces();
     if (parentMd.value) {
         parentMd.value.removeEventListener('click', handleMarkdownImageClick, true);
     }

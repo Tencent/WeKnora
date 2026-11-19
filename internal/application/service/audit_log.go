@@ -168,3 +168,32 @@ func (s *auditLogService) Purge(ctx context.Context, retentionDays int) (int64, 
 	cutoff := s.now().Add(-time.Duration(retentionDays) * 24 * time.Hour)
 	return s.repo.DeleteOlderThan(ctx, cutoff)
 }
+
+// CardActionAlreadyExecuted implements the confirm button's one-shot
+// semantics: scan the button's newest success rows for a (message_id,
+// action_name) match in details. Denial rows never count; a malformed
+// best-effort details blob is skipped, not fatal (audit rows may be written
+// by code paths we did not write).
+func (s *auditLogService) CardActionAlreadyExecuted(
+	ctx context.Context, tenantID uint64, targetID, messageID, actionName string,
+) (bool, error) {
+	rows, err := s.repo.ListCardActionRows(ctx, tenantID, targetID)
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if row.Outcome != types.AuditOutcomeSuccess {
+			continue
+		}
+		var details map[string]string
+		if len(row.Details) > 0 {
+			if err := json.Unmarshal(row.Details, &details); err != nil {
+				continue
+			}
+		}
+		if details["message_id"] == messageID && details["action_name"] == actionName {
+			return true, nil
+		}
+	}
+	return false, nil
+}

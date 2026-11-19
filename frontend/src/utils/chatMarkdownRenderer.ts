@@ -46,6 +46,20 @@ export type RenderChatMarkdownOptions = {
   cachedMermaidSvgHtml?: CachedMermaidSvgHtml
   injectCachedMermaidSvg?: (html: string, cachedSvgHtml?: CachedMermaidSvgHtml) => string
   prepareMarkdown?: (markdown: string, cachedSvgHtml?: CachedMermaidSvgHtml) => string
+  /**
+   * Rewrite the official `<a2ui-json>` card blocks in the SOURCE before anything
+   * else touches the answer (a2uiSurface.markA2uiTagBlocks). Applied first, on
+   * purpose: the card payload must be base64'd into a placeholder before the
+   * math-delimiter rewrite, the emphasis guards and the HTML sanitizer can read a
+   * JSON brace or a `<` as markdown or markup.
+   *
+   * Optional and host-decided because the plane decides it: on the embed plane
+   * the action executor sits behind the member-JWT gate, so an embed visitor must
+   * not get a rendered card whose every button answers 401 — that host passes
+   * nothing and the tag's payload stays visible as plain text, the same honesty
+   * rule createSurfaceAwareCodeRenderer applies to the fence form.
+   */
+  markA2uiTags?: (markdown: string, streaming: boolean) => string
   /** Render `weknora://` URIs as clickable entity links with these labels. */
   entityLinkLabels?: WeKnoraEntityLinkLabels
 }
@@ -502,9 +516,12 @@ export function renderChatMarkdown(rawMarkdown: unknown, options: RenderChatMark
 
   configureMarkedForChatMarkdown()
 
+  // A2UI cards first, before any text-shaping step can look at the card's JSON
+  // (see the markA2uiTags option doc for why the order is load-bearing).
+  const cardMarked = options.markA2uiTags ? options.markA2uiTags(rawText, Boolean(options.streaming)) : rawText
   const streamingSafeText = options.streaming
-    ? stripStreamingMarkerLines(rawText)
-    : rawText
+    ? stripStreamingMarkerLines(cardMarked)
+    : cardMarked
   const imageContextSafeText = normalizeLegacyImageContextMarkup(
     streamingSafeText,
     Boolean(options.streaming),
