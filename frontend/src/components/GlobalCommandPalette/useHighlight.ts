@@ -1,7 +1,7 @@
 /**
  * Safely highlight query keywords inside a plain-text string by wrapping
- * matches in <mark> tags. The input text is HTML-escaped first so the output
- * is safe to bind with v-html.
+ * matches in <mark> tags. Matched and unmatched slices of the input are
+ * HTML-escaped so the output is safe to bind with v-html.
  *
  * Extracted from the legacy KnowledgeSearch.vue so it can be reused by the
  * global command palette and KB-scoped search bar.
@@ -39,15 +39,13 @@ export function highlightRegex(text: string, pattern: string): string {
 
 export function highlightText(text: string, query: string): string {
   const q = (query || '').trim()
-  const escaped = escapeHtml(text || '')
-  if (!q) return escaped
+  if (!q) return escapeHtml(text || '')
+  // Prefer the longer keyword when several alternatives start at the same index.
   const keywords = q.split(/\s+/).filter(Boolean)
-  let result = escaped
-  for (const kw of keywords) {
-    const escapedKw = escapeHtml(kw).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    if (!escapedKw) continue
-    const regex = new RegExp(`(${escapedKw})`, 'gi')
-    result = result.replace(regex, '<mark class="search-highlight">$1</mark>')
-  }
-  return result
+  if (keywords.length === 0) return escapeHtml(text || '')
+  const pattern = keywords
+    .sort((a, b) => b.length - a.length)
+    .map(keyword => keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')
+  return highlightRegex(text, pattern)
 }
