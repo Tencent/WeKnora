@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 )
 
 // liteMultimodalPending stands in for the Redis multimodal:pending:<kid>
@@ -18,31 +19,92 @@ import (
 // counter is lost on restart, where the Lite startup reset already fails
 // rows that were still processing.
 //
-// Keys and semantics mirror Redis: a missing key reads as zero, so a
-// decrement on it goes negative and still drives post-process.
+// Legacy tasks without a batch retain the missing-key fallback. A task carrying
+// a batch may change the counter only while that batch still owns it.
 var liteMultimodalPending = struct {
 	sync.Mutex
-	counts map[string]int64
-}{counts: map[string]int64{}}
+	counts  map[string]int64
+	batches map[string]string
+}{counts: map[string]int64{}, batches: map[string]string{}}
 
 func liteMultimodalSet(key string, n int64) {
 	liteMultimodalPending.Lock()
 	defer liteMultimodalPending.Unlock()
 	liteMultimodalPending.counts[key] = n
-}
-
-func liteMultimodalDecrBy(key string, by int64) int64 {
-	liteMultimodalPending.Lock()
-	defer liteMultimodalPending.Unlock()
-	n := liteMultimodalPending.counts[key] - by
-	liteMultimodalPending.counts[key] = n
-	return n
+	delete(liteMultimodalPending.batches, key)
 }
 
 func liteMultimodalDel(key string) {
 	liteMultimodalPending.Lock()
 	defer liteMultimodalPending.Unlock()
 	delete(liteMultimodalPending.counts, key)
+	delete(liteMultimodalPending.batches, key)
+}
+
+// Check ownership in the same operation as the mutation: a reparse can seed
+// its counter while an older image worker or fan-out is still finishing.
+var decrementMultimodalCounterScript = redis.NewScript(`
+if (redis.call('GET', KEYS[2]) or '') ~= ARGV[1] then
+    return {0, 0}
+end
+return {1, redis.call('DECRBY', KEYS[1], ARGV[2])}
+`)
+
+var deleteMultimodalCounterScript = redis.NewScript(`
+if (redis.call('GET', KEYS[2]) or '') ~= ARGV[1] then
+    return 0
+end
+return redis.call('DEL', KEYS[1], KEYS[2])
+`)
+
+func seedMultimodalCounter(ctx context.Context, client *redis.Client, key, batch string, count int64) error {
+	if client != nil {
+		_, err := client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Set(ctx, key, count, 24*time.Hour)
+			pipe.Set(ctx, key+":batch", batch, 24*time.Hour)
+			return nil
+		})
+		return err
+	}
+	liteMultimodalPending.Lock()
+	defer liteMultimodalPending.Unlock()
+	liteMultimodalPending.counts[key] = count
+	liteMultimodalPending.batches[key] = batch
+	return nil
+}
+
+func decrementMultimodalCounter(
+	ctx context.Context, client *redis.Client, key, batch string, by int64,
+) (int64, bool, error) {
+	if client != nil {
+		result, err := decrementMultimodalCounterScript.Run(ctx, client, []string{key, key + ":batch"}, batch, by).
+			Int64Slice()
+		if err != nil {
+			return 0, false, err
+		}
+		return result[1], result[0] == 1, nil
+	}
+	liteMultimodalPending.Lock()
+	defer liteMultimodalPending.Unlock()
+	if liteMultimodalPending.batches[key] != batch {
+		return 0, false, nil
+	}
+	pending := liteMultimodalPending.counts[key] - by
+	liteMultimodalPending.counts[key] = pending
+	return pending, true, nil
+}
+
+func deleteMultimodalCounter(ctx context.Context, client *redis.Client, key, batch string) {
+	if client != nil {
+		deleteMultimodalCounterScript.Run(ctx, client, []string{key, key + ":batch"}, batch)
+		return
+	}
+	liteMultimodalPending.Lock()
+	defer liteMultimodalPending.Unlock()
+	if liteMultimodalPending.batches[key] == batch {
+		delete(liteMultimodalPending.counts, key)
+		delete(liteMultimodalPending.batches, key)
+	}
 }
 
 // postProcessEnqueueAttempts bounds the in-place retry of the post-process

@@ -134,12 +134,15 @@ func TestDownloadSuccessfulReplacement(t *testing.T) {
 			if err := os.WriteFile(dest, []byte("old"), 0o640); err != nil {
 				t.Fatal(err)
 			}
+			beforeInfo, err := os.Stat(dest)
+			if err != nil {
+				t.Fatal(err)
+			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte("complete"))
 			}))
 			defer server.Close()
 			c := NewClient(server.URL)
-			var err error
 			if batch {
 				err = c.DownloadKnowledgeFiles(context.Background(), "kb-test", []string{"doc-test"}, dest)
 			} else {
@@ -153,8 +156,8 @@ func TestDownloadSuccessfulReplacement(t *testing.T) {
 				t.Fatalf("download content %q: %v", got, err)
 			}
 			info, err := os.Stat(dest)
-			if err != nil || info.Mode().Perm() != 0o640 {
-				t.Fatalf("permissions changed: %v, %v", info, err)
+			if err != nil || info.Mode().Perm() != beforeInfo.Mode().Perm() {
+				t.Fatalf("permissions changed: got %v, want %v (%v)", info, beforeInfo.Mode().Perm(), err)
 			}
 			entries, err := os.ReadDir(dir)
 			if err != nil || len(entries) != 1 {

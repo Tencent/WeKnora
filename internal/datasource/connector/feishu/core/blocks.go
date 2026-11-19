@@ -312,6 +312,7 @@ type DocxBlocksResponse struct {
 func (c *Client) listDocumentBlocks(ctx context.Context, documentID string) ([]DocxBlock, error) {
 	var all []DocxBlock
 	pageToken := ""
+	seenPageTokens := make(map[string]struct{})
 	for {
 		path := fmt.Sprintf("/open-apis/docx/v1/documents/%s/blocks?page_size=500&document_revision_id=-1",
 			url.PathEscape(documentID))
@@ -327,18 +328,25 @@ func (c *Client) listDocumentBlocks(ctx context.Context, documentID string) ([]D
 		}
 		all = append(all, resp.Data.Items...)
 		if len(resp.Data.Items) == 0 {
-			// Defensive: a malformed page (empty items but has_more=true and a
-			// non-empty page_token) would otherwise loop until the task deadline,
-			// burning API quota. There is nothing more to collect, so stop.
+			// Defensive: a malformed empty page never advances, so stop instead
+			// of looping until the task deadline. Pages that do carry items are
+			// not allowed to truncate silently (guards below).
 			break
 		}
 		if len(all) >= maxDocumentBlocks {
 			logger.Warnf(ctx, "[Feishu] document %s exceeded %d blocks; truncating", documentID, maxDocumentBlocks)
 			break
 		}
-		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+		if !resp.Data.HasMore {
 			break
 		}
+		if resp.Data.PageToken == "" {
+			return nil, fmt.Errorf("feishu docx block pagination: has_more=true with a missing page token")
+		}
+		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
+			return nil, fmt.Errorf("feishu docx block pagination repeated page token %q", resp.Data.PageToken)
+		}
+		seenPageTokens[resp.Data.PageToken] = struct{}{}
 		pageToken = resp.Data.PageToken
 	}
 	return all, nil
@@ -652,17 +660,19 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 			cols = append(cols, bitableColumn{name: f.FieldName, fieldType: f.Type, dateFormatter: formatter})
 		}
 		if len(fieldsResp.Data.Items) == 0 {
-			// Defensive: an empty page with has_more=true never advances, so the
-			// size cap below would never trip — stop instead of looping until the
-			// task deadline. Nothing more to read.
+			// Defensive: an empty page never advances the header listing, so
+			// stop instead of looping until the task deadline.
 			break
 		}
-		if !fieldsResp.Data.HasMore || fieldsResp.Data.PageToken == "" {
+		if !fieldsResp.Data.HasMore {
 			break
 		}
 		if len(cols) >= maxBitableFields {
 			logger.Warnf(ctx, "[Feishu] bitable %s exceeded %d fields; truncating", embedToken, maxBitableFields)
 			break
+		}
+		if fieldsResp.Data.PageToken == "" {
+			return nil, false, fmt.Errorf("feishu bitable field pagination: has_more=true with a missing page token")
 		}
 		// A repeated non-empty token means the vendor is re-serving a page we
 		// already read; without this the loop would re-append the same fields
@@ -691,6 +701,7 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 	baseRPath := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records/search?page_size=500",
 		url.PathEscape(appToken), url.PathEscape(tableID))
 	pageToken := ""
+	seenRecordPageTokens := make(map[string]struct{})
 	for {
 		rpath := baseRPath
 		if pageToken != "" {
@@ -711,9 +722,8 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 			dataRows = append(dataRows, row)
 		}
 		if len(rec.Data.Items) == 0 {
-			// Defensive: an empty page with has_more=true never advances dataRows,
-			// so the maxTableRows cap below would never trip — stop instead of
-			// looping until the task deadline.
+			// Defensive: an empty page never advances the row listing, so stop
+			// instead of looping until the task deadline.
 			break
 		}
 		if len(dataRows) >= maxTableRows {
@@ -722,9 +732,17 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 			}
 			break
 		}
-		if !rec.Data.HasMore || rec.Data.PageToken == "" {
+		if !rec.Data.HasMore {
 			break
 		}
+		if rec.Data.PageToken == "" {
+			return nil, false, fmt.Errorf("feishu bitable record pagination: has_more=true with a missing page token")
+		}
+		if _, exists := seenRecordPageTokens[rec.Data.PageToken]; exists {
+			return nil, false, fmt.Errorf("feishu bitable record pagination repeated page token %q",
+				rec.Data.PageToken)
+		}
+		seenRecordPageTokens[rec.Data.PageToken] = struct{}{}
 		pageToken = rec.Data.PageToken
 	}
 	dataRows, capped := capRows(dataRows)
