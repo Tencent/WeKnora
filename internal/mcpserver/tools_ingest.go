@@ -32,6 +32,9 @@ func updateDocumentTool() mcp.Tool {
 		mcp.WithString("knowledge_id", mcp.Required(), mcp.Description("Document id")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("New Markdown content")),
 		mcp.WithString("title", mcp.Description("New title; keeps the current title when omitted")),
+		mcp.WithString("folder_path", mcp.Description("Move the document to this folder "+
+			"path (e.g. docs/spec) after the update; empty files it at the top "+
+			"level; omit keeps the current folder")),
 		mcp.WithBoolean("publish", mcp.Description("Publish (default true) or keep as draft")),
 		mcp.WithDestructiveHintAnnotation(true),
 	)
@@ -141,10 +144,31 @@ func (s *Server) handleUpdateDocument(ctx context.Context, req mcp.CallToolReque
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("failed to update document", err), nil
 	}
-	return jsonResult(map[string]any{
+	// folder_path moves the document between folders when the caller sends
+	// it (#5610). An absent parameter keeps the current filing; an empty
+	// string intentionally files the document at the knowledge base top
+	// level, matching POST /knowledge/folder semantics.
+	var movedFolder *string
+	if raw, ok := req.GetArguments()["folder_path"]; ok {
+		folder, ok := raw.(string)
+		if !ok {
+			return mcp.NewToolResultError("folder_path must be a string"), nil
+		}
+		folder = types.NormalizeKnowledgeFolderPath(folder)
+
+		if _, err := s.knowledgeService.MoveKnowledgeToFolder(ctx, kb.ID, []string{existing.ID}, folder); err != nil {
+			return mcp.NewToolResultErrorFromErr("failed to move document to folder", err), nil
+		}
+		movedFolder = &folder
+	}
+	result := map[string]any{
 		"document": summarizeKnowledge(updated),
 		"note":     "Re-indexing runs asynchronously.",
-	})
+	}
+	if movedFolder != nil {
+		result["folder_path"] = *movedFolder
+	}
+	return jsonResult(result)
 }
 
 func (s *Server) handleDeleteDocument(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
