@@ -66,7 +66,15 @@ func TestMCPServiceResponse_BuiltinStripsTenantConfig(t *testing.T) {
 	resp := NewMCPServiceResponse(adminContext(), svc)
 	assert.Nil(t, resp.URL, "builtin must not leak per-tenant URL")
 	assert.Nil(t, resp.Headers, "builtin must not leak per-tenant headers")
-	assert.Nil(t, resp.AuthConfig, "builtin must not leak auth config")
+	// #5618: builtin rows keep auth_type/scopes so the settings page can
+	// start OAuth; secrets have no response fields, so they cannot leak.
+	if resp.AuthConfig != nil {
+		assert.Empty(t, resp.AuthConfig.APIKeyHeader)
+		assert.Nil(t, resp.AuthConfig.CustomHeaders)
+		assert.Empty(t, resp.AuthConfig.ClientID)
+		assert.Empty(t, resp.AuthConfig.Scopes)
+		assert.Empty(t, resp.AuthConfig.AuthType)
+	}
 
 	body, _ := json.Marshal(resp)
 	assert.False(t, strings.Contains(string(body), "should-not-leak-via-builtin"))
