@@ -34,6 +34,13 @@ _ESCAPE_OR_PIPE = re.compile(r"\\.|\|", re.DOTALL)
 # Looser than ``_SEPARATOR_CELL``: any non-empty run of ``:``/``-`` qualifies.
 _ALIGNMENT_CELL = re.compile(r"^[:-]+$")
 _CODE_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
+# shortcut: explicit ATX and paragraph-interrupting list markers, use a
+# source-position-aware Markdown parser if broader block handling is needed.
+_INLINE_BLOCK_START = re.compile(
+    r"^ {0,3}(?:>[ \t]{0,4})*"
+    r"(?:(?P<heading>#{1,6}(?=[ \t]|\r?$)[^\n]*)|(?:[-+*]|1[.)])[ \t]+(?=\S))",
+    re.MULTILINE,
+)
 
 
 def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> str:
@@ -71,10 +78,19 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
 def _inline_code_spans(content: str) -> list[tuple[int, int]]:
     """Find paired backtick runs without rescanning unmatched suffixes."""
     tokens = list(re.finditer(r"`+|\n[ \t\r]*\n", content))
+    boundaries = []
+    for block in _INLINE_BLOCK_START.finditer(content):
+        boundaries.append(block.start())
+        if block["heading"] is not None:
+            boundaries.append(block.end())  # A heading has its own inline content.
+
     following: dict[int, int] = {}
     closers: dict[int, int] = {}
     for i in range(len(tokens) - 1, -1, -1):
         token = tokens[i]
+        while boundaries and boundaries[-1] > token.start():
+            following.clear()
+            boundaries.pop()
         if token[0].startswith("\n"):
             following.clear()  # Inline code cannot cross a blank paragraph.
             continue

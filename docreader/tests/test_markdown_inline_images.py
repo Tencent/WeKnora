@@ -59,6 +59,33 @@ class MarkdownInlineImageTests(unittest.TestCase):
         self.assertEqual(doc.content, raw)
         self.assertEqual(doc.images, {})
 
+    def test_backticks_do_not_pair_across_block_boundaries(self):
+        for raw in (
+            f"> - literal `\n> - {IMAGE} `",
+            f"literal `\n# Heading\n{IMAGE} `",
+            f"# Heading `\n{IMAGE} `",
+            f"literal `\n# {IMAGE} `",
+        ):
+            with self.subTest(raw=raw):
+                doc = self.parse(raw)
+                self.assertEqual(len(doc.images), 1)
+                path, payload = next(iter(doc.images.items()))
+                expected = raw.replace(IMAGE, f"![example]({path})")
+                self.assertEqual(doc.content, expected)
+                self.assertEqual(payload, PNG_B64)
+
+    def test_ordered_marker_can_continue_inline_code_in_a_paragraph(self):
+        raw = f"Example: `line one\n2. {IMAGE}`"
+        doc = self.parse(raw)
+        self.assertEqual(doc.content, raw)
+        self.assertEqual(doc.images, {})
+
+    def test_inline_code_within_heading_stays_literal(self):
+        raw = f"# Example: `{IMAGE}`"
+        doc = self.parse(raw)
+        self.assertEqual(doc.content, raw)
+        self.assertEqual(doc.images, {})
+
     def test_code_in_alt_text_does_not_hide_real_image(self):
         raw = IMAGE.replace("[example]", "[a `literal` example]")
         doc = self.parse(raw)
