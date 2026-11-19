@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -64,4 +65,37 @@ func TestKeyringStore_Ref(t *testing.T) {
 	k := NewKeyringStore()
 	got := k.Ref("prod", "access")
 	assert.Equal(t, "keychain://weknora/prod/access", got)
+}
+
+// A backend that never answers must not hold the command: the probe gives up
+// after keyringProbeTimeout and falls back to the file store.
+func TestNewBestEffortStoreFallsBackWhenTheProbeHangs(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	prev := keyringGet
+	keyringGet = func(service, user string) (string, error) {
+		<-release
+		return "", keyring.ErrNotFound
+	}
+	t.Cleanup(func() { keyringGet = prev })
+
+	type result struct {
+		store Store
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		s, err := NewBestEffortStore()
+		done <- result{store: s, err: err}
+	}()
+
+	select {
+	case got := <-done:
+		require.NoError(t, got.err)
+		_, ok := got.store.(*FileStore)
+		assert.True(t, ok, "a hung keyring probe must fall back to the file store")
+	case <-time.After(keyringProbeTimeout + 3*time.Second):
+		t.Fatal("NewBestEffortStore blocked on a hung keyring backend")
+	}
 }
