@@ -427,20 +427,7 @@ func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
 // @x-agent-hint "Lists parser engine names, supported file extensions and availability. Choose an available engine supporting every requested file type before setting parser_engine in knowledge_base.update. Never guess an engine name."
 // @Router       /system/parser-engines [get]
 func (h *SystemHandler) ListParserEngines(c *gin.Context) {
-	var overrides map[string]string
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
-			if tenant.ParserEngineConfig != nil {
-				overrides = tenant.ParserEngineConfig.ToOverridesMap()
-			}
-			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-				if overrides == nil {
-					overrides = make(map[string]string)
-				}
-				overrides["weknoracloud_app_id"] = creds.AppID
-			}
-		}
-	}
+	overrides := parserOverridesForTenant(c, nil)
 
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
 	connected := reader != nil && reader.IsConnected()
@@ -489,20 +476,7 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 		return
 	}
 
-	var overrides map[string]string
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
-			if tenant.ParserEngineConfig != nil {
-				overrides = tenant.ParserEngineConfig.ToOverridesMap()
-			}
-			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-				if overrides == nil {
-					overrides = make(map[string]string)
-				}
-				overrides["weknoracloud_app_id"] = creds.AppID
-			}
-		}
-	}
+	overrides := parserOverridesForTenant(c, nil)
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), h.documentReader, overrides)
 	engines := docparser.ListAllEngines(true, overrides, remoteEngines)
 
@@ -526,28 +500,45 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 		return
 	}
 	var existing *types.ParserEngineConfig
-	var tenant *types.Tenant
 	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
 		if t, ok := v.(*types.Tenant); ok && t != nil {
-			tenant = t
 			existing = t.ParserEngineConfig
 		}
 	}
 	merged := types.MergeParserEngineConfigForUpdate(&body, existing)
-	overrides := merged.ToOverridesMap()
-	if tenant != nil {
-		if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-			if overrides == nil {
-				overrides = make(map[string]string)
-			}
-			overrides["weknoracloud_app_id"] = creds.AppID
-		}
-	}
+	overrides := parserOverridesForTenant(c, merged)
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
 	connected := reader != nil && reader.IsConnected()
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
 	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
 	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
+}
+
+// parserOverridesForTenant builds the parser overrides for the caller's tenant:
+// deployment defaults under the tenant's parser settings, plus the tenant's
+// WeKnora Cloud app id. config, when non-nil, is used instead of the tenant's
+// stored settings (CheckParserEngines passes the merged form values).
+func parserOverridesForTenant(c *gin.Context, config *types.ParserEngineConfig) map[string]string {
+	var tenant *types.Tenant
+	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
+		tenant, _ = v.(*types.Tenant)
+	}
+	if config == nil && tenant != nil {
+		config = tenant.ParserEngineConfig
+	}
+	overrides := types.ParserOverridesFor(config)
+	if tenant == nil {
+		return overrides
+	}
+	creds := tenant.Credentials.GetWeKnoraCloud()
+	if creds == nil {
+		return overrides
+	}
+	if overrides == nil {
+		overrides = make(map[string]string, 1)
+	}
+	overrides["weknoracloud_app_id"] = creds.AppID
+	return overrides
 }
 
 func (h *SystemHandler) resolveDocReader(ctx context.Context, overrides map[string]string) (interfaces.DocumentReader, string, string) {

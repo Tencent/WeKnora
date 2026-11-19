@@ -1,9 +1,13 @@
 package service
 
-import "testing"
+import (
+	"testing"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
 
 func TestValidateParserOverrideURLsRejectsEverySupportedURLKey(t *testing.T) {
-	for _, key := range parserOutboundURLKeys {
+	for _, key := range secutils.ParserOutboundURLKeys {
 		t.Run(key, func(t *testing.T) {
 			err := validateParserEngineOverrideURLs(map[string]string{
 				key: "http://169.254.169.254/latest/meta-data",

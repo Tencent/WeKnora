@@ -494,17 +494,28 @@ func oneOf(value string, allowed ...string) bool {
 // chat attachment file type, or the type-level default when no rule matches.
 // Mirrors ParserEngineConfig.ResolveChatParserEngine.
 func (c *CustomAgentConfig) ResolveChatParserEngine(fileType string) string {
-	if c != nil {
-		normalized := normalizeParserFileType(fileType)
-		for _, rule := range c.ChatParserEngineRules {
-			for _, candidate := range rule.FileTypes {
-				if normalizeParserFileType(candidate) == normalized {
-					return strings.TrimSpace(rule.Engine)
-				}
+	if engine, ok := c.ExplicitChatParserEngine(fileType); ok {
+		return engine
+	}
+	return DefaultParserEngine(fileType)
+}
+
+// ExplicitChatParserEngine returns the agent's chat rule for a file type.
+// Unlike ResolveChatParserEngine it does not fall back to the default, so
+// callers can keep tenant rules ahead of the deployment default.
+func (c *CustomAgentConfig) ExplicitChatParserEngine(fileType string) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	normalized := normalizeParserFileType(fileType)
+	for _, rule := range c.ChatParserEngineRules {
+		for _, candidate := range rule.FileTypes {
+			if normalizeParserFileType(candidate) == normalized {
+				return strings.TrimSpace(rule.Engine), true
 			}
 		}
 	}
-	return DefaultParserEngine(fileType)
+	return "", false
 }
 
 // Value implements driver.Valuer interface for CustomAgentConfig

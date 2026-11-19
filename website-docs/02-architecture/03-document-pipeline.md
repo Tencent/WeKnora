@@ -272,7 +272,7 @@ Worker 消费 `TypeDocumentProcess` 后按五个规范化阶段推进，每个�
 
 1. `beginStage(StageDocReader)` 记录输入（file_name/file_type/is_url）。
 2. URL 模式再次 `ValidateURLForSSRF`，失败即 `failStage` + `ParseStatus=failed`。
-3. 引擎选择：`eff.ChunkingConfig.ResolveParserEngine(fileType)`（URL 用虚拟类型 `"url"`），按 KB 配置的 `ParserEngineRules`（文件类型 → 引擎）路由；`MergeParserEngineOverrides` 合并租户级与上传级引擎参数覆盖。
+3. 引擎选择：`eff.ChunkingConfig.ResolveParserEngine(fileType)`（URL 用虚拟类型 `"url"`），按 KB 配置的 `ParserEngineRules`（文件类型 → 引擎）路由。入库链路的顺序为 KB 显式规则 > 部署默认 `parser_defaults` > 内置回退；租户解析设置只作用于聊天附件，KB 规则为空时使用部署默认引擎。`MergeParserEngineOverrides` 合并租户级与上传级引擎参数覆盖。
 4. `resolveDocReader` 返回 `interfaces.DocReader`：
    - **builtin**：通过 gRPC（`docparser/grpc_parser.go`）或 HTTP（`http_parser.go`）调用 Python **docreader** 服务；
    - **simple**：Go 原生解析 md/txt/csv/json/图片/音频（`builtin_converter.go`，CSV→Markdown 表格、JSON→递归分割的代码块，图片/音频转占位引用）；
