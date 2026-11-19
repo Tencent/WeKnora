@@ -2,7 +2,9 @@ package drive
 
 import (
 	"context"
+	"errors"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -110,13 +112,27 @@ func (o *driveOps) listDriveFilesForResource(
 	}
 	files, dirPaths, failures := core.WalkDriveTree(ctx, client, fileToken, base)
 	for _, failure := range failures {
+		if failure.FolderToken == fileToken && errors.Is(failure.Err, datasource.ErrResourceNotFound) {
+			logger.Warnf(ctx, "[FeishuDrive] selected drive resource %s has been deleted, skipping: %v",
+				resourceID, failure.Err)
+			return nil, &core.SelectedResourceDeletedError{Token: fileToken, Cause: failure.Err}
+		}
 		if failure.FolderToken == fileToken && isDriveNotFolderError(failure.Err) {
 			// Only nested single files need the legacy root search: Drive
 			// exposes no single-file parent query. Never use this fallback for
 			// permission/transport failures, which must retain the old cursor.
 			rootFiles, rootDirs, rootFailures := core.WalkDriveTree(ctx, client, rootFolderToken, rootBase)
 			o.dirPaths = rootDirs
-			return filterDriveFileByToken(rootFiles, fileToken), partialDriveError(rootFailures)
+			matched := filterDriveFileByToken(rootFiles, fileToken)
+			if len(matched) == 0 && len(rootFailures) == 0 {
+				logger.Warnf(ctx, "[FeishuDrive] selected drive file %s no longer exists under %s, skipping",
+					resourceID, rootFolderToken)
+				return nil, &core.SelectedResourceDeletedError{
+					Token: fileToken,
+					Cause: datasource.ErrResourceNotFound,
+				}
+			}
+			return matched, partialDriveError(rootFailures)
 		}
 	}
 	o.dirPaths = dirPaths

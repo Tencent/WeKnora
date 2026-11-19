@@ -572,6 +572,31 @@ func TestConnectorResolveResourceAncestors(t *testing.T) {
 	if len(ancestors) != 0 {
 		t.Fatalf("want no ancestors for a space selection, got %+v", ancestors)
 	}
+
+	// A deleted node (or a node under a deleted/unshared space) must NOT add
+	// its space or broken parents to ancestors, while valid selections alongside
+	// it still resolve in top-down order.
+	ancestors, err = c.ResolveResourceAncestors(
+		context.Background(), makeConfig(cfg, nil), []string{"deleted-space:nt-deleted", "space1:nt-deleted"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors(deleted) error: %v", err)
+	}
+	if len(ancestors) != 0 {
+		t.Fatalf("deleted selections must not return unexpandable space ancestors, got %+v", ancestors)
+	}
+
+	ancestors, err = c.ResolveResourceAncestors(
+		context.Background(),
+		makeConfig(cfg, nil),
+		[]string{"deleted-space:nt-deleted", "space1:nt-grandchild"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveResourceAncestors(mixed) error: %v", err)
+	}
+	if !slices.Equal(ancestors, []string{"space1", "space1:nt-root", "space1:nt-child"}) {
+		t.Fatalf("want [space1 space1:nt-root space1:nt-child], got %+v", ancestors)
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -1961,6 +1986,120 @@ func TestSupportedImageExt(t *testing.T) {
 			}
 			if ct != tc.wantCT {
 				t.Errorf("contentType = %q, want %q (must be returned even when !ok)", ct, tc.wantCT)
+			}
+		})
+	}
+}
+
+func TestFetchStream_DeletedSelectedSubtreeReconcilesDescendantsAndContinues(t *testing.T) {
+	for _, statusCode := range []int{http.StatusBadRequest, http.StatusOK} {
+		t.Run(http.StatusText(statusCode), func(t *testing.T) {
+			deletedFolder := false
+			mux := http.NewServeMux()
+			mux.HandleFunc(
+				"/open-apis/auth/v3/tenant_access_token/internal",
+				func(w http.ResponseWriter, _ *http.Request) {
+					writeJSON(w, core.TokenResponse{
+						ApiResponse:       core.ApiResponse{Code: 0},
+						TenantAccessToken: "fake-token",
+						Expire:            7200,
+					})
+				},
+			)
+			mux.HandleFunc("/open-apis/wiki/v2/spaces", func(w http.ResponseWriter, _ *http.Request) {
+				writeJSON(w, core.WikiSpaceListResponse{
+					ApiResponse: core.ApiResponse{Code: 0},
+					Data:        core.WikiSpaceListData{Items: []core.WikiSpace{{SpaceID: "space1", Name: "Space"}}},
+				})
+			})
+			mux.HandleFunc("/open-apis/wiki/v2/spaces/get_node", func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Query().Get("token") {
+				case "nt-folder":
+					if deletedFolder {
+						w.WriteHeader(statusCode)
+						_, _ = w.Write([]byte(`{"code":131005,"msg":"not found: node has been deleted"}`))
+						return
+					}
+					writeJSON(w, core.WikiNodeInfoResponse{
+						ApiResponse: core.ApiResponse{Code: 0},
+						Data: core.WikiNodeInfoData{Node: core.WikiNode{
+							SpaceID: "space1", NodeToken: "nt-folder", ObjToken: "obj-folder",
+							ObjType: "file", Title: "Folder.pdf", NodeEditTime: "100", HasChild: true,
+						}},
+					})
+				case "nt-doc-b":
+					edit := "100"
+					if deletedFolder {
+						edit = "200"
+					}
+					writeJSON(w, core.WikiNodeInfoResponse{
+						ApiResponse: core.ApiResponse{Code: 0},
+						Data: core.WikiNodeInfoData{Node: core.WikiNode{
+							SpaceID: "space1", NodeToken: "nt-doc-b", ObjToken: "obj-doc-b",
+							ObjType: "file", Title: "DocB.pdf", NodeEditTime: edit,
+						}},
+					})
+				default:
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"code":131005,"msg":"not found"}`))
+				}
+			})
+			mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
+				var items []core.WikiNode
+				if r.URL.Query().Get("parent_node_token") == "nt-folder" {
+					items = []core.WikiNode{{
+						SpaceID: "space1", ParentNodeID: "nt-folder", NodeToken: "nt-child",
+						ObjToken: "obj-child", ObjType: "file", Title: "Child.pdf", NodeEditTime: "100",
+					}}
+				}
+				writeJSON(w, core.WikiNodeListResponse{
+					ApiResponse: core.ApiResponse{Code: 0},
+					Data:        core.WikiNodeListData{Items: items},
+				})
+			})
+			mux.HandleFunc("/open-apis/drive/v1/files/", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/octet-stream")
+				_, _ = w.Write([]byte("pdf-bytes"))
+			})
+			ts := httptest.NewServer(mux)
+			defer ts.Close()
+
+			cfg := makeConfig(&core.Config{
+				AppID: "id", AppSecret: "sec", BaseURL: ts.URL,
+			}, []string{"space1:nt-folder", "space1:nt-doc-b"})
+			conn := NewConnector(core.RegionFeishu)
+
+			items1, cur1, err := conn.FetchIncremental(context.Background(), cfg, nil)
+			if err != nil {
+				t.Fatalf("first sync error: %v", err)
+			}
+			if len(items1) != 3 {
+				t.Fatalf("want 3 items on first sync, got %d", len(items1))
+			}
+
+			deletedFolder = true
+			items2, cur2, err := conn.FetchIncremental(context.Background(), cfg, cur1)
+			if err != nil {
+				t.Fatalf("second sync after deleting selected subtree failed: %v", err)
+			}
+			var deleted []string
+			var updated []string
+			for _, it := range items2 {
+				if it.IsDeleted {
+					deleted = append(deleted, it.ExternalID)
+				} else {
+					updated = append(updated, it.ExternalID)
+				}
+			}
+			if !slices.Equal(deleted, []string{"nt-child", "nt-folder"}) {
+				t.Fatalf("deleted = %v, want [nt-child nt-folder]", deleted)
+			}
+			if !slices.Equal(updated, []string{"nt-doc-b"}) {
+				t.Fatalf("updated = %v, want [nt-doc-b]", updated)
+			}
+			times := (&wikiOps{}).DecodeCursorTimes(cur2.ConnectorCursor)
+			if _, exists := times["space1:nt-folder"]; exists {
+				t.Fatalf("deleted selected resource must be pruned from cursor, got %+v", times)
 			}
 		})
 	}

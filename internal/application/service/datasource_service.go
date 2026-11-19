@@ -932,6 +932,75 @@ func recordSyncError(result *types.SyncResult, item types.SyncItemError) {
 	}
 }
 
+// recordSyncDeletedItem appends a source-deleted item sample to
+// result.DeletedItems (capped at maxSyncResultErrors and deduplicated),
+// resolving a human-readable title from the item, KB row, or prior sync result.
+func recordSyncDeletedItem(
+	result *types.SyncResult, ds *types.DataSource,
+	existing *types.Knowledge, item *types.FetchedItem,
+) {
+	if result == nil || item == nil || len(result.DeletedItems) >= maxSyncResultErrors {
+		return
+	}
+	for _, d := range result.DeletedItems {
+		if d.ExternalID == item.ExternalID && d.SourceResourceID == item.SourceResourceID {
+			return
+		}
+	}
+	result.DeletedItems = append(result.DeletedItems, types.SyncDeletedItem{
+		ExternalID:       item.ExternalID,
+		SourceResourceID: item.SourceResourceID,
+		Title:            resolveDeletedItemTitle(ds, existing, item),
+	})
+}
+
+func resolveDeletedItemTitle(
+	ds *types.DataSource, existing *types.Knowledge, item *types.FetchedItem,
+) string {
+	if t := strings.TrimSpace(item.Title); t != "" {
+		return t
+	}
+	if existing != nil {
+		if t := strings.TrimSpace(existing.Title); t != "" {
+			return t
+		}
+		if t := strings.TrimSpace(existing.FileName); t != "" {
+			return t
+		}
+	}
+	if ds != nil && len(ds.LastSyncResult) > 0 {
+		var prev types.SyncResult
+		if err := json.Unmarshal(ds.LastSyncResult, &prev); err == nil {
+			if item.ExternalID != "" {
+				for _, d := range prev.DeletedItems {
+					if d.Title != "" && d.ExternalID == item.ExternalID {
+						return d.Title
+					}
+				}
+			}
+			if item.SourceResourceID != "" {
+				matchedTitle := ""
+				ambiguous := false
+				for _, d := range prev.DeletedItems {
+					if d.Title == "" || d.SourceResourceID != item.SourceResourceID {
+						continue
+					}
+					if matchedTitle == "" {
+						matchedTitle = d.Title
+					} else if matchedTitle != d.Title {
+						ambiguous = true
+						break
+					}
+				}
+				if matchedTitle != "" && !ambiguous {
+					return matchedTitle
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // fetchFailureSyncError maps a connector error item into a structured, user-
 // facing sample. Connectors that classify their errors (Feishu) provide a stable
 // i18n code + params via metadata so the frontend localises it to the viewer's
@@ -963,7 +1032,18 @@ func (s *DataSourceService) applyFetchedItem(
 	tagIDs []string, result *types.SyncResult,
 ) (nonBlockingFailure bool, ingestErr error) {
 	if item.IsDeleted {
+		selectedDeleted := item.Metadata[types.MetaKeySelectedResourceDeleted] == "true"
 		if !ds.SyncDeletions {
+			if selectedDeleted {
+				var existing *types.Knowledge
+				if s.knowledgeService != nil && s.knowledgeService.GetRepository() != nil && item.ExternalID != "" {
+					existing, _ = s.knowledgeService.GetRepository().FindByDataSourceExternalID(
+						ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID,
+					)
+				}
+				result.Skipped++
+				recordSyncDeletedItem(result, ds, existing, item)
+			}
 			// Sync deletion disabled: neither count nor delete.
 			return false, nil
 		}
@@ -993,7 +1073,11 @@ func (s *DataSourceService) applyFetchedItem(
 		if existing == nil {
 			// Deletion is idempotent: the source item may already have been
 			// removed manually or by an earlier sync.
+			s.sweepStaleSubtree(ctx, ds, item)
 			result.Skipped++
+			if selectedDeleted {
+				recordSyncDeletedItem(result, ds, nil, item)
+			}
 			return false, nil
 		}
 		if deleteErr := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); deleteErr != nil {
@@ -1023,7 +1107,9 @@ func (s *DataSourceService) applyFetchedItem(
 			})
 			return false, nil
 		}
+		s.sweepStaleSubtree(ctx, ds, item)
 		result.Deleted++
+		recordSyncDeletedItem(result, ds, existing, item)
 		return false, nil
 	}
 
@@ -1385,6 +1471,35 @@ func (s *DataSourceService) cancelSyncLog(
 	return nil
 }
 
+func mergeDeletedItems(cur, prev []types.SyncDeletedItem) []types.SyncDeletedItem {
+	if len(prev) == 0 {
+		return cur
+	}
+	out := make([]types.SyncDeletedItem, 0, min(len(cur)+len(prev), maxSyncResultErrors))
+	for _, d := range cur {
+		if len(out) >= maxSyncResultErrors {
+			return out
+		}
+		out = append(out, d)
+	}
+	for _, p := range prev {
+		if len(out) >= maxSyncResultErrors {
+			break
+		}
+		seen := false
+		for _, existing := range out {
+			if existing.ExternalID == p.ExternalID && existing.SourceResourceID == p.SourceResourceID {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func (s *DataSourceService) updateSyncRunResult(
 	ctx context.Context,
 	ds *types.DataSource,
@@ -1420,7 +1535,20 @@ func (s *DataSourceService) updateSyncRunResult(
 		ds.Status = types.DataSourceStatusActive
 	}
 	ds.ErrorMessage = errorMessage
-	ds.LastSyncResult = resultJSON
+	dsResultJSON := resultJSON
+	if status == types.SyncLogStatusFailed && result != nil {
+		if prev, err := ds.ParseSyncResult(); err == nil && prev != nil && len(prev.DeletedItems) > 0 {
+			mergedItems := mergeDeletedItems(result.DeletedItems, prev.DeletedItems)
+			if len(mergedItems) > len(result.DeletedItems) {
+				merged := *result
+				merged.DeletedItems = mergedItems
+				if b, merr := merged.ToJSON(); merr == nil {
+					dsResultJSON = b
+				}
+			}
+		}
+	}
+	ds.LastSyncResult = dsResultJSON
 	sourceErr := s.dsRepo.UpdateSyncState(ctx, ds)
 	if sourceErr != nil {
 		logger.Errorf(ctx, "failed to update data source: %v", sourceErr)

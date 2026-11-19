@@ -468,6 +468,8 @@ export default {
     logDetail: {
       startTime: '開始',
       endTime: '終了',
+      deletedItems: '同期元で削除済み',
+      deletedItemsMore: '他{n}件の削除されたドキュメントは表示されていません',
       failedItems: '失敗したドキュメント',
       failedItemsMore: '他{n}件の失敗したドキュメントは表示されていません',
       docsFailedSummary: '{n}件のドキュメントの同期に失敗しました'
@@ -633,6 +635,7 @@ export default {
       book: 'Yuqueナレッジベース',
       library: 'Seafileライブラリ'
     },
+    resourceUnavailable: '削除済みまたは利用不可',
     neverSynced: '未同期',
     justNow: 'たった今',
     minutesAgo: '{n}分前',

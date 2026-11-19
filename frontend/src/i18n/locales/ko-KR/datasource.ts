@@ -778,6 +778,7 @@ export default {
       book: 'Yuque 지식베이스',
       library: 'Seafile 라이브러리'
     },
+    resourceUnavailable: '삭제됨 또는 사용 불가',
     scheduleHuman: {
       '30min': '30분마다',
       '1h': '매시간',
@@ -848,6 +849,8 @@ export default {
     logDetail: {
       startTime: '시작 시간',
       endTime: '종료 시간',
+      deletedItems: '원본에서 삭제된 문서',
+      deletedItemsMore: '표시되지 않은 삭제 문서 {n}개',
       failedItems: '실패한 문서',
       failedItemsMore: '표시되지 않은 실패 문서 {n}개',
       docsFailedSummary: '문서 {n}개 동기화 실패'

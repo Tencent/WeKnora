@@ -468,6 +468,8 @@ export default {
     logDetail: {
       startTime: 'Started',
       endTime: 'Finished',
+      deletedItems: 'Deleted in source',
+      deletedItemsMore: '{n} more deleted documents not shown',
       failedItems: 'Failed documents',
       failedItemsMore: '{n} more failed documents not shown',
       docsFailedSummary: '{n} document(s) failed to sync'
@@ -633,6 +635,7 @@ export default {
       book: 'Yuque Book',
       library: 'Seafile Library'
     },
+    resourceUnavailable: 'Deleted or unavailable',
     neverSynced: 'Never synced',
     justNow: 'Just now',
     minutesAgo: '{n}m ago',

@@ -778,6 +778,7 @@ export default {
       book: '語雀知識庫',
       library: 'Seafile 資料庫'
     },
+    resourceUnavailable: '已刪除或不可用',
     scheduleHuman: {
       '30min': '每 30 分鐘',
       '1h': '每小時',
@@ -848,6 +849,8 @@ export default {
     logDetail: {
       startTime: '開始時間',
       endTime: '結束時間',
+      deletedItems: '來源端已刪除文件',
+      deletedItemsMore: '還有 {n} 個已刪除文件未顯示',
       failedItems: '失敗文件',
       failedItemsMore: '還有 {n} 個失敗文件未顯示',
       docsFailedSummary: '{n} 個文件同步失敗'
