@@ -55,6 +55,7 @@ func (c *Connector) Validate(ctx context.Context, ds *types.DataSourceConfig) er
 	}
 	return nil
 }
+
 func (c *Connector) ListResources(ctx context.Context, ds *types.DataSourceConfig, parent string) ([]types.Resource, error) {
 	var err error
 	if c, err = c.configured(ds); err != nil {
@@ -92,9 +93,11 @@ func (c *Connector) ListResources(ctx context.Context, ds *types.DataSourceConfi
 	}
 	return out, nil
 }
+
 func (c *Connector) ResolveResourceAncestors(context.Context, *types.DataSourceConfig, []string) ([]string, error) {
 	return []string{}, nil
 }
+
 func (c *Connector) FetchAll(ctx context.Context, ds *types.DataSourceConfig, _ []string) ([]types.FetchedItem, error) {
 	var err error
 	if c, err = c.configured(ds); err != nil {
@@ -167,12 +170,12 @@ func (c *Connector) FetchIncremental(ctx context.Context, ds *types.DataSourceCo
 		}
 		previous := prev.Projects[s.ProjectID]
 		if previous == "" {
-			files, err := c.files(ctx, s.ProjectID, ref, s.Paths)
+			files, err := c.files(ctx, s.ProjectID, head, s.Paths)
 			if err != nil {
 				return nil, nil, err
 			}
 			for _, f := range files {
-				item, err := c.item(ctx, p, ref, f)
+				item, err := c.itemAtRevision(ctx, p, ref, head, f)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -194,7 +197,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, ds *types.DataSourceCo
 					out = append(out, c.deleted(p, ref, d.OldPath))
 				}
 				if c.inScope(d.NewPath, s.Paths) && isSupportedFile(d.NewPath) {
-					item, err := c.item(ctx, p, ref, d.NewPath)
+					item, err := c.itemAtRevision(ctx, p, ref, head, d.NewPath)
 					if err != nil {
 						return nil, nil, err
 					}
@@ -254,7 +257,7 @@ func (c *Connector) FetchStream(
 		previous := prev.Projects[selection.ProjectID]
 		switch {
 		case previous == "":
-			err = c.streamFiles(ctx, project, ref, selection.Paths, h)
+			err = c.streamFiles(ctx, project, ref, head, selection.Paths, h)
 		case previous != head:
 			err = c.streamChanges(ctx, project, ref, previous, head, selection.Paths, h)
 		}
@@ -301,7 +304,7 @@ func (c *Connector) streamChanges(
 			}
 		}
 		if c.inScope(change.NewPath, roots) && isSupportedFile(change.NewPath) {
-			item, err := c.item(ctx, project, ref, change.NewPath)
+			item, err := c.itemAtRevision(ctx, project, ref, to, change.NewPath)
 			if err != nil {
 				return err
 			}
@@ -325,10 +328,10 @@ func (c *Connector) compareChanges(ctx context.Context, projectID, from, to stri
 }
 
 func (c *Connector) streamFiles(
-	ctx context.Context, project *project, ref string, roots []string, h datasource.StreamHandler,
+	ctx context.Context, project *project, ref, revision string, roots []string, h datasource.StreamHandler,
 ) error {
-	return c.walkFiles(ctx, fmt.Sprint(project.ID), ref, roots, func(file string) error {
-		item, err := c.item(ctx, project, ref, file)
+	return c.walkFiles(ctx, fmt.Sprint(project.ID), revision, roots, func(file string) error {
+		item, err := c.itemAtRevision(ctx, project, ref, revision, file)
 		if err != nil {
 			return err
 		}
@@ -396,7 +399,15 @@ var gitLabSupportedFileExtensions = map[string]struct{}{
 }
 
 func (c *Connector) item(ctx context.Context, p *project, ref, file string) (types.FetchedItem, error) {
-	body, err := c.client.raw(ctx, fmt.Sprint(p.ID), ref, file)
+	return c.itemAtRevision(ctx, p, ref, ref, file)
+}
+
+// itemAtRevision reads an immutable sync snapshot without changing the logical
+// branch identity used for updates, deletions, folders, and source links.
+func (c *Connector) itemAtRevision(
+	ctx context.Context, p *project, ref, revision, file string,
+) (types.FetchedItem, error) {
+	body, err := c.client.raw(ctx, fmt.Sprint(p.ID), revision, file)
 	if err != nil {
 		return types.FetchedItem{}, err
 	}
@@ -446,9 +457,11 @@ func knowledgeRelativePath(projectName, ref, file string) string {
 	root := strings.TrimSpace(projectName) + "-" + strings.ReplaceAll(strings.TrimSpace(ref), "/", "-")
 	return path.Join(root, file)
 }
+
 func (c *Connector) deleted(p *project, ref, file string) types.FetchedItem {
 	return types.FetchedItem{ExternalID: fmt.Sprintf("gitlab:%s:%d:%s:%s", c.canonicalBase, p.ID, ref, file), IsDeleted: true, Metadata: map[string]string{"channel": types.ConnectorTypeGitLab, "gitlab_path": file}}
 }
+
 func (c *Connector) inScope(file string, roots []string) bool {
 	if len(roots) == 0 {
 		return true
@@ -460,6 +473,7 @@ func (c *Connector) inScope(file string, roots []string) bool {
 	}
 	return false
 }
+
 func splitResourceID(value string) (string, string) {
 	parts := strings.SplitN(value, ":", 2)
 	if len(parts) == 1 {

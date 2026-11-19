@@ -9,6 +9,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -23,6 +24,7 @@ func TestConnectorFetchesNestedDirectories(t *testing.T) {
 	} {
 		t.Run(mode, func(t *testing.T) {
 			allowLocalGitLabServer(t)
+			var browsing atomic.Bool
 			dirs := []string{"docs", "docs/a", "docs/a/b", "docs/a/b/c", "docs/a/b/c/d"}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -38,7 +40,11 @@ func TestConnectorFetchesNestedDirectories(t *testing.T) {
 				case "/api/v4/projects/1/repository/tree":
 					dir := r.URL.Query().Get("path")
 					index := slices.Index(dirs, dir)
-					if index < 0 || r.URL.Query().Get("ref") != "main" {
+					expectedRef := "head"
+					if mode == "all" || browsing.Load() {
+						expectedRef = "main"
+					}
+					if index < 0 || r.URL.Query().Get("ref") != expectedRef {
 						http.Error(w, "unexpected tree scope", http.StatusBadRequest)
 						return
 					}
@@ -100,6 +106,7 @@ func TestConnectorFetchesNestedDirectories(t *testing.T) {
 				require.Equal(t, dir+"/README.md", items[i].Metadata["gitlab_path"])
 			}
 
+			browsing.Store(true)
 			resources, err := connector.ListResources(context.Background(), cfg, "1:docs")
 			require.NoError(t, err)
 			require.Len(t, resources, 1)
