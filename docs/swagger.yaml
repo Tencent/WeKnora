@@ -11119,6 +11119,20 @@ definitions:
     - name
     - trigger
     type: object
+  internal_handler.CreateChunkRequest:
+    properties:
+      content:
+        description: Full content of the new chunk; trimmed and validated like chunk
+          updates.
+        type: string
+        x-agent: true
+        x-agent-max-bytes: "32000"
+      is_enabled:
+        description: Whether the new chunk participates in retrieval; omitted defaults
+          to true.
+        type: boolean
+        x-agent: true
+    type: object
   internal_handler.CreateKnowledgeFromURLRequest:
     properties:
       channel:
@@ -12435,6 +12449,23 @@ definitions:
         example: false
         type: boolean
     type: object
+  internal_handler.MergeChunksRequest:
+    properties:
+      chunk_ids:
+        description: 2..N chunk ids in document order; must be adjacent text chunks
+          of one document.
+        items:
+          type: string
+        type: array
+        x-agent: true
+      expected_revisions:
+        description: Optional content_revision per chunk id; a stale value fails with
+          HTTP 409.
+        items:
+          type: integer
+        type: array
+        x-agent: true
+    type: object
   internal_handler.MessageResponse:
     properties:
       message:
@@ -13440,6 +13471,25 @@ definitions:
         x-agent: true
       name:
         type: string
+        x-agent: true
+    type: object
+  internal_handler.SplitChunkRequest:
+    properties:
+      expected_revision:
+        description: Current content_revision from chunk.get; a stale value fails
+          with HTTP 409.
+        minimum: 0
+        type: integer
+        x-agent: true
+      is_enabled:
+        description: Whether the new suffix chunk participates in retrieval; omitted
+          inherits.
+        type: boolean
+        x-agent: true
+      split_at:
+        description: Rune offset inside the chunk body; both halves must be non-empty.
+        minimum: 1
+        type: integer
         x-agent: true
     type: object
   internal_handler.StorageCheckRequest:
@@ -17091,6 +17141,41 @@ paths:
         risk: read
       x-agent-hint: The chunks a document was split into, in order; use it to check
         how a document was parsed. meta.total counts every chunk.
+    post:
+      consumes:
+      - application/json
+      description: 在指定知识下新建一个人工分块并立即重建索引
+      parameters:
+      - description: 知识ID
+        in: path
+        name: knowledge_id
+        required: true
+        type: string
+        x-agent: true
+      - description: 创建请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.CreateChunkRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 新建的分块
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Chunk'
+              type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 新建人工分块
+      tags:
+      - 分块管理
   /chunks/{knowledge_id}/{id}:
     delete:
       consumes:
@@ -17274,6 +17359,85 @@ paths:
         risk: read
       x-agent-hint: Read saved earlier revisions of a document chunk. Current revision
         is returned by chunk.get.
+  /chunks/{knowledge_id}/{id}/split:
+    post:
+      consumes:
+      - application/json
+      description: 在指定字符偏移处把一个文本分块拆成两块并各自重建索引
+      parameters:
+      - description: 知识ID
+        in: path
+        name: knowledge_id
+        required: true
+        type: string
+        x-agent: true
+      - description: 分块ID
+        in: path
+        name: id
+        required: true
+        type: string
+        x-agent: chunk_id
+      - description: 拆分请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.SplitChunkRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 拆分后的两个分块
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Chunk'
+                  type: array
+              type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 拆分分块
+      tags:
+      - 分块管理
+  /chunks/{knowledge_id}/merge:
+    post:
+      consumes:
+      - application/json
+      description: 将同一知识下 2..N 个相邻文本分块按文档顺序合并进第一个分块
+      parameters:
+      - description: 知识ID
+        in: path
+        name: knowledge_id
+        required: true
+        type: string
+      - description: 合并请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.MergeChunksRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 合并后的分块
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Chunk'
+              type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 合并相邻分块
+      tags:
+      - 分块管理
   /chunks/by-id/{id}:
     get:
       consumes:

@@ -3544,6 +3544,66 @@
                 },
                 "x-agent-hint": "The chunks a document was split into, in order; use it to check how a document was parsed. meta.total counts every chunk."
             },
+            "post": {
+                "description": "在指定知识下新建一个人工分块并立即重建索引",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "分块管理"
+                ],
+                "summary": "新建人工分块",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "知识ID",
+                        "name": "knowledge_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "创建请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.CreateChunkRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "新建的分块",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Chunk"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ]
+            },
             "delete": {
                 "description": "删除指定知识下的所有分块",
                 "consumes": [
@@ -3576,6 +3636,67 @@
                         "description": "请求参数错误",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/chunks/{knowledge_id}/merge": {
+            "post": {
+                "description": "将同一知识下 2..N 个相邻文本分块按文档顺序合并进第一个分块",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "分块管理"
+                ],
+                "summary": "合并相邻分块",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识ID",
+                        "name": "knowledge_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "合并请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MergeChunksRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "合并后的分块",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Chunk"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 },
@@ -3866,6 +3987,79 @@
                     "risk": "read"
                 },
                 "x-agent-hint": "Read saved earlier revisions of a document chunk. Current revision is returned by chunk.get."
+            }
+        },
+        "/chunks/{knowledge_id}/{id}/split": {
+            "post": {
+                "description": "在指定字符偏移处把一个文本分块拆成两块并各自重建索引",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "分块管理"
+                ],
+                "summary": "拆分分块",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "知识ID",
+                        "name": "knowledge_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "x-agent": "chunk_id",
+                        "description": "分块ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "拆分请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SplitChunkRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "拆分后的两个分块",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Chunk"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ]
             }
         },
         "/datasource": {
@@ -39599,6 +39793,22 @@
                 }
             }
         },
+        "internal_handler.CreateChunkRequest": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "description": "Full content of the new chunk; trimmed and validated like chunk updates.",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-max-bytes": "32000"
+                },
+                "is_enabled": {
+                    "description": "Whether the new chunk participates in retrieval; omitted defaults to true.",
+                    "type": "boolean",
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.CreateKnowledgeFromURLRequest": {
             "type": "object",
             "required": [
@@ -41433,6 +41643,27 @@
                 }
             }
         },
+        "internal_handler.MergeChunksRequest": {
+            "type": "object",
+            "properties": {
+                "chunk_ids": {
+                    "description": "2..N chunk ids in document order; must be adjacent text chunks of one document.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true
+                },
+                "expected_revisions": {
+                    "description": "Optional content_revision per chunk id; a stale value fails with HTTP 409.",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    },
+                    "x-agent": true
+                }
+            }
+        },
         "internal_handler.MessageResponse": {
             "type": "object",
             "properties": {
@@ -42810,6 +43041,28 @@
                 },
                 "name": {
                     "type": "string",
+                    "x-agent": true
+                }
+            }
+        },
+        "internal_handler.SplitChunkRequest": {
+            "type": "object",
+            "properties": {
+                "expected_revision": {
+                    "description": "Current content_revision from chunk.get; a stale value fails with HTTP 409.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "x-agent": true
+                },
+                "is_enabled": {
+                    "description": "Whether the new suffix chunk participates in retrieval; omitted inherits.",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "split_at": {
+                    "description": "Rune offset inside the chunk body; both halves must be non-empty.",
+                    "type": "integer",
+                    "minimum": 1,
                     "x-agent": true
                 }
             }
