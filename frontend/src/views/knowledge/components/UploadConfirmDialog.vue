@@ -1632,6 +1632,44 @@ const validateBeforeConfirm = (): boolean => {
     goToSection('asr')
     return false
   }
+
+  if (uiState.value.nodeExtractConfig.enabled && uiState.value.graphEnabled) {
+    const extract = uiState.value.nodeExtractConfig
+    if (!extract.tags || extract.tags.length === 0 || extract.tags.some((tag: string) => !tag || !tag.trim())) {
+      MessagePlugin.warning(t('graphSettings.tagsRequired'))
+      goToSection('graph')
+      return false
+    }
+
+    if (!extract.text || !extract.text.trim()) {
+      MessagePlugin.warning(t('graphSettings.sampleTextRequired'))
+      goToSection('graph')
+      return false
+    }
+
+    if (!extract.nodes || extract.nodes.length === 0) {
+      MessagePlugin.warning(t('graphSettings.nodesRequired'))
+      goToSection('graph')
+      return false
+    }
+
+    const nodeNames = new Set<string>()
+    for (const node of extract.nodes) {
+      const name = (node.name || '').trim()
+      if (!name) {
+        MessagePlugin.warning(t('graphSettings.nodeNameRequired'))
+        goToSection('graph')
+        return false
+      }
+      if (nodeNames.has(name)) {
+        MessagePlugin.warning(t('graphSettings.duplicateNodeName', { name }))
+        goToSection('graph')
+        return false
+      }
+      nodeNames.add(name)
+    }
+  }
+
   return true
 }
 

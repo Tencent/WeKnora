@@ -82,7 +82,7 @@ export default {
     tagsPlaceholder: '输入关系类型，如：工作于、同事、朋友等',
     generateRandomTags: '生成随机标签',
     sampleTextLabel: '示例文本',
-    sampleTextDescription: '用于测试实体关系提取的示例文本',
+    sampleTextDescription: '用于定义实体关系提取规范的示例文本（启用提取时必填）',
     sampleTextPlaceholder: '输入一段包含实体和关系的文本...',
     customInstructionsLabel: '额外提取要求',
     customInstructionsDescription: '补充领域范围、实体筛选和属性提取要求；系统仍负责结构化输出协议',
@@ -122,7 +122,12 @@ export default {
     checkingAvailability: '正在检查知识图谱服务…',
     checkAvailabilityFailed: '无法检查知识图谱服务，请重试。',
     disabledWarning: '知识图谱数据库未启用，实体关系提取功能将无法使用',
-    howToEnable: '如何启用知识图谱？'
+    howToEnable: '如何启用知识图谱？',
+    tagsRequired: '请至少添加一个关系类型',
+    sampleTextRequired: '请输入用于实体关系提取的示例文本',
+    nodesRequired: '请至少添加一个实体',
+    nodeNameRequired: '实体名称不能为空',
+    duplicateNodeName: '实体名称重复：{name}'
   },
   retrievalSettings: {
     recallTab: '召回',

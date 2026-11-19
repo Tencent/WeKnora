@@ -71,7 +71,7 @@
       <!-- 关系类型配置 -->
       <div v-if="localGraphExtract.enabled" class="setting-row vertical">
         <div class="setting-info">
-          <label>{{ t('graphSettings.tagsLabel') }}</label>
+          <label>{{ t('graphSettings.tagsLabel') }} <span class="required">*</span></label>
           <p class="desc">{{ t('graphSettings.tagsDescription') }}</p>
         </div>
         <div class="setting-control full-width">
@@ -108,7 +108,7 @@
       <!-- 示例文本 -->
       <div v-if="localGraphExtract.enabled" class="setting-row vertical">
         <div class="setting-info">
-          <label>{{ t('graphSettings.sampleTextLabel') }}</label>
+          <label>{{ t('graphSettings.sampleTextLabel') }} <span class="required">*</span></label>
           <p class="desc">{{ t('graphSettings.sampleTextDescription') }}</p>
         </div>
         <div class="setting-control full-width">
@@ -144,7 +144,7 @@
       <!-- 实体列表 -->
       <div v-if="localGraphExtract.enabled && localGraphExtract.nodes.length > 0" class="setting-row vertical">
         <div class="setting-info">
-          <label>{{ t('graphSettings.entityListLabel') }}</label>
+          <label>{{ t('graphSettings.entityListLabel') }} <span class="required">*</span></label>
           <p class="desc">{{ t('graphSettings.entityListDescription') }}</p>
         </div>
         <div class="setting-control full-width">
@@ -199,7 +199,7 @@
       <!-- 添加实体按钮 -->
       <div v-if="localGraphExtract.enabled" class="setting-row">
         <div class="setting-info">
-          <label>{{ t('graphSettings.manageEntitiesLabel') }}</label>
+          <label>{{ t('graphSettings.manageEntitiesLabel') }} <span class="required">*</span></label>
           <p class="desc">{{ t('graphSettings.manageEntitiesDescription') }}</p>
         </div>
         <div class="setting-control">
@@ -720,6 +720,11 @@ onMounted(async () => {
     color: var(--td-text-color-primary);
     display: block;
     margin-bottom: 4px;
+
+    .required {
+      color: var(--td-error-color, #e34d59);
+      margin-left: 2px;
+    }
   }
 
   .desc {
