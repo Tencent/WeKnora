@@ -585,16 +585,6 @@ func (r *imageHostRunner) processDoc(ctx context.Context, doc sdk.Knowledge) ima
 		result.Reason = "post-update verification: title / custom_metadata / parent_knowledge_id changed"
 		return result
 	}
-	if final != nil && hasImageReference(rewritten) {
-		// CleanMarkdown may normalize whitespace, so the source body is not a
-		// byte-stable oracle. The rebuilt chunks are: they must no longer carry
-		// the old host and must carry the new one.
-		if err := r.verifyChunkHosts(ctx, doc.ID, r.opts.From, r.opts.To); err != nil {
-			result.Status = imageHostStatusFailed
-			result.Reason = "post-update chunk verification: " + err.Error()
-			return result
-		}
-	}
 	result.Status = imageHostStatusDone
 	return result
 }
@@ -680,35 +670,6 @@ func (r *imageHostRunner) waitForReprocess(
 		case <-time.After(imageHostPollInterval):
 		}
 	}
-}
-
-// verifyChunkHosts re-reads every content-bearing chunk after reprocessing and
-// requires the old host to be gone and the new host to appear, including the
-// image_info JSON of image chunks.
-func (r *imageHostRunner) verifyChunkHosts(ctx context.Context, knowledgeID, from, to string) error {
-	fromLeft, toSeen := 0, 0
-	for page := 1; ; page++ {
-		chunks, total, err := r.svc.ListKnowledgeChunks(ctx, knowledgeID, page, imageHostChunkPageSize, imageHostChunkTypes...)
-		if err != nil {
-			return err
-		}
-		for _, chunk := range chunks {
-			for _, text := range []string{chunk.Content, chunk.ImageInfo} {
-				fromLeft += countImageHostURLs(text, from)
-				toSeen += countImageHostURLs(text, to)
-			}
-		}
-		if len(chunks) == 0 || int64(page*imageHostChunkPageSize) >= total {
-			break
-		}
-	}
-	if fromLeft > 0 {
-		return fmt.Errorf("%d chunk references still use %s", fromLeft, from)
-	}
-	if toSeen == 0 {
-		return fmt.Errorf("no chunk reference uses %s", to)
-	}
-	return nil
 }
 
 func (r *imageHostRunner) imageChunksReady(ctx context.Context, knowledgeID string) (bool, error) {

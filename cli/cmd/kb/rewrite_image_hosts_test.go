@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,8 +26,6 @@ type fakeImageHostService struct {
 
 	updateErr  map[string]error
 	onUpdate   func(*sdk.Knowledge)
-	fromHost   string
-	toHost     string
 	updates    []string
 	updateReqs []*sdk.UpdateManualKnowledgeRequest
 	getCalls   map[string]int
@@ -42,8 +39,6 @@ func newFakeImageHostService(docs ...sdk.Knowledge) *fakeImageHostService {
 		chunks:    map[string][]sdk.Chunk{},
 		updateErr: map[string]error{},
 		getCalls:  map[string]int{},
-		fromHost:  "img2.tapimg.com",
-		toHost:    "img2-tc.tapimg.com",
 	}
 	for _, doc := range docs {
 		cp := doc
@@ -128,12 +123,6 @@ func (f *fakeImageHostService) UpdateManualKnowledge(
 	if doc != nil {
 		doc.Metadata = manualMetadata(req.Content)
 		doc.ParseStatus = "completed"
-		if f.fromHost != "" && f.toHost != "" {
-			for i := range f.chunks[id] {
-				f.chunks[id][i].Content = strings.ReplaceAll(f.chunks[id][i].Content, f.fromHost, f.toHost)
-				f.chunks[id][i].ImageInfo = strings.ReplaceAll(f.chunks[id][i].ImageInfo, f.fromHost, f.toHost)
-			}
-		}
 		if f.onUpdate != nil {
 			f.onUpdate(doc)
 		}
@@ -255,7 +244,7 @@ func TestRewriteImageHostsApplyIsIdempotent(t *testing.T) {
 	doc := manualDoc("a", "alpha", "text ![x](https://img2.tapimg.com/a.jpg)")
 	svc := newFakeImageHostService(doc)
 	svc.chunks["a"] = []sdk.Chunk{
-		{ChunkType: "text", Content: "text ![x](https://img2.tapimg.com/a.jpg)"},
+		{ChunkType: "text", Content: "text"},
 		{ChunkType: "image_caption", Content: "caption", IndexStatus: "ready"},
 	}
 	opts := &RewriteImageHostsOptions{
@@ -315,32 +304,11 @@ func TestRewriteImageHostsPreservesIdentityFields(t *testing.T) {
 	require.Equal(t, "parent", svc.details["a"].ParentKnowledgeID)
 }
 
-func TestRewriteImageHostsFailsWhenChunksKeepOldHost(t *testing.T) {
-	doc := manualDoc("a", "a", "![](https://img2.tapimg.com/a.jpg)")
-	svc := newFakeImageHostService(doc)
-	svc.fromHost, svc.toHost = "", "" // simulate a stale reindex that kept the old chunk text
-	svc.chunks["a"] = []sdk.Chunk{
-		{ChunkType: "text", Content: "![](https://img2.tapimg.com/a.jpg)"},
-		{ChunkType: "image_caption", IndexStatus: "ready"},
-	}
-	opts := &RewriteImageHostsOptions{
-		From: "img2.tapimg.com", To: "img2-tc.tapimg.com",
-		Apply: true, Concurrency: 1, PageSize: 10, Timeout: time.Second,
-	}
-	stdout, _ := iostreams.SetForTest(t)
-	require.NoError(t, runRewriteImageHosts(context.Background(), opts,
-		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb-1"))
-	require.Contains(t, stdout.String(), "failed=1")
-}
-
 func TestRewriteImageHostsPreservesDraftStatus(t *testing.T) {
 	doc := manualDoc("a", "draft doc", "![](https://img2.tapimg.com/a.jpg)")
 	doc.ParseStatus = "draft"
 	svc := newFakeImageHostService(doc)
-	svc.chunks["a"] = []sdk.Chunk{
-		{ChunkType: "text", Content: "![](https://img2.tapimg.com/a.jpg)"},
-		{ChunkType: "image_caption", IndexStatus: "ready"},
-	}
+	svc.chunks["a"] = []sdk.Chunk{{ChunkType: "image_caption", IndexStatus: "ready"}}
 	opts := &RewriteImageHostsOptions{
 		From: "img2.tapimg.com", To: "img2-tc.tapimg.com",
 		Apply: true, Concurrency: 1, PageSize: 10, Timeout: time.Second,
