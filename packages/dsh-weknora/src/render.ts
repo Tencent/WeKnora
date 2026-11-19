@@ -4,7 +4,14 @@
 export function clip(text: string, maxChars: number): { text: string, truncated: boolean } {
   const normalized = text.replace(/\r\n/g, '\n').trim()
   if (normalized.length <= maxChars) return { text: normalized, truncated: false }
-  return { text: `${normalized.slice(0, maxChars).trimEnd()}…`, truncated: true }
+  let end = maxChars
+  if (end > 0) {
+    const code = normalized.charCodeAt(end - 1)
+    if (code >= 0xd800 && code <= 0xdbff) {
+      end -= 1
+    }
+  }
+  return { text: `${normalized.slice(0, end).trimEnd()}…`, truncated: true }
 }
 
 /** Human-readable score, tolerant of a backend that omits it. */
