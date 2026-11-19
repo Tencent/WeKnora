@@ -1242,8 +1242,14 @@ func (s *DataSourceService) clearResyncMarker(ctx context.Context, ds *types.Dat
 		logger.Warnf(ctx, "failed to clear resync_required marker, config re-encode failed: ds=%s err=%v", ds.ID, err)
 		return
 	}
-	fresh.Config = blob
-	if err := s.dsRepo.Update(ctx, fresh); err != nil {
+	// Write config only, with the re-read config as the compare-and-swap
+	// condition: a full-row Update would silently revert a status or config
+	// edit committed after the re-read. If the config changed meanwhile the
+	// patch conflicts, the warning below is logged and the marker stays
+	// armed for the next sync instead of dropping the newer configuration.
+	patched := *fresh
+	patched.Config = blob
+	if err := s.dsRepo.PatchSyncSettings(ctx, &patched, fresh.Config, []string{"config"}); err != nil {
 		logger.Warnf(ctx, "failed to clear resync_required marker: ds=%s err=%v", ds.ID, err)
 	}
 }

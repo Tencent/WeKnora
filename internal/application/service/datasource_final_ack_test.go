@@ -99,7 +99,8 @@ func TestProcessSyncFinalPersistenceFailureKeepsResyncMarker(t *testing.T) {
 	require.True(t, resyncRequired(mustParseDataSourceConfig(t, ds)))
 	faults.failure = nil
 	require.NoError(t, svc.ProcessSync(context.Background(), task))
-	require.Equal(t, 1, repo.updates)
+	require.Equal(t, 0, repo.updates, "marker cleanup must not rewrite the whole row")
+	require.Equal(t, 1, repo.patches)
 	require.False(t, resyncRequired(mustParseDataSourceConfig(t, ds)))
 }
 

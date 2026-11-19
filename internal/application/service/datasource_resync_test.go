@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -67,11 +68,12 @@ func (c *resyncStreamConnector) FetchStream(
 	return &types.SyncCursor{ConnectorCursor: map[string]interface{}{"space_node_times": map[string]interface{}{}}}, nil
 }
 
-// resyncDSRepo captures Config-writing Update calls (marker clear).
+// resyncDSRepo captures Config-writing PatchSyncSettings calls (marker clear).
 type resyncDSRepo struct {
 	kbDeleteDSRepo
 	updates    int
 	configs    []types.JSON
+	patches    int
 	syncStates int
 }
 
@@ -79,6 +81,27 @@ func (r *resyncDSRepo) Update(_ context.Context, ds *types.DataSource) error {
 	r.updates++
 	r.configs = append(r.configs, ds.Config)
 	return nil
+}
+
+// PatchSyncSettings mirrors the repository's compare-and-swap: it records
+// the config write and applies it only when the stored config still matches
+// the expected bytes read before the marker was removed.
+func (r *resyncDSRepo) PatchSyncSettings(_ context.Context, ds *types.DataSource, expected types.JSON, fields []string) error {
+	r.patches++
+	r.configs = append(r.configs, ds.Config)
+	for _, list := range r.byKB {
+		for _, stored := range list {
+			if stored.ID != ds.ID {
+				continue
+			}
+			if !bytes.Equal(stored.Config, expected) {
+				return types.ErrDataSourceSettingsConflict
+			}
+			stored.Config = ds.Config
+			return nil
+		}
+	}
+	return types.ErrDataSourceSettingsConflict
 }
 
 func (r *resyncDSRepo) UpdateSyncState(_ context.Context, _ *types.DataSource) error {
@@ -173,8 +196,10 @@ func TestProcessSync_ResyncMarkerRunsFullOnceAndClears(t *testing.T) {
 	require.Len(t, conn.startCursors, 1)
 	assert.Nil(t, conn.startCursors[0], "resync_required must upgrade the incremental sync to a full pass")
 
-	// One Config write: clearing the marker on success.
-	require.Equal(t, 1, dsRepo.updates)
+	// One config-only write: clearing the marker on success, no full-row
+	// rewrite that could revert concurrent edits.
+	require.Equal(t, 0, dsRepo.updates, "marker cleanup must not rewrite the whole row")
+	require.Equal(t, 1, dsRepo.patches)
 	final := settingsOf(t, dsRepo.configs[0])
 	assert.NotContains(t, final, "resync_required", "marker must be cleared after a successful upgrade")
 }
@@ -209,6 +234,7 @@ func TestProcessSync_FailedResyncKeepsMarker(t *testing.T) {
 
 	// No config writes on the failed run: the marker stays armed.
 	assert.Equal(t, 0, dsRepo.updates)
+	assert.Equal(t, 0, dsRepo.patches)
 }
 
 // resyncRequired tolerates the encodings the marker may be written in.
