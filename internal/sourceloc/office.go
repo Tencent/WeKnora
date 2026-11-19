@@ -26,7 +26,8 @@ const maxZipEntryBytes = 64 << 20
 // SupportsStructure reports whether StructureUnits can read fileType.
 func SupportsStructure(fileType string) bool {
 	switch normalizeType(fileType) {
-	case "docx", "docm", "pptx", "pptm", "xlsx", "xlsm", "csv", "epub":
+	case "docx", "docm", "pptx", "pptm", "xlsx", "xlsm", "csv", "epub",
+		"html", "htm", "xhtml":
 		return true
 	}
 	return false
@@ -57,6 +58,8 @@ func StructureUnits(fileType string, data []byte) ([]Unit, error) {
 		return csvUnits(data)
 	case "epub":
 		return epubUnits(data)
+	case "html", "htm", "xhtml":
+		return htmlUnits(data), nil
 	}
 	return nil, nil
 }
@@ -497,6 +500,90 @@ func isHTMLBlock(tag string) bool {
 		return true
 	}
 	return false
+}
+
+// htmlUnits extracts one unit per block-level element of a standalone HTML
+// document, with a section locator anchored at the nearest preceding heading
+// (1-based heading ordinal). Table rows contribute one unit of joined cell
+// text — normalizeKey strips the GFM pipe separators, so such units align
+// with the markdown table rows the html converter emits. Script, style and
+// head content never reaches the text buffer, so navigation chrome never
+// becomes a unit a citation could anchor to.
+func htmlUnits(doc []byte) []Unit {
+	z := html.NewTokenizer(bytes.NewReader(doc))
+	var (
+		units      []Unit
+		text       strings.Builder
+		section    int
+		title      string
+		headingOrd int // >0 while collecting the heading's own unit
+		skip       int
+		full       bool
+	)
+	flush := func() {
+		s := strings.Join(strings.Fields(text.String()), " ")
+		text.Reset()
+		if s == "" {
+			return
+		}
+		ord, t := section, title
+		if headingOrd > 0 {
+			// The heading's own unit belongs to the section it opens.
+			ord, t = headingOrd, s
+			title = s
+		}
+		units = append(units, Unit{
+			Text: s,
+			Locator: types.SourceLocator{
+				Type:    types.SourceLocatorSection,
+				Section: ord,
+				Title:   t,
+			},
+		})
+		if len(units) >= maxUnits {
+			full = true
+		}
+	}
+	for !full {
+		tt := z.Next()
+		switch tt {
+		case html.ErrorToken:
+			flush()
+			return units
+		case html.StartTagToken, html.EndTagToken, html.SelfClosingTagToken:
+			name, _ := z.TagName()
+			tag := string(name)
+			switch tag {
+			case "script", "style", "head":
+				if tt == html.StartTagToken {
+					skip++
+				} else if tt == html.EndTagToken && skip > 0 {
+					skip--
+				}
+				continue
+			}
+			if !isHTMLBlock(tag) {
+				continue
+			}
+			isHeading := len(tag) == 2 && tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6'
+			if isHeading && tt == html.StartTagToken {
+				flush()
+				section++
+				headingOrd = section
+			} else {
+				flush()
+				if isHeading {
+					headingOrd = 0
+				}
+			}
+		case html.TextToken:
+			if skip == 0 {
+				text.Write(z.Text())
+				text.WriteByte(' ')
+			}
+		}
+	}
+	return units
 }
 
 // ---- zip helpers ----------------------------------------------------------
