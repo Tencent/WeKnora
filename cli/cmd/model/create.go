@@ -61,6 +61,7 @@ type CreateOptions struct {
 // ListModelProviders supplies the authoritative provider catalog used to
 // validate --provider and default --base-url for remote models.
 type CreateService interface {
+	defaultSettingsService
 	CreateModel(ctx context.Context, req *sdk.CreateModelRequest) (*sdk.Model, error)
 	ListModelProviders(ctx context.Context, modelType string) ([]sdk.ModelProvider, error)
 }
@@ -106,7 +107,11 @@ Two modes:
 --type accepts the server's term "chat" for KnowledgeQA (embedding/rerank/vllm/
 asr match the enum directly). Embedding models take --dimension. Pipe the
 provider key via --api-key-stdin so it never lands in argv/history. Anything
-else goes through repeatable --param key=value.`,
+else goes through repeatable --param key=value.
+
+--default writes the workspace default settings; the is_default flag on the
+model body itself is ignored by the server. A local model can take the default
+only after its Ollama pull finishes (run 'model update <id> --default' then).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
@@ -141,6 +146,12 @@ else goes through repeatable --param key=value.`,
 					"--provider applies to --source remote; a local model is pulled from Ollama by name").
 					WithHint("drop --provider, or switch to --source remote")
 			}
+			// A local model is still downloading when create returns, and the
+			// workspace default endpoint only accepts an active model. Refuse
+			// before creating anything instead of dropping the flag silently.
+			if err := validateDefaultTarget(opts); err != nil {
+				return err
+			}
 			params, err := parseParams(opts.Params)
 			if err != nil {
 				return err
@@ -149,7 +160,10 @@ else goes through repeatable --param key=value.`,
 				Action: "model.create",
 				// Never echo the API key into the plan (it is read from stdin
 				// precisely so it never lands in argv / history / dry-run output).
-				Args: map[string]any{"name": opts.Name, "type": opts.Type, "source": opts.Source, "provider": opts.Provider},
+				Args: map[string]any{
+					"name": opts.Name, "type": opts.Type, "source": opts.Source,
+					"provider": opts.Provider, "default": opts.Default,
+				},
 			}); handled {
 				return err
 			}
@@ -171,7 +185,8 @@ else goes through repeatable --param key=value.`,
 	cmd.Flags().StringVar(&opts.BaseURL, "base-url", "", "Model API base URL (e.g. http://localhost:11434 for Ollama)")
 	cmd.Flags().BoolVar(&opts.APIKeyStdin, "api-key-stdin", false, "Read the provider API key from stdin (kept out of argv / history)")
 	cmd.Flags().IntVar(&opts.Dimension, "dimension", 0, "Embedding dimension (Embedding models only)")
-	cmd.Flags().BoolVar(&opts.Default, "default", false, "Mark this the default model for its type")
+	cmd.Flags().BoolVar(&opts.Default, "default", false,
+		"Set the workspace default for this model type (remote models; local ones after the pull)")
 	cmd.Flags().StringArrayVar(&opts.Params, "param", nil, "Extra provider parameter as key=value, repeatable (value parsed as JSON: true/42/text)")
 	_ = cmd.MarkFlagRequired("type")
 	_ = cmd.MarkFlagRequired("source")
@@ -192,6 +207,18 @@ else goes through repeatable --param key=value.`,
 		},
 	})
 	return cmd
+}
+
+// validateDefaultTarget rejects --default where create cannot apply it: a
+// local model is still downloading when create returns, and the workspace
+// default endpoint only accepts an active model.
+func validateDefaultTarget(opts *CreateOptions) error {
+	if !opts.Default || opts.Source != string(sdk.ModelSourceLocal) {
+		return nil
+	}
+	return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+		"--default cannot apply to a local model before its Ollama pull finishes").
+		WithHint("create without --default, then run `weknora model update <id> --default` after the pull completes")
 }
 
 // parseParams turns repeated key=value flags into a map. Each value is parsed
@@ -260,16 +287,28 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 		Source:      sdk.ModelSource(opts.Source),
 		Description: opts.Description,
 		Parameters:  parameters,
-		IsDefault:   opts.Default,
 	}
 	created, err := svc.CreateModel(ctx, req)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "create model")
 	}
+	if opts.Default {
+		// The server ignores is_default on the model body: the workspace
+		// default settings are the state the model list projects.
+		if err := setWorkspaceDefaultModel(ctx, svc, created.Type, created.ID, true); err != nil {
+			return defaultFailure(fmt.Sprintf("model %s was created", created.ID), err)
+		}
+		created.IsDefault = true
+	}
 	if fopts.WantsJSON() {
 		return fopts.Emit(iostreams.IO.Out, created, nil)
 	}
-	fmt.Fprintf(iostreams.IO.Out, "✓ Created model %q (id: %s, type: %s)\n", created.Name, created.ID, created.Type)
+	suffix := ""
+	if opts.Default {
+		suffix = ", workspace default"
+	}
+	_, _ = fmt.Fprintf(iostreams.IO.Out, "✓ Created model %q (id: %s, type: %s%s)\n",
+		created.Name, created.ID, created.Type, suffix)
 	return nil
 }
 
