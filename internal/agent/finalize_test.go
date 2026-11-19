@@ -541,7 +541,8 @@ func TestMaxIterationsCompactsFinalAnswerWithoutReplayingTools(t *testing.T) {
 
 func TestFinalSynthesisDoesNotDoubleCountAnthropicThinking(t *testing.T) {
 	model := &finalSynthesisChat{}
-	engine := newTestEngine(t, model, withMaxContextTokens(32768), withMaxCompletionTokens(4096))
+	engine := newTestEngine(t, model, withMaxContextTokens(32768), withMaxCompletionTokens(4096),
+		func(cfg *types.AgentConfig) { cfg.ModelMaxOutputTokens = 4096 })
 	thinking := strings.Repeat("synthetic reasoning ", 10000)
 	blocks, err := json.Marshal([]map[string]string{
 		{"type": "thinking", "thinking": thinking, "signature": "synthetic-signature"},
