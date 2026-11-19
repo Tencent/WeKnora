@@ -1325,7 +1325,7 @@ const handleSteerMsg = async (value, mentionedItems = [], delivery = 'after', re
     if (delivery === 'inject') {
         const preview = previewSteerMessage(messagesList, findSteerQueueItem(clientId));
         delete preview._steerFailed;
-        scrollToBottom(true);
+        scrollFollow.resume();
     }
     try {
         const res = await steerSession(requestSessionId, value, mentionedItems, delivery, expectedId, clientId);
@@ -1397,7 +1397,7 @@ const handlePromoteSteer = async (steerId) => {
     item.promoting = true;
     item.delivery = 'inject';
     previewSteerMessage(messagesList, item);
-    scrollToBottom(true);
+    scrollFollow.resume();
     try {
         const res = await promoteSteerSession(requestSessionId, item.steer_id);
         if (session_id.value !== requestSessionId) return;
@@ -1698,8 +1698,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
 
     // 将@提及的知识库和文件信息存入用户消息
     messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ id: a.documentId, file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web', created_at: new Date().toISOString() });
-    userHasScrolledUp.value = false;
-    scrollToBottom(true);
+    scrollFollow.resume();
 
     // Get agent mode status from settings store (prefer selectedAgentId for builtins)
     const agentEnabled = props.embeddedMode
