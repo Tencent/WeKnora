@@ -11,6 +11,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestDataSourcePreviewBodiesAreNotLogged(t *testing.T) {
+	for _, path := range []string{
+		"/api/v1/datasource/ds-1/resources/preview",
+		"/api/v1/datasource/ds-1/resource-ancestors/preview",
+	} {
+		if !skipsBodyLogging(path) {
+			t.Errorf("preview path %q must not log credentials", path)
+		}
+	}
+}
+
 func TestSanitizeBody(t *testing.T) {
 	cases := []struct {
 		name string

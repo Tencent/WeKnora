@@ -352,14 +352,12 @@ async function loadDriveRoot() {
     // picker, obtained through the same guard: an answer without an id is a
     // reported failure instead of a listing against an empty id, and two quick
     // Enter presses share one create instead of leaving a second paused row
-    // behind. Drive additionally needs the new folder_token stored before it
-    // lists (the listing reads the token from the row), so it flushes the form
-    // even in edit mode — which the generic picker deliberately does not do,
-    // leaving the existing row untouched until submit.
-    const dsId = await ensureTempDataSource(true)
+    // behind. The preview carries the new folder token without saving edits.
+    const dsId = await ensureTempDataSource()
     if (!dsId) return
 
-    const res = await listResources(dsId)
+    activePreviewConfig = buildResourcePreview()
+    const res = await listResources(dsId, undefined, activePreviewConfig)
     resources.value = res?.data || res || []
     if (resources.value.length > 0) {
       // Mirror loadResources' tree initialization: index parents that already
@@ -497,7 +495,7 @@ async function ensureChildrenLoaded(id: string) {
 
   loadingChildrenIds.value = new Set(loadingChildrenIds.value).add(id)
   try {
-    const res = await listResources(tempDsId.value, id)
+    const res = await listResources(tempDsId.value, id, activePreviewConfig)
     const children: Resource[] = res?.data || res || []
     if (children.length > 0) {
       const existing = new Set(resources.value.map(r => r.external_id))
@@ -814,6 +812,8 @@ const displayedCredentialFields = computed(() => {
 // then be closed — or reopened with a different form.
 let drawerSession = 0
 let tempDsPromise: Promise<string> | null = null
+let activePreviewConfig: Record<string, unknown> | undefined
+let draftCredentials = ''
 
 watch(visible, async (v) => {
   // Both edges start a new session: opening begins one, closing ends it.
@@ -821,6 +821,8 @@ watch(visible, async (v) => {
   // A create from the session that was just left is not something a session
   // starting now may join, so the shared slot is emptied on both edges.
   tempDsPromise = null
+  activePreviewConfig = undefined
+  draftCredentials = ''
   if (!v) {
     if (!isEdit.value && tempDsId.value) {
       try {
@@ -1036,10 +1038,8 @@ function canCreateTempDataSource(): boolean {
 // the dialog is still a draft.
 //
 // This is not a side-effect-free lookup: with a draft already in hand it PUTs
-// the current form to it (create mode), which is what keeps the row equal to
-// the form the user sees. `persist` extends that flush to edit mode, where the
-// row is otherwise left alone until submit — the Drive root loader needs it,
-// because the listing it is about to make reads the folder token from the row.
+// the current form to it (create mode), which keeps the draft in step with the
+// form. In edit mode the existing row is left alone until submit.
 //
 // A single in-flight creation is shared, so two callers cannot create two rows
 // for one dialog. The shared attempt is scoped to the drawer session that
@@ -1047,9 +1047,9 @@ function canCreateTempDataSource(): boolean {
 // reopened while the create was in flight, the row it produced is deleted and
 // no id is handed back, so a late answer can neither be adopted by a new
 // session nor be left behind as an orphan.
-async function ensureTempDataSource(persist = false): Promise<string> {
+async function ensureTempDataSource(): Promise<string> {
   if (tempDsId.value) {
-    if (persist || !isEdit.value) {
+    if (!isEdit.value) {
       await updateDataSource(tempDsId.value, {
         ...form.value,
         knowledge_base_id: props.kbId,
@@ -1077,6 +1077,7 @@ async function ensureTempDataSource(persist = false): Promise<string> {
     const ownSession = drawerSession
     let pending: Promise<string>
     pending = (async () => {
+      const createdCredentials = JSON.stringify(form.value.config.credentials)
       const res = await createDataSource({
         ...form.value,
         knowledge_base_id: props.kbId,
@@ -1105,6 +1106,7 @@ async function ensureTempDataSource(persist = false): Promise<string> {
         throw new Error(t('datasource.saveFailed'))
       }
       tempDsId.value = createdId
+      draftCredentials = createdCredentials
       return createdId
     })().finally(() => {
       // A settled attempt is never cached — a failed create must stay
@@ -1114,6 +1116,26 @@ async function ensureTempDataSource(persist = false): Promise<string> {
     tempDsPromise = pending
   }
   return tempDsPromise
+}
+
+// The picker uses the form as a request-local snapshot. Stored credentials
+// stay on the server unless the user is replacing them.
+function buildResourcePreview(): Record<string, unknown> {
+  syncRssAuthHeadersToCredentials()
+  syncConfluencePublicFieldsToSettings()
+  const preview: Record<string, unknown> = {
+    settings: { ...form.value.config.settings },
+    resource_ids: [...form.value.config.resource_ids],
+  }
+  if (!isEdit.value) {
+    preview.credentials = { ...form.value.config.credentials }
+  } else if (replaceCredentialsMode.value || !credentialsConfigured.value) {
+    const filled = Object.entries(form.value.config.credentials).filter(
+      ([, v]) => typeof v === 'string' ? v !== '' : v != null,
+    )
+    if (filled.length) preview.credentials = Object.fromEntries(filled)
+  }
+  return JSON.parse(JSON.stringify(preview))
 }
 
 async function loadResources() {
@@ -1126,7 +1148,8 @@ async function loadResources() {
     const dsId = await ensureTempDataSource()
     if (!dsId) return
 
-    const res = await listResources(dsId)
+    activePreviewConfig = buildResourcePreview()
+    const res = await listResources(dsId, undefined, activePreviewConfig)
     resources.value = res?.data || res || []
     // Any parent that already arrived with children (connectors returning the
     // full tree, e.g. Notion) needs no further lazy fetch.
@@ -1168,7 +1191,7 @@ async function loadResources() {
 async function revealExistingSelections(hiddenIds: string[]) {
   if (!tempDsId.value || hiddenIds.length === 0) return
   try {
-    const res = await resolveResourceAncestors(tempDsId.value, hiddenIds)
+    const res = await resolveResourceAncestors(tempDsId.value, hiddenIds, activePreviewConfig)
     const ancestors: string[] = res?.data?.ancestors || res?.ancestors || []
     if (ancestors.length === 0) return
     const expanded = new Set(expandedResourceIds.value)
@@ -1368,15 +1391,20 @@ function buildConfigPayload(): Record<string, unknown> {
 // least one value, commit it to /credentials before the main PUT. Aborts
 // the whole submit on failure so we don't leave the row partially saved.
 async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
-  if (!isEdit.value || !replaceCredentialsMode.value) return true
+  if (isEdit.value && !replaceCredentialsMode.value) return true
   syncRssAuthHeadersToCredentials()
   syncConfluencePublicFieldsToSettings()
+  if (!isEdit.value && JSON.stringify(form.value.config.credentials) === draftCredentials) return true
   const filled = Object.entries(form.value.config.credentials).filter(
     ([, v]) => typeof v === 'string' ? v !== '' : v != null,
   )
   if (filled.length === 0) return true
   try {
     await putDataSourceCredentials(dsId, Object.fromEntries(filled))
+    if (!isEdit.value) {
+      draftCredentials = JSON.stringify(form.value.config.credentials)
+      return true
+    }
     credentialsConfigured.value = true
     replaceCredentialsMode.value = false
     form.value.config.credentials = {}

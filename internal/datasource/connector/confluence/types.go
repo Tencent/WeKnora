@@ -27,6 +27,13 @@ func configValue(ds *types.DataSourceConfig, name string) string {
 	if ds == nil {
 		return ""
 	}
+	// Public fields moved to settings; prefer the editable value when legacy
+	// credentials still contain an older copy.
+	if name == "edition" || name == "base_url" || name == "username" {
+		if v, ok := ds.Settings[name].(string); ok {
+			return strings.TrimSpace(v)
+		}
+	}
 	if v, ok := ds.Credentials[name].(string); ok {
 		if trimmed := strings.TrimSpace(v); trimmed != "" {
 			return trimmed
