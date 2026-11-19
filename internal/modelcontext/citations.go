@@ -10,7 +10,17 @@ import (
 	"html"
 	"regexp"
 	"strings"
+	"unicode"
 )
+
+// HasReadableAnswer excludes standalone citation markers and formatting.
+func HasReadableAnswer(answer string) bool {
+	answer = publicKBTagRE.ReplaceAllString(answer, "")
+	answer = publicWebTagRE.ReplaceAllString(answer, "")
+	return strings.ContainsFunc(answer, func(r rune) bool {
+		return unicode.IsLetter(r) || unicode.IsNumber(r)
+	})
+}
 
 const sourceHandleProtocolPrompt = `
 

@@ -433,6 +433,12 @@ curl -N -X POST $BASE/api/v1/knowledge-chat/s-1 -H "X-API-Key: $API_KEY" \
 
 **限库 API Key 的文档限定轮次：** 使用有 `chat` 能力的限库 Key 调用同工作空间的智能推理 Agent 时，可以只传 `knowledge_ids`（1–100 个已启用、已完成解析的文档 ID）。服务端检查每份文档可读且真实所属库在 Key 的授权范围内；任一项不满足时整轮返回 403。空数组、同时传入整库、标签、@提及或附件等扩展来源时返回 400。检索、列表和读取只使用该轮文档；模型不读取旧轮次、记忆或其他数据源。该范围只作用于本轮；省略 `knowledge_ids` 时沿用现有 Agent 行为。
 
+文档限定轮次在工具阶段结束后，基于本轮证据发起一次禁用工具调用的终稿请求，并向模型适配器传入关闭思考的偏好；思考开关的实际传参取决于模型配置的协议能力。正文通过 `answer.content` 增量发送。工具阶段照常返回工具事件，正文从终稿阶段开始发送。这会增加一次终稿模型调用，其用量计入本轮。接收方按顺序追加正文，并等待轮次终态。首次终稿为空或仅含引用时可重试一次，已发出可读正文后发生错误则结束该轮。停止生成时保存取消生效前已发布的部分正文；客户端实际已收长度可能受在途分片影响。
+
+通过 OpenAI 兼容网关调用需要 `enable_thinking` 的 Qwen 模型时，在该模型的 `parameters.spec.compat` 中设置 `{"thinking_format":"enable-thinking"}`，使终稿请求实际携带 `enable_thinking: false`。表单填写位置见[模型协议兼容覆盖](../03-features/06-models.md#协议兼容覆盖-compat-json)。
+
+首轮要求一次语义检索，后续轮次改为审阅已有证据。检索返回的完整片段可直接作为引用证据，已支持所问结论和相关适用条件时进入终稿；事实缺失、例外条款、冲突或内容截断时定向补查。补查仍返回相同证据时结束该项查找，终稿明确说明资料未提供的细节。资料标题和目录仅用于定位。执行仍遵守本轮文档白名单和 Agent 的总轮数上限。
+
 ```bash
 curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"query":"分析上季度数据","agent_id":"agent-1"}'

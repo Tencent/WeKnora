@@ -1045,11 +1045,20 @@ func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
 	functionDefs := e.toolRegistry.GetModelFunctionDefinitions()
 	tools := make([]chat.Tool, 0, len(functionDefs))
 	for _, def := range functionDefs {
+		description := def.Description
+		if e.config.DocumentScoped {
+			switch def.Name {
+			case agenttools.ToolSearchKnowledge:
+				description = documentSearchToolDescription
+			case agenttools.ToolReadDocument:
+				description = documentReadToolDescription
+			}
+		}
 		tools = append(tools, chat.Tool{
 			Type: "function",
 			Function: chat.FunctionDef{
 				Name:        def.Name,
-				Description: def.Description,
+				Description: description,
 				Parameters:  def.Parameters,
 			},
 		})

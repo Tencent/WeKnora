@@ -102,6 +102,38 @@ const emptyResponseRetryNotice = "<runtime_event>\n" +
 	"existing task from the current state. Tools and waiting remain available; " +
 	"provide a final response when the task is ready to conclude.\"}\n</runtime_event>"
 
+const documentAnswerNotice = "Use the permitted knowledge tools silently. Full search chunks are already " +
+	"original, citable evidence; rereading them is unnecessary for verification or citation. " +
+	"Titles, metadata and failed or empty results are not evidence. The runtime will generate the final " +
+	"answer separately after you return READY. READY is terminal: return it alone with no tool calls. " +
+	"If another tool is needed, call it without also returning READY."
+
+const documentInitialSearchNotice = "Initial lookup: call search_knowledge with mode=\"semantic\" and " +
+	"one query covering the user's actual question. Include the requested subjects together."
+
+const documentEvidenceNotice = "The initial lookup instruction is finished. Review the tool results " +
+	"already obtained. If they support the requested answer and relevant applicability conditions, " +
+	"return only READY now. Do not expand the task to optional procedures or unasked follow-up questions. " +
+	"Make another call only to resolve a specific missing fact, relevant exception, conflict or truncated " +
+	"passage. Target that gap with a focused search or a relevant chunk read with necessary context; " +
+	"use a document query when locating a passage instead of reading from its start. If a focused lookup " +
+	"returns the same full chunks with no new evidence, return READY and let the final answer state " +
+	"which requested details cannot be confirmed."
+
+const documentSearchToolDescription = "Search the documents permitted for this turn and return full, " +
+	"citable source chunks. Their content is already original evidence, not a preview requiring a " +
+	"read_document call. Use one complete query covering the user's requested subjects and " +
+	"mode=\"semantic\" for meaning-based lookup. Search again only for a specific gap in the content " +
+	"already obtained; reuse existing chunks when they answer the question."
+
+const documentReadToolDescription = "Read an unread passage needed to resolve a specific missing fact, " +
+	"exception, conflict or truncated context. First check the full source chunks already returned by " +
+	"search_knowledge. If they cover the requested answer, finish planning instead of calling this tool. " +
+	"id=chunk://N reads that chunk; context includes necessary neighbouring chunks. id=doc://N with " +
+	"query locates a missing passage inside that document. All query words must match, so use only " +
+	"terms needed to locate the passage. Reading a document from its start is useful only when that " +
+	"unread content is needed for the question."
+
 func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 	if toolName == "local_browser" && len(arguments) > 0 {
 		var input struct {

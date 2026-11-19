@@ -1021,13 +1021,16 @@ func (e *AgentEngine) runReActIteration(
 			response.Usage.PromptCacheHitRate(), response.Usage.CacheStatus)
 	}
 
+	needsDocumentSynthesis := e.config.DocumentScoped && len(response.ToolCalls) == 0 &&
+		(isNaturalStopFinishReason(response.FinishReason) || isLengthFinishReason(response.FinishReason))
+
 	// Every round in a row that the provider cut off at the completion cap.
 	// A truncated *answer* already ends the turn in analyzeResponse, so a run
 	// of these means the truncation keeps landing inside tool-call arguments:
 	// act.go refuses the calls, the model is told to re-issue them, writes an
 	// even longer call, and hits the cap again. Give up rather than spend the
 	// whole round budget on it (#3446).
-	if isLengthFinishReason(response.FinishReason) {
+	if isLengthFinishReason(response.FinishReason) && !needsDocumentSynthesis {
 		guards.consecutiveLength++
 		if guards.consecutiveLength >= maxConsecutiveLengthRounds {
 			logger.Warnf(ctx, "[Agent][Round-%d] %d consecutive rounds cut off at the completion cap "+
@@ -1080,7 +1083,7 @@ func (e *AgentEngine) runReActIteration(
 		}
 		guards.sawPlainRound = true
 		guards.lastResponseContent = response.Content
-		if guards.consecutiveSameContent >= maxRepeatedResponseRounds {
+		if guards.consecutiveSameContent >= maxRepeatedResponseRounds && !needsDocumentSynthesis {
 			logger.Warnf(
 				ctx,
 				"[Agent][Round-%d] Detected stuck loop: same content repeated %d times (finish=%s), stopping",
@@ -1132,6 +1135,18 @@ func (e *AgentEngine) runReActIteration(
 			len(step.BackgroundInjections) > 0 {
 			state.RoundSteps = append(state.RoundSteps, step)
 		}
+		return iterOutcomeBreak, nil
+	}
+
+	if needsDocumentSynthesis {
+		// A tool-enabled round cannot publish text before its finish reason
+		// confirms there are no more tool calls. Only the tool-free turn streams.
+		step.Thought = ""
+		state.RoundSteps = append(state.RoundSteps, step)
+		if err := e.streamFinalAnswerToEventBus(ctx, query, state, sessionID, *messagesPtr); err != nil {
+			return iterOutcomeBreak, err
+		}
+		state.IsComplete = true
 		return iterOutcomeBreak, nil
 	}
 
