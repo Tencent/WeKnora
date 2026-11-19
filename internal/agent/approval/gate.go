@@ -143,12 +143,13 @@ var _ MCPApproval = (*Gate)(nil)
 
 // Gate applies per-tool MCP policy and raises approval / OAuth prompts.
 type Gate struct {
-	checker   Checker
-	timeout   time.Duration
-	hotWait   time.Duration // in-memory wait before a suspendable approval suspends the run
-	broker    *hitl.Broker
-	failClose bool // when true, policy read errors require approval instead of skipping it
-	grants    GrantStore
+	sessionPolicies SessionPolicyReader
+	checker         Checker
+	timeout         time.Duration
+	hotWait         time.Duration // in-memory wait before a suspendable approval suspends the run
+	broker          *hitl.Broker
+	failClose       bool // when true, policy read errors require approval instead of skipping it
+	grants          GrantStore
 }
 
 // Errors returned by Resolve; they alias the prompt broker's errors.
@@ -217,13 +218,25 @@ func (g *Gate) requiredByPolicy(ctx context.Context, tenantID uint64, serviceID,
 // optional). A missing tenant or tool identity is fail-closed: the caller
 // cannot attribute a tenant-scoped disable flag, so the tool is not allowed.
 func (g *Gate) IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
-	if g == nil || g.checker == nil {
+	if g == nil {
 		return true, nil
 	}
-	if tenantID == 0 || serviceID == "" || toolName == "" {
+	if g.checker != nil && (tenantID == 0 || serviceID == "" || toolName == "") {
 		return false, nil
 	}
-	return g.checker.IsEnabled(ctx, tenantID, serviceID, toolName)
+	enabled := true
+	if g.checker != nil {
+		var err error
+		enabled, err = g.checker.IsEnabled(ctx, tenantID, serviceID, toolName)
+		if err != nil || !enabled {
+			return false, err
+		}
+	}
+	policies, err := g.restrictIMTools(ctx, tenantID, serviceID, map[string]bool{toolName: enabled})
+	if err != nil {
+		return false, err
+	}
+	return policies[toolName], nil
 }
 
 // RequestAndWait emits a UI event, then blocks until Resolve, timeout, or ctx cancellation.

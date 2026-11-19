@@ -73,7 +73,11 @@ func (g *Gate) EnabledTools(
 	if g == nil {
 		return EnabledTools(ctx, nil, tenantID, serviceID, names)
 	}
-	return EnabledTools(ctx, g.checker, tenantID, serviceID, names)
+	enabled, err := EnabledTools(ctx, g.checker, tenantID, serviceID, names)
+	if err != nil {
+		return nil, err
+	}
+	return g.restrictIMTools(ctx, tenantID, serviceID, enabled)
 }
 
 // EnabledTools reads service policies in one batch when supported by the service.

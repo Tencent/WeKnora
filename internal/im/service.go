@@ -439,6 +439,12 @@ func formatQuotedContext(quote *QuotedMessage) string {
 // channels without an explicit locale use the deployment default.
 func withIMIdentity(ctx context.Context, channel *IMChannel, msg *IncomingMessage) context.Context {
 	tenantID := channel.TenantID
+	conversation := types.IMConversation{Platform: channel.Platform}
+	if msg != nil {
+		conversation.ChatType = string(msg.ChatType)
+		conversation.ChatID = msg.ChatID
+	}
+	ctx = types.WithIMConversation(ctx, conversation)
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	ctx = context.WithValue(ctx, types.UserIDContextKey, fmt.Sprintf("system-%d", tenantID))
 	locale := channel.Locale
