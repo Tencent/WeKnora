@@ -36577,6 +36577,12 @@
                         "type": "string"
                     }
                 },
+                "knowledge_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "source": {
                     "type": "string"
                 },
