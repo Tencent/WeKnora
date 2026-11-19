@@ -102,6 +102,73 @@ func TestDocumentScopedAgentPublishesOnlyReadableFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestDocumentScopedSynthesisKeepsToolEvidenceAndCitationHandles(t *testing.T) {
+	for _, toolName := range []string{agenttools.ToolSearchKnowledge, agenttools.ToolReadDocument} {
+		for _, citations := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/citations=%v", toolName, citations), func(t *testing.T) {
+				model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+					{ResponseType: types.ResponseTypeAnswer, Content: "请在线提交申请。<ref id=\"chunk://"},
+					{ResponseType: types.ResponseTypeAnswer, Content: "1\"/>", Done: true, FinishReason: "stop"},
+				}}}}
+				engine := newTestEngine(t, model, withCitationsEnabled(citations), func(cfg *types.AgentConfig) {
+					cfg.DocumentScoped = true
+				})
+				row := map[string]interface{}{
+					"chunk_id": "current-chunk", "knowledge_id": "allowed-document",
+					"knowledge_base_id": "allowed-base", "knowledge_title": "办理指引",
+					"content": "请在线提交申请。",
+				}
+				data := map[string]interface{}{
+					"display_type": "search_results", "mode": "semantic",
+					"results": []map[string]interface{}{row},
+				}
+				args := map[string]interface{}{"query": "如何申请？"}
+				if toolName == agenttools.ToolReadDocument {
+					row["knowledge_base"] = row["knowledge_base_id"]
+					delete(row, "knowledge_base_id")
+					data = map[string]interface{}{
+						"display_type": "knowledge_chunks_list", "knowledge_id": "allowed-document",
+						"knowledge_base_id": "allowed-base", "knowledge_title": "办理指引",
+						"chunks":   []map[string]interface{}{row},
+						"document": map[string]interface{}{"knowledge_id": "allowed-document", "title": "办理指引"},
+					}
+					args = map[string]interface{}{"id": "allowed-document"}
+				}
+				step := types.AgentStep{ToolCalls: []types.ToolCall{{
+					ID: "lookup", Name: toolName, Args: args, Result: &types.ToolResult{Success: true, Data: data},
+				}}}
+				messages := []chat.Message{
+					{Role: "system", Content: engine.buildSystemPrompt(t.Context())},
+					{Role: "user", Content: "如何申请？"},
+				}
+				messages = engine.appendToolResults(messages, step)
+				state := &types.AgentState{RoundSteps: []types.AgentStep{step}}
+				var published strings.Builder
+				engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+					published.WriteString(evt.Data.(event.AgentFinalAnswerData).Content)
+					return nil
+				})
+				require.NoError(t, engine.streamFinalAnswerToEventBus(t.Context(), "如何申请？", state, "session", messages))
+				require.Len(t, model.calls, 1)
+				evidence := model.calls[0][len(messages)-1]
+				require.Equal(t, "tool", evidence.Role)
+				require.Equal(t, "lookup", evidence.ToolCallID)
+				require.Equal(t, toolName, evidence.Name)
+				require.Contains(t, evidence.Content, `<document id="doc://1" kb="kb://1" title="办理指引">`)
+				require.Contains(t, evidence.Content, `<chunk id="chunk://1" index="0" view="full">`)
+				require.Contains(t, evidence.Content, "请在线提交申请。")
+				require.NotContains(t, evidence.Content, "current-chunk")
+				require.Equal(t, state.FinalAnswer, published.String())
+				want := "请在线提交申请。"
+				if citations {
+					want += `<kb doc="办理指引" chunk_id="current-chunk" kb_id="allowed-base" />`
+				}
+				require.Equal(t, want, state.FinalAnswer)
+			})
+		}
+	}
+}
+
 func TestDocumentScopedSynthesisDoesNotRetryAfterPublishing(t *testing.T) {
 	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
 		{ResponseType: types.ResponseTypeAnswer, Content: "请在线提交申请。"},
