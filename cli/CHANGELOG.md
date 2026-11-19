@@ -26,6 +26,11 @@ CLI history before v0.3 is recorded in the project root
   (a directly-executable argv array — no shell-splitting or quoting).
 
 ### Added
+- `kb rewrite-image-hosts` rewrites only the image URL host in manual
+  knowledge (dry-run by default; `--apply` preserves title / custom_metadata
+  / parent_knowledge_id and waits for re-indexed image chunks).
+- Headless env auth accepts `WEKNORA_TENANT_ID` so platform API keys can
+  send the required `X-Tenant-ID` workspace header.
 - `chat` / `session ask --reference` includes indexed citations, while
   `--verbose` includes reasoning, tools, and lifecycle events. MCP `chat` /
   `session_ask` expose the same controls through `reference` / `verbose` inputs.

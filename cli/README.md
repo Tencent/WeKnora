@@ -126,6 +126,7 @@ For AI agents (any MCP-capable host) integrating WeKnora:
    ```bash
    export WEKNORA_API_KEY="sk-…"   # or WEKNORA_TOKEN for a bearer JWT
    export WEKNORA_HOST="https://kb.example.com"
+   export WEKNORA_TENANT_ID="10000" # platform API keys only: workspace header
    weknora kb list                 # already authenticated
    ```
    Or, for a persisted local profile:
@@ -428,6 +429,32 @@ reaches a terminal `parse_status` (completed or failed). Exit codes:
 flight; pipe through `xargs -P` for more).
 
 ---
+
+## Bulk image host rewrite
+
+`weknora kb rewrite-image-hosts` scans every document of a knowledge base and
+rewrites only the host of image URLs in manual Markdown content. Markdown
+images, HTML `<img>` tags and bare links are covered; the rest of the
+document is byte-for-byte unchanged. The command is read-only unless
+`--apply` is passed.
+
+```bash
+# Report matches only (default)
+weknora kb rewrite-image-hosts --kb <kb-id> \
+  --from img2.tapimg.com --to img2-tc.tapimg.com --verbose
+
+# Apply, resumably, with a per-document wait for re-indexed image chunks
+weknora kb rewrite-image-hosts --kb <kb-id> \
+  --from img2.tapimg.com --to img2-tc.tapimg.com \
+  --apply --limit 200 --concurrency 4 --resume /tmp/image-hosts.json -y
+```
+
+`--apply` updates manual knowledge through `PUT /api/v1/knowledge/manual/{id}`,
+preserving title, tags, `custom_metadata` and `parent_knowledge_id`, then
+polls until `image_ocr` / `image_caption` / `image_vector` chunks report
+`index_status=ready` (or `--timeout`). Only documents that still contain the
+old host are written, so a second run performs no updates. Per-document
+failures are summarized and never abort the batch.
 
 ## Development
 
