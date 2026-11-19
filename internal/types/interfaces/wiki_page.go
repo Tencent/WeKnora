@@ -46,6 +46,10 @@ type WikiPageService interface {
 	// and whether any rewrite happened. Best-effort: callers may ignore errors.
 	RepairContentLinks(ctx context.Context, kbID, selfSlug, content string) (string, bool, error)
 
+	// FixBrokenLink repairs one linted target or strips the link markup when
+	// there is no live match. It reports whether the source content changed.
+	FixBrokenLink(ctx context.Context, kbID, pageSlug, targetSlug string) (bool, error)
+
 	// GetPageByID retrieves a wiki page by its unique ID.
 	GetPageByID(ctx context.Context, id string) (*types.WikiPage, error)
 

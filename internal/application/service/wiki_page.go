@@ -80,6 +80,7 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	if page.ID == "" {
 		page.ID = uuid.New().String()
 	}
+	page.Slug = normalizeSlug(page.Slug)
 	if page.Slug == "" {
 		return nil, errors.New("wiki page slug is required")
 	}
@@ -97,7 +98,11 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	stripWikiPageInlineChunkCitations(page)
 
 	// Parse outbound links from content
-	page.OutLinks = s.parseOutLinks(page.Content)
+	outLinks, err := s.parsePageOutLinks(ctx, page)
+	if err != nil {
+		return nil, err
+	}
+	page.OutLinks = outLinks
 	if err := s.applyFolderToPage(ctx, page); err != nil {
 		return nil, err
 	}
@@ -264,7 +269,10 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	// Outbound links are a pure derivative of content, so they only shift
 	// when content shifts. Re-parse unconditionally to stay consistent with
 	// the stored body.
-	existing.OutLinks = s.parseOutLinks(existing.Content)
+	existing.OutLinks, err = s.parsePageOutLinks(ctx, existing)
+	if err != nil {
+		return nil, err
+	}
 	normalizeWikiHierarchy(existing)
 
 	if contentChanged {
@@ -318,14 +326,18 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 	oldOutLinks := existing.OutLinks
 
 	existing.Content = stripWikiInlineChunkCitations(page.Content)
-	existing.OutLinks = s.parseOutLinks(existing.Content)
+	existing.OutLinks, err = s.parsePageOutLinks(ctx, existing)
+	if err != nil {
+		return err
+	}
 	existing.UpdatedAt = time.Now()
 
 	if err := s.repo.UpdateAutoLinkedContent(ctx, existing); err != nil {
 		return fmt.Errorf("update auto-linked content: %w", err)
 	}
 
-	s.syncInLinks(ctx, existing.TenantID, existing.KnowledgeBaseID, existing.Slug, oldOutLinks, existing.OutLinks)
+	linkCtx := types.WithWikiPageWriteSnapshot(ctx, nil)
+	s.syncInLinks(linkCtx, existing.TenantID, existing.KnowledgeBaseID, existing.Slug, oldOutLinks, existing.OutLinks)
 
 	return nil
 }
@@ -444,6 +456,11 @@ func (s *wikiPageService) RevertPageToVersion(
 // GetPageBySlug retrieves a wiki page by its slug
 func (s *wikiPageService) GetPageBySlug(ctx context.Context, kbID string, slug string) (*types.WikiPage, error) {
 	page, err := s.repo.GetBySlug(ctx, kbID, slug)
+	if errors.Is(err, repository.ErrWikiPageNotFound) {
+		if normalized := normalizeSlug(slug); normalized != slug {
+			page, err = s.repo.GetBySlug(ctx, kbID, normalized)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1132,8 +1149,9 @@ func (s *wikiPageService) RebuildLinks(ctx context.Context, kbID string) error {
 	}
 
 	// Re-parse outbound links and rebuild inbound links
+	isLive := func(slug string) bool { return pageMap[slug] != nil }
 	for _, p := range pages {
-		p.OutLinks = s.parseOutLinks(p.Content)
+		p.OutLinks = wikiOutLinks(markdownWikiLinks(p.Content), isLive)
 		for _, target := range p.OutLinks {
 			if tp, exists := pageMap[target]; exists {
 				tp.InLinks = append(tp.InLinks, p.Slug)
@@ -1378,9 +1396,30 @@ func isInvalidWikiSearchQuery(err error) bool {
 
 // --- Internal helpers ---
 
-// parseOutLinks extracts [[wiki-link]] slugs from markdown content
-func (s *wikiPageService) parseOutLinks(content string) types.StringArray {
-	return wikiOutLinks(content)
+func (s *wikiPageService) parsePageOutLinks(ctx context.Context, page *types.WikiPage) (types.StringArray, error) {
+	links := markdownWikiLinks(page.Content)
+	exact, err := s.liveNonCanonicalLinkSlugs(ctx, page.KnowledgeBaseID, links)
+	if err != nil {
+		return nil, fmt.Errorf("look up legacy wiki link targets: %w", err)
+	}
+	return wikiOutLinks(links, func(slug string) bool { return exact[slug] }), nil
+}
+
+func (s *wikiPageService) liveNonCanonicalLinkSlugs(
+	ctx context.Context, kbID string, links []markdownWikiLink,
+) (map[string]bool, error) {
+	var slugs []string
+	seen := make(map[string]bool)
+	for _, link := range links {
+		if link.rawSlug != link.slug && !seen[link.rawSlug] {
+			seen[link.rawSlug] = true
+			slugs = append(slugs, link.rawSlug)
+		}
+	}
+	if len(slugs) == 0 {
+		return nil, nil
+	}
+	return s.repo.ExistsSlugs(ctx, kbID, slugs)
 }
 
 // normalizeSlug normalizes a wiki link slug
@@ -1411,11 +1450,7 @@ func rewriteDeadWikiLinks(content string, resolve func(normSlug, display string)
 		if !ok || newSlug == "" || newSlug == link.slug {
 			return content[link.start:link.end]
 		}
-		replacement := "[[" + newSlug
-		if link.display != "" {
-			replacement += link.separator + link.display
-		}
-		return replacement + "]]"
+		return link.withSlug(newSlug)
 	})
 }
 
@@ -1444,12 +1479,48 @@ func rewriteDeadWikiLinks(content string, resolve func(normSlug, display string)
 func (s *wikiPageService) RepairContentLinks(
 	ctx context.Context, kbID, selfSlug, content string,
 ) (string, bool, error) {
-	if strings.TrimSpace(content) == "" {
+	return s.repairContentLinks(ctx, kbID, selfSlug, content, "")
+}
+
+func (s *wikiPageService) FixBrokenLink(ctx context.Context, kbID, pageSlug, targetSlug string) (bool, error) {
+	if targetSlug == "" {
+		return false, nil
+	}
+	page, err := s.repo.GetBySlug(ctx, kbID, pageSlug)
+	if err != nil {
+		return false, err
+	}
+	content, changed, err := s.repairContentLinks(ctx, kbID, pageSlug, page.Content, targetSlug)
+	if err != nil || !changed {
+		return false, err
+	}
+
+	ctx = types.WithWikiPageWriteSnapshot(ctx, page)
+	page.Content = content
+	if err := s.UpdateAutoLinkedContent(ctx, page); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *wikiPageService) repairContentLinks(
+	ctx context.Context, kbID, selfSlug, content, targetSlug string,
+) (string, bool, error) {
+	links := markdownWikiLinks(content)
+	if len(links) == 0 {
 		return content, false, nil
 	}
-	outLinks := s.parseOutLinks(content)
-	if len(outLinks) == 0 {
-		return content, false, nil
+	exact, err := s.liveNonCanonicalLinkSlugs(ctx, kbID, links)
+	if err != nil {
+		return content, false, err
+	}
+	isExactLive := func(slug string) bool { return exact[slug] }
+	outLinks := wikiOutLinks(links, isExactLive)
+	if targetSlug != "" {
+		if !slices.Contains(outLinks, targetSlug) {
+			return content, false, nil
+		}
+		outLinks = []string{targetSlug}
 	}
 
 	existMap, err := s.repo.ExistsSlugs(ctx, kbID, outLinks)
@@ -1474,7 +1545,7 @@ func (s *wikiPageService) RepairContentLinks(
 	liveByPrefix := make(map[string]map[string]struct{})
 	var candidateSlugs []string
 	for _, sl := range allSlugs {
-		ns := slugNamespace(sl)
+		ns := slugNamespace(normalizeSlug(sl))
 		if _, want := deadPrefixes[ns]; !want {
 			continue
 		}
@@ -1486,7 +1557,7 @@ func (s *wikiPageService) RepairContentLinks(
 		set[sl] = struct{}{}
 		candidateSlugs = append(candidateSlugs, sl)
 	}
-	if len(candidateSlugs) == 0 {
+	if len(candidateSlugs) == 0 && targetSlug == "" {
 		return content, false, nil
 	}
 
@@ -1494,7 +1565,11 @@ func (s *wikiPageService) RepairContentLinks(
 	// display-text lever (the safest, most precise one) can fire. Bounded to
 	// the relevant namespaces so this stays cheap even on large KBs.
 	titleToSlug := make(map[string]string)
-	if lites, lerr := s.repo.ListBySlugs(ctx, kbID, candidateSlugs); lerr == nil {
+	if len(candidateSlugs) > 0 {
+		lites, err := s.repo.ListBySlugs(ctx, kbID, candidateSlugs)
+		if err != nil && targetSlug != "" {
+			return content, false, err
+		}
 		for _, lp := range lites {
 			if lp != nil && lp.Title != "" {
 				titleToSlug[lp.Title] = lp.Slug
@@ -1503,21 +1578,28 @@ func (s *wikiPageService) RepairContentLinks(
 	}
 
 	resolveCache := make(map[string]string)
-	newContent, changed := rewriteDeadWikiLinks(content, func(norm, display string) (string, bool) {
-		if norm == selfSlug || existMap[norm] {
-			return "", false
+	newContent, changed := rewriteMarkdownWikiLinks(content, func(link markdownWikiLink) string {
+		slug := link.targetSlug(isExactLive)
+		original := content[link.start:link.end]
+		if slug == selfSlug || exact[slug] || existMap[slug] || (targetSlug != "" && slug != targetSlug) {
+			return original
 		}
-		key := norm + "\x00" + display
-		if cached, ok := resolveCache[key]; ok {
-			return cached, cached != ""
+		key := slug + "\x00" + link.display
+		resolved, cached := resolveCache[key]
+		if !cached {
+			resolved, _ = resolveDeadSlug(slug, link.display, liveByPrefix[slugNamespace(slug)], titleToSlug)
+			resolveCache[key] = resolved
 		}
-		resolved, ok := resolveDeadSlug(norm, display, liveByPrefix[slugNamespace(norm)], titleToSlug)
-		if !ok || resolved == norm {
-			resolveCache[key] = ""
-			return "", false
+		if resolved != "" && resolved != slug {
+			return link.withSlug(resolved)
 		}
-		resolveCache[key] = resolved
-		return resolved, true
+		if targetSlug == "" || resolved == slug {
+			return original
+		}
+		if link.display != "" {
+			return link.display
+		}
+		return link.slug
 	})
 	return newContent, changed, nil
 }
