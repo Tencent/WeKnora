@@ -1308,12 +1308,12 @@ function initFromKbInfo(kb: any) {
     nodeExtractConfig: {
       enabled: !!kb.extract_config?.enabled && !!kb.indexing_strategy?.graph_enabled,
       text: kb.extract_config?.text || '',
-      tags: kb.extract_config?.tags || [],
+      tags: [...(kb.extract_config?.tags || [])],
       nodes: (kb.extract_config?.nodes || []).map((node: any) => ({
         name: node.name,
-        attributes: node.attributes || [],
+        attributes: [...(node.attributes || [])],
       })),
-      relations: kb.extract_config?.relations || [],
+      relations: (kb.extract_config?.relations || []).map((rel: any) => ({ ...rel })),
       customInstructions: kb.extract_config?.custom_instructions || '',
     },
     graphEnabled: kb.indexing_strategy?.graph_enabled ?? false,
@@ -1634,27 +1634,32 @@ const validateBeforeConfirm = (): boolean => {
   }
 
   if (uiState.value.nodeExtractConfig.enabled && uiState.value.graphEnabled) {
-    const extract = uiState.value.nodeExtractConfig
-    if (!extract.tags || extract.tags.length === 0 || extract.tags.some((tag: string) => !tag || !tag.trim())) {
+    const raw = uiState.value.nodeExtractConfig
+    const defaults = props.kbInfo?.extract_config
+    const effectiveText = (raw.text || defaults?.text || '').trim()
+    const effectiveTags = (raw.tags && raw.tags.length > 0) ? raw.tags : (defaults?.tags || [])
+    const effectiveNodes = (raw.nodes && raw.nodes.length > 0) ? raw.nodes : (defaults?.nodes || [])
+
+    if (!effectiveTags || effectiveTags.length === 0 || effectiveTags.some((tag: string) => !tag || !tag.trim())) {
       MessagePlugin.warning(t('graphSettings.tagsRequired'))
       goToSection('graph')
       return false
     }
 
-    if (!extract.text || !extract.text.trim()) {
+    if (!effectiveText) {
       MessagePlugin.warning(t('graphSettings.sampleTextRequired'))
       goToSection('graph')
       return false
     }
 
-    if (!extract.nodes || extract.nodes.length === 0) {
+    if (!effectiveNodes || effectiveNodes.length === 0) {
       MessagePlugin.warning(t('graphSettings.nodesRequired'))
       goToSection('graph')
       return false
     }
 
     const nodeNames = new Set<string>()
-    for (const node of extract.nodes) {
+    for (const node of effectiveNodes) {
       const name = (node.name || '').trim()
       if (!name) {
         MessagePlugin.warning(t('graphSettings.nodeNameRequired'))
