@@ -145,6 +145,7 @@ func newWikiWriteGuardStore(t *testing.T, content string) (interfaces.WikiPageSe
 
 	ctx := context.Background()
 	svc := NewWikiPageService(repository.NewWikiPageRepository(db), nil, nil, nil, nil, nil)
+	seedWikiTestKnowledgeBase(t, db, "kb-row-guard", 1)
 	page, err := svc.CreatePage(ctx, &types.WikiPage{
 		TenantID: 1, KnowledgeBaseID: "kb-row-guard", Slug: "entity/pmp",
 		Title: "PMP", PageType: types.WikiPageTypeEntity,

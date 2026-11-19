@@ -61,10 +61,15 @@ export const useMenuStore = defineStore('menuStore', () => {
   applyMenuTranslations()
 
   watch(
-    () => i18n.global.locale.value,
+    () => [
+      i18n.global.locale.value,
+      i18n.global.messages?.value?.[
+        i18n.global.locale.value as keyof typeof i18n.global.messages.value
+      ],
+    ],
     () => {
       applyMenuTranslations()
-    }
+    },
   )
 
   const liteHiddenPaths = new Set(['logout', 'organizations'])

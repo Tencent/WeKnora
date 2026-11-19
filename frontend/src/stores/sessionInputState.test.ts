@@ -46,6 +46,41 @@ function selectDefaults(store: ReturnType<typeof useSettingsStore>) {
   store.selectKnowledgeBases(['default-kb'])
 }
 
+test('a new chat clears prior KB and file mentions while keeping unrelated composer settings', () => {
+  const store = useSettingsStore(createPinia())
+  selectDefaults(store)
+  store.settings.selectedAgentId = 'agent-1'
+  store.settings.selectedMCPServices = ['mcp-1']
+
+  store.clearChatReferences()
+
+  assert.deepEqual(store.getSelectedKnowledgeBases(), [])
+  assert.deepEqual(store.getSelectedFiles(), [])
+  assert.deepEqual(store.settings.selectedFileKbMap, {})
+  assert.deepEqual(store.settings.selectedTags, [])
+  assert.equal(store.settings.selectedAgentId, 'agent-1')
+  assert.deepEqual(store.settings.selectedMCPServices, ['mcp-1'])
+  assert.deepEqual(JSON.parse(items.get('WeKnora_settings')!).selectedKnowledgeBases, [])
+  assert.deepEqual(JSON.parse(items.get('WeKnora_settings')!).selectedFiles, [])
+})
+
+test('search-started chat replaces old references and survives session default restoration', () => {
+  const store = useSettingsStore(createPinia())
+  selectDefaults(store)
+  store.snapshotAsDefaultsIfNeeded()
+
+  store.prepareNewChatReferences(['new-kb'], ['new-file'])
+  store.restoreDefaultsIfSnapshotted()
+  const references = store.consumeNewChatReferences()
+  assert.deepEqual(references, { kbIds: ['new-kb'], fileIds: ['new-file'] })
+  store.setNewChatReferences(references!.kbIds, references!.fileIds)
+
+  assert.deepEqual(store.getSelectedKnowledgeBases(), ['new-kb'])
+  assert.deepEqual(store.getSelectedFiles(), ['new-file'])
+  assert.deepEqual(store.settings.selectedFileKbMap, {})
+  assert.equal(store.consumeNewChatReferences(), null)
+})
+
 const emptySelections: SessionLastRequestStatePayload = {
   knowledge_base_ids: [], knowledge_ids: [], tag_ids: [], mcp_service_ids: [], skill_names: [],
 }

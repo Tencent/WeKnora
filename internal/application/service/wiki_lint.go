@@ -164,7 +164,9 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 
 			// Check 2: Broken links — outlinks pointing at slugs that
 			// don't exist in the live set.
-			for _, outLink := range page.OutLinks {
+			// Historical OutLinks can contain escaped aliases and code
+			// examples. Validate the current body without rewriting the page.
+			for _, outLink := range wikiOutLinks(page.Content) {
 				if !slugSet[outLink] {
 					issues = append(issues, WikiLintIssue{
 						Type:        LintIssueBrokenLink,
@@ -238,8 +240,8 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 		}
 		for _, page := range pages {
 			lowerContent := strings.ToLower(page.Content)
-			outLinkSet := make(map[string]struct{}, len(page.OutLinks))
-			for _, l := range page.OutLinks {
+			outLinkSet := make(map[string]struct{})
+			for _, l := range wikiOutLinks(page.Content) {
 				outLinkSet[l] = struct{}{}
 			}
 			for slug, title := range entitySlugs {
@@ -367,7 +369,19 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 				continue
 			}
 			target := issue.TargetSlug
-			page.Content = strings.ReplaceAll(page.Content, "[["+target+"]]", target)
+			updated, changed := rewriteMarkdownWikiLinks(page.Content, func(link markdownWikiLink) string {
+				if link.slug != target {
+					return page.Content[link.start:link.end]
+				}
+				if link.display != "" {
+					return link.display
+				}
+				return link.slug
+			})
+			if !changed {
+				continue
+			}
+			page.Content = updated
 			if err := s.wikiService.UpdateAutoLinkedContent(ctx, page); err == nil {
 				fixed++
 			}
