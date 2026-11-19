@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -49,15 +50,43 @@ func ShouldOmitRawToolOutput(_ string, data map[string]interface{}) bool {
 
 // SanitizeToolDataForPersist returns a copy of tool Data safe for DB / SSE replay.
 func SanitizeToolDataForPersist(toolName string, data map[string]interface{}) map[string]interface{} {
-	return sanitizeToolData(data, persistStripFieldsByTool[toolName])
+	out := sanitizeToolData(data, persistStripFieldsByTool[toolName])
+	delete(out, "data_change")
+	return out
 }
 
-func sanitizeToolDataForClient(toolName string, data map[string]interface{}) map[string]interface{} {
+// SanitizeToolDataForClient retains transient metadata only for live clients.
+func SanitizeToolDataForClient(toolName string, data map[string]interface{}) map[string]interface{} {
 	omit := clientStripFieldsByTool[toolName]
 	if omit == nil {
 		omit = persistStripFieldsByTool[toolName]
 	}
-	return sanitizeToolData(data, omit)
+	out := sanitizeToolData(data, omit)
+	if !dataChangeTools[toolName] {
+		delete(out, "data_change")
+	}
+	return out
+}
+
+// dataChangeTools may tell live clients what they changed, so open pages
+// reload it.
+var dataChangeTools = map[string]bool{
+	ToolRunOperation:    true,
+	ToolWikiWritePage:   true,
+	ToolWikiReplaceText: true,
+	ToolWikiRenamePage:  true,
+	ToolWikiDeletePage:  true,
+	ToolWikiUpdateIssue: true,
+}
+
+// wikiDataChange names the knowledge base whose Wiki a tool changed, in the
+// shape run_operation reports its changes.
+func wikiDataChange(action, kbID string) map[string]any {
+	return map[string]any{
+		"operation": "wiki." + action,
+		"area":      "wiki",
+		"ids":       map[string][]string{"knowledge_base_id": {kbID}},
+	}
 }
 
 func sanitizeToolData(data map[string]interface{}, extraOmit []string) map[string]interface{} {
@@ -85,7 +114,7 @@ func SanitizeToolResultForClient(toolName string, result *types.ToolResult) map[
 		return meta
 	}
 	if result.Data != nil {
-		for k, v := range sanitizeToolDataForClient(toolName, result.Data) {
+		for k, v := range SanitizeToolDataForClient(toolName, result.Data) {
 			meta[k] = v
 		}
 	}
@@ -202,7 +231,10 @@ func compactHistoricalSandboxOutput(output string) string {
 	kept := historicalSandboxOutputChars - len(marker)
 	head := kept / 4
 	tail := kept - head
-	return output[:head] + marker + output[len(output)-tail:]
+	// Cut at the byte offsets, dropping a multi-byte character a cut splits:
+	// invalid UTF-8 reaches history replay as U+FFFD.
+	return strings.ToValidUTF8(output[:head], "") + marker +
+		strings.ToValidUTF8(output[len(output)-tail:], "")
 }
 
 func compactSandboxStreamFields(data map[string]interface{}) {
@@ -247,7 +279,8 @@ func compactShellExecHeadline(data map[string]interface{}) string {
 	}
 	const maxCmd = 240
 	if len(cmd) > maxCmd {
-		cmd = cmd[:maxCmd] + "..."
+		// Cut at maxCmd bytes, dropping a multi-byte character the cut splits.
+		cmd = strings.ToValidUTF8(cmd[:maxCmd], "") + "..."
 	}
 	return fmt.Sprintf("shell_exec exit=%d command=%s", exit, cmd)
 }
@@ -367,11 +400,67 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 		if parsed > 0 {
 			return fmt.Sprintf("Parsed %d attachment(s)", parsed)
 		}
+	case "secure_form":
+		return compactSecureFormSummary(data)
+	case "browser_fill_secret":
+		return compactFillSecretSummary(data)
 	}
 	if displayType := stringField(data, "display_type"); displayType != "" {
 		return fmt.Sprintf("Tool completed (%s; payload omitted from history)", displayType)
 	}
 	return "Tool completed (payload omitted from history)"
+}
+
+// compactSecureFormSummary rebuilds what request_secure_form told the model.
+// Data holds only the handle, field names, username and flags, never values.
+func compactSecureFormSummary(data map[string]interface{}) string {
+	if answered, _ := data["answered"].(bool); !answered {
+		reason := stringField(data, "reason")
+		if reason == "" {
+			reason = "no answer"
+		}
+		return fmt.Sprintf("The user did not provide credentials (%s).", reason)
+	}
+	handle := stringField(data, "handle")
+	if handle == "" {
+		return "The user provided credentials (the handle is not kept in history)."
+	}
+	var fields []string
+	if list, ok := data["fields"].([]interface{}); ok {
+		for _, f := range list {
+			if s, ok := f.(string); ok {
+				fields = append(fields, s)
+			}
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "The user provided credentials. handle: %s  fields: %s", handle, strings.Join(fields, ", "))
+	if u := stringField(data, "username"); u != "" {
+		fmt.Fprintf(&b, "  username: %s", u)
+	}
+	b.WriteString("\nThe handle may have been used or expired; call request_secure_form " +
+		"again if a fill reports handle_expired.")
+	return b.String()
+}
+
+// compactFillSecretSummary rebuilds the per-field statuses of browser_fill_secret.
+func compactFillSecretSummary(data map[string]interface{}) string {
+	statuses, _ := data["fields"].(map[string]interface{})
+	if len(statuses) == 0 {
+		return "browser_fill_secret finished (statuses are not kept in history)."
+	}
+	names := make([]string, 0, len(statuses))
+	for name := range statuses {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Fill results for %s:", stringField(data, "handle"))
+	for _, name := range names {
+		s, _ := statuses[name].(string)
+		fmt.Fprintf(&b, "\n- %s: %s", name, s)
+	}
+	return b.String()
 }
 
 func stringField(data map[string]interface{}, key string) string {

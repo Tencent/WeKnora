@@ -40,6 +40,23 @@ after(async () => {
   else Reflect.deleteProperty(globalThis, 'localStorage')
 })
 
+test('approval reattach identifies the resumed segment without changing ordinary replay', async () => {
+  let stream!: ReturnType<typeof useStream>
+  await renderToString(createSSRApp({ setup() { stream = useStream(); return () => null } }))
+  try {
+    for (const pendingId of [undefined, 'pending/a+b']) {
+      await stream.startStream({
+        session_id: 'session', query: 'message', method: 'GET',
+        url: '/api/v1/sessions/continue-stream', resume_pending_id: pendingId,
+      })
+      assert.equal(stream.error.value, null)
+      const request = transport.requests.at(-1)!
+      assert.equal(request.url, '/api/v1/sessions/continue-stream/session?message_id=message' +
+        (pendingId ? '&resume_pending_id=pending%2Fa%2Bb' : ''))
+    }
+  } finally { stream.stopStream() }
+})
+
 for (const effort of [undefined, '', 'off', 'auto', 'high', 'max']) {
   test(`SSE body carries only explicit reasoning overrides: ${effort}`, async () => {
     let stream!: ReturnType<typeof useStream>
@@ -80,3 +97,18 @@ for (const selected of [true, false, undefined]) {
     } finally { stream.stopStream() }
   })
 }
+
+test('SSE body carries an agent-only page context', async () => {
+  let stream!: ReturnType<typeof useStream>
+  await renderToString(createSSRApp({ setup() { stream = useStream(); return () => null } }))
+  try {
+    await stream.startStream({
+      session_id: 'session', query: 'Check', method: 'POST', url: '/api/v1/agent-chat',
+      agent_enabled: true, page_context: { agent_id: 'agent-a' },
+    })
+    assert.equal(stream.error.value, null)
+    const body = JSON.parse(transport.requests.at(-1)!.options.body)
+    assert.deepEqual(body.page_context, { agent_id: 'agent-a' })
+    assert.equal(body.assistant_scope, undefined)
+  } finally { stream.stopStream() }
+})

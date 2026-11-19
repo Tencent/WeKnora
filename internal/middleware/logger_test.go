@@ -83,6 +83,16 @@ func TestSanitizeBody(t *testing.T) {
 			in:   `{"authorization_url":"https://idp.example/authorize?state=secret","authorization_attempt":"secret-state"}`,
 			want: `{"authorization_url":"***","authorization_attempt":"***"}`,
 		},
+		{
+			name: "inline image data URI",
+			in:   `{"query":"see chart","image":"data:image/png;base64,` + strings.Repeat("A", 80) + `"}`,
+			want: `{"query":"see chart","image":"data:image/png;base64,[redacted 80 chars]"}`,
+		},
+		{
+			name: "data URI inside a secret field is still masked",
+			in:   `{"apiKey":"data:image/png;base64,AAAA"}`,
+			want: `{"apiKey":"***"}`,
+		},
 	}
 
 	for _, tc := range cases {
@@ -193,6 +203,27 @@ func TestReadRequestBodyLeavesRouteBodyCapDeciding(t *testing.T) {
 	}
 }
 
+func TestReadRequestBodyRedactsDataURI(t *testing.T) {
+	payload := `{"image":"data:image/png;base64,` + strings.Repeat("A", maxBodySize) + `"}`
+
+	c, _ := newJSONContext(t, "/api/v1/knowledge-search", payload)
+	got := readRequestBody(c)
+
+	if strings.Contains(got, strings.Repeat("A", 32)) {
+		t.Fatalf("logged body still contains the base64 payload")
+	}
+	if !strings.Contains(got, "data:image/png;base64,[redacted ") {
+		t.Fatalf("readRequestBody() = %q, want a redacted data URI", got)
+	}
+	rest, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		t.Fatalf("handler read: %v", err)
+	}
+	if string(rest) != payload {
+		t.Fatalf("handler saw a redacted body; the request itself must stay intact")
+	}
+}
+
 func TestReadRequestBodySkipsNonTextBodies(t *testing.T) {
 	payload := "--x\r\nContent-Disposition: form-data; name=\"file\"\r\n\r\nbody\r\n--x--\r\n"
 
@@ -230,5 +261,24 @@ func TestSanitizeQueryRedactsTerminalTicket(t *testing.T) {
 	}
 	if strings.Contains(got, "signature") {
 		t.Fatalf("sanitizeQuery() leaked the ticket: %q", got)
+	}
+}
+
+func TestSkipsBodyLoggingForSecretRoutes(t *testing.T) {
+	for _, p := range []string{
+		"/api/v1/agent/secure-forms/p1",
+		"/api/v1/me/credential-vault",
+		"/api/v1/me/credential-vault/abc",
+		"/api/v1/local-browser/x",
+		"/api/v1/me/browser",
+	} {
+		if !skipsBodyLogging(p) {
+			t.Errorf("%s must not have its body logged", p)
+		}
+	}
+	for _, p := range []string{"/api/v1/agent/prompts/p1", "/api/v1/me/env-vars"} {
+		if skipsBodyLogging(p) {
+			t.Errorf("%s keeps its body log", p)
+		}
 	}
 }

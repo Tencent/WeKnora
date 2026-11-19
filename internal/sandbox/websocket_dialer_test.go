@@ -256,3 +256,105 @@ func TestCubeDialDesktopUsesHandleTokenWhenRegistryEmpty(t *testing.T) {
 	require.Equal(t, "weknora", user)
 	require.Equal(t, "s3cret", pass)
 }
+
+func TestWebsocketDialerSplitsQueryFromPath(t *testing.T) {
+	var seen http.Request
+	srv := desktopEchoServer(t, &seen)
+	defer srv.Close()
+
+	pool := NewSandboxGatewayTransportPoolWithPolicy(nil, OutboundURLPolicy{AllowPrivate: true})
+	cfg := &Config{
+		Type:                  SandboxTypeCube,
+		CubeProxyURL:          srv.URL,
+		CubeSandboxDomain:     "cube.app",
+		AllowPrivateEndpoints: true,
+	}
+	conn, _, err := pool.WebsocketDialerFor(cfg).
+		Dial(context.Background(), "sbx-1", 6080, "/websockify?token=7", nil)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+
+	require.Equal(t, "/websockify", seen.URL.Path,
+		"the query must not be escaped into the path")
+	require.Equal(t, "7", seen.URL.Query().Get("token"))
+}
+
+func TestCubeDialDesktopSendsSeatTokenAsQuery(t *testing.T) {
+	var seen http.Request
+	srv := desktopEchoServer(t, &seen)
+	defer srv.Close()
+
+	pool := NewSandboxGatewayTransportPoolWithPolicy(nil, OutboundURLPolicy{AllowPrivate: true})
+	cfg := &Config{
+		Type:                  SandboxTypeCube,
+		CubeAPIURL:            "http://127.0.0.1:33000",
+		CubeProxyURL:          srv.URL,
+		CubeSandboxDomain:     "cube.app",
+		AllowPrivateEndpoints: true,
+	}
+	client, err := NewCubeRemoteClientWithPool(cfg, pool)
+	require.NoError(t, err)
+
+	conn, err := client.DialDesktop(context.Background(),
+		&cubeRemoteHandle{sb: &cubesandbox.Sandbox{SandboxID: "sbx-9"}},
+		RemoteDesktopOptions{BasicAuthUser: "weknora", BasicAuthPassword: "s3cret", Token: "12"})
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+
+	require.Equal(t, "/websockify", seen.URL.Path)
+	require.Equal(t, "12", seen.URL.Query().Get("token"))
+}
+
+func TestCubeDialDesktopOmitsQueryWithoutToken(t *testing.T) {
+	var seen http.Request
+	srv := desktopEchoServer(t, &seen)
+	defer srv.Close()
+
+	pool := NewSandboxGatewayTransportPoolWithPolicy(nil, OutboundURLPolicy{AllowPrivate: true})
+	cfg := &Config{
+		Type:                  SandboxTypeCube,
+		CubeAPIURL:            "http://127.0.0.1:33000",
+		CubeProxyURL:          srv.URL,
+		CubeSandboxDomain:     "cube.app",
+		AllowPrivateEndpoints: true,
+	}
+	client, err := NewCubeRemoteClientWithPool(cfg, pool)
+	require.NoError(t, err)
+
+	conn, err := client.DialDesktop(context.Background(),
+		&cubeRemoteHandle{sb: &cubesandbox.Sandbox{SandboxID: "sbx-9"}},
+		RemoteDesktopOptions{})
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+
+	require.Empty(t, seen.URL.RawQuery)
+}
+
+func TestCubeDialDesktopRejectsInvalidTokenWithoutDialling(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+	defer srv.Close()
+
+	pool := NewSandboxGatewayTransportPoolWithPolicy(nil, OutboundURLPolicy{AllowPrivate: true})
+	cfg := &Config{
+		Type:                  SandboxTypeCube,
+		CubeAPIURL:            "http://127.0.0.1:33000",
+		CubeProxyURL:          srv.URL,
+		CubeSandboxDomain:     "cube.app",
+		AllowPrivateEndpoints: true,
+	}
+	client, err := NewCubeRemoteClientWithPool(cfg, pool)
+	require.NoError(t, err)
+
+	for _, bad := range []string{"abc", "123", "-1", "1&x=2", "1/../x", " 1", "1 ", "1\n", "\u0661"} {
+		_, err := client.DialDesktop(context.Background(),
+			&cubeRemoteHandle{sb: &cubesandbox.Sandbox{SandboxID: "sbx-9"}},
+			RemoteDesktopOptions{Token: bad})
+		require.Error(t, err, "token %q", bad)
+		var remoteErr *RemoteError
+		require.ErrorAs(t, err, &remoteErr, "token %q", bad)
+		require.Equal(t, RemoteErrorKindInvalidRequest, remoteErr.Kind, "token %q", bad)
+		require.Equal(t, "DialDesktop", remoteErr.Op)
+	}
+	require.Zero(t, hits, "an invalid token must be refused before any dial")
+}

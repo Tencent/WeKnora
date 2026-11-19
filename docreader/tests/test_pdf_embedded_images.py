@@ -110,6 +110,40 @@ def _build_opaque_gray_pdf(level: int = 128) -> bytes:
     return _pdf_from_objects(_page_objects(image))
 
 
+def _build_same_page_figures() -> bytes:
+    contents = (
+        b"0 0 10 10 re f\n"
+        b"q 200 0 0 150 20 20 cm /Bottom Do Q\n"
+        b"q 200 0 0 150 20 400 cm /Top Do Q\n"
+    )
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /XObject << /Bottom 5 0 R /Top 6 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length %d >>\nstream\n" % len(contents) + contents + b"endstream",
+    ]
+    for color in ((20, 30, 210), (200, 30, 40)):
+        pixels = bytes(color) * (400 * 300)
+        objects.append(
+            b"<< /Type /XObject /Subtype /Image /Width 400 /Height 300 "
+            b"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Length %d >>\nstream\n" % len(pixels)
+            + pixels + b"\nendstream"
+        )
+    return _pdf_from_objects(objects)
+
+
+class _TrackedPDF:
+    def __init__(self, pdf):
+        self.pdf = pdf
+        self.pages = []
+
+    def __getitem__(self, index):
+        page = self.pdf[index]
+        self.pages.append(page)
+        return page
+
+
 def _first_image_object(pdf):
     for page in pdf:
         for obj in page.get_objects():
@@ -232,6 +266,116 @@ class DecodeEmbeddedImageTest(unittest.TestCase):
 
 
 class ExtractEmbeddedImagesTest(unittest.TestCase):
+    def test_same_page_figures_keep_pixels_references_and_vertical_order(self):
+        with pdfium.PdfDocument(_build_same_page_figures()) as pdf:
+            result = _extract_embedded_images(pdf, ["text"], pdfium_raw, "figures", 85)
+        top, bottom = result[0]
+        self.assertTrue(top[0].endswith("_p1_img2.jpg"))
+        self.assertTrue(bottom[0].endswith("_p1_img1.jpg"))
+        self.assertGreater(top[2], bottom[2])
+        for item, channel in ((top, 0), (bottom, 2)):
+            with Image.open(io.BytesIO(base64.b64decode(item[1]))) as pil:
+                self.assertGreater(pil.getpixel((200, 150))[channel], 150)
+
+    def _two_figures(self):
+        buf = io.BytesIO()
+        with Image.new("RGB", (400, 300), (10, 120, 230)) as first:
+            with Image.new("RGB", (400, 300), (230, 120, 10)) as second:
+                first.save(buf, format="PDF", save_all=True, append_images=[second])
+        return pdfium.PdfDocument(buf.getvalue())
+
+    def test_candidates_release_pixels_before_decoding_the_next_figure(self):
+        decoded = []
+
+        def decode(obj):
+            for previous in decoded:
+                with self.assertRaises(ValueError):
+                    previous.tobytes()
+            pil = _decode_embedded_image_pil(obj)
+            decoded.append(pil)
+            return pil
+
+        with self._two_figures() as pdf:
+            with patch("docreader.parser.pdf_parser._decode_embedded_image_pil", side_effect=decode):
+                result = _extract_embedded_images(pdf, ["text", "text"], pdfium_raw, "figures", 85)
+        self.assertEqual(set(result), {0, 1})
+        self.assertEqual(len(decoded), 4)
+        for pil in decoded:
+            with self.assertRaises(ValueError):
+                pil.tobytes()
+        for page in result.values():
+            with Image.open(io.BytesIO(base64.b64decode(page[0][1]))) as pil:
+                self.assertEqual(pil.size, (400, 300))
+
+    def test_filtered_candidates_release_pixels(self):
+        decoded = []
+
+        def decode(obj):
+            pil = _decode_embedded_image_pil(obj)
+            decoded.append(pil)
+            return pil
+
+        with self._two_figures() as pdf:
+            with patch("docreader.parser.pdf_parser._decode_embedded_image_pil", side_effect=decode):
+                with patch("docreader.parser.pdf_parser._select_embedded_images", return_value=[]):
+                    result = _extract_embedded_images(pdf, ["text", "text"], pdfium_raw, "filtered", 85)
+        self.assertEqual(result, {})
+        self.assertEqual(len(decoded), 2)
+        for pil in decoded:
+            with self.assertRaises(ValueError):
+                pil.tobytes()
+
+    def test_hash_failure_releases_pixels_and_page(self):
+        decoded = []
+
+        def decode(obj):
+            pil = _decode_embedded_image_pil(obj)
+            decoded.append(pil)
+            return pil
+
+        with self._two_figures() as pdf:
+            tracked = _TrackedPDF(pdf)
+            with patch("docreader.parser.pdf_parser._decode_embedded_image_pil", side_effect=decode):
+                with patch("hashlib.md5", side_effect=RuntimeError("hash failed")):
+                    with self.assertRaisesRegex(RuntimeError, "hash failed"):
+                        _extract_embedded_images(tracked, ["text", "text"], pdfium_raw, "hash", 85)
+            self.assertEqual(len(decoded), 1)
+            with self.assertRaises(ValueError):
+                decoded[0].tobytes()
+            self.assertTrue(tracked.pages)
+            self.assertTrue(all(page.raw is None for page in tracked.pages))
+            page = pdf[0]
+            try:
+                self.assertEqual(page.get_size(), (400.0, 300.0))
+            finally:
+                page.close()
+
+    def test_jpeg_failure_releases_selected_pixels_and_page(self):
+        decoded = []
+
+        def decode(obj):
+            pil = _decode_embedded_image_pil(obj)
+            decoded.append(pil)
+            return pil
+
+        with self._two_figures() as pdf:
+            tracked = _TrackedPDF(pdf)
+            with patch("docreader.parser.pdf_parser._decode_embedded_image_pil", side_effect=decode):
+                with patch.object(Image.Image, "save", side_effect=RuntimeError("encode failed")):
+                    with self.assertRaisesRegex(RuntimeError, "encode failed"):
+                        _extract_embedded_images(tracked, ["text", "text"], pdfium_raw, "encode", 85)
+            self.assertEqual(len(decoded), 3)
+            for pil in decoded:
+                with self.assertRaises(ValueError):
+                    pil.tobytes()
+            self.assertTrue(tracked.pages)
+            self.assertTrue(all(page.raw is None for page in tracked.pages))
+            page = pdf[0]
+            try:
+                self.assertEqual(page.get_size(), (400.0, 300.0))
+            finally:
+                page.close()
+
     def test_smask_figure_is_not_all_black(self):
         pdf = pdfium.PdfDocument(_build_smask_pdf())
         try:

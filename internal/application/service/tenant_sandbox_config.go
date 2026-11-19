@@ -40,12 +40,16 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 const sandboxConfigCleanupTimeout = 20 * time.Second
+
+const configCreateDrainTimeout = 2 * time.Minute
 
 // SandboxIdentityChanged reports whether sandboxes already created under oldCfg
 // would stop being operable under newCfg. Names, templates, TTLs, HTTP timeouts
@@ -196,6 +200,10 @@ var ErrSkillSnapshotBlocksTemplateChange = stderrors.New(
 // row is recoverable; leaking a billable snapshot is not.
 var ErrSkillSnapshotReleaseFailed = stderrors.New("failed to release skill snapshots")
 
+// ErrSandboxConfigCreatesInFlight is returned while a sandbox of this config
+// is still being created; retry the deletion once it finishes.
+var ErrSandboxConfigCreatesInFlight = stderrors.New("sandbox config still has sandboxes being created")
+
 // SkillSnapshotReleaseFailedError names the snapshots that are still on the
 // provider so the handler can show them and a retry can skip already-deleted
 // ones.
@@ -251,6 +259,10 @@ type SandboxInventory struct {
 	SandboxCount int      `json:"sandbox_count"`
 	SessionIDs   []string `json:"session_ids,omitempty"`
 	AgentNames   []string `json:"agent_names,omitempty"`
+	// UserSandboxCount is how many of SandboxCount are shared user machines.
+	// They carry no session id, so SessionIDs alone under-reports what a
+	// credential change would affect.
+	UserSandboxCount int `json:"user_sandbox_count,omitempty"`
 
 	// Unverifiable reports that SandboxCount is unknown rather than zero
 	// because the provider could not be reached. The management page must say
@@ -319,6 +331,11 @@ type TenantSandboxConfigService struct {
 	// build shows up in the provider's catalog, and a double-click on refresh
 	// is fast enough to slip in before that.
 	ensureTemplate singleflight.Group
+
+	allocations        interfaces.SandboxAllocationRepository
+	admission          admission.Registry
+	createDrainTimeout time.Duration
+	userMachines       UserMachineReleaser
 }
 
 // NewTenantSandboxConfigService wires the config service.
@@ -330,16 +347,130 @@ func NewTenantSandboxConfigService(
 	files sandboxConfigBundleResolver,
 ) *TenantSandboxConfigService {
 	return &TenantSandboxConfigService{
-		repo:      repo,
-		agents:    agents,
-		globalCfg: globalCfg,
-		now:       time.Now,
-		skills:    skills,
-		files:     files,
+		repo:               repo,
+		agents:             agents,
+		globalCfg:          globalCfg,
+		now:                time.Now,
+		skills:             skills,
+		files:              files,
+		createDrainTimeout: configCreateDrainTimeout,
 		newClient: func(cfg *sandbox.Config) (sandbox.ConfigSandboxClient, error) {
 			return sandbox.NewRemoteClientForCheck(cfg)
 		},
 	}
+}
+
+// WithAllocationRepo lets config deletion drop the user machine registry.
+func (s *TenantSandboxConfigService) WithAllocationRepo(
+	repo interfaces.SandboxAllocationRepository,
+) *TenantSandboxConfigService {
+	s.allocations = repo
+	return s
+}
+
+// WithAdmission lets config deletion close and drain in-flight creates.
+func (s *TenantSandboxConfigService) WithAdmission(reg admission.Registry) *TenantSandboxConfigService {
+	s.admission = reg
+	return s
+}
+
+// ErrUserSandboxBusy is returned while a terminal, desktop or command is
+// still running on the machine; the admin is asked to retry once the user
+// has closed it.
+var ErrUserSandboxBusy = stderrors.New("user sandbox is busy")
+
+// UserMachineReleaser deletes one shared machine. It returns false when a
+// live session or registered work still holds the machine, and must not
+// destroy it in that case.
+type UserMachineReleaser interface {
+	ReleaseMachine(ctx context.Context, m allocation.UserMachine) (bool, error)
+}
+
+// WithUserMachineReleaser enables the admin release action.
+func (s *TenantSandboxConfigService) WithUserMachineReleaser(r UserMachineReleaser) *TenantSandboxConfigService {
+	s.userMachines = r
+	return s
+}
+
+// UserMachineView is one shared machine as the config admin sees it. Owners
+// from other workspaces (borrowers of a shared agent) are not named.
+type UserMachineView struct {
+	Digest        string     `json:"digest"`
+	OwnerTenantID uint64     `json:"owner_tenant_id"`
+	OwnerID       string     `json:"owner_id,omitempty"`
+	LiveSessions  int64      `json:"live_sessions"`
+	EmptySince    *time.Time `json:"empty_since,omitempty"`
+	ReclaimAfter  *time.Time `json:"reclaim_after,omitempty"`
+}
+
+// ListUserMachines lists the config's shared machines with their retention clock.
+func (s *TenantSandboxConfigService) ListUserMachines(
+	ctx context.Context, tenantID uint64, configID string,
+) ([]UserMachineView, error) {
+	entity, err := s.repo.GetByID(ctx, tenantID, configID)
+	if err != nil || entity == nil {
+		return nil, err
+	}
+	if s.allocations == nil {
+		return nil, nil
+	}
+	rows, err := s.allocations.ListUserMachinesByConfig(ctx, tenantID, configID)
+	if err != nil {
+		return nil, err
+	}
+	days := allocation.DefaultEmptyRetentionDays
+	if entity.Config != nil {
+		days = allocation.EffectiveRetentionDays(entity.Config.UserSandboxEmptyRetentionDays)
+	}
+	out := make([]UserMachineView, 0, len(rows))
+	for _, r := range rows {
+		live, err := s.allocations.CountLiveAssignments(ctx, r.MachineDigest)
+		if err != nil {
+			return nil, err
+		}
+		v := UserMachineView{
+			Digest: r.MachineDigest, OwnerTenantID: r.OwnerTenantID,
+			LiveSessions: live, EmptySince: r.EmptySince,
+		}
+		if r.OwnerTenantID == tenantID {
+			v.OwnerID = r.OwnerID
+		}
+		if r.EmptySince != nil {
+			at := r.EmptySince.Add(time.Duration(days) * 24 * time.Hour)
+			v.ReclaimAfter = &at
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// ReleaseUserMachine deletes one shared machine now. Every session on it
+// keeps its assignment and gets a fresh machine on next use; its files and
+// installed packages are gone.
+func (s *TenantSandboxConfigService) ReleaseUserMachine(
+	ctx context.Context, tenantID uint64, configID, digest string,
+) error {
+	if s.allocations == nil || s.userMachines == nil {
+		return apperrors.NewBadRequestError("user sandboxes are not enabled")
+	}
+	row, err := s.allocations.GetUserMachine(ctx, digest)
+	if err != nil {
+		return err
+	}
+	if row == nil || row.ConfigTenantID != tenantID || row.ConfigID != configID {
+		return apperrors.NewNotFoundError("sandbox config not found")
+	}
+	ok, err := s.userMachines.ReleaseMachine(ctx, allocation.UserMachine{
+		OwnerTenantID: row.OwnerTenantID, OwnerID: row.OwnerID,
+		ConfigTenantID: row.ConfigTenantID, ConfigID: row.ConfigID,
+	})
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrUserSandboxBusy
+	}
+	return nil
 }
 
 // SanitizeSandboxConfig resolves redacted secrets and validates the payload
@@ -399,6 +530,9 @@ func SanitizeSandboxConfig(
 	if err := validateSkillRollout(merged.SkillRollout); err != nil {
 		return nil, err
 	}
+	if err := validateAllocationPolicy(merged, existing); err != nil {
+		return nil, err
+	}
 	return merged, nil
 }
 
@@ -409,6 +543,27 @@ func validateSkillRollout(value string) error {
 	default:
 		return apperrors.NewBadRequestError("invalid skill_rollout")
 	}
+}
+
+// validateAllocationPolicy checks allocation_mode and the retention window.
+// Switching a config TO user needs the deployment gate; a config already
+// saved as user stays saveable so unrelated edits do not fail after an
+// operator closes the gate (allocation then falls back per session).
+func validateAllocationPolicy(merged, existing *types.TenantSandboxConfig) error {
+	mode, err := allocation.ParseMode(merged.AllocationMode)
+	if err != nil {
+		return apperrors.NewBadRequestError("invalid allocation_mode")
+	}
+	alreadyUser := existing != nil && strings.TrimSpace(existing.AllocationMode) == types.SandboxAllocationUser
+	if mode == allocation.ModeUser && !alreadyUser && !allocation.UserModeAvailable() {
+		return apperrors.NewBadRequestError(
+			"allocation_mode=user is not enabled on this deployment " +
+				"(set " + allocation.UserModeEnvVar + "=enabled on every replica; Redis is required)")
+	}
+	if err := allocation.ValidateRetentionDays(merged.UserSandboxEmptyRetentionDays); err != nil {
+		return apperrors.NewBadRequestError(err.Error())
+	}
+	return nil
 }
 
 func validateNamedSandboxBackend(cfg *types.TenantSandboxConfig) error {
@@ -1124,10 +1279,11 @@ func (s *TenantSandboxConfigService) Update(
 		return s.writeConfig(ctx, entity, in, merged)
 	}
 
-	if err := s.repo.SetCordon(ctx, tenantID, id, s.now()); err != nil {
+	cordonedAt := s.now()
+	if err := s.repo.SetCordon(ctx, tenantID, id, cordonedAt); err != nil {
 		return nil, err
 	}
-	defer s.clearCordonAfterRequest(ctx, tenantID, id)
+	defer s.clearCordonAfterRequest(ctx, tenantID, id, cordonedAt)
 
 	// When old credentials no longer reach the provider we cannot enumerate
 	// sandboxes to refuse the edit — but blocking the save traps the admin on
@@ -1168,14 +1324,12 @@ func (s *TenantSandboxConfigService) Update(
 // snapshots on its ledger cannot be destroyed. Agent references are permanent
 // state and are surfaced as warnings by callers, not blockers.
 //
-// force covers two cases we cannot complete from here: the provider could not
-// be reached to list sandboxes, and a skill snapshot could not be destroyed.
-// Without it a config whose endpoint's DNS record disappeared, or whose
-// snapshot API is down, could never be removed — unlike an edit, deletion has
-// no "create a second config" way out. It does NOT override sandboxes we can
-// actually see; those still have to be dealt with through their sessions,
-// otherwise the forced deletion would be precisely the permanent leak this
-// whole flow prevents.
+// force covers a skill snapshot that could not be destroyed. It does not
+// cover an inventory we could not list: an unreachable provider is not the
+// same as an empty one, and dropping the user-machine registry would make
+// directory cleanup treat those machines as already gone. Sandboxes we can
+// actually see, including user machines, still have to be dealt with through
+// their sessions.
 func (s *TenantSandboxConfigService) Delete(
 	ctx context.Context, tenantID uint64, id string, force bool,
 ) error {
@@ -1191,23 +1345,166 @@ func (s *TenantSandboxConfigService) Delete(
 	if types.IsSandboxWorkspacePolicyRow(entity) {
 		return apperrors.NewBadRequestError("workspace policy cannot be deleted here")
 	}
+	lease := &cordonLease{at: s.now()}
+	if err := s.repo.SetCordon(ctx, tenantID, id, lease.at); err != nil {
+		return err
+	}
+	defer func() {
+		if lease.abandoned {
+			return
+		}
+		s.clearCordonAfterRequest(ctx, tenantID, id, lease.at)
+	}()
+	barrier, err := s.closeCreates(ctx, tenantID, id, lease)
+	if err != nil {
+		return err
+	}
+	// Release reopens creates. That is only correct when Delete fails and
+	// the config stays. A successful delete seals the scope instead.
+	var failed bool
+	if barrier != nil {
+		defer func() {
+			if failed {
+				barrier.Release()
+			}
+		}()
+	}
+	fail := func(err error) error {
+		failed = true
+		return err
+	}
+
+	if err := s.keepCordon(ctx, tenantID, id, lease); err != nil {
+		return fail(err)
+	}
 	summaries, listErr := s.listSandboxes(ctx, entity.Config, tenantID, id)
 	if listErr != nil {
-		if !force {
-			return fmt.Errorf("%w: %v", ErrSandboxInventoryUnverifiable, listErr)
-		}
-		logger.Warnf(ctx,
-			"[sandbox] force-deleting config %s without verifying its sandboxes: %v",
-			id, listErr)
+		return fail(fmt.Errorf("%w: %v", ErrSandboxInventoryUnverifiable, listErr))
 	}
 	if len(summaries) > 0 {
 		inv := s.inventoryFromSummaries(ctx, tenantID, id, summaries)
-		return &SandboxesStillLiveError{Inventory: inv}
+		return fail(&SandboxesStillLiveError{Inventory: inv})
+	}
+	if err := s.keepCordon(ctx, tenantID, id, lease); err != nil {
+		return fail(err)
 	}
 	if err := s.releaseSkillSnapshots(ctx, entity, tenantID, id, force); err != nil {
-		return err
+		return fail(err)
+	}
+	if barrier != nil {
+		if err := barrier.Check(); err != nil {
+			return fail(err) // a create may have been admitted after the inventory
+		}
+	}
+	if err := s.keepCordon(ctx, tenantID, id, lease); err != nil {
+		return fail(err)
+	}
+	if err := s.dropMachinesAndDelete(ctx, tenantID, id); err != nil {
+		return fail(err)
+	}
+	if barrier == nil && listErr == nil {
+		// No create registry injected: keep the previous post-delete sweep.
+		if client, err := s.clientFor(entity.Config); err == nil && client != nil {
+			s.sweepAfterWrite(ctx, client, tenantID, id)
+		}
+	}
+	if barrier != nil {
+		barrier.Seal()
+	}
+	return nil
+}
+
+// dropMachinesAndDelete removes the config's user-machine rows and
+// soft-deletes the config. When both repositories share a database this is
+// one transaction, so a failed config delete puts the registry rows back.
+// Fakes without a database keep the two calls in that order.
+func (s *TenantSandboxConfigService) dropMachinesAndDelete(
+	ctx context.Context, tenantID uint64, id string,
+) error {
+	if db := repository.GormDB(s.repo); db != nil {
+		if err := repository.DeleteUserMachinesAndSandboxConfig(ctx, db, tenantID, id); err != nil {
+			return fmt.Errorf("drop user machine registry of config %s: %w", id, err)
+		}
+		return nil
+	}
+	if s.allocations != nil {
+		if err := s.allocations.DeleteUserMachinesByConfig(ctx, tenantID, id); err != nil {
+			return fmt.Errorf("drop user machine registry of config %s: %w", id, err)
+		}
 	}
 	return s.repo.SoftDelete(ctx, tenantID, id)
+}
+
+// cordonLease is the stamp this Delete wrote, moved forward while the call
+// runs so the lease cannot lapse underneath it.
+type cordonLease struct {
+	at        time.Time
+	abandoned bool
+}
+
+// keepCordon moves the stamp once it is halfway through the lease. A compare
+// that matches nothing means another request owns the cordon: the caller must
+// not clear it.
+func (s *TenantSandboxConfigService) keepCordon(
+	ctx context.Context, tenantID uint64, id string, lease *cordonLease,
+) error {
+	if lease == nil || lease.abandoned {
+		return nil
+	}
+	now := s.now()
+	if now.Sub(lease.at) < types.SandboxCordonLease/2 {
+		return nil
+	}
+	if err := s.repo.RefreshCordon(ctx, tenantID, id, lease.at, now); err != nil {
+		if stderrors.Is(err, repository.ErrSandboxConfigCordoned) {
+			lease.abandoned = true
+		}
+		return err
+	}
+	lease.at = now
+	return nil
+}
+
+// closeCreates stops new creates of the config and waits for running ones.
+func (s *TenantSandboxConfigService) closeCreates(
+	ctx context.Context, tenantID uint64, id string, lease *cordonLease,
+) (admission.Barrier, error) {
+	if s.admission == nil {
+		return nil, nil
+	}
+	scope := admission.ConfigCreateScope(tenantID, id)
+	barrier, err := s.admission.Close(ctx, scope, admission.DefaultHoldTTL)
+	if stderrors.Is(err, admission.ErrClosed) {
+		return nil, ErrSandboxConfigCreatesInFlight // another deletion holds it
+	}
+	if err != nil {
+		return nil, err
+	}
+	deadline := time.Now().Add(s.createDrainTimeout)
+	for {
+		if err := s.keepCordon(ctx, tenantID, id, lease); err != nil {
+			barrier.Release()
+			return nil, err
+		}
+		n, err := s.admission.ActiveExcept(ctx, scope)
+		if err != nil {
+			barrier.Release()
+			return nil, err
+		}
+		if n == 0 {
+			return barrier, nil
+		}
+		if time.Now().After(deadline) {
+			barrier.Release()
+			return nil, ErrSandboxConfigCreatesInFlight
+		}
+		select {
+		case <-ctx.Done():
+			barrier.Release()
+			return nil, ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }
 
 func snapshotReleaserFrom(client sandbox.ConfigSandboxClient) (sandboxSnapshotReleaser, bool) {
@@ -1572,6 +1869,9 @@ func (s *TenantSandboxConfigService) inventoryFromSummaries(
 		if sessionID := summary.Metadata[sandbox.MetadataSessionIDKey()]; sessionID != "" {
 			inv.SessionIDs = append(inv.SessionIDs, sessionID)
 		}
+		if summary.Metadata[sandbox.MetadataAllocationKey()] == sandbox.MetadataAllocationUser {
+			inv.UserSandboxCount++
+		}
 	}
 	if s.agents == nil {
 		return inv
@@ -1589,11 +1889,12 @@ func (s *TenantSandboxConfigService) clearCordonAfterRequest(
 	ctx context.Context,
 	tenantID uint64,
 	id string,
+	at time.Time,
 ) {
 	cleanupCtx, cancel := context.WithTimeout(
 		context.WithoutCancel(ctx), sandboxConfigCleanupTimeout)
 	defer cancel()
-	if err := s.repo.ClearCordon(cleanupCtx, tenantID, id); err != nil {
+	if err := s.repo.ClearCordonIf(cleanupCtx, tenantID, id, at); err != nil {
 		logger.Warnf(ctx, "[sandbox] clear cordon on config %s: %v", id, err)
 	}
 }

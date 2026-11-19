@@ -46,11 +46,12 @@ func (s *sessionService) KnowledgeQA(
 		if req.CustomAgent != nil {
 			configID = req.CustomAgent.Config.SandboxConfigID
 		}
-		releaseTurn, holdErr := s.holdSandboxTurn(ctx, req.Session.ID, configID)
+		turnCtx, releaseTurn, holdErr := s.holdSandboxTurn(ctx, req.Session.ID, configID)
 		if holdErr != nil {
 			return holdErr
 		}
 		defer releaseTurn()
+		ctx = turnCtx
 	}
 
 	// Span the request setup (KB / model resolution, search target building,
@@ -71,7 +72,7 @@ func (s *sessionService) KnowledgeQA(
 	}
 
 	// Resolve chat model ID using shared helper
-	chatModelID, err := s.resolveChatModelID(ctx, req, knowledgeBaseIDs, knowledgeIDs)
+	chatModelID, chatModelTenantID, err := s.resolveChatModelID(ctx, req, knowledgeBaseIDs, knowledgeIDs)
 	if err != nil {
 		return err
 	}
@@ -95,7 +96,9 @@ func (s *sessionService) KnowledgeQA(
 	var chatModelSupportsVision bool
 	var vlmModelID string
 	if chatModelID != "" {
-		if chatModelInfo, err := s.modelService.GetModelByID(ctx, chatModelID); err == nil && chatModelInfo != nil {
+		modelCtx := types.WithExecutionTenant(ctx, chatModelTenantID)
+		chatModelInfo, err := s.modelService.GetModelByID(modelCtx, chatModelID)
+		if err == nil && chatModelInfo != nil {
 			chatModelSupportsVision = chatModelInfo.Parameters.SupportsVision
 		}
 	}
@@ -137,6 +140,7 @@ func (s *sessionService) KnowledgeQA(
 			RerankTopK:              s.cfg.Conversation.RerankTopK,
 			RerankThreshold:         s.cfg.Conversation.RerankThreshold,
 			ChatModelID:             chatModelID,
+			ChatModelTenantID:       chatModelTenantID,
 			SummaryConfig:           summaryConfig,
 			FallbackStrategy:        fallbackStrategy,
 			FallbackResponse:        s.cfg.Conversation.FallbackResponse,
@@ -175,6 +179,11 @@ func (s *sessionService) KnowledgeQA(
 	applyRequestReasoningEffort(
 		req.ReasoningEffort, &chatManage.SummaryConfig.Thinking, &chatManage.SummaryConfig.ReasoningEffort,
 	)
+
+	// Fill the rerank model the same way the retrieval API path does when the
+	// overrides left it empty (issue #1800): the rerank stage otherwise skips
+	// with "empty_model_id" and the answer goes out in raw retrieval order.
+	chatManage.RerankModelID = s.resolveKnowledgeQARerankModel(ctx, chatManage.RerankModelID)
 
 	// An agent may opt out of long-term memory. The preference is per-request
 	// rather than per-user, so it travels in the context that the recall
@@ -260,89 +269,65 @@ func (s *sessionService) KnowledgeQA(
 	return nil
 }
 
-// selectChatModelID selects the appropriate chat model ID with priority for Remote models
-// Priority order:
-// 1. Session's SummaryModelID if it's a Remote model
-// 2. First knowledge base with a Remote model (from knowledgeBaseIDs or derived from knowledgeIDs)
-// 3. Session's SummaryModelID (if not Remote)
-// 4. First knowledge base's SummaryModelID
+// selectChatModelID prefers a remote model from an accessible KB, then the
+// first accessible KB's model, then an available model in the execution tenant.
+// Return the KB owner alongside its model ID without changing the request scope.
 func (s *sessionService) selectChatModelID(
 	ctx context.Context,
-	session *types.Session,
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
-) (string, error) {
-	// If no knowledge base IDs but have knowledge IDs, derive KB IDs from knowledge IDs (include shared KB files)
+) (string, uint64, error) {
+	tenantID, _ := types.TenantIDFromContext(ctx)
 	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) > 0 {
-		tenantID := types.MustTenantIDFromContext(ctx)
 		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to get knowledge batch for model selection: %v", err)
-		} else {
-			// Collect unique KB IDs from knowledge items
-			kbIDSet := make(map[string]bool)
-			for _, k := range knowledgeList {
-				if k != nil && k.KnowledgeBaseID != "" {
-					kbIDSet[k.KnowledgeBaseID] = true
-				}
-			}
-			for kbID := range kbIDSet {
-				knowledgeBaseIDs = append(knowledgeBaseIDs, kbID)
-			}
-			logger.Infof(ctx, "Derived %d knowledge base IDs from %d knowledge IDs for model selection",
-				len(knowledgeBaseIDs), len(knowledgeIDs))
+			return "", 0, fmt.Errorf("resolve knowledge bases for chat model: %w", err)
 		}
-	}
-	// Check knowledge bases for models
-	if len(knowledgeBaseIDs) > 0 {
-		// Try to find a knowledge base with Remote model
-		for _, kbID := range knowledgeBaseIDs {
-			kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
-			if err != nil {
-				logger.Warnf(ctx, "Failed to get knowledge base: %v", err)
-				continue
-			}
-			if kb != nil && kb.SummaryModelID != "" {
-				model, err := s.modelService.GetModelByID(ctx, kb.SummaryModelID)
-				if err == nil && model != nil && model.Source == types.ModelSourceRemote {
-					logger.Info(ctx, "Using Remote summary model from knowledge base")
-					return kb.SummaryModelID, nil
-				}
+		for _, k := range knowledgeList {
+			if k != nil && k.KnowledgeBaseID != "" {
+				knowledgeBaseIDs = append(knowledgeBaseIDs, k.KnowledgeBaseID)
 			}
 		}
-
-		// If no Remote model found, use first knowledge base's model
-		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, knowledgeBaseIDs[0])
-		if err != nil {
-			logger.Errorf(ctx, "Failed to get knowledge base for model ID: %v", err)
-			return "", fmt.Errorf("failed to get knowledge base %s: %w", knowledgeBaseIDs[0], err)
-		}
-		if kb != nil && kb.SummaryModelID != "" {
-			logger.Infof(
-				ctx,
-				"Using summary model from first knowledge base %s: %s",
-				knowledgeBaseIDs[0],
-				kb.SummaryModelID,
-			)
-			return kb.SummaryModelID, nil
-		}
+		knowledgeBaseIDs = uniqueNonEmptyStrings(knowledgeBaseIDs)
 	}
 
-	// No knowledge bases - try to find any available chat model
+	permissions := kbReadPermissions(ctx, s.kbShareService)
+	var firstKB *types.KnowledgeBase
+	for _, kbID := range knowledgeBaseIDs {
+		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
+		if err != nil || kb == nil {
+			logger.Warnf(ctx, "Failed to get knowledge base %s for chat model: %v", kbID, err)
+			continue
+		}
+		allowed, err := permissions.Check(kb.ID, kb.TenantID, types.OrgRoleViewer)
+		if err != nil || !allowed {
+			logger.Warnf(ctx, "Cannot use chat model from inaccessible knowledge base %s", kb.ID)
+			continue
+		}
+		if firstKB == nil {
+			firstKB = kb
+		}
+		if kb.SummaryModelID == "" {
+			continue
+		}
+		modelCtx := types.WithExecutionTenant(ctx, kb.TenantID)
+		model, err := s.modelService.GetModelByID(modelCtx, kb.SummaryModelID)
+		if err == nil && model != nil && model.Source == types.ModelSourceRemote {
+			return kb.SummaryModelID, kb.TenantID, nil
+		}
+	}
+	if firstKB != nil && firstKB.SummaryModelID != "" {
+		return firstKB.SummaryModelID, firstKB.TenantID, nil
+	}
+
 	models, err := s.modelService.ListModels(ctx)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to list models: %v", err)
-		return "", fmt.Errorf("failed to list models: %w", err)
+		return "", 0, fmt.Errorf("failed to list models: %w", err)
 	}
-	for _, model := range models {
-		if model != nil && model.Type == types.ModelTypeKnowledgeQA {
-			logger.Infof(ctx, "Using first available KnowledgeQA model: %s", model.ID)
-			return model.ID, nil
-		}
+	if model := types.PickChatModel(models, ""); model != nil {
+		return model.ID, tenantID, nil
 	}
-
-	logger.Error(ctx, "No chat model ID available")
-	return "", fmt.Errorf("no chat model ID available: no knowledge bases configured and no available models")
+	return "", 0, fmt.Errorf("no chat model ID available: no accessible knowledge base model or available models")
 }
 
 // resolveKnowledgeBasesFromAgent resolves knowledge base IDs based on agent's KBSelectionMode.
@@ -692,6 +677,7 @@ func intersectStrings(left []string, right []string) []string {
 func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	chatManage *types.ChatManage, eventList []types.EventType,
 ) error {
+	ctx = types.WithSessionID(ctx, chatManage.SessionID)
 	logger.Info(ctx, "Start processing knowledge base question answering through events")
 	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s, query: %s",
 		chatManage.SessionID, chatManage.Query)
@@ -909,6 +895,8 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 			KeywordThreshold:     rc.GetEffectiveKeywordThreshold(),
 			DisableVectorMatch:   opts.DisableVectorMatch,
 			DisableKeywordsMatch: opts.DisableKeywordsMatch,
+			QueryImage:           opts.QueryImage,
+			QueryImageMediaType:  opts.QueryImageMediaType,
 			RerankModelID:        rerankModelID,
 			RerankTopK:           rc.GetEffectiveRerankTopK(),
 			RerankThreshold:      rc.GetEffectiveRerankThreshold(),
@@ -964,6 +952,7 @@ func applyKnowledgeSearchOverrides(chatManage *types.ChatManage, opts *types.Kno
 	if opts.KeywordThreshold != nil {
 		chatManage.KeywordThreshold = *opts.KeywordThreshold
 	}
+	chatManage.ParentSlotAggregation = opts.ParentSlotAggregation
 	// The final FILTER_TOP_K stage cuts to RerankTopK whether or not the
 	// rerank stage runs, so it is the result count. Recall must be at least
 	// as deep for the count to be reachable.
@@ -1076,7 +1065,7 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 	}
 
 	// Get chat model
-	chatModel, err := s.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	chatModel, err := s.modelService.GetChatModel(chatManage.ChatModelContext(ctx), chatManage.ChatModelID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get chat model for fallback: %v, falling back to fixed response", err)
 		s.handleFixedFallback(ctx, chatManage)
@@ -1270,17 +1259,56 @@ func (s *sessionService) consumeFallbackStream(
 	var finalContent string
 	streamCompleted := false
 	decoder := modelContext.StreamDecoder()
+	// Keep the provider's usage (reported on the final chunk) so the closing
+	// answer event can carry it to the QA turn's complete event (issue #3865).
+	var turnUsage *types.TokenUsage
+	// The assembler emits the finish chunk (Done, no usage) before its End
+	// emission (Done, usage): defer the closing event to the channel close so
+	// the usage trailer is not dropped (review finding on PR #5253).
+	pendingClose := false
+	pendingTruncated := false
 
 	for response := range responseChan {
 		// Emit event for each answer chunk
 		if response.ResponseType == types.ResponseTypeAnswer {
-			response.Content = decoder.Feed(response.Content)
-			if response.Done {
-				response.Content += decoder.Flush()
+			if response.Usage != nil {
+				turnUsage = response.Usage
 			}
+			response.Content = decoder.Feed(response.Content)
 			truncated := response.Done && chatpipeline.IsLengthFinishReason(response.FinishReason)
 			if truncated && strings.TrimSpace(finalContent+response.Content) == "" {
 				response.Content = chatpipeline.EmptyTruncatedAnswerFallback
+			}
+			if response.Done {
+				if pendingClose {
+					// Duplicate EOF sentinel: its usage was already captured
+					// above; the closing state must not be recomputed.
+					continue
+				}
+				// Flush the closing tail as a plain content event, then defer
+				// the Done marker to the channel close. The truncation flag
+				// rides only the closing event.
+				response.Content += decoder.Flush()
+				finalContent += response.Content
+				if response.Content != "" {
+					if err := eventBus.Emit(ctx, types.Event{
+						ID:        fallbackID,
+						Type:      types.EventType(event.EventAgentFinalAnswer),
+						SessionID: chatManage.SessionID,
+						Data: event.AgentFinalAnswerData{
+							Content:    response.Content,
+							IsFallback: true,
+						},
+					}); err != nil {
+						logger.Errorf(ctx, "Failed to emit fallback answer chunk event: %v", err)
+					}
+				}
+				pendingClose = true
+				pendingTruncated = truncated
+				chatManage.ChatResponse = &types.ChatResponse{Content: finalContent}
+				streamCompleted = true
+				logger.Infof(ctx, "Fallback streaming response completed")
+				continue
 			}
 			finalContent += response.Content
 			if err := eventBus.Emit(ctx, types.Event{
@@ -1289,25 +1317,34 @@ func (s *sessionService) consumeFallbackStream(
 				SessionID: chatManage.SessionID,
 				Data: event.AgentFinalAnswerData{
 					Content:    response.Content,
-					Done:       response.Done,
 					IsFallback: true,
-					Truncated:  truncated,
 				},
 			}); err != nil {
 				logger.Errorf(ctx, "Failed to emit fallback answer chunk event: %v", err)
 			}
-
-			// Update ChatResponse with final content when done
-			if response.Done {
-				chatManage.ChatResponse = &types.ChatResponse{Content: finalContent}
-				streamCompleted = true
-				logger.Infof(ctx, "Fallback streaming response completed")
-				break
-			}
 		}
 	}
 
-	// If channel closed without Done=true, emit final event with fixed response
+	// The channel closed. A deferred Done closes the answer with the latest
+	// usage; a stream that ended without Done=true gets the fixed response.
+	if pendingClose {
+		data := event.AgentFinalAnswerData{
+			Done:       true,
+			IsFallback: true,
+			Truncated:  pendingTruncated,
+		}
+		if turnUsage != nil {
+			data.Usage = turnUsage
+		}
+		if err := eventBus.Emit(ctx, types.Event{
+			ID:        fallbackID,
+			Type:      types.EventType(event.EventAgentFinalAnswer),
+			SessionID: chatManage.SessionID,
+			Data:      data,
+		}); err != nil {
+			logger.Errorf(ctx, "Failed to emit fallback answer close event: %v", err)
+		}
+	}
 	if !streamCompleted {
 		logger.Warnf(ctx, "Fallback stream closed without completion, emitting final event with fixed response")
 		s.emitFallbackAnswer(ctx, chatManage, chatManage.FallbackResponse)

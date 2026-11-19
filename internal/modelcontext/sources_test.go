@@ -1,6 +1,7 @@
 package modelcontext
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,86 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCitationsInJSONStrings(t *testing.T) {
+	registry := NewRegistry(true)
+	ref := ChunkReference{
+		ChunkID: "chunk-real", KnowledgeBaseID: "kb-real", DocumentTitle: "Guide \"quoted\" & <text> \\ notes\nnext",
+	}
+	registry.RegisterChunk(ref)
+	registry.RegisterWeb("https://example.com/?a=1&b=2", ref.DocumentTitle)
+	input := `{"chunk":"<ref id=\"chunk://1\"/>","web":"<ref id=\"url://1\"/>","text":"keep \\ and \"quotes\""}`
+	output := registry.DecodeOutputText(input)
+	var decoded map[string]string
+	require.NoError(t, json.Unmarshal([]byte(output), &decoded))
+	require.Equal(t, registry.DecodeOutputText(`<ref id="chunk://1"/>`), decoded["chunk"])
+	require.Equal(t, registry.DecodeOutputText(`<ref id="url://1"/>`), decoded["web"])
+	require.Equal(t, `keep \ and "quotes"`, decoded["text"])
+	for split := 0; split <= len(input); split++ {
+		decoder := registry.StreamDecoder()
+		got := decoder.Feed(input[:split]) + decoder.Feed(input[split:]) + decoder.Flush()
+		require.Equal(t, output, got, "split at %d", split)
+	}
+	decoder := registry.StreamDecoder()
+	var streamed strings.Builder
+	for i := range len(input) {
+		streamed.WriteString(decoder.Feed(input[i : i+1]))
+	}
+	streamed.WriteString(decoder.Flush())
+	require.Equal(t, output, streamed.String())
+
+	// Replayed citations remain navigation-only until a current retrieval supplies evidence.
+	history := NewRegistry(true)
+	messages := history.EncodeMessages([]chat.Message{{Role: "assistant", Content: output}})
+	require.JSONEq(t, input, messages[0].Content)
+	require.NoError(t, json.Unmarshal([]byte(history.DecodeOutputText(messages[0].Content)), &decoded))
+	require.Empty(t, decoded["chunk"])
+	require.Empty(t, decoded["web"])
+	history.RegisterChunk(ref)
+	history.RegisterWeb("https://example.com/?a=1&b=2", ref.DocumentTitle)
+	require.JSONEq(t, output, history.DecodeOutputText(messages[0].Content))
+}
+
+func TestJSONCitationsPreserveSourcePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		citation string
+		disabled bool
+	}{
+		{"unknown", `<ref id=\"chunk://999\"/>`, false},
+		{"history only", `<ref id=\"chunk://2\"/>`, false},
+		{"document", `<ref id=\"doc://1\"/>`, false},
+		{"knowledge base", `<ref id=\"kb://1\"/>`, false},
+		{"disabled chunk", `<ref id=\"chunk://1\"/>`, true},
+		{"disabled web", `<ref id=\"url://1\"/>`, true},
+		{"forged chunk", `<kb chunk_id=\"chunk-real\"/>`, false},
+		{"forged web", `<web url=\"https://example.com\"/>`, false},
+		{"extra attribute", `<ref id=\"chunk://1\" other=\"value\"/>`, false},
+		{"double encoding", `<ref id=\\\"chunk://1\\\"/>`, false},
+		{"nested ref", `<ref id=\"<ref id=\\\"chunk://1\\\"/>\"/>`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := NewRegistry(!tc.disabled)
+			registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real"})
+			registry.RegisterContextChunk(ChunkReference{ChunkID: "history-real"})
+			registry.RegisterDocument("doc-real")
+			registry.RegisterKnowledgeBase("kb-real")
+			registry.RegisterWeb("https://example.com", "Example")
+			input := `{"citation":"` + tc.citation + `"}`
+			require.True(t, json.Valid([]byte(input)))
+			output := registry.DecodeOutputText(input)
+			var decoded map[string]string
+			require.NoError(t, json.Unmarshal([]byte(output), &decoded))
+			require.NotContains(t, decoded["citation"], "<kb")
+			require.NotContains(t, decoded["citation"], "<web")
+			for split := 0; split <= len(input); split++ {
+				decoder := registry.StreamDecoder()
+				got := decoder.Feed(input[:split]) + decoder.Feed(input[split:]) + decoder.Flush()
+				require.Equal(t, output, got, "split at %d", split)
+			}
+		})
+	}
+}
 
 func TestRegistryChunkAliasIsStableAndExpandsCanonicalCitation(t *testing.T) {
 	registry := newSourceRegistry()
@@ -25,27 +106,27 @@ func TestRegistryChunkAliasIsStableAndExpandsCanonicalCitation(t *testing.T) {
 		DocumentTitle: "Architecture.md",
 	})
 
-	require.Equal(t, "c1", first)
+	require.Equal(t, "chunk://1", first)
 	require.Equal(t, first, second)
 	require.Equal(t,
 		`claim <kb doc="Architecture.md" chunk_id="chunk-uuid-1" kb_id="kb-uuid-1" />`,
-		registry.ExpandText(`claim <ref id="c1"/>`),
+		registry.ExpandText(`claim <ref id="chunk://1"/>`),
 	)
 }
 
 func TestRegisterDoesNotTreatModelAliasesAsNewDurableIdentities(t *testing.T) {
 	r := newSourceRegistry()
-	require.Equal(t, "c1", r.RegisterChunk(ChunkReference{ChunkID: "chunk-real"}))
-	require.Equal(t, "d1", r.RegisterDocument("doc-real"))
-	require.Equal(t, "b1", r.RegisterKnowledgeBase("kb-real"))
-	require.Equal(t, "w1", r.RegisterWeb("https://example.com", "Example"))
+	require.Equal(t, "chunk://1", r.RegisterChunk(ChunkReference{ChunkID: "chunk-real"}))
+	require.Equal(t, "doc://1", r.RegisterDocument("doc-real"))
+	require.Equal(t, "kb://1", r.RegisterKnowledgeBase("kb-real"))
+	require.Equal(t, "url://1", r.RegisterWeb("https://example.com", "Example"))
 
-	require.Equal(t, "c1", r.RegisterChunk(ChunkReference{ChunkID: "c1"}))
-	require.Equal(t, "d1", r.RegisterDocument("d1"))
-	require.Equal(t, "b1", r.RegisterKnowledgeBase("b1"))
-	require.Equal(t, "w1", r.RegisterWeb("w1", ""))
-	require.Empty(t, r.RegisterDocument("d99"))
-	require.Empty(t, r.RegisterDocument("c1"), "a chunk handle must not be accepted as a document identity")
+	require.Equal(t, "chunk://1", r.RegisterChunk(ChunkReference{ChunkID: "chunk://1"}))
+	require.Equal(t, "doc://1", r.RegisterDocument("doc://1"))
+	require.Equal(t, "kb://1", r.RegisterKnowledgeBase("kb://1"))
+	require.Equal(t, "url://1", r.RegisterWeb("url://1", ""))
+	require.Empty(t, r.RegisterDocument("doc://99"))
+	require.Empty(t, r.RegisterDocument("chunk://1"), "a chunk handle must not be accepted as a document identity")
 	require.Equal(t, 1, r.chunks.size())
 	require.Equal(t, 1, r.docs.size())
 	require.Equal(t, 1, r.kbs.size())
@@ -60,7 +141,7 @@ func TestRegistrySuppressesSourceCitationsWhenDisabled(t *testing.T) {
 	require.Contains(t, sourceProtocolPrompt(false), "Source citations are disabled")
 	require.NotContains(t, sourceProtocolPrompt(false), `Cite a knowledge chunk with exactly`)
 	require.Equal(t, "knowledge  web ", registry.ExpandText(
-		`knowledge <ref id="c1"/> web <ref id="w1"/>`,
+		`knowledge <ref id="chunk://1"/> web <ref id="url://1"/>`,
 	))
 	require.Equal(t, "forged  ", registry.ExpandText(
 		`forged <kb doc="Doc" chunk_id="raw" /> <web url="https://example.com" />`,
@@ -77,7 +158,7 @@ func TestRegistryDecodesAliasesInNestedToolArguments(t *testing.T) {
 	calls := []types.LLMToolCall{{
 		Function: types.FunctionCall{
 			Name:      "list_knowledge_chunks",
-			Arguments: `{"knowledge_id":"d1","filters":{"chunk_id":"c1","faq_id":["c1"]}}`,
+			Arguments: `{"knowledge_id":"doc://1","filters":{"chunk_id":"chunk://1","faq_id":["chunk://1"]}}`,
 		},
 	}}
 	registry.DecodeToolCalls(calls)
@@ -88,22 +169,23 @@ func TestRegistryDecodesAliasesInNestedToolArguments(t *testing.T) {
 	)
 }
 
-func TestDecodeToolCallsOnlyRewritesAliasBearingKeys(t *testing.T) {
+func TestDecodeToolCallsGivesFreeTextDurableFormsAndIDFieldsBareIDs(t *testing.T) {
 	registry := NewRegistry(true)
 	registry.RegisterKnowledgeBase("kb-uuid-1")
 
-	// A free-text field (query) whose value coincidentally equals a handle must
-	// be preserved verbatim, while declared ID-bearing keys resolve to real IDs.
+	// Declared ID-bearing keys resolve to real IDs; handles in free text become
+	// weknora:// URIs a later request can encode again; legacy-shaped prose
+	// such as "b1" is never rewritten.
 	calls := []types.LLMToolCall{{
 		Function: types.FunctionCall{
 			Name:      "knowledge_search",
-			Arguments: `{"query":"b1","content":"see b1 for details","knowledge_base_ids":["b1"]}`,
+			Arguments: `{"query":"b1","content":"see kb://1 for details","knowledge_base_ids":["kb://1"]}`,
 		},
 	}}
 	registry.DecodeToolCalls(calls)
 
 	require.JSONEq(t,
-		`{"query":"b1","content":"see b1 for details","knowledge_base_ids":["kb-uuid-1"]}`,
+		`{"query":"b1","content":"see weknora://kb/kb-uuid-1 for details","knowledge_base_ids":["kb-uuid-1"]}`,
 		calls[0].Function.Arguments,
 	)
 }
@@ -114,12 +196,12 @@ func TestStreamExpanderHoldsSplitReferenceAndDropsUnknown(t *testing.T) {
 	expander := newCitationStreamExpander(registry)
 
 	require.Equal(t, "before ", expander.Feed(`before <ref id="`))
-	require.Equal(t, `<kb doc="Doc" chunk_id="chunk-1" /> after`, expander.Feed(`c1"/> after`))
+	require.Equal(t, `<kb doc="Doc" chunk_id="chunk-1" /> after`, expander.Feed(`chunk://1"/> after`))
 	require.Empty(t, expander.Flush())
-	require.Equal(t, "x  y", registry.ExpandText(`x <ref id="c999"/> y`))
-	require.Equal(t, "x  y", registry.ExpandText(`x <ref id="d1"/> y`))
-	require.Equal(t, "x  y", registry.ExpandText(`x <ref id='c1'/> y`))
-	require.Equal(t, "x ", registry.ExpandText(`x <ref id="c1"`))
+	require.Equal(t, "x  y", registry.ExpandText(`x <ref id="chunk://999"/> y`))
+	require.Equal(t, "x  y", registry.ExpandText(`x <ref id="doc://1"/> y`))
+	require.Equal(t, "x  y", registry.ExpandText(`x <ref id='chunk://1'/> y`))
+	require.Equal(t, "x ", registry.ExpandText(`x <ref id="chunk://1"`))
 	require.Equal(t, "x  y", registry.ExpandText(`x <kb doc="forged" chunk_id="forged" /> y`))
 	require.Equal(t, "x ", expander.Feed(`x <we`))
 	require.Equal(t, " y", expander.Feed(`b url="https://forged" /> y`))
@@ -134,16 +216,17 @@ func TestEncodeMessagesCompactsCanonicalCitationsFromHistory(t *testing.T) {
 	}}
 
 	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
-	require.Equal(t, `Knowledge <ref id="c1"/>; web <ref id="w1"/>`, encoded[0].Content)
+	require.Equal(t, `Knowledge <ref id="chunk://1"/>; web <ref id="url://1"/>`, encoded[0].Content)
 	require.NotContains(t, encoded[0].Content, "chunk-real")
 	require.NotContains(t, encoded[0].Content, "https://example.com")
-	require.Equal(t, " ", registry.ExpandText(`<ref id="c1"/> <ref id="w1"/>`), "history is not current evidence")
+	require.Equal(t, " ", registry.ExpandText(`<ref id="chunk://1"/> <ref id="url://1"/>`),
+		"history is not current evidence")
 	// A fresh retrieval promotes the same handles, retaining canonical metadata.
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real"})
 	registry.RegisterWeb("https://example.com/a?x=1&y=2", "")
 	require.Equal(t,
 		`<kb doc="A &amp; B.pdf" chunk_id="chunk-real" kb_id="kb-real" /> <web url="https://example.com/a?x=1&amp;y=2" title="Example &amp; More" />`,
-		registry.ExpandText(`<ref id="c1"/> <ref id="w1"/>`),
+		registry.ExpandText(`<ref id="chunk://1"/> <ref id="url://1"/>`),
 	)
 }
 
@@ -172,17 +255,18 @@ func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
 	}
 
 	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
-	require.JSONEq(t, `{"knowledge_base_ids":["b1"],"knowledge_ids":["d1"]}`,
+	require.JSONEq(t, `{"knowledge_base_ids":["kb://1"],"knowledge_ids":["doc://1"]}`,
 		encoded[0].ToolCalls[0].Function.Arguments)
-	require.Contains(t, encoded[1].Content, `chunk_id="c1"`)
-	require.Contains(t, encoded[1].Content, `knowledge_id="d1"`)
-	require.Contains(t, encoded[1].Content, `knowledge_base_id="b1"`)
-	require.Equal(t, `Legacy answer <ref id="c1"/>`, encoded[2].Content)
-	require.Empty(t, registry.ExpandText(`<ref id="c1"/>`), "legacy tool history does not authorize new citations")
+	require.Contains(t, encoded[1].Content, `chunk_id="chunk://1"`)
+	require.Contains(t, encoded[1].Content, `knowledge_id="doc://1"`)
+	require.Contains(t, encoded[1].Content, `knowledge_base_id="kb://1"`)
+	require.Equal(t, `Legacy answer <ref id="chunk://1"/>`, encoded[2].Content)
+	require.Empty(t, registry.ExpandText(`<ref id="chunk://1"/>`),
+		"legacy tool history does not authorize new citations")
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real"})
 	require.Equal(t,
 		`<kb doc="Legacy Doc" chunk_id="chunk-real" kb_id="kb-real" />`,
-		registry.ExpandText(`<ref id="c1"/>`),
+		registry.ExpandText(`<ref id="chunk://1"/>`),
 	)
 }
 
@@ -218,8 +302,8 @@ func TestModelOutputGroupsChunksAndReusesAliasAcrossTools(t *testing.T) {
 		},
 	}
 	first := registry.ModelOutput(search)
-	require.Contains(t, first, `<document id="d1" kb="b1" title="Doc A">`)
-	require.Contains(t, first, `<chunk id="c1" index="3" view="full">`)
+	require.Contains(t, first, `<document id="doc://1" kb="kb://1" title="Doc A">`)
+	require.Contains(t, first, `<chunk id="chunk://1" index="3" view="full">`)
 	require.NotContains(t, first, "chunk-uuid-1")
 	require.NotContains(t, first, "knowledge-uuid-1")
 
@@ -237,8 +321,8 @@ func TestModelOutputGroupsChunksAndReusesAliasAcrossTools(t *testing.T) {
 		},
 	}
 	second := registry.ModelOutput(deepRead)
-	require.Contains(t, second, `<chunk id="c1"`)
-	require.False(t, strings.Contains(second, "c2"))
+	require.Contains(t, second, `<chunk id="chunk://1"`)
+	require.False(t, strings.Contains(second, "chunk://2"))
 }
 
 func TestModelOutputRendersKnowledgeMetadataOncePerDocument(t *testing.T) {
@@ -278,12 +362,12 @@ func TestModelOutputWebAliasExpandsToWebCitation(t *testing.T) {
 			},
 		},
 	})
-	require.Contains(t, output, `<page id="w1" title="Example">`)
+	require.Contains(t, output, `<page id="url://1" title="Example">`)
 	require.Contains(t, output, `<evidence type="search_summary" verified="false" />`)
 	require.NotContains(t, output, "https://example.com/a")
 	require.Equal(t,
 		`<web url="https://example.com/a" title="Example" />`,
-		registry.ExpandText(`<ref id="w1"/>`),
+		registry.ExpandText(`<ref id="url://1"/>`),
 	)
 }
 
@@ -352,9 +436,9 @@ func TestModelOutputWebFetchPreservesPartialFailureStatus(t *testing.T) {
 		},
 	})
 
-	require.Contains(t, output, `<page id="w1" status="success" view="excerpt">`)
+	require.Contains(t, output, `<page id="url://1" status="success" view="excerpt">`)
 	require.Contains(t, output, "verified page content")
-	require.Contains(t, output, `<page id="w2" status="failed" retryable="false" error_code="http_403">`)
+	require.Contains(t, output, `<page id="url://2" status="failed" retryable="false" error_code="http_403">`)
 	require.Contains(t, output, `<error>access denied</error>`)
 	require.Contains(t, output, "failed URLs do not invalidate successful evidence")
 	require.NotContains(t, output, "https://example.com")
@@ -478,9 +562,9 @@ func TestModelOutputDocumentInfoUsesDocumentAndFAQAliases(t *testing.T) {
 	for _, raw := range []string{"doc-real-id", "faq-chunk-real-id", "faq-container-real-id"} {
 		require.NotContains(t, output, raw)
 	}
-	require.Contains(t, output, `<document id="d1" title="Architecture"`)
-	require.Contains(t, output, `<chunk id="c1" type="faq">`)
-	require.Contains(t, registry.ExpandText(`Answer <ref id="c1"/>`), `chunk_id="faq-chunk-real-id"`)
+	require.Contains(t, output, `<document id="doc://1" title="Architecture"`)
+	require.Contains(t, output, `<chunk id="chunk://1" type="faq">`)
+	require.Contains(t, registry.ExpandText(`Answer <ref id="chunk://1"/>`), `chunk_id="faq-chunk-real-id"`)
 }
 
 func TestModelOutputCompactsLabeledWikiReferences(t *testing.T) {
@@ -496,14 +580,14 @@ func TestModelOutputCompactsLabeledWikiReferences(t *testing.T) {
 	output := registry.ModelOutput(result)
 	require.NotContains(t, output, "kb-real-id")
 	require.NotContains(t, output, "doc-real-id")
-	require.Contains(t, output, `<knowledge_base_id>b1</knowledge_base_id>`)
-	require.Contains(t, output, `knowledge_id="d1"`)
+	require.Contains(t, output, `<knowledge_base_id>kb://1</knowledge_base_id>`)
+	require.Contains(t, output, `knowledge_id="doc://1"`)
 
 	toolCalls := []types.LLMToolCall{
-		{Function: types.FunctionCall{Name: "wiki_read_source_doc", Arguments: `{"knowledge_id":"d1"}`}},
-		{Function: types.FunctionCall{Name: "wiki_search", Arguments: `{"knowledge_base_id":"b1"}`}},
+		{Function: types.FunctionCall{Name: "wiki_read_source_doc", Arguments: `{"knowledge_id":"doc://1"}`}},
+		{Function: types.FunctionCall{Name: "wiki_search", Arguments: `{"knowledge_base_id":"kb://1"}`}},
 	}
-	registry.DecodeToolCallsWithPolicy(toolCalls, sourceArgumentAllowed)
+	registry.DecodeToolCallsWithPolicy(toolCalls, sourceArgumentAllowed, sourceBareTextAllowed)
 	require.JSONEq(t, `{"knowledge_id":"doc-real-id"}`, toolCalls[0].Function.Arguments)
 	require.JSONEq(t, `{"knowledge_base_id":"kb-real-id"}`, toolCalls[1].Function.Arguments)
 }
@@ -526,11 +610,11 @@ func TestModelOutputGraphResultsUseChunkAliases(t *testing.T) {
 	})
 
 	require.Contains(t, output, `<retrieval type="knowledge" mode="graph">`)
-	require.Contains(t, output, `<chunk id="c1" index="4" view="full">`)
+	require.Contains(t, output, `<chunk id="chunk://1" index="4" view="full">`)
 	require.NotContains(t, output, "graph-chunk-real")
 	require.Equal(t,
 		`<kb doc="Graph Source" chunk_id="graph-chunk-real" kb_id="graph-kb-real" />`,
-		registry.ExpandText(`<ref id="c1"/>`),
+		registry.ExpandText(`<ref id="chunk://1"/>`),
 	)
 }
 
@@ -544,8 +628,8 @@ func TestModelOutputDoesNotRegisterInternalSchemesAsWebSources(t *testing.T) {
 	// An internal handle in a url-labeled field must never enter the web
 	// handle space, where CompactKnownText would rewrite it a second time.
 	require.Contains(t, output, "res://0001")
-	require.NotContains(t, output, "w1")
-	require.Contains(t, output, "d1")
+	require.NotContains(t, output, "url://1")
+	require.Contains(t, output, "doc://1")
 	require.NotContains(t, output, "doc-real-id")
 
 	registry.ModelOutput(&types.ToolResult{
@@ -554,7 +638,7 @@ func TestModelOutputDoesNotRegisterInternalSchemesAsWebSources(t *testing.T) {
 	})
 	require.Equal(t,
 		`<web url="https://example.com/page" title="" />`,
-		registry.ExpandText(`<ref id="w1"/>`),
+		registry.ExpandText(`<ref id="url://1"/>`),
 	)
 }
 
@@ -571,7 +655,7 @@ func TestModelOutputWebFetchKeepsEveryPageAndAccurateContinuation(t *testing.T) 
 		Success: true, Data: map[string]interface{}{"display_type": "web_fetch_results", "results": rows},
 	})
 	for i := 1; i <= 8; i++ {
-		require.Contains(t, output, fmt.Sprintf(`url="w%d" next_offset="2100"`, i))
+		require.Contains(t, output, fmt.Sprintf(`url="url://%d" next_offset="2100"`, i))
 	}
 	require.Equal(t, 8, strings.Count(output, `<content truncated="true">文字`))
 	require.NotContains(t, output, `view="full"`)

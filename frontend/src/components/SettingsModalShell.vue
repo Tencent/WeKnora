@@ -3,7 +3,7 @@
     <Transition name="settings-modal-shell">
       <div v-if="visible" class="settings-modal-shell settings-overlay" :class="overlayClass" :style="{ zIndex }"
         @click.self="emit('close')">
-        <div class="settings-modal">
+        <div class="settings-modal" role="dialog" aria-modal="true" :aria-label="title">
           <div v-if="loading" class="editor-initializing" role="status" :aria-label="$t('common.loading')">
             <t-loading size="medium" :text="$t('common.loading')" />
           </div>
@@ -122,7 +122,8 @@ function showBadge(item: SettingsModalNavItem): boolean {
 <style lang="less">
 .settings-modal-shell.settings-overlay {
   position: fixed;
-  inset: 0;
+  // Stops at a docked assistant panel.
+  inset: 0 var(--assistant-dock-width, 0px) 0 0;
   background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;

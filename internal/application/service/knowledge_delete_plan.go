@@ -72,12 +72,14 @@ func deleteReferencedKnowledge(
 }
 
 type knowledgeDeletePlan struct {
-	ctx       context.Context
-	ids       []string
-	knowledge []*types.Knowledge
-	kbs       map[string]*types.KnowledgeBase
-	files     map[string]interfaces.FileService
-	imageInfo []interfaces.ChunkImageInfo
+	// A datasource replacement already soft-deleted the old row atomically.
+	rowsDeleted bool
+	ctx         context.Context
+	ids         []string
+	knowledge   []*types.Knowledge
+	kbs         map[string]*types.KnowledgeBase
+	files       map[string]interfaces.FileService
+	imageInfo   []interfaces.ChunkImageInfo
 }
 
 func (s *knowledgeService) planKnowledgeDelete(ctx context.Context, ids []string) (*knowledgeDeletePlan, error) {

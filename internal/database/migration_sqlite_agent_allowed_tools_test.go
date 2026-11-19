@@ -38,8 +38,11 @@ func requireAgentToolListsUpgraded(t *testing.T, db *sql.DB, query string) {
 		require.NoError(t, json.Unmarshal([]byte(agentToolListRows[id]), &want), id)
 		require.JSONEq(t, string(want.AllowedTools), string(got.AllowedTools), "%s must be left as it is", id)
 	}
+	// Migration 35 freezes the defaults that existed when it was written.
+	// Later defaults must not silently grant tools to explicit lists.
+	legacyDefaults := []string{"search_knowledge", "read_document", "list_documents", "search_conversations"}
 	want := map[string][]string{
-		"reasoning-empty":   tools.DefaultAllowedTools(),
+		"reasoning-empty":   legacyDefaults,
 		"reasoning-null":    nil,
 		"reasoning-missing": nil,
 		"reasoning-picked":  {"thinking"},
@@ -55,6 +58,9 @@ func requireAgentToolListsUpgraded(t *testing.T, db *sql.DB, query string) {
 		require.Equal(t, expected, config.AllowedTools, id)
 		// The default tools still apply to the agents that never set a list.
 		before := tools.EffectiveAllowedTools(decodeAllowedTools(t, agentToolListRows[id]))
+		if id == "reasoning-empty" {
+			before = legacyDefaults
+		}
 		require.ElementsMatch(t, before, tools.EffectiveAllowedTools(config.AllowedTools),
 			"%s must keep its effective tools", id)
 	}

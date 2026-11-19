@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
@@ -24,8 +25,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// copyOwnedObject copies srcPath into a NEW object owned by the destination
-// tenant, returning the new provider:// (resource) path.
+// copyOwnedObject copies srcPath for the destination tenant and claims the
+// returned resource for its knowledge. Identical images may reuse a catalog blob.
 //
 // Extracted/embedded chunk images MUST land in the tenant's exports/ namespace,
 // because GET /knowledge-bases/:id/files only serves objects that pass
@@ -35,7 +36,7 @@ import (
 // produced images that could no longer be rendered. Instead, read the source
 // bytes and re-save them via SaveBytes, exactly mirroring how the original
 // images were persisted during ingestion (see image_resolver.saveReferencedImage),
-// so the copy is a genuine independent object in the servable namespace.
+// so the copy is in the servable namespace.
 func copyOwnedObject(
 	ctx context.Context,
 	srcSvc, dstSvc interfaces.FileService,
@@ -122,8 +123,8 @@ func isImageExt(ext string) bool {
 }
 
 // cloneChunkImageInfo parses a chunk's image_info JSON, copies every referenced
-// object into a NEW object owned by (tenantID, knowledgeID), and returns the
-// re-serialized image_info plus the list of newly-created object URLs (for
+// object for (tenantID, knowledgeID), and returns the re-serialized image_info
+// plus copied resource URLs (including reused images, for ownership-aware
 // rollback on failure). urlCache dedups identical source objects across chunks
 // so the same source image is copied at most once per clone AND accumulates the
 // full old->new URL mapping so callers can rewrite in-content Markdown image
@@ -213,22 +214,13 @@ func rewriteContentImageURLs(content string, urlCache map[string]string) string 
 	return content
 }
 
-// cleanupCopiedObjects deletes objects that were newly created during a clone
-// that subsequently failed, to avoid orphaning storage. It is best-effort:
-// delete errors are logged but never returned (the original clone error wins).
-func cleanupCopiedObjects(ctx context.Context, svc interfaces.FileService, paths []string) {
+// cleanupCopiedObjects releases a failed clone's claims before deleting any
+// unreferenced bytes. SaveBytes may have reused another owner's image.
+func cleanupCopiedObjects(ctx context.Context, svc interfaces.FileService, releaser *resourceReleaser, paths []string) {
 	if len(paths) == 0 || svc == nil {
 		return
 	}
-	logger.Infof(ctx, "Cleaning up %d copied objects after clone failure", len(paths))
-	for _, p := range paths {
-		if p == "" {
-			continue
-		}
-		if err := svc.DeleteFile(ctx, p); err != nil {
-			logger.Errorf(ctx, "Failed to clean up copied object %s: %v", p, err)
-		}
-	}
+	deleteExtractedImages(ctx, svc, releaser, paths)
 }
 
 func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID string) error {
@@ -339,7 +331,10 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 				return
 			}
 		}
-		cleanupCopiedObjects(ctx, dstSvc, copiedURLs)
+		// The source file is already owned by this destination before chunk
+		// cloning. An identical embedded image must not release that claim.
+		copiedURLs = slices.DeleteFunc(copiedURLs, func(ref string) bool { return ref == stored.FilePath })
+		cleanupCopiedObjects(ctx, dstSvc, knowledgeResourceOwners(s.resourceCatalog, dst.ID), copiedURLs)
 	}()
 
 	now := time.Now()
@@ -542,11 +537,9 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	// Get source and target knowledge bases
 	srcKB, dstKB, err := s.kbService.CopyKnowledgeBase(ctx, payload.SourceID, payload.TargetID)
 	if err != nil {
-		retry, maxRetry := 0, 0
-		retry, _ = asynq.GetRetryCount(ctx)
-		maxRetry, _ = asynq.GetMaxRetry(ctx)
+		retry, maxRetry := taskRetryState(ctx)
 		status := types.KBCloneStatusProcessing
-		if retry >= maxRetry {
+		if retry >= maxRetry || errors.Is(err, asynq.SkipRetry) {
 			status = types.KBCloneStatusFailed
 		}
 		_ = s.saveKBCloneProgress(
@@ -565,8 +558,7 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	}
 
 	// Check if this is the last retry
-	retryCount, _ := asynq.GetRetryCount(ctx)
-	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	retryCount, maxRetry := taskRetryState(ctx)
 	isLastRetry := retryCount >= maxRetry
 
 	logger.Infof(ctx, "Processing KB clone task: %s, source: %s, target: %s, retry: %d/%d",
@@ -574,7 +566,7 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 
 	// Helper function to handle errors - only mark as failed on last retry
 	handleError := func(progress *types.KBCloneProgress, err error, message string) {
-		if isLastRetry {
+		if isLastRetry || errors.Is(err, asynq.SkipRetry) {
 			progress.Status = types.KBCloneStatusFailed
 			progress.Error = err.Error()
 			progress.Message = message
@@ -673,12 +665,6 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	// new objects for best-effort cleanup if the clone fails partway through.
 	dstSvc := s.resolveFileService(ctx, dstKB)
 	imageURLCache := map[string]string{}
-	var copiedImageURLs []string
-	defer func() {
-		if retErr != nil {
-			cleanupCopiedObjects(ctx, dstSvc, copiedImageURLs)
-		}
-	}()
 
 	// Get source FAQ knowledge first (FAQ KB has exactly one Knowledge entry)
 	srcKnowledgeList, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, srcKB.TenantID, srcKB.ID)
@@ -831,6 +817,42 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 		handleError(progress, err, "Failed to prepare FAQ knowledge entry")
 		return err
 	}
+	// Bind is idempotent per knowledge, so rollback must preserve claims that
+	// predate this incremental clone as well as images in persisted batches.
+	retainedImages := map[string]bool{}
+	if s.resourceCatalog != nil {
+		refs, err := s.resourceCatalog.ListReferencesByOwner(ctx, types.ResourceOwnerKnowledge, dstKnowledge.ID)
+		if err != nil {
+			handleError(progress, err, "Failed to load existing FAQ resource claims")
+			return fmt.Errorf("load existing FAQ resource claims: %w", err)
+		}
+		for _, ref := range refs {
+			retainedImages[ref] = true
+		}
+	}
+	var copiedImageURLs []string
+	defer func() {
+		if retErr == nil || len(copiedImageURLs) == 0 {
+			return
+		}
+		// A failed CreateChunks may have committed before its acknowledgement
+		// was lost. Inspect persisted rows, keeping all bytes on an uncertain read.
+		rows, err := s.chunkRepo.ListAllChunksByKnowledgeID(ctx, dstKB.TenantID, dstKnowledge.ID)
+		if err != nil {
+			logger.Warnf(ctx, "Keeping copied FAQ images: failed to read saved chunks: %v", err)
+			return
+		}
+		for _, row := range rows {
+			for _, ref := range collectImageURLs(ctx, []string{row.ImageInfo}) {
+				retainedImages[ref] = true
+			}
+			for _, ref := range types.ScanResourceReferences(row.Content) {
+				retainedImages[ref] = true
+			}
+		}
+		copiedImageURLs = slices.DeleteFunc(copiedImageURLs, func(ref string) bool { return retainedImages[ref] })
+		cleanupCopiedObjects(ctx, dstSvc, knowledgeResourceOwners(s.resourceCatalog, dstKnowledge.ID), copiedImageURLs)
+	}()
 
 	// Clone FAQ chunks from source to destination
 	batch := 50
@@ -859,13 +881,13 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 			// FAQ knowledge so deleting the source never breaks this clone.
 			newImageInfo, copied, copyErr := cloneChunkImageInfo(
 				ctx, dstSvc, srcChunk.ImageInfo, dstKB.TenantID, dstKnowledge.ID, imageURLCache, s.resourceCatalog)
+			copiedImageURLs = append(copiedImageURLs, copied...)
 			if copyErr != nil {
 				logger.Errorf(ctx, "Failed to copy FAQ chunk images: %v", copyErr)
 				handleError(progress, copyErr, "Failed to copy FAQ entry images")
 				retErr = copyErr
 				return retErr
 			}
-			copiedImageURLs = append(copiedImageURLs, copied...)
 
 			newChunk := &types.Chunk{
 				ID:              uuid.New().String(),
@@ -1012,8 +1034,85 @@ func (s *knowledgeService) getOrCreateFAQKnowledge(ctx context.Context, kb *type
 	return knowledge, nil
 }
 
-// saveKBCloneProgress saves the KB clone progress to Redis
+type memProgressEntry[T any] struct {
+	value     T
+	expiresAt time.Time
+}
+
+func storeMemProgress[T any](store *sync.Map, taskID string, value T, ttl time.Duration, onlyIfAbsent bool) {
+	if taskID == "" {
+		return
+	}
+	now := time.Now()
+	entry := memProgressEntry[T]{value: value, expiresAt: now.Add(ttl)}
+	if !onlyIfAbsent {
+		store.Store(taskID, entry)
+		return
+	}
+	sweepExpiredMemProgress[T](store, now)
+	for {
+		actual, loaded := store.LoadOrStore(taskID, entry)
+		if !loaded {
+			return
+		}
+		existing, ok := actual.(memProgressEntry[T])
+		if ok && now.Before(existing.expiresAt) {
+			return
+		}
+		if store.CompareAndSwap(taskID, actual, entry) {
+			return
+		}
+	}
+}
+
+func loadMemProgress[T any](store *sync.Map, taskID string) (*T, bool) {
+	raw, ok := store.Load(taskID)
+	if !ok {
+		return nil, false
+	}
+	entry, ok := raw.(memProgressEntry[T])
+	if !ok {
+		return nil, false
+	}
+	if !time.Now().Before(entry.expiresAt) {
+		store.CompareAndDelete(taskID, raw)
+		return nil, false
+	}
+	cloned := entry.value
+	return &cloned, true
+}
+
+func sweepExpiredMemProgress[T any](store *sync.Map, now time.Time) {
+	store.Range(func(key, raw any) bool {
+		if entry, ok := raw.(memProgressEntry[T]); !ok || !now.Before(entry.expiresAt) {
+			store.CompareAndDelete(key, raw)
+		}
+		return true
+	})
+}
+
+// taskRetryState resolves (retried, maxRetry) across both Asynq workers and
+// Lite mode's SyncTaskExecutor (which injects TaskRetryMetadata). Outside any
+// task runner (e.g. direct test invocations), both return 0 so single-shot
+// calls remain terminal.
+func taskRetryState(ctx context.Context) (int, int) {
+	if retried, maxRetry, ok := types.TaskRetryMetadataFromContext(ctx); ok {
+		return retried, maxRetry
+	}
+	retry, _ := asynq.GetRetryCount(ctx)
+	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	return retry, maxRetry
+}
+
+// saveKBCloneProgress saves the KB clone progress to Redis (or in-memory in Lite mode)
 func (s *knowledgeService) saveKBCloneProgress(ctx context.Context, progress *types.KBCloneProgress) error {
+	if progress == nil {
+		return errors.New("progress is nil")
+	}
+	if s.redisClient == nil {
+		storeMemProgress(&s.memKBCloneProgress, progress.TaskID, *progress, kbCloneProgressTTL, false)
+		return nil
+	}
 	key := getKBCloneProgressKey(progress.TaskID)
 	data, err := json.Marshal(progress)
 	if err != nil {
@@ -1022,8 +1121,15 @@ func (s *knowledgeService) saveKBCloneProgress(ctx context.Context, progress *ty
 	return s.redisClient.Set(ctx, key, data, kbCloneProgressTTL).Err()
 }
 
-// SaveKBCloneProgress saves the KB clone progress to Redis (public method for handler use)
+// SaveKBCloneProgress saves the KB clone progress without overwriting a worker that already started
 func (s *knowledgeService) SaveKBCloneProgress(ctx context.Context, progress *types.KBCloneProgress) error {
+	if progress == nil {
+		return errors.New("progress is nil")
+	}
+	if s.redisClient == nil {
+		storeMemProgress(&s.memKBCloneProgress, progress.TaskID, *progress, kbCloneProgressTTL, true)
+		return nil
+	}
 	data, err := json.Marshal(progress)
 	if err != nil {
 		return err
@@ -1033,6 +1139,12 @@ func (s *knowledgeService) SaveKBCloneProgress(ctx context.Context, progress *ty
 
 // GetKBCloneProgress retrieves the progress of a knowledge base clone task
 func (s *knowledgeService) GetKBCloneProgress(ctx context.Context, taskID string) (*types.KBCloneProgress, error) {
+	if s.redisClient == nil {
+		if progress, ok := loadMemProgress[types.KBCloneProgress](&s.memKBCloneProgress, taskID); ok {
+			return progress, nil
+		}
+		return nil, werrors.NewNotFoundError("KB clone task not found")
+	}
 	key := getKBCloneProgressKey(taskID)
 	data, err := s.redisClient.Get(ctx, key).Bytes()
 	if err != nil {
@@ -1059,6 +1171,13 @@ func getKnowledgeMoveProgressKey(taskID string) string {
 }
 
 func (s *knowledgeService) saveKnowledgeMoveProgress(ctx context.Context, progress *types.KnowledgeMoveProgress) error {
+	if progress == nil {
+		return errors.New("progress is nil")
+	}
+	if s.redisClient == nil {
+		storeMemProgress(&s.memKnowledgeMoveProgress, progress.TaskID, *progress, knowledgeMoveProgressTTL, false)
+		return nil
+	}
 	key := getKnowledgeMoveProgressKey(progress.TaskID)
 	data, err := json.Marshal(progress)
 	if err != nil {
@@ -1067,8 +1186,15 @@ func (s *knowledgeService) saveKnowledgeMoveProgress(ctx context.Context, progre
 	return s.redisClient.Set(ctx, key, data, knowledgeMoveProgressTTL).Err()
 }
 
-// SaveKnowledgeMoveProgress saves the knowledge move progress to Redis (public method for handler use)
+// SaveKnowledgeMoveProgress saves the knowledge move progress without overwriting a worker that already started
 func (s *knowledgeService) SaveKnowledgeMoveProgress(ctx context.Context, progress *types.KnowledgeMoveProgress) error {
+	if progress == nil {
+		return errors.New("progress is nil")
+	}
+	if s.redisClient == nil {
+		storeMemProgress(&s.memKnowledgeMoveProgress, progress.TaskID, *progress, knowledgeMoveProgressTTL, true)
+		return nil
+	}
 	data, err := json.Marshal(progress)
 	if err != nil {
 		return err
@@ -1078,6 +1204,12 @@ func (s *knowledgeService) SaveKnowledgeMoveProgress(ctx context.Context, progre
 
 // GetKnowledgeMoveProgress retrieves the progress of a knowledge move task
 func (s *knowledgeService) GetKnowledgeMoveProgress(ctx context.Context, taskID string) (*types.KnowledgeMoveProgress, error) {
+	if s.redisClient == nil {
+		if progress, ok := loadMemProgress[types.KnowledgeMoveProgress](&s.memKnowledgeMoveProgress, taskID); ok {
+			return progress, nil
+		}
+		return nil, werrors.NewNotFoundError("Knowledge move task not found")
+	}
 	key := getKnowledgeMoveProgressKey(taskID)
 	data, err := s.redisClient.Get(ctx, key).Bytes()
 	if err != nil {
@@ -1139,12 +1271,11 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 	// No item is claimed and no failure callback can alter document state until
 	// every requested document and its children passed the same pair preflight.
-	retry, _ := asynq.GetRetryCount(ctx)
-	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	retry, maxRetry := taskRetryState(ctx)
 	items, err := s.planKnowledgeMove(ctx, sourceKB, targetKB, payload.KnowledgeIDs, payload.Mode)
 	if err != nil {
 		status := types.KBCloneStatusProcessing
-		if retry >= maxRetry {
+		if retry >= maxRetry || errors.Is(err, asynq.SkipRetry) {
 			status = types.KBCloneStatusFailed
 		}
 		_ = s.saveKnowledgeMoveProgress(
@@ -1197,7 +1328,7 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	for _, item := range items {
 		if err := s.moveOneKnowledge(ctx, item.ID, sourceKB, targetKB, payload.Mode); err != nil {
 			failures = errors.Join(failures, fmt.Errorf("knowledge %s: %w", item.ID, err))
-			if retry >= maxRetry {
+			if retry >= maxRetry || errors.Is(err, asynq.SkipRetry) {
 				s.markMoveItemFailed(ctx, item.ID, sourceKB, targetKB, payload.Mode, err)
 			}
 			progress.Failed++
@@ -1214,7 +1345,7 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	}
 	if failures != nil {
 		progress.Error = failures.Error()
-		if retry >= maxRetry {
+		if retry >= maxRetry || errors.Is(failures, asynq.SkipRetry) {
 			progress.Status = types.KBCloneStatusFailed
 			outcome := types.AuditOutcomeFailed
 			if progress.Failed < progress.Total {
@@ -1282,7 +1413,7 @@ func (s *knowledgeService) moveOneKnowledge(
 			if state.Phase == "reparse_pending" {
 				return s.enqueueMovedKnowledge(ctx, knowledge, sourceKB, targetKB)
 			}
-			if mode == "reuse_vectors" && targetKB.IsWikiEnabled() {
+			if mode == "reuse_vectors" && targetKB.IsWikiAutoGenerateEnabled() {
 				_, err := EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, tenantID, targetKB.ID, knowledge.ID)
 				return err
 			}
@@ -1329,7 +1460,7 @@ func (s *knowledgeService) moveOneKnowledge(
 		// reparse re-ingests through KnowledgePostProcess once the new chunks
 		// land; reuse_vectors keeps the existing chunks and never re-enters that
 		// pipeline, so the target KB has to be told about the document here.
-		if targetKB.IsWikiEnabled() {
+		if targetKB.IsWikiAutoGenerateEnabled() {
 			_, err := EnqueueWikiIngest(ctx, s.task, s.taskPendingRepo, tenantID, targetKB.ID, knowledge.ID)
 			return err
 		}

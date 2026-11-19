@@ -35,6 +35,160 @@ def _mark_entry_encrypted(payload: bytes) -> bytes:
 
 
 class XMindParserModernTests(unittest.TestCase):
+    def test_preserves_all_json_topic_groups_matching_classic_archive(self):
+        # The official XMind topic schema defines attached, detached, summary,
+        # and callout arrays of recursive topics. Every fixture topic has the
+        # schema-required id; both supported archive formats carry this outline.
+        # https://github.com/xmindltd/xmind-model/blob/master/schemas/topic.json
+        groups = {
+            "attached": [
+                {
+                    "id": "main",
+                    "title": "Main branch",
+                    "notes": {"plain": {"content": "Main note"}},
+                    "children": {
+                        "attached": [{"id": "main-task", "title": "Main task"}]
+                    },
+                }
+            ],
+            "detached": [
+                {
+                    "id": "idea",
+                    "title": "Independent idea",
+                    "notes": {"plain": {"content": "Detached note"}},
+                    "children": {
+                        "summary": [
+                            {"id": "decision", "title": "Detached decision"}
+                        ]
+                    },
+                }
+            ],
+            "summary": [
+                {
+                    "id": "summary",
+                    "title": "Overall decision",
+                    "notes": {"plain": {"content": "Summary note"}},
+                    "children": {
+                        "callout": [{"id": "detail", "title": "Summary detail"}]
+                    },
+                }
+            ],
+            "callout": [
+                {
+                    "id": "reminder",
+                    "title": "Reminder",
+                    "notes": {"plain": {"content": "Callout note"}},
+                    "children": {
+                        "detached": [{"id": "related", "title": "Related detail"}]
+                    },
+                }
+            ],
+        }
+        modern = _modern_xmind_bytes(
+            [
+                {
+                    "id": "sheet",
+                    "title": "Plan",
+                    "rootTopic": {
+                        "id": "root",
+                        "title": "Plan & Delivery",
+                        "notes": {"plain": {"content": "Root note"}},
+                        "children": groups,
+                    },
+                }
+            ]
+        )
+        classic = _classic_xmind_bytes(
+            """<xmap-content xmlns="urn:xmind:xmap:xmlns:content:2.0">
+<sheet id="sheet"><title>Plan</title><topic id="root">
+<title>Plan &amp; Delivery</title><notes><plain>Root note</plain></notes>
+<children>
+<topics type="attached"><topic id="main"><title>Main branch</title>
+<notes><plain>Main note</plain></notes><children><topics type="attached">
+<topic id="main-task"><title>Main task</title></topic>
+</topics></children></topic></topics>
+<topics type="detached"><topic id="idea"><title>Independent idea</title>
+<notes><plain>Detached note</plain></notes><children><topics type="summary">
+<topic id="decision"><title>Detached decision</title></topic>
+</topics></children></topic></topics>
+<topics type="summary"><topic id="summary"><title>Overall decision</title>
+<notes><plain>Summary note</plain></notes><children><topics type="callout">
+<topic id="detail"><title>Summary detail</title></topic>
+</topics></children></topic></topics>
+<topics type="callout"><topic id="reminder"><title>Reminder</title>
+<notes><plain>Callout note</plain></notes><children><topics type="detached">
+<topic id="related"><title>Related detail</title></topic>
+</topics></children></topic></topics>
+</children></topic></sheet></xmap-content>"""
+        )
+        expected = (
+            "# Plan\n\n"
+            "- Plan & Delivery\n"
+            "  > Root note\n"
+            "  - Main branch\n"
+            "    > Main note\n"
+            "    - Main task\n"
+            "  - Independent idea\n"
+            "    > Detached note\n"
+            "    - Detached decision\n"
+            "  - Overall decision\n"
+            "    > Summary note\n"
+            "    - Summary detail\n"
+            "  - Reminder\n"
+            "    > Callout note\n"
+            "    - Related detail"
+        )
+
+        for source_format, payload in (("json", modern), ("xml", classic)):
+            with self.subTest(source_format=source_format):
+                document = XMindParser(file_name="plan.xmind").parse(payload)
+                self.assertEqual(expected, document.content)
+                self.assertEqual(
+                    source_format, document.metadata["xmind_content_format"]
+                )
+                self.assertEqual(1, document.metadata["sheet_count"])
+                self.assertEqual(9, document.metadata["topic_count"])
+                self.assertEqual(5, document.metadata["note_count"])
+
+    def test_promotes_each_nonattached_group_from_blank_root(self):
+        for group_name in ("detached", "summary", "callout"):
+            with self.subTest(group_name=group_name):
+                payload = _modern_xmind_bytes(
+                    [
+                        {
+                            "id": "sheet",
+                            "title": "Outline",
+                            "rootTopic": {
+                                "id": "root",
+                                "title": " ",
+                                "children": {
+                                    group_name: [
+                                        {
+                                            "id": "visible",
+                                            "title": "Visible",
+                                            "notes": {
+                                                "plain": {"content": "Retained note"}
+                                            },
+                                            "children": {
+                                                "attached": [
+                                                    {"id": "nested", "title": "Nested"}
+                                                ]
+                                            },
+                                        }
+                                    ]
+                                },
+                            },
+                        }
+                    ]
+                )
+                document = XMindParser(file_name="outline.xmind").parse(payload)
+                self.assertEqual(
+                    "# Outline\n\n- Visible\n  > Retained note\n  - Nested",
+                    document.content,
+                )
+                self.assertEqual(2, document.metadata["topic_count"])
+                self.assertEqual(1, document.metadata["note_count"])
+
     def test_finds_content_without_enumerating_unrelated_entries(self):
         payload = _xmind_zip(
             {

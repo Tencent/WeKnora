@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -16,8 +18,8 @@ type staticPolicyGate struct {
 	err     error
 }
 
-func (g staticPolicyGate) NeedsApproval(context.Context, uint64, string, string) bool {
-	return false
+func (g staticPolicyGate) Action(context.Context, uint64, string, *types.MCPTool) policy.Action {
+	return policy.Action{Risk: policy.RiskRead}
 }
 
 func (g staticPolicyGate) IsEnabled(context.Context, uint64, string, string) (bool, error) {
@@ -27,6 +29,12 @@ func (g staticPolicyGate) IsEnabled(context.Context, uint64, string, string) (bo
 func (g staticPolicyGate) RequestAndWait(context.Context, approval.PendingRequest) (approval.Decision, error) {
 	return approval.Decision{Approved: true}, nil
 }
+
+func (staticPolicyGate) ResumeDecision(_ context.Context, p *types.AgentPrompt, _ *event.EventBus) approval.Decision {
+	return approval.Decision{PendingID: p.ID, Approved: true}
+}
+
+func (staticPolicyGate) MarkExecuted(context.Context, string) {}
 
 var _ approval.MCPApproval = staticPolicyGate{}
 

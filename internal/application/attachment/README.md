@@ -31,13 +31,17 @@ Agent engine queries attachment repositories.
    the configured parse budget. A successful read projects newly-ready parsed
    text immediately, including when parsing finished after turn-start staging.
 3. Image reads default to one image with `brief` plus an optional `focus`.
-   The tool prompt reserves `full` for an explicit close-reading request; full
-   reads return at most one image. Explicit brief batches are capped at four.
+   Use complete `attachment://<handle>/images/N` addresses, never bare `/images/N`.
+   Exact chart/table values and calculations use `full` with a focused question;
+   full reads return at most one image. Explicit brief batches are capped at four.
+   Observations preserve category, series and unit alongside each value. Missing
+   associations or inconsistent totals require a focused re-read, not guessed data.
 4. Non-vision chat models use the configured VLM. Successful observations are
    keyed by document, prepared-image hash, model ID and normalized reading prompt
    (including detail/focus). Equal requests reuse the observation across turns
    and authorized forks; different requirements do not reuse a narrower answer.
-   Each new description has a 30-second deadline. Failed or empty descriptions
+   Descriptions have a 60-second deadline (150 seconds for full reads), starting
+   after a model slot is acquired. Failed or empty descriptions
    are not cached, and the engine does not repeat an attempted description.
 5. The document metadata stores a bounded observation cache through optimistic
    updates that preserve parser metadata and concurrent writes. Cache entries

@@ -258,6 +258,15 @@ func (s *mcpServiceService) UpdateMCPService(
 	if service.AdvancedConfig != nil {
 		existing.AdvancedConfig = service.AdvancedConfig
 	}
+	if updateFields[types.MCPUpdateDropSecrets] {
+		// Empty rather than nil: the repository skips nil maps.
+		existing.Headers = types.MCPHeaders{}
+		if existing.AuthConfig != nil {
+			existing.AuthConfig.APIKey = ""
+			existing.AuthConfig.Token = ""
+			existing.AuthConfig.CustomHeaders = nil
+		}
+	}
 
 	// Update timestamp
 	if err := mcp.ValidateServiceOutboundURLs(existing); err != nil {

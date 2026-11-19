@@ -15,8 +15,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/sandbox/admission"
+	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -244,6 +247,7 @@ type fakeConfigRepo struct {
 	updateErr   error
 
 	clearCordonCtxErr error
+	cordonedAt        *time.Time
 }
 
 func (f *fakeConfigRepo) Create(_ context.Context, e *types.TenantSandboxConfigEntity) error {
@@ -303,18 +307,39 @@ func (f *fakeConfigRepo) SoftDelete(_ context.Context, _ uint64, id string) erro
 	return nil
 }
 
-func (f *fakeConfigRepo) SetCordon(_ context.Context, _ uint64, _ string, _ time.Time) error {
+func (f *fakeConfigRepo) SetCordon(_ context.Context, _ uint64, _ string, at time.Time) error {
 	f.events = append(f.events, "cordon")
+	stamped := at
+	f.cordonedAt = &stamped
 	if f.onSetCordon != nil {
 		f.onSetCordon()
 	}
 	return nil
 }
 
+func (f *fakeConfigRepo) RefreshCordon(
+	_ context.Context, _ uint64, _ string, previous, next time.Time,
+) error {
+	if f.cordonedAt == nil || !f.cordonedAt.Equal(previous) {
+		return repository.ErrSandboxConfigCordoned
+	}
+	stamped := next
+	f.cordonedAt = &stamped
+	return nil
+}
+
 func (f *fakeConfigRepo) ClearCordon(ctx context.Context, _ uint64, _ string) error {
 	f.events = append(f.events, "uncordon")
+	f.cordonedAt = nil
 	f.clearCordonCtxErr = ctx.Err()
 	return nil
+}
+
+func (f *fakeConfigRepo) ClearCordonIf(ctx context.Context, tenantID uint64, id string, at time.Time) error {
+	if f.cordonedAt == nil || !f.cordonedAt.Equal(at) {
+		return nil
+	}
+	return f.ClearCordon(ctx, tenantID, id)
 }
 
 type stubAgentRepo struct {
@@ -1301,7 +1326,7 @@ func TestDeleteRefusesWhileSandboxesLive(t *testing.T) {
 	require.Equal(t, []string{"s-1"}, liveErr.Inventory.SessionIDs)
 	require.Equal(t, []string{"analyst"}, liveErr.Inventory.AgentNames)
 	require.False(t, repo.deleted)
-	require.Equal(t, []string{"get"}, repo.events)
+	require.Equal(t, []string{"get", "cordon", "uncordon"}, repo.events)
 }
 
 // "We cannot tell" must not read as "nothing there": refuse, and say which of
@@ -1323,20 +1348,25 @@ func TestDeleteRefusesWhenInventoryUnverifiable(t *testing.T) {
 	require.False(t, repo.deleted)
 }
 
-// Deletion has no "create a second config" way out, so a config whose endpoint
-// vanished must remain removable once an admin takes responsibility.
-func TestDeleteForceRemovesConfigWithUnverifiableInventory(t *testing.T) {
+// An inventory failure does not mean the provider has no sandboxes. force
+// does not delete the config or its user-machine registry in that case:
+// cleanup treats a missing registry row as a machine that is already gone.
+func TestDeleteForceKeepsTheConfigWhenInventoryIsUnverifiable(t *testing.T) {
 	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
 		ID: "cfg-a", TenantID: 7, Name: "prod", SandboxType: "e2b",
 		Config: e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300),
 	}}
+	alloc := &recordingAlloc{}
 	svc := newTestConfigService(t, repo, nil, stubAgentRepo{})
+	svc.WithAllocationRepo(alloc)
 	svc.newClient = func(*sandbox.Config) (sandbox.ConfigSandboxClient, error) {
 		return nil, stderrors.New("dial tcp: no such host")
 	}
 
-	require.NoError(t, svc.Delete(context.Background(), 7, "cfg-a", true))
-	require.True(t, repo.deleted)
+	err := svc.Delete(context.Background(), 7, "cfg-a", true)
+	require.ErrorIs(t, err, ErrSandboxInventoryUnverifiable)
+	require.False(t, repo.deleted)
+	require.Zero(t, alloc.calls)
 }
 
 // force covers "cannot verify", never "verified live". Letting it through here
@@ -1417,7 +1447,7 @@ func TestDeleteSoftDeletesWhenEmpty(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, repo.deleted)
-	require.Equal(t, []string{"get", "delete"}, repo.events)
+	require.Equal(t, []string{"get", "cordon", "delete", "uncordon"}, repo.events)
 }
 
 // Reporting success for a config that is not there would let the UI drop a card
@@ -2192,9 +2222,636 @@ func (deleteFileService) CopyFile(context.Context, string, uint64, string) (stri
 	return "", nil
 }
 
+func allocationTestConfig(mode string, days int) *types.TenantSandboxConfig {
+	cfg := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	cfg.AllocationMode = mode
+	cfg.UserSandboxEmptyRetentionDays = days
+	return cfg
+}
+
+func TestSanitizeSandboxConfigAllocationPolicy(t *testing.T) {
+	// e2bCfg carries an API key. Sanitize refuses secrets when SYSTEM_AES_KEY
+	// is unset, before allocation policy is checked.
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	t.Cleanup(func() { allocation.SetUserModeAvailable(false) })
+
+	allocation.SetUserModeAvailable(false)
+	_, err := SanitizeSandboxConfig(allocationTestConfig("user", 0), nil)
+	require.ErrorContains(t, err, "allocation_mode=user is not enabled")
+
+	// A config already saved as user stays saveable after the gate closes, so
+	// an unrelated edit does not fail; allocation falls back at decide time.
+	_, err = SanitizeSandboxConfig(allocationTestConfig("user", 0), allocationTestConfig("user", 0))
+	require.NoError(t, err)
+
+	allocation.SetUserModeAvailable(true)
+	out, err := SanitizeSandboxConfig(allocationTestConfig("user", 14), nil)
+	require.NoError(t, err)
+	require.Equal(t, "user", out.AllocationMode)
+	require.Equal(t, 14, out.UserSandboxEmptyRetentionDays)
+
+	_, err = SanitizeSandboxConfig(allocationTestConfig("machine", 0), nil)
+	require.ErrorContains(t, err, "invalid allocation_mode")
+	_, err = SanitizeSandboxConfig(allocationTestConfig("session", 91), nil)
+	require.ErrorContains(t, err, "between 1 and 90")
+	_, err = SanitizeSandboxConfig(allocationTestConfig("session", -1), nil)
+	require.Error(t, err)
+}
+
 var (
 	_ sandbox.ConfigSandboxClient = (*snapshotReleaseClient)(nil)
 	_ sandboxSnapshotReleaser     = (*snapshotReleaseClient)(nil)
 	_ sandboxConfigSkillStore     = (*deleteSkillStore)(nil)
 	_ sandboxConfigBundleResolver = (*deleteBundleResolver)(nil)
 )
+
+func configA() *types.TenantSandboxConfigEntity {
+	return &types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 7, Name: "prod", SandboxType: "e2b",
+		Config: e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300),
+	}
+}
+
+func userMachineOfConfigA(id string) sandbox.RemoteSandboxSummary {
+	return sandbox.RemoteSandboxSummary{
+		ID: id,
+		Metadata: map[string]string{
+			"weknora_tenant_id":             "7",
+			"weknora_sandbox_config_id":     "cfg-a",
+			sandbox.MetadataAllocationKey(): sandbox.MetadataAllocationUser,
+		},
+	}
+}
+
+// orderConfigRepo records cordon, delete, and uncordon beside the fake repo's
+// own event log, so a test can assert one timeline across the provider and
+// the admission registry.
+type orderConfigRepo struct {
+	repository.TenantSandboxConfigRepository
+	order *[]string
+}
+
+func (r orderConfigRepo) SetCordon(ctx context.Context, tenantID uint64, id string, at time.Time) error {
+	*r.order = append(*r.order, "SetCordon")
+	return r.TenantSandboxConfigRepository.SetCordon(ctx, tenantID, id, at)
+}
+
+func (r orderConfigRepo) ClearCordon(ctx context.Context, tenantID uint64, id string) error {
+	*r.order = append(*r.order, "ClearCordon")
+	return r.TenantSandboxConfigRepository.ClearCordon(ctx, tenantID, id)
+}
+
+func (r orderConfigRepo) ClearCordonIf(ctx context.Context, tenantID uint64, id string, at time.Time) error {
+	*r.order = append(*r.order, "ClearCordon")
+	return r.TenantSandboxConfigRepository.ClearCordonIf(ctx, tenantID, id, at)
+}
+
+func (r orderConfigRepo) SoftDelete(ctx context.Context, tenantID uint64, id string) error {
+	*r.order = append(*r.order, "SoftDelete")
+	return r.TenantSandboxConfigRepository.SoftDelete(ctx, tenantID, id)
+}
+
+// recordingAlloc records DeleteUserMachinesByConfig. Other methods are not
+// part of config deletion; calling one panics instead of pretending success.
+type recordingAlloc struct {
+	interfaces.SandboxAllocationRepository
+	order *[]string
+	err   error
+	calls int
+}
+
+func (r *recordingAlloc) DeleteUserMachinesByConfig(_ context.Context, tenantID uint64, configID string) error {
+	r.calls++
+	if r.order != nil {
+		*r.order = append(*r.order, fmt.Sprintf("DeleteUserMachinesByConfig(%d,%q)", tenantID, configID))
+	}
+	return r.err
+}
+
+type recordingProvider struct {
+	summaries []sandbox.RemoteSandboxSummary
+	order     *[]string
+	lists     int
+	deleted   []string
+}
+
+func (p *recordingProvider) List(context.Context, sandbox.RemoteListFilter) ([]sandbox.RemoteSandboxSummary, error) {
+	p.lists++
+	if p.order != nil {
+		*p.order = append(*p.order, "List")
+	}
+	return append([]sandbox.RemoteSandboxSummary(nil), p.summaries...), nil
+}
+
+func (p *recordingProvider) Delete(_ context.Context, sandboxID string) error {
+	p.deleted = append(p.deleted, sandboxID)
+	if p.order != nil {
+		*p.order = append(*p.order, "Delete")
+	}
+	return nil
+}
+
+type recordingAdmission struct {
+	admission.Registry
+	order *[]string
+}
+
+func (r recordingAdmission) Close(
+	ctx context.Context, scope admission.Scope, ttl time.Duration,
+) (admission.Barrier, error) {
+	*r.order = append(*r.order, "Close("+scope.Name+")")
+	b, err := r.Registry.Close(ctx, scope, ttl)
+	if err != nil || b == nil {
+		return b, err
+	}
+	return recordingBarrier{Barrier: b, order: r.order, name: scope.Name}, nil
+}
+
+type recordingBarrier struct {
+	admission.Barrier
+	order *[]string
+	name  string
+}
+
+func (b recordingBarrier) Release() {
+	*b.order = append(*b.order, "release("+b.name+")")
+	b.Barrier.Release()
+}
+
+func (b recordingBarrier) Seal() {
+	*b.order = append(*b.order, "Seal("+b.name+")")
+	b.Barrier.Seal()
+}
+
+// gatedInventory lists nothing until released, then the sandbox the in-flight
+// create produced. early counts lists that ran before the release.
+type gatedInventory struct {
+	mu       sync.Mutex
+	released bool
+	calls    int
+	early    int
+	deleted  []string
+}
+
+func (g *gatedInventory) List(context.Context, sandbox.RemoteListFilter) ([]sandbox.RemoteSandboxSummary, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.calls++
+	if !g.released {
+		g.early++
+		return nil, nil
+	}
+	return []sandbox.RemoteSandboxSummary{userMachineOfConfigA("sb-inflight")}, nil
+}
+
+func (g *gatedInventory) Delete(_ context.Context, sandboxID string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.deleted = append(g.deleted, sandboxID)
+	return nil
+}
+
+func (g *gatedInventory) release() {
+	g.mu.Lock()
+	g.released = true
+	g.mu.Unlock()
+}
+
+func (g *gatedInventory) snapshot() (calls, early int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.calls, g.early
+}
+
+func newConfigDeleteService(
+	repo repository.TenantSandboxConfigRepository,
+	client sandbox.ConfigSandboxClient,
+) *TenantSandboxConfigService {
+	svc := NewTenantSandboxConfigService(repo, stubAgentRepo{}, testGlobalSandboxConfig(), nil, nil)
+	svc.newClient = func(*sandbox.Config) (sandbox.ConfigSandboxClient, error) {
+		if client == nil {
+			return &stubProviderClient{}, nil
+		}
+		return client, nil
+	}
+	return svc
+}
+
+func TestDeleteConfigWaitsForInFlightCreatesBeforeTheInventory(t *testing.T) {
+	cordoned := make(chan struct{})
+	repo := &fakeConfigRepo{entity: configA(), onSetCordon: func() { close(cordoned) }}
+	reg := admission.NewMemory()
+	scope := admission.ConfigCreateScope(7, "cfg-a")
+	lease, err := reg.Hold(context.Background(), scope, "create:inflight", admission.DefaultHoldTTL)
+	require.NoError(t, err)
+	defer lease.Release()
+
+	inventory := &gatedInventory{}
+	svc := newConfigDeleteService(repo, inventory)
+	svc.WithAdmission(reg)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- svc.Delete(context.Background(), 7, "cfg-a", false)
+	}()
+
+	select {
+	case <-cordoned:
+	case <-time.After(time.Second):
+		t.Fatal("Delete did not cordon while a create was still in flight")
+	}
+	time.Sleep(100 * time.Millisecond)
+	calls, _ := inventory.snapshot()
+	require.Zero(t, calls, "inventory must wait until the in-flight create is released")
+	inventory.release()
+	lease.Release()
+
+	select {
+	case err = <-errCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Delete did not return after the in-flight create finished")
+	}
+	var live *SandboxesStillLiveError
+	require.ErrorAs(t, err, &live)
+	require.Equal(t, 1, live.Inventory.SandboxCount)
+	calls, early := inventory.snapshot()
+	require.Equal(t, 1, calls)
+	require.Zero(t, early, "List ran only after the release")
+	require.False(t, repo.deleted)
+	require.NotContains(t, repo.events, "delete")
+	require.Equal(t, []string{"get", "cordon", "uncordon"}, repo.events)
+}
+
+func TestDeleteConfigTimesOutWhileACreateIsStillRunning(t *testing.T) {
+	repo := &fakeConfigRepo{entity: configA()}
+	reg := admission.NewMemory()
+	scope := admission.ConfigCreateScope(7, "cfg-a")
+	lease, err := reg.Hold(context.Background(), scope, "create:stuck", admission.DefaultHoldTTL)
+	require.NoError(t, err)
+	defer lease.Release()
+
+	client := &stubProviderClient{}
+	svc := newConfigDeleteService(repo, client)
+	svc.WithAdmission(reg)
+	svc.createDrainTimeout = 100 * time.Millisecond
+
+	err = svc.Delete(context.Background(), 7, "cfg-a", false)
+
+	require.ErrorIs(t, err, ErrSandboxConfigCreatesInFlight)
+	require.Zero(t, client.listCalls)
+	require.False(t, repo.deleted)
+	require.Equal(t, []string{"get", "cordon", "uncordon"}, repo.events)
+}
+
+func TestDeleteConfigCordonsBeforeInventoryAndUncordonsWhenLive(t *testing.T) {
+	fake := &fakeConfigRepo{entity: configA()}
+	var order []string
+	repo := orderConfigRepo{TenantSandboxConfigRepository: fake, order: &order}
+	provider := &recordingProvider{
+		summaries: []sandbox.RemoteSandboxSummary{userMachineOfConfigA("sb-user")},
+		order:     &order,
+	}
+	alloc := &recordingAlloc{}
+	svc := newConfigDeleteService(repo, provider)
+	svc.WithAllocationRepo(alloc)
+
+	err := svc.Delete(context.Background(), 7, "cfg-a", false)
+
+	var live *SandboxesStillLiveError
+	require.ErrorAs(t, err, &live)
+	require.Equal(t, []string{"SetCordon", "List", "ClearCordon"}, order)
+	require.False(t, fake.deleted)
+	require.Zero(t, alloc.calls)
+	require.Empty(t, provider.deleted)
+}
+
+func TestDeleteConfigKeepsTheConfigWhenTheRegistryCannotBeDropped(t *testing.T) {
+	fake := &fakeConfigRepo{entity: configA()}
+	dropErr := stderrors.New("registry down")
+	alloc := &recordingAlloc{err: dropErr}
+	svc := newConfigDeleteService(fake, &stubProviderClient{})
+	svc.WithAllocationRepo(alloc)
+
+	err := svc.Delete(context.Background(), 7, "cfg-a", false)
+
+	require.ErrorIs(t, err, dropErr)
+	require.Equal(t, 1, alloc.calls)
+	require.False(t, fake.deleted)
+	require.NotContains(t, fake.events, "delete")
+}
+
+func TestDeleteConfigDropsTheRegistryThenSoftDeletes(t *testing.T) {
+	fake := &fakeConfigRepo{entity: configA()}
+	var order []string
+	repo := orderConfigRepo{TenantSandboxConfigRepository: fake, order: &order}
+	provider := &recordingProvider{order: &order}
+	reg := recordingAdmission{Registry: admission.NewMemory(), order: &order}
+	alloc := &recordingAlloc{order: &order}
+	svc := newConfigDeleteService(repo, provider)
+	svc.WithAdmission(reg).WithAllocationRepo(alloc)
+
+	require.NoError(t, svc.Delete(context.Background(), 7, "cfg-a", false))
+	require.Equal(t, []string{
+		"SetCordon",
+		"Close(create)",
+		"List",
+		`DeleteUserMachinesByConfig(7,"cfg-a")`,
+		"SoftDelete",
+		"Seal(create)",
+		"ClearCordon",
+	}, order)
+	require.True(t, fake.deleted)
+	require.Equal(t, 1, provider.lists, "a drained delete does not sweep after the write")
+	require.Empty(t, provider.deleted)
+}
+
+func TestDeleteConfigSealsCreatesOnTheResolvedManager(t *testing.T) {
+	reg := admission.NewMemory()
+	client := &sealRemoteClient{}
+	cfg := sandbox.DefaultConfig()
+	cfg.Type = sandbox.SandboxTypeCube
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := sandbox.NewSessionBoundManager(sandbox.SessionBoundManagerConfig{
+		Config: cfg, Client: client, Store: sandbox.NewMemorySessionSandboxBindingStore(),
+		Checker: alwaysExistsChecker{}, SkipHealthProbe: true,
+		ConfigID: "cfg-a", ConfigTenantID: 7, Admission: reg,
+	})
+	require.NoError(t, err)
+	ctx := types.WithSandboxTenantID(context.Background(), 7)
+	_, err = mgr.ExecShellCommand(ctx, "sess-1", "echo hi", "", time.Second, nil)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), client.creates.Load())
+
+	svc := newConfigDeleteService(&fakeConfigRepo{entity: configA()}, &stubProviderClient{})
+	svc.WithAdmission(reg)
+	require.NoError(t, svc.Delete(ctx, 7, "cfg-a", false))
+
+	_, err = mgr.ExecShellCommand(ctx, "sess-2", "echo hi", "", time.Second, nil)
+	require.ErrorIs(t, err, sandbox.ErrSandboxConfigCordoned)
+	require.Equal(t, int32(1), client.creates.Load(), "a sealed config must not reach the provider")
+}
+
+func TestDeleteConfigRefreshesCordonBeforeTheLeaseLapses(t *testing.T) {
+	start := time.Date(2026, 10, 16, 3, 4, 5, 0, time.UTC)
+	fake := &fakeConfigRepo{entity: configA()}
+	repo := &countingRefresh{fakeConfigRepo: fake}
+	svc := newConfigDeleteService(repo, &stubProviderClient{})
+	svc.WithAdmission(admission.NewMemory())
+	svc.now = cordonClock(start)
+
+	require.NoError(t, svc.Delete(context.Background(), 7, "cfg-a", false))
+	require.Equal(t, 1, repo.calls)
+	require.True(t, repo.prev.Equal(start))
+	require.True(t, repo.next.Equal(start.Add(types.SandboxCordonLease/2)))
+	require.True(t, fake.deleted)
+	require.Contains(t, fake.events, "uncordon")
+}
+
+func TestDeleteConfigLeavesACordonOwnedBySomeoneElse(t *testing.T) {
+	start := time.Date(2026, 10, 16, 3, 4, 5, 0, time.UTC)
+	fake := &fakeConfigRepo{entity: configA()}
+	svc := newConfigDeleteService(loseRefresh{fakeConfigRepo: fake}, &stubProviderClient{})
+	svc.WithAdmission(admission.NewMemory())
+	svc.now = cordonClock(start)
+
+	err := svc.Delete(context.Background(), 7, "cfg-a", false)
+	require.ErrorIs(t, err, repository.ErrSandboxConfigCordoned)
+	require.False(t, fake.deleted)
+	require.NotContains(t, fake.events, "uncordon")
+	require.NotContains(t, fake.events, "delete")
+}
+
+func cordonClock(start time.Time) func() time.Time {
+	var n atomic.Int32
+	advanced := start.Add(types.SandboxCordonLease / 2)
+	return func() time.Time {
+		if n.Add(1) == 1 {
+			return start
+		}
+		return advanced
+	}
+}
+
+type countingRefresh struct {
+	*fakeConfigRepo
+	calls      int
+	prev, next time.Time
+}
+
+func (c *countingRefresh) RefreshCordon(
+	ctx context.Context, tenantID uint64, id string, previous, next time.Time,
+) error {
+	c.calls++
+	c.prev, c.next = previous, next
+	return c.fakeConfigRepo.RefreshCordon(ctx, tenantID, id, previous, next)
+}
+
+type loseRefresh struct {
+	*fakeConfigRepo
+}
+
+func (loseRefresh) RefreshCordon(context.Context, uint64, string, time.Time, time.Time) error {
+	return repository.ErrSandboxConfigCordoned
+}
+
+type alwaysExistsChecker struct{}
+
+func (alwaysExistsChecker) SessionExists(context.Context, sandbox.SessionSandboxKey) (bool, error) {
+	return true, nil
+}
+
+type sealRemoteClient struct {
+	creates atomic.Int32
+}
+
+func (c *sealRemoteClient) Provider() sandbox.RemoteProvider { return sandbox.SandboxTypeCube }
+func (c *sealRemoteClient) Capabilities() sandbox.RemoteSandboxCapabilities {
+	return sandbox.RemoteSandboxCapabilities{SupportsReconnect: true}
+}
+func (c *sealRemoteClient) Health(context.Context) error { return nil }
+func (c *sealRemoteClient) Create(context.Context, sandbox.RemoteCreateRequest) (sandbox.RemoteSandboxHandle, error) {
+	n := c.creates.Add(1)
+	return sealHandle{id: fmt.Sprintf("sb-%d", n)}, nil
+}
+
+func (c *sealRemoteClient) Connect(
+	_ context.Context, req sandbox.RemoteConnectRequest,
+) (sandbox.RemoteSandboxHandle, error) {
+	return sealHandle{id: req.SandboxID}, nil
+}
+
+func (c *sealRemoteClient) Get(context.Context, string) (*sandbox.RemoteSandboxSummary, error) {
+	return nil, nil
+}
+
+func (c *sealRemoteClient) List(context.Context, sandbox.RemoteListFilter) ([]sandbox.RemoteSandboxSummary, error) {
+	return nil, nil
+}
+func (c *sealRemoteClient) Delete(context.Context, string) error { return nil }
+func (c *sealRemoteClient) Exec(
+	context.Context, sandbox.RemoteSandboxHandle, sandbox.RemoteExecRequest,
+) (*sandbox.RemoteExecResult, error) {
+	return &sandbox.RemoteExecResult{}, nil
+}
+
+func (c *sealRemoteClient) WriteFile(context.Context, sandbox.RemoteSandboxHandle, string, []byte) error {
+	return nil
+}
+
+func (c *sealRemoteClient) ReadFile(context.Context, sandbox.RemoteSandboxHandle, string) ([]byte, error) {
+	return nil, nil
+}
+
+func (c *sealRemoteClient) ListDir(
+	context.Context, sandbox.RemoteSandboxHandle, string,
+) ([]sandbox.RemoteDirEntry, error) {
+	return nil, nil
+}
+
+func (c *sealRemoteClient) MakeDir(context.Context, sandbox.RemoteSandboxHandle, string) error {
+	return nil
+}
+
+func (c *sealRemoteClient) Remove(context.Context, sandbox.RemoteSandboxHandle, string) error {
+	return nil
+}
+
+func (c *sealRemoteClient) Stat(
+	context.Context, sandbox.RemoteSandboxHandle, string,
+) (*sandbox.RemoteStatEntry, error) {
+	return nil, nil
+}
+
+type sealHandle struct{ id string }
+
+func (h sealHandle) ID() string                       { return h.id }
+func (h sealHandle) Provider() sandbox.RemoteProvider { return sandbox.SandboxTypeCube }
+func (h sealHandle) Metadata() map[string]string      { return nil }
+
+// recordingReleaser stands in for WorkspaceCleaner.ReleaseMachine. busy
+// reports a terminal, desktop or command still registered on the machine.
+type recordingReleaser struct {
+	released []allocation.UserMachine
+	busy     bool
+}
+
+func (r *recordingReleaser) ReleaseMachine(_ context.Context, m allocation.UserMachine) (bool, error) {
+	if r.busy {
+		return false, nil
+	}
+	r.released = append(r.released, m)
+	return true, nil
+}
+
+// userMachineAllocRepo embeds the allocation repository and overrides only
+// the reads the admin list and release actions use.
+type userMachineAllocRepo struct {
+	interfaces.SandboxAllocationRepository
+	byDigest map[string]*types.SandboxUserMachine
+	byConfig []*types.SandboxUserMachine
+	live     map[string]int64
+}
+
+func (r userMachineAllocRepo) GetUserMachine(_ context.Context, digest string) (*types.SandboxUserMachine, error) {
+	return r.byDigest[digest], nil
+}
+
+func (r userMachineAllocRepo) ListUserMachinesByConfig(
+	context.Context, uint64, string,
+) ([]*types.SandboxUserMachine, error) {
+	return r.byConfig, nil
+}
+
+func (r userMachineAllocRepo) CountLiveAssignments(_ context.Context, digest string) (int64, error) {
+	return r.live[digest], nil
+}
+
+func TestReleaseUserMachineChecksConfigOwnershipAndBusy(t *testing.T) {
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{ID: "cfg-a", TenantID: 7}}
+	allocRepo := userMachineAllocRepo{byDigest: map[string]*types.SandboxUserMachine{
+		"d-1": {MachineDigest: "d-1", ConfigTenantID: 7, ConfigID: "cfg-a", OwnerID: "u-1", OwnerTenantID: 7},
+		"d-x": {MachineDigest: "d-x", ConfigTenantID: 7, ConfigID: "cfg-b", OwnerID: "u-1", OwnerTenantID: 7},
+	}}
+	svc := newTestConfigService(t, repo, nil, stubAgentRepo{})
+	rel := &recordingReleaser{}
+	svc.WithAllocationRepo(allocRepo).WithUserMachineReleaser(rel)
+
+	require.NoError(t, svc.ReleaseUserMachine(context.Background(), 7, "cfg-a", "d-1"))
+	require.Equal(t, []allocation.UserMachine{{
+		OwnerTenantID: 7, OwnerID: "u-1", ConfigTenantID: 7, ConfigID: "cfg-a",
+	}}, rel.released)
+	// A digest that belongs to another config is the same answer as a missing
+	// config: this file reports absence as a not-found AppError, not a sentinel.
+	err := svc.ReleaseUserMachine(context.Background(), 7, "cfg-a", "d-x")
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok)
+	require.Equal(t, http.StatusNotFound, appErr.HTTPCode)
+	require.Equal(t, "sandbox config not found", appErr.Message)
+	rel.busy = true
+	require.ErrorIs(t, svc.ReleaseUserMachine(context.Background(), 7, "cfg-a", "d-1"), ErrUserSandboxBusy)
+	require.Len(t, rel.released, 1, "a busy machine is not released")
+}
+
+func TestListUserMachinesHidesOtherWorkspacesAndClocksRetention(t *testing.T) {
+	empty := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 7,
+		Config: &types.TenantSandboxConfig{UserSandboxEmptyRetentionDays: 14},
+	}}
+	alloc := userMachineAllocRepo{
+		byConfig: []*types.SandboxUserMachine{
+			{
+				MachineDigest: "d-own", OwnerTenantID: 7, OwnerID: "u-1",
+				ConfigTenantID: 7, ConfigID: "cfg-a", EmptySince: &empty,
+			},
+			{
+				MachineDigest: "d-borrow", OwnerTenantID: 9, OwnerID: "secret-owner",
+				ConfigTenantID: 7, ConfigID: "cfg-a",
+			},
+		},
+		live: map[string]int64{"d-own": 2},
+	}
+	svc := newTestConfigService(t, repo, nil, stubAgentRepo{}).WithAllocationRepo(alloc)
+
+	got, err := svc.ListUserMachines(context.Background(), 7, "cfg-a")
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.Equal(t, "u-1", got[0].OwnerID)
+	require.EqualValues(t, 2, got[0].LiveSessions)
+	require.NotNil(t, got[0].ReclaimAfter)
+	require.True(t, got[0].ReclaimAfter.Equal(empty.Add(14*24*time.Hour)))
+	require.Empty(t, got[1].OwnerID, "a borrower from another workspace is not named")
+	require.Nil(t, got[1].EmptySince)
+	require.Nil(t, got[1].ReclaimAfter)
+}
+
+func TestListUserMachinesUsesDefaultRetentionWhenUnset(t *testing.T) {
+	empty := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 7,
+		Config: &types.TenantSandboxConfig{UserSandboxEmptyRetentionDays: 0},
+	}}
+	alloc := userMachineAllocRepo{byConfig: []*types.SandboxUserMachine{
+		{
+			MachineDigest: "d-1", OwnerTenantID: 7, OwnerID: "u-1",
+			ConfigTenantID: 7, ConfigID: "cfg-a", EmptySince: &empty,
+		},
+	}}
+	svc := newTestConfigService(t, repo, nil, stubAgentRepo{}).WithAllocationRepo(alloc)
+
+	got, err := svc.ListUserMachines(context.Background(), 7, "cfg-a")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.True(t, got[0].ReclaimAfter.Equal(empty.Add(7*24*time.Hour)))
+}
+
+func TestInventoryCountsUserMachinesSeparately(t *testing.T) {
+	svc := &TenantSandboxConfigService{}
+	inv := svc.inventoryFromSummaries(context.Background(), 7, "cfg-a", []sandbox.RemoteSandboxSummary{
+		{ID: "sb-1", Metadata: map[string]string{sandbox.MetadataSessionIDKey(): "s-1"}},
+		{ID: "sb-2", Metadata: map[string]string{sandbox.MetadataAllocationKey(): sandbox.MetadataAllocationUser}},
+	})
+	require.Equal(t, 2, inv.SandboxCount)
+	require.Equal(t, []string{"s-1"}, inv.SessionIDs)
+	require.Equal(t, 1, inv.UserSandboxCount)
+}

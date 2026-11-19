@@ -154,6 +154,8 @@ func TestImageEmbeddingNeedsBothTheModelAndTheEndpoint(t *testing.T) {
 		{"text model on the OpenAI shape", "openai", "text-embedding-3-small", nil, false},
 		{"generic endpoint, image input not declared", "generic", "my-clip", nil, false},
 		{"declared on a generic (vLLM) endpoint", "generic", "my-clip", declare, true},
+		{"declared on the OpenAI provider", "openai", "my-clip", declare, true},
+		{"declared on LiteLLM", "litellm", "my-clip", declare, true},
 		{
 			"declared, but the row switched to an object format without a field", "generic", "my-clip",
 			&types.ModelSpecOverride{
@@ -188,6 +190,35 @@ func TestImageEmbeddingNeedsBothTheModelAndTheEndpoint(t *testing.T) {
 // image both pass the chat template and the prompt ends in <|endoftext|>,
 // the token its last-token pooling reads. A plain `input` string skips the
 // template and lands in a different space from the images.
+// An OpenAI-compatible gateway has no image field of its own. Declaring
+// image input, and nothing else, must still send the picture: vLLM takes it
+// as a messages conversation. The text request stays on input.
+func TestDeclaredImageInputOnOpenAIGatewayUsesMessages(t *testing.T) {
+	up := newUpstream(t)
+	declare := &types.ModelSpecOverride{Input: []string{"text", "image"}}
+	e := imageEmbedder(t, up, "openai", "WeMM-Embedding-2B", "/v1", declare)
+	ie, ok := AsImageEmbedder(e)
+	require.True(t, ok)
+
+	_, err := e.BatchEmbed(context.Background(), []string{"bridge"})
+	require.NoError(t, err)
+	images, err := ie.BatchEmbedImages(context.Background(), pngs(1))
+	require.NoError(t, err)
+	assert.Equal(t, [][]float32{{1}}, images)
+
+	require.Len(t, up.requests, 2)
+	assert.Equal(t, map[string]any{
+		"model": "WeMM-Embedding-2B", "encoding_format": "float",
+		"input": []any{"bridge"},
+	}, up.requests[0].body)
+	assert.Equal(t, map[string]any{
+		"model": "WeMM-Embedding-2B", "encoding_format": "float",
+		"messages": []any{map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": pngs(1)[0].DataURI()}},
+		}}},
+	}, up.requests[1].body)
+}
+
 func TestSelfHostedQwen3VLEmbeddingSendsTextAndImagesThroughTheTemplate(t *testing.T) {
 	up := newUpstream(t)
 	e := imageEmbedder(t, up, "generic", "Qwen/Qwen3-VL-Embedding-8B", "/v1", nil)

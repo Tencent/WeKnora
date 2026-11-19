@@ -55,6 +55,9 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 		rt := extractRichText(block.RawContent)
 		text := renderRichText(rt)
 		b.WriteString(indent + text + "\n\n")
+		if len(block.Children) > 0 {
+			renderBlocks(b, block.Children, depth, attachments)
+		}
 
 	case "heading_1", "heading_2", "heading_3", "heading_4":
 		level := int(block.Type[len(block.Type)-1] - '0')
@@ -91,6 +94,9 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 			checkbox = "[x]"
 		}
 		b.WriteString(fmt.Sprintf("%s- %s %s\n", indent, checkbox, renderRichText(rt)))
+		if len(block.Children) > 0 {
+			renderBlocks(b, block.Children, depth+1, attachments)
+		}
 
 	case "toggle":
 		rt := extractRichText(block.RawContent)
@@ -103,7 +109,11 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 	case "code":
 		rt := extractRichText(block.RawContent)
 		lang := extractString(block.RawContent, "language")
-		b.WriteString(fmt.Sprintf("```%s\n%s\n```\n\n", lang, renderRichText(rt)))
+		// A Markdown tutorial can itself contain backtick fences. Use a
+		// longer outer fence so imported code cannot become document structure.
+		code := renderRichText(rt)
+		fence := backtickDelimiter(code, 3)
+		fmt.Fprintf(b, "%s%s\n%s\n%s\n\n", fence, lang, code, fence)
 
 	case "quote", "meeting_notes":
 		rt := extractRichText(block.RawContent)
@@ -141,7 +151,7 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 	case "image":
 		file, caption := extractFileAndCaption(block.RawContent)
 		url := file.GetURL()
-		b.WriteString(fmt.Sprintf("![%s](%s)\n\n", caption, url))
+		fmt.Fprintf(b, "![%s](%s)\n\n", caption, markdownDestinationEscaper.Replace(url))
 		if url != "" {
 			*attachments = append(*attachments, attachment{
 				URL:      url,
@@ -161,11 +171,11 @@ func renderBlock(b *strings.Builder, block notionBlock, depth int, attachments *
 		} else {
 			caption = url
 		}
-		b.WriteString(fmt.Sprintf("[%s](%s)\n\n", caption, url))
+		fmt.Fprintf(b, "[%s](%s)\n\n", caption, markdownDestinationEscaper.Replace(url))
 
 	case "embed":
 		url := extractString(block.RawContent, "url")
-		b.WriteString(fmt.Sprintf("[%s](%s)\n\n", url, url))
+		fmt.Fprintf(b, "[%s](%s)\n\n", url, markdownDestinationEscaper.Replace(url))
 
 	case "link_to_page":
 		// Render as a link; the actual page title is not available in block data
@@ -242,7 +252,7 @@ func renderMediaBlock(b *strings.Builder, block notionBlock, attachments *[]atta
 	if name == "" {
 		name = fileNameFromURL(url, block.Type)
 	}
-	b.WriteString(fmt.Sprintf("[%s](%s)\n\n", name, url))
+	fmt.Fprintf(b, "[%s](%s)\n\n", name, markdownDestinationEscaper.Replace(url))
 	if url != "" {
 		*attachments = append(*attachments, attachment{
 			URL:      url,
@@ -251,6 +261,12 @@ func renderMediaBlock(b *strings.Builder, block notionBlock, attachments *[]atta
 		})
 	}
 }
+
+// Markdown rows must stay on one physical line. Match CRLF first so it
+// produces a single break, and keep literal pipes inside their source cell.
+var tableCellReplacer = strings.NewReplacer(
+	"\r\n", "<br>", "\r", "<br>", "\n", "<br>", "|", "\\|",
+)
 
 // renderTable converts a table block (with table_row children) to Markdown.
 func renderTable(b *strings.Builder, block notionBlock) {
@@ -262,7 +278,7 @@ func renderTable(b *strings.Builder, block notionBlock) {
 		cells := extractTableCells(row.RawContent)
 		var parts []string
 		for _, cell := range cells {
-			parts = append(parts, strings.ReplaceAll(renderRichText(cell), "|", "\\|"))
+			parts = append(parts, tableCellReplacer.Replace(renderRichText(cell)))
 		}
 		b.WriteString("| " + strings.Join(parts, " | ") + " |\n")
 
@@ -278,6 +294,9 @@ func renderTable(b *strings.Builder, block notionBlock) {
 	b.WriteString("\n")
 }
 
+// Backslash-escape Markdown delimiters without changing the underlying URL.
+var markdownDestinationEscaper = strings.NewReplacer("\\", "\\\\", "(", "\\(", ")", "\\)")
+
 // --- Rich text rendering ---
 
 // renderRichText converts a slice of rich text elements to Markdown.
@@ -287,7 +306,7 @@ func renderRichText(texts []notionRichText) string {
 		text := richTextToString(rt)
 		text = applyAnnotations(text, rt.Annotations)
 		if rt.Href != "" && !rt.Annotations.Code {
-			text = fmt.Sprintf("[%s](%s)", text, rt.Href)
+			text = fmt.Sprintf("[%s](%s)", text, markdownDestinationEscaper.Replace(rt.Href))
 		}
 		b.WriteString(text)
 	}
@@ -341,13 +360,33 @@ func richTextToString(rt notionRichText) string {
 	}
 }
 
+func backtickDelimiter(code string, minLength int) string {
+	length, run := minLength, 0
+	for _, char := range code {
+		if char == '`' {
+			run++
+			length = max(length, run+1)
+		} else {
+			run = 0
+		}
+	}
+	return strings.Repeat("`", length)
+}
+
 // applyAnnotations wraps text with Markdown formatting based on annotations.
 func applyAnnotations(text string, ann notionAnnotations) string {
 	if text == "" {
 		return text
 	}
 	if ann.Code {
-		text = "`" + text + "`"
+		delimiter := backtickDelimiter(text, 1)
+		// CommonMark removes one space on each side of a nonblank span.
+		// Add a removable pair to separate edge backticks or preserve spaces.
+		if strings.HasPrefix(text, "`") || strings.HasSuffix(text, "`") ||
+			(strings.HasPrefix(text, " ") && strings.HasSuffix(text, " ") && strings.Trim(text, " ") != "") {
+			text = " " + text + " "
+		}
+		text = delimiter + text + delimiter
 	}
 	if ann.Bold && ann.Italic {
 		text = "***" + text + "***"

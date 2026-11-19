@@ -125,6 +125,39 @@ func TestPaginatePagesMergesRealPages(t *testing.T) {
 	require.Equal(t, int64(2), requests.Load())
 }
 
+func TestBlockChildrenPreservesContinuationCursor(t *testing.T) {
+	const cursor = "next+page&tag=%2F#end"
+	for _, tc := range []struct {
+		name string
+		list func(*notionClient, context.Context, string) ([]notionBlock, error)
+	}{
+		{"flat", (*notionClient).GetBlockChildrenFlat},
+		{"recursive", (*notionClient).GetBlockChildrenAll},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				query := r.URL.Query()
+				if !query.Has("start_cursor") {
+					writeListPage(w, `[{"id":"first"}]`, true, cursor)
+					return
+				}
+				if query.Get("start_cursor") != cursor || len(query) != 1 {
+					http.Error(w, "invalid continuation cursor", http.StatusBadRequest)
+					return
+				}
+				writeListPage(w, `[{"id":"second"}]`, false, "")
+			}))
+			defer server.Close()
+
+			blocks, err := tc.list(paginationTestClient(t, server), context.Background(), "parent")
+			require.NoError(t, err)
+			require.Len(t, blocks, 2)
+			require.Equal(t, "first", blocks[0].ID)
+			require.Equal(t, "second", blocks[1].ID)
+		})
+	}
+}
+
 // GetBlockChildrenFlat is the same cursor loop on the block endpoint and used
 // to spin the same way during resource discovery.
 func TestGetBlockChildrenFlatRejectsRepeatedCursor(t *testing.T) {
@@ -146,6 +179,82 @@ func TestGetBlockChildrenFlatRejectsRepeatedCursor(t *testing.T) {
 	require.Equal(t, int64(2), requests.Load(),
 		"the guard must reject the repeated cursor on the second page; err=%v", err)
 	require.Contains(t, err.Error(), `repeated next_cursor "same-cursor"`)
+}
+
+// GetBlockChildrenAll is the recursive sibling of GetBlockChildrenFlat and
+// carried the same unbounded cursor loop. Its own maxBlocksPerPage fallback
+// counts blocks already appended, so a vendor answering empty results with
+// has_more=true keeps that counter at zero forever and the loop never exits.
+func TestGetBlockChildrenAllRejectsRepeatedCursor(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) > fakeLoopBudget {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		writeListPage(w, `[]`, true, "same-cursor")
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err := paginationTestClient(t, server).GetBlockChildrenAll(ctx, "block-1")
+	require.Error(t, err)
+	require.Equal(t, int64(2), requests.Load(),
+		"the guard must reject the repeated cursor on the second page; err=%v", err)
+	require.Contains(t, err.Error(), `repeated next_cursor "same-cursor"`)
+}
+
+// A vendor that mints a fresh cursor for every empty page never repeats one, so
+// only the hop cap can end the recursive walk.
+func TestGetBlockChildrenAllStopsAtPaginationCap(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n := requests.Add(1)
+		if n > fakeLoopBudget {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		writeListPage(w, `[]`, true, fmt.Sprintf("cursor-%d", n))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	_, err := paginationTestClient(t, server).GetBlockChildrenAll(ctx, "block-1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "pagination exceeded 10000 pages")
+	require.Equal(t, int64(paginationHopCap), requests.Load())
+}
+
+// The recursive walk must still merge a genuinely multi-page listing.
+func TestGetBlockChildrenAllMergesRealPages(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.URL.Query().Get("start_cursor") == "" {
+			writeListPage(w, `[{"id":"block-1","type":"paragraph",`+
+				`"paragraph":{"rich_text":[{"type":"text","text":{"content":"one"},"plain_text":"one"}]}}]`,
+				true, "cursor-2")
+			return
+		}
+		writeListPage(w, `[{"id":"block-2","type":"paragraph",`+
+			`"paragraph":{"rich_text":[{"type":"text","text":{"content":"two"},"plain_text":"two"}]}}]`,
+			false, "")
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	blocks, err := paginationTestClient(t, server).GetBlockChildrenAll(ctx, "block-1")
+	require.NoError(t, err)
+	require.Len(t, blocks, 2)
+	require.Equal(t, "block-1", blocks[0].ID)
+	require.Equal(t, "block-2", blocks[1].ID)
+	require.Equal(t, int64(2), requests.Load())
 }
 
 // Data source queries page through queryDataSourceWindow since #3845, so the

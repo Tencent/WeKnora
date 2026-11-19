@@ -1019,6 +1019,14 @@ func (r *reaperConfigStore) ClearCordon(context.Context, uint64, string) error {
 	panic("ClearCordon is outside the reaper surface")
 }
 
+func (r *reaperConfigStore) RefreshCordon(context.Context, uint64, string, time.Time, time.Time) error {
+	panic("RefreshCordon is outside the reaper surface")
+}
+
+func (r *reaperConfigStore) ClearCordonIf(context.Context, uint64, string, time.Time) error {
+	panic("ClearCordonIf is outside the reaper surface")
+}
+
 type reaperSandboxResolver struct {
 	provider *reaperSnapshotProvider
 	// resolves counts provider constructions. Resolving builds a client, so a

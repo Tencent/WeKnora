@@ -277,6 +277,7 @@ import {
 import {
   buildClaudeCodeCommand,
   buildHttpClientSnippet,
+  buildVsCodeClientSnippet,
   buildMcpEndpointUrl,
   buildStdioBridgeSnippet,
   groupTools,
@@ -346,6 +347,7 @@ const connectSnippets = computed(() => {
   const url = endpointUrl(ep)
   return [
     { key: 'http', text: buildHttpClientSnippet(ep.name, url, freshToken.value, ep.id) },
+    { key: 'vscode', text: buildVsCodeClientSnippet(ep.name, url, freshToken.value, ep.id) },
     { key: 'claudeCode', text: buildClaudeCodeCommand(ep.name, url, freshToken.value, ep.id) },
     { key: 'stdio', text: buildStdioBridgeSnippet(ep.name, url, freshToken.value, ep.id) },
   ]
@@ -448,6 +450,7 @@ function openEdit(ep: McpEndpoint, step: 0 | 1 = 0, token = '') {
 function goToWizardStep(step: number) {
   if (step < 0 || step >= stepTitles.value.length) return
   if (step > 0 && !editing.value) return
+  if (step === 0 && wizardStep.value !== 0) void loadOptions()
   wizardStep.value = step
 }
 

@@ -69,6 +69,34 @@ func TestCountByModelID_KnowledgeBase(t *testing.T) {
 	assert.Equal(t, int64(1), count)
 }
 
+func TestQuestionModelUsageBlocksDeletionUntilUnbound(t *testing.T) {
+	ctx := context.Background()
+	db := setupModelUsageTestDB(t)
+	repo := NewKnowledgeBaseRepository(db)
+	kb := makeKB(nil)
+	kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{Enabled: false, ModelID: "questions"}
+	require.NoError(t, db.Create(kb).Error)
+	count, err := repo.CountByModelID(ctx, 1, "questions")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+	usages, err := repo.ListModelUsages(ctx, 1, "questions")
+	require.NoError(t, err)
+	require.Len(t, usages, 1)
+	require.Equal(t, []types.ModelUsageBinding{types.ModelUsageBindingQuestionModel}, usages[0].Bindings)
+	kb.SummaryModelID = "questions"
+	require.NoError(t, db.Save(kb).Error)
+	count, err = repo.CountByModelID(ctx, 1, "questions")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count, "one KB can reference a model in several roles")
+	require.NoError(t, db.Delete(kb).Error)
+	count, err = repo.CountByModelID(ctx, 1, "questions")
+	require.NoError(t, err)
+	require.Zero(t, count)
+	usages, err = repo.ListModelUsages(ctx, 1, "questions")
+	require.NoError(t, err)
+	require.Empty(t, usages)
+}
+
 func TestListModelUsages_KnowledgeBase(t *testing.T) {
 	ctx := context.Background()
 	db := setupModelUsageTestDB(t)

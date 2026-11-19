@@ -59,6 +59,7 @@ func browserRecoveryHint(method string, err *browserskill.RPCError) string {
 	if err.Code == "user_aborted" || err.Code == "cancelled" || err.Code == "task_paused" || err.Code == "timeout" {
 		return "Stop browser actions. Ask the user to complete any manual step and click Continue operation " +
 			"in the conversation browser preview, then continue in the same conversation. " +
+			"If BrowserSkill is stopped or held, first use Resume in its browser overlay to return control. " +
 			"A paused task does not require reconnection or pairing. The action may already have taken effect. " +
 			"Observe before acting; do not replay the interrupted action."
 	}
@@ -67,6 +68,23 @@ func browserRecoveryHint(method string, err *browserskill.RPCError) string {
 			"what remains; do not repeat the action blindly."
 	}
 	switch data.Reason {
+	case "last_tab_requires_placeholder":
+		return "The close was not sent. Call tab_create with url:about:blank and active:false, " +
+			"then cooperate action:sync with the original tab_id. Inspect its current state before " +
+			"calling tab_close with the returned context_id and observation_id. Session stop cleans up the blank tab."
+	case "cooperation_sync_required", "control_context_invalid", "document_changed",
+		"observation_required", "observation_changed":
+		return "Call cooperate with action:sync on the intended tab and inspect the returned evidence " +
+			"before choosing another action. Pass its actual context_id and, for scripts or untargeted " +
+			"actions, observation_id. If the user is operating the page, use action:wait first. " +
+			"Never attach a fresh receipt to an unexamined old action or replay an uncertain submission."
+	case "control_held", "human_intervention", "control_authority_required":
+		return "The user controls the page. Call cooperate with action:wait; while ready is false, " +
+			"do not act. After hand-back, sync and inspect what the person already completed before " +
+			"choosing the next action. Do not reconnect or automatically replay input."
+	case "precondition_failed":
+		return "An observed business fact changed. Inspect the expected and actual values and the " +
+			"current page before deciding again. Do not drop the expectation or retry the old action blindly."
 	case "ref_not_found":
 		return "Observe the current tab and retry the intended action once using its fresh ref. " +
 			"Do not guess another ref."

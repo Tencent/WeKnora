@@ -13,6 +13,15 @@ import (
 // so we can exercise the concurrency wrapper's slot lifecycle.
 type fakeChat struct{ id string }
 
+type idleStreamChat struct {
+	*fakeChat
+	stream <-chan types.StreamResponse
+}
+
+func (f *idleStreamChat) ChatStream(context.Context, []Message, *ChatOptions) (<-chan types.StreamResponse, error) {
+	return f.stream, nil
+}
+
 func (f *fakeChat) GetModelName() string { return f.id }
 func (f *fakeChat) GetModelID() string   { return f.id }
 
@@ -89,5 +98,61 @@ func TestConcurrencyChatStreamReleasesOnAbandon(t *testing.T) {
 		// released and reacquired successfully
 	case <-time.After(2 * time.Second):
 		t.Fatal("stream slot leaked: not released after consumer abandoned + cancelled")
+	}
+}
+
+func TestConcurrencyChatStreamReleasesWhileUpstreamIdle(t *testing.T) {
+	for _, afterChunk := range []bool{false, true} {
+		name := "before first chunk"
+		if afterChunk {
+			name = "between chunks"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Cleanup(func() { limiter.SetGovernor(nil, 0) })
+			limiter.SetGovernor(limiter.NewLocalLimiter(), 1)
+
+			// Keep the provider channel open across cancellation, as can happen
+			// while a provider or an inner stream decorator is stalled.
+			upstream := make(chan types.StreamResponse)
+			t.Cleanup(func() { close(upstream) })
+			ctx, cancel := context.WithCancel(types.WithBackgroundTask(context.Background()))
+			t.Cleanup(cancel)
+			w := &concurrencyChat{inner: &idleStreamChat{fakeChat: &fakeChat{id: "idle-model"}, stream: upstream}}
+			out, err := w.ChatStream(ctx, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if afterChunk {
+				upstream <- types.StreamResponse{Content: "partial"}
+				if got := <-out; got.Content != "partial" {
+					t.Fatalf("forwarded chunk = %+v", got)
+				}
+			}
+			stats, _, err := limiter.RuntimeStats(context.Background())
+			if err != nil || len(stats) != 1 || stats[0].Active != 1 {
+				t.Fatalf("live stream must hold one slot: stats=%+v, err=%v", stats, err)
+			}
+
+			cancel()
+			select {
+			case _, ok := <-out:
+				if ok {
+					t.Fatal("cancelled idle stream emitted another chunk")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("cancelled stream stayed open while upstream was idle")
+			}
+			stats, _, err = limiter.RuntimeStats(context.Background())
+			if err != nil || len(stats) != 1 || stats[0].Active != 0 {
+				t.Fatalf("cancelled stream leaked its slot: stats=%+v, err=%v", stats, err)
+			}
+
+			// A late upstream send must still drain so its producer can exit.
+			select {
+			case upstream <- types.StreamResponse{Content: "late"}:
+			case <-time.After(time.Second):
+				t.Fatal("late upstream chunk was not drained after cancellation")
+			}
+		})
 	}
 }

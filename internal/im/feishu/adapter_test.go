@@ -1,12 +1,16 @@
 package feishu
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/im"
+	"github.com/gin-gonic/gin"
 )
 
 func TestFeishuThreadID_ThreadedReply(t *testing.T) {
@@ -56,6 +60,84 @@ func TestFeishuMessageStruct_JSONFields(t *testing.T) {
 	}
 	if msg.MessageID != "" {
 		t.Errorf("MessageID zero value = %q, want empty", msg.MessageID)
+	}
+}
+
+func TestParseCallbackGroupMentionGate(t *testing.T) {
+	useTestHTTPClient(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0, "tenant_access_token": "test-token", "expire": 7200,
+			})
+		case "/open-apis/bot/v3/info":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0, "msg": "ok",
+				"bot": map[string]any{"open_id": "ou_this_bot"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	adapter, err := NewAdapter(testRegion(srv.URL), "app", "secret", "", "", "")
+	if err != nil {
+		t.Fatalf("NewAdapter: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name     string
+		mentions string
+		wantNil  bool
+	}{
+		{
+			name:     "no mention",
+			mentions: `[]`,
+			wantNil:  true,
+		},
+		{
+			name:     "mentions a different bot",
+			mentions: `[{"key":"@_user_1","mentioned_type":"bot","id":{"open_id":"ou_other_bot"}}]`,
+			wantNil:  true,
+		},
+		{
+			name:     "mentions this bot",
+			mentions: `[{"key":"@_user_1","mentioned_type":"bot","id":{"open_id":"ou_this_bot"}}]`,
+			wantNil:  false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"header":{"event_type":"im.message.receive_v1"},"event":{"message":{` +
+				`"message_id":"om_1","message_type":"text","chat_type":"group","chat_id":"oc_group",` +
+				`"content":"{\"text\":\"@_user_1 hello\"}","mentions":` + test.mentions + `}}}`
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+
+			got, err := adapter.ParseCallback(ctx)
+			if err != nil {
+				t.Fatalf("ParseCallback: %v", err)
+			}
+			if test.wantNil && got != nil {
+				t.Fatalf("ParseCallback() = %+v, want nil", got)
+			}
+			if !test.wantNil {
+				if got == nil {
+					t.Fatal("ParseCallback() returned nil, want message mentioning this bot")
+				}
+				if got.ChatType != im.ChatTypeGroup || got.Content != "hello" {
+					t.Fatalf("ParseCallback() = %+v, want group message with content \"hello\"", got)
+				}
+			}
+		})
 	}
 }
 

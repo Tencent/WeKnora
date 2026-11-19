@@ -49,7 +49,9 @@ func NewWikiReplaceTextTool(
 					"source_refs": {
 						"type": "array",
 						"items": {"type": "string"},
-						"description": "An optional list of short dN source document IDs that justify this change. If provided, these will COMPLETELY REPLACE the existing source_refs of the page."
+						"description": "An optional list of `+
+				`doc://N source document handles that justify this change. If provided, `+
+				`these will COMPLETELY REPLACE the existing source_refs of the page."
 					}
 				},
 				"required": ["slug", "old_text", "new_text"]
@@ -103,7 +105,7 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 	params.Slug = normalizedSlug
 
 	// Get the existing page
-	existingPage, _, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
+	existingPage, kbID, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Failed to fetch page %s: %v", params.Slug, err)}, nil
 	}
@@ -140,6 +142,7 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 		Output:  output,
 		Data: map[string]interface{}{
 			"display_type":      "wiki_replace_text",
+			"data_change":       wikiDataChange("replace_text", kbID),
 			"slug":              params.Slug,
 			"title":             existingPage.Title,
 			"old_text":          oldPreview,
@@ -147,4 +150,9 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 			"replacement_count": replacementCount,
 		},
 	}, nil
+}
+
+// ApprovalGrant scopes a session-wide approval to the run's knowledge bases.
+func (t *wikiReplaceTextTool) ApprovalGrant(ctx context.Context, _ json.RawMessage) (string, string) {
+	return wikiApprovalGrant(ctx, t.Name(), t.kbIDs)
 }

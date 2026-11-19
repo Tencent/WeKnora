@@ -84,23 +84,32 @@ func (r *memoryRepository) UpdateSubjectEnabled(
 	if _, err := r.EnsureSubject(ctx, scope); err != nil {
 		return err
 	}
-	return r.scoped(ctx, scope).
-		Model(&types.MemorySubject{}).
-		Updates(map[string]interface{}{"enabled": enabled, "updated_at": time.Now()}).Error
+	return r.withSubject(ctx, scope, func(tx *gorm.DB, subject *types.MemorySubject) error {
+		updates := map[string]interface{}{"enabled": enabled, "updated_at": time.Now()}
+		if subject.Enabled && !enabled {
+			// Opt-out invalidates in-flight models without deleting stored memories
+			// or advancing history. A later opt-in can claim the pending work again.
+			updates["extraction_state"] = types.MemoryExtractionState{Generation: uuid.NewString()}
+			updates["extract_scheduled_at"] = nil
+		}
+		return tx.Model(subject).Updates(updates).Error
+	})
 }
 
 func (r *memoryRepository) UpdateSubjectBlock(
 	ctx context.Context, scope interfaces.MemoryScope, block string, itemCount int,
 ) error {
-	now := time.Now()
-	return r.scoped(ctx, scope).
-		Model(&types.MemorySubject{}).
-		Updates(map[string]interface{}{
-			"block_text":       block,
-			"block_updated_at": now,
-			"item_count":       itemCount,
-			"updated_at":       now,
-		}).Error
+	return r.withSubjectMutation(ctx, scope, func(r *memoryRepository) error {
+		now := time.Now()
+		return r.scoped(ctx, scope).
+			Model(&types.MemorySubject{}).
+			Updates(map[string]interface{}{
+				"block_text":       block,
+				"block_updated_at": now,
+				"item_count":       itemCount,
+				"updated_at":       now,
+			}).Error
+	})
 }
 
 func (r *memoryRepository) CreateItem(ctx context.Context, item *types.MemoryItem) error {
@@ -317,23 +326,27 @@ func (r *memoryRepository) DeleteItem(
 func (r *memoryRepository) DeleteAll(
 	ctx context.Context, scope interfaces.MemoryScope,
 ) (int64, error) {
-	result := r.scoped(ctx, scope).Delete(&types.MemoryItem{})
-	return result.RowsAffected, result.Error
+	return subjectMutation(ctx, r, scope, func(r *memoryRepository) (int64, error) {
+		result := r.scoped(ctx, scope).Delete(&types.MemoryItem{})
+		return result.RowsAffected, result.Error
+	})
 }
 
 func (r *memoryRepository) TouchUsed(
 	ctx context.Context, scope interfaces.MemoryScope, ids []string,
 ) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	return r.scoped(ctx, scope).
-		Model(&types.MemoryItem{}).
-		Where("id IN ?", ids).
-		Updates(map[string]interface{}{
-			"last_used_at": time.Now(),
-			"use_count":    gorm.Expr("use_count + 1"),
-		}).Error
+	return r.withSubjectMutation(ctx, scope, func(r *memoryRepository) error {
+		if len(ids) == 0 {
+			return nil
+		}
+		return r.scoped(ctx, scope).
+			Model(&types.MemoryItem{}).
+			Where("id IN ?", ids).
+			Updates(map[string]interface{}{
+				"last_used_at": time.Now(),
+				"use_count":    gorm.Expr("use_count + 1"),
+			}).Error
+	})
 }
 
 // ArchiveLowestRanked keeps the `keep` best active items and archives the
@@ -343,58 +356,62 @@ func (r *memoryRepository) TouchUsed(
 func (r *memoryRepository) ArchiveLowestRanked(
 	ctx context.Context, scope interfaces.MemoryScope, keep int,
 ) (int64, error) {
-	if keep <= 0 {
-		return 0, nil
-	}
-	var survivors []string
-	err := r.scoped(ctx, scope).
-		Model(&types.MemoryItem{}).
-		Where("status = ?", types.MemoryStatusActive).
-		Order("importance DESC, COALESCE(last_used_at, valid_from) DESC, valid_from DESC").
-		Limit(keep).
-		Pluck("id", &survivors).Error
-	if err != nil {
-		return 0, err
-	}
-	query := r.scoped(ctx, scope).
-		Model(&types.MemoryItem{}).
-		Where("status = ?", types.MemoryStatusActive)
-	if len(survivors) > 0 {
-		query = query.Where("id NOT IN ?", survivors)
-	}
-	result := query.Updates(map[string]interface{}{
-		"status":     types.MemoryStatusArchived,
-		"updated_at": time.Now(),
+	return subjectMutation(ctx, r, scope, func(r *memoryRepository) (int64, error) {
+		if keep <= 0 {
+			return 0, nil
+		}
+		var survivors []string
+		err := r.scoped(ctx, scope).
+			Model(&types.MemoryItem{}).
+			Where("status = ?", types.MemoryStatusActive).
+			Order("importance DESC, COALESCE(last_used_at, valid_from) DESC, valid_from DESC").
+			Limit(keep).
+			Pluck("id", &survivors).Error
+		if err != nil {
+			return 0, err
+		}
+		query := r.scoped(ctx, scope).
+			Model(&types.MemoryItem{}).
+			Where("status = ?", types.MemoryStatusActive)
+		if len(survivors) > 0 {
+			query = query.Where("id NOT IN ?", survivors)
+		}
+		result := query.Updates(map[string]interface{}{
+			"status":     types.MemoryStatusArchived,
+			"updated_at": time.Now(),
+		})
+		return result.RowsAffected, result.Error
 	})
-	return result.RowsAffected, result.Error
 }
 
 func (r *memoryRepository) AddTombstone(
 	ctx context.Context, scope interfaces.MemoryScope, topic, fingerprint, sourceMessageID string,
 ) error {
-	if fingerprint == "" {
-		return nil
-	}
-	tombstone := &types.MemoryTombstone{
-		ID:              uuid.New().String(),
-		TenantID:        scope.TenantID,
-		SubjectID:       scope.SubjectID,
-		Topic:           topic,
-		Fingerprint:     fingerprint,
-		SourceMessageID: sourceMessageID,
-	}
-	err := r.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns: []clause.Column{
-				{Name: "tenant_id"}, {Name: "subject_id"}, {Name: "fingerprint"},
-			},
-			DoNothing: true,
-		}).
-		Create(tombstone).Error
-	if err != nil {
-		return err
-	}
-	return r.trimTombstones(ctx, scope)
+	return r.withSubjectMutation(ctx, scope, func(r *memoryRepository) error {
+		if fingerprint == "" {
+			return nil
+		}
+		tombstone := &types.MemoryTombstone{
+			ID:              uuid.New().String(),
+			TenantID:        scope.TenantID,
+			SubjectID:       scope.SubjectID,
+			Topic:           topic,
+			Fingerprint:     fingerprint,
+			SourceMessageID: sourceMessageID,
+		}
+		err := r.db.WithContext(ctx).
+			Clauses(clause.OnConflict{
+				Columns: []clause.Column{
+					{Name: "tenant_id"}, {Name: "subject_id"}, {Name: "fingerprint"},
+				},
+				DoNothing: true,
+			}).
+			Create(tombstone).Error
+		if err != nil {
+			return err
+		}
+		return r.trimTombstones(ctx, scope)
+	})
 }
 
 // trimTombstones keeps the list bounded. A rejection from long ago matters less
@@ -467,15 +484,17 @@ func (r *memoryRepository) HasTombstoneForMessage(
 func (r *memoryRepository) ExpireOverdue(
 	ctx context.Context, scope interfaces.MemoryScope,
 ) (int64, error) {
-	now := time.Now()
-	result := r.scoped(ctx, scope).
-		Model(&types.MemoryItem{}).
-		Where("status = ? AND expires_at IS NOT NULL AND expires_at <= ?", types.MemoryStatusActive, now).
-		Updates(map[string]interface{}{
-			"status":     types.MemoryStatusArchived,
-			"updated_at": now,
-		})
-	return result.RowsAffected, result.Error
+	return subjectMutation(ctx, r, scope, func(r *memoryRepository) (int64, error) {
+		now := time.Now()
+		result := r.scoped(ctx, scope).
+			Model(&types.MemoryItem{}).
+			Where("status = ? AND expires_at IS NOT NULL AND expires_at <= ?", types.MemoryStatusActive, now).
+			Updates(map[string]interface{}{
+				"status":     types.MemoryStatusArchived,
+				"updated_at": now,
+			})
+		return result.RowsAffected, result.Error
+	})
 }
 
 func (r *memoryRepository) UpsertItemEmbedding(
@@ -525,12 +544,14 @@ func (r *memoryRepository) UpsertItemEmbedding(
 func (r *memoryRepository) DeleteItemEmbedding(
 	ctx context.Context, scope interfaces.MemoryScope, itemID string,
 ) error {
-	if itemID == "" {
-		return nil
-	}
-	return r.scoped(ctx, scope).
-		Where("item_id = ?", itemID).
-		Delete(&types.MemoryItemEmbedding{}).Error
+	return r.withSubjectMutation(ctx, scope, func(r *memoryRepository) error {
+		if itemID == "" {
+			return nil
+		}
+		return r.scoped(ctx, scope).
+			Where("item_id = ?", itemID).
+			Delete(&types.MemoryItemEmbedding{}).Error
+	})
 }
 
 func (r *memoryRepository) ItemEmbeddings(
@@ -588,19 +609,23 @@ func (r *memoryRepository) ItemsMissingEmbeddings(
 func (r *memoryRepository) MarkConsolidated(
 	ctx context.Context, scope interfaces.MemoryScope,
 ) error {
-	now := time.Now()
-	return r.scoped(ctx, scope).
-		Model(&types.MemorySubject{}).
-		Updates(map[string]interface{}{"consolidated_at": now, "updated_at": now}).Error
+	return r.withSubjectMutation(ctx, scope, func(r *memoryRepository) error {
+		now := time.Now()
+		return r.scoped(ctx, scope).
+			Model(&types.MemorySubject{}).
+			Updates(map[string]interface{}{"consolidated_at": now, "updated_at": now}).Error
+	})
 }
 
 func (r *memoryRepository) MarkForcedConsolidated(
 	ctx context.Context, scope interfaces.MemoryScope,
 ) error {
-	now := time.Now()
-	return r.scoped(ctx, scope).
-		Model(&types.MemorySubject{}).
-		Updates(map[string]interface{}{"forced_consolidated_at": now, "updated_at": now}).Error
+	return r.withSubjectMutation(ctx, scope, func(r *memoryRepository) error {
+		now := time.Now()
+		return r.scoped(ctx, scope).
+			Model(&types.MemorySubject{}).
+			Updates(map[string]interface{}{"forced_consolidated_at": now, "updated_at": now}).Error
+	})
 }
 
 // BumpTopic counts one more sighting. The insert-then-increment shape keeps two
@@ -608,65 +633,67 @@ func (r *memoryRepository) MarkForcedConsolidated(
 func (r *memoryRepository) BumpTopic(
 	ctx context.Context, scope interfaces.MemoryScope, topic, normalizedKey, alias string,
 ) (*types.MemoryTopicStat, error) {
-	if normalizedKey == "" {
-		return nil, nil
-	}
-	now := time.Now()
-	stat := &types.MemoryTopicStat{
-		ID:            uuid.New().String(),
-		TenantID:      scope.TenantID,
-		SubjectID:     scope.SubjectID,
-		NormalizedKey: normalizedKey,
-		Topic:         topic,
-		Hits:          0,
-		LastSeenAt:    now,
-	}
-	err := r.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns: []clause.Column{
-				{Name: "tenant_id"}, {Name: "subject_id"}, {Name: "normalized_key"},
-			},
-			DoNothing: true,
-		}).
-		Create(stat).Error
-	if err != nil {
-		return nil, err
-	}
-	err = r.scoped(ctx, scope).
-		Model(&types.MemoryTopicStat{}).
-		Where("normalized_key = ?", normalizedKey).
-		Updates(map[string]interface{}{
-			"hits":         gorm.Expr("hits + 1"),
-			"last_seen_at": now,
-			"updated_at":   now,
-		}).Error
-	if err != nil {
-		return nil, err
-	}
-	var updated types.MemoryTopicStat
-	if err := r.scoped(ctx, scope).
-		Where("normalized_key = ?", normalizedKey).
-		First(&updated).Error; err != nil {
-		return nil, err
-	}
-
-	// Record the wording this sighting arrived as, so the same phrasing
-	// resolves by exact match next time instead of being re-adjudicated.
-	if alias != "" && !updated.Aliases.Has(alias) &&
-		types.NormalizeTopicKey(alias) != updated.NormalizedKey {
-		aliases := append(updated.Aliases, alias)
-		if len(aliases) > 12 {
-			aliases = aliases[len(aliases)-12:]
+	return subjectMutation(ctx, r, scope, func(r *memoryRepository) (*types.MemoryTopicStat, error) {
+		if normalizedKey == "" {
+			return nil, nil
 		}
-		if err := r.scoped(ctx, scope).
-			Model(&types.MemoryTopicStat{}).
-			Where("normalized_key = ?", normalizedKey).
-			Updates(map[string]interface{}{"aliases": aliases, "updated_at": now}).Error; err != nil {
+		now := time.Now()
+		stat := &types.MemoryTopicStat{
+			ID:            uuid.New().String(),
+			TenantID:      scope.TenantID,
+			SubjectID:     scope.SubjectID,
+			NormalizedKey: normalizedKey,
+			Topic:         topic,
+			Hits:          0,
+			LastSeenAt:    now,
+		}
+		err := r.db.WithContext(ctx).
+			Clauses(clause.OnConflict{
+				Columns: []clause.Column{
+					{Name: "tenant_id"}, {Name: "subject_id"}, {Name: "normalized_key"},
+				},
+				DoNothing: true,
+			}).
+			Create(stat).Error
+		if err != nil {
 			return nil, err
 		}
-		updated.Aliases = aliases
-	}
-	return &updated, nil
+		err = r.scoped(ctx, scope).
+			Model(&types.MemoryTopicStat{}).
+			Where("normalized_key = ?", normalizedKey).
+			Updates(map[string]interface{}{
+				"hits":         gorm.Expr("hits + 1"),
+				"last_seen_at": now,
+				"updated_at":   now,
+			}).Error
+		if err != nil {
+			return nil, err
+		}
+		var updated types.MemoryTopicStat
+		if err := r.scoped(ctx, scope).
+			Where("normalized_key = ?", normalizedKey).
+			First(&updated).Error; err != nil {
+			return nil, err
+		}
+
+		// Record the wording this sighting arrived as, so the same phrasing
+		// resolves by exact match next time instead of being re-adjudicated.
+		if alias != "" && !updated.Aliases.Has(alias) &&
+			types.NormalizeTopicKey(alias) != updated.NormalizedKey {
+			aliases := append(updated.Aliases, alias)
+			if len(aliases) > 12 {
+				aliases = aliases[len(aliases)-12:]
+			}
+			if err := r.scoped(ctx, scope).
+				Model(&types.MemoryTopicStat{}).
+				Where("normalized_key = ?", normalizedKey).
+				Updates(map[string]interface{}{"aliases": aliases, "updated_at": now}).Error; err != nil {
+				return nil, err
+			}
+			updated.Aliases = aliases
+		}
+		return &updated, nil
+	})
 }
 
 // RenameTopic gives a subject a better canonical label.
@@ -680,72 +707,76 @@ func (r *memoryRepository) BumpTopic(
 func (r *memoryRepository) RenameTopic(
 	ctx context.Context, scope interfaces.MemoryScope, oldKey, newKey, newLabel string,
 ) (bool, error) {
-	if oldKey == "" || newKey == "" || oldKey == newKey {
-		return false, nil
-	}
-
-	var clash int64
-	err := r.scoped(ctx, scope).
-		Model(&types.MemoryTopicStat{}).
-		Where("normalized_key = ?", newKey).
-		Count(&clash).Error
-	if err != nil {
-		return false, err
-	}
-	if clash > 0 {
-		return false, nil
-	}
-
-	var current types.MemoryTopicStat
-	if err := r.scoped(ctx, scope).
-		Where("normalized_key = ?", oldKey).
-		First(&current).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	return subjectMutation(ctx, r, scope, func(r *memoryRepository) (bool, error) {
+		if oldKey == "" || newKey == "" || oldKey == newKey {
 			return false, nil
 		}
-		return false, err
-	}
 
-	// The incoming wording was recorded as an alias before the rename decided
-	// to adopt it. Leaving it there would list the canonical label as an alias
-	// of itself.
-	aliases := make(types.MemoryTopicAliases, 0, len(current.Aliases)+1)
-	for _, alias := range current.Aliases {
-		if types.NormalizeTopicKey(alias) == newKey {
-			continue
+		var clash int64
+		err := r.scoped(ctx, scope).
+			Model(&types.MemoryTopicStat{}).
+			Where("normalized_key = ?", newKey).
+			Count(&clash).Error
+		if err != nil {
+			return false, err
 		}
-		aliases = append(aliases, alias)
-	}
-	if current.Topic != "" && !aliases.Has(current.Topic) {
-		aliases = append(aliases, current.Topic)
-	}
-	if len(aliases) > 12 {
-		aliases = aliases[len(aliases)-12:]
-	}
+		if clash > 0 {
+			return false, nil
+		}
 
-	err = r.scoped(ctx, scope).
-		Model(&types.MemoryTopicStat{}).
-		Where("normalized_key = ?", oldKey).
-		Updates(map[string]interface{}{
-			"topic":          newLabel,
-			"normalized_key": newKey,
-			"aliases":        aliases,
-			"updated_at":     time.Now(),
-		}).Error
-	if err != nil {
-		return false, err
-	}
-	return true, nil
+		var current types.MemoryTopicStat
+		if err := r.scoped(ctx, scope).
+			Where("normalized_key = ?", oldKey).
+			First(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return false, nil
+			}
+			return false, err
+		}
+
+		// The incoming wording was recorded as an alias before the rename decided
+		// to adopt it. Leaving it there would list the canonical label as an alias
+		// of itself.
+		aliases := make(types.MemoryTopicAliases, 0, len(current.Aliases)+1)
+		for _, alias := range current.Aliases {
+			if types.NormalizeTopicKey(alias) == newKey {
+				continue
+			}
+			aliases = append(aliases, alias)
+		}
+		if current.Topic != "" && !aliases.Has(current.Topic) {
+			aliases = append(aliases, current.Topic)
+		}
+		if len(aliases) > 12 {
+			aliases = aliases[len(aliases)-12:]
+		}
+
+		err = r.scoped(ctx, scope).
+			Model(&types.MemoryTopicStat{}).
+			Where("normalized_key = ?", oldKey).
+			Updates(map[string]interface{}{
+				"topic":          newLabel,
+				"normalized_key": newKey,
+				"aliases":        aliases,
+				"updated_at":     time.Now(),
+			}).Error
+		if err != nil {
+			return false, err
+		}
+		return true, nil
+	})
 }
 
 func (r *memoryRepository) MarkTopicPromoted(
 	ctx context.Context, scope interfaces.MemoryScope, normalizedKey string,
 ) error {
-	now := time.Now()
-	return r.scoped(ctx, scope).
-		Model(&types.MemoryTopicStat{}).
-		Where("normalized_key = ?", normalizedKey).
-		Updates(map[string]interface{}{"promoted_at": now, "updated_at": now}).Error
+	return r.withSubjectMutation(ctx, scope, func(r *memoryRepository) error {
+		now := time.Now()
+		return r.scoped(ctx, scope).
+			Model(&types.MemoryTopicStat{}).
+			Where("normalized_key = ?", normalizedKey).
+			Updates(map[string]interface{}{"promoted_at": now, "updated_at": now}).Error
+	})
 }
 
 // TopicByKey returns one subject's statistics, or nil when it is not tracked.
@@ -826,62 +857,68 @@ func (r *memoryRepository) ListUnpromotedTopics(
 func (r *memoryRepository) DeleteTopic(
 	ctx context.Context, scope interfaces.MemoryScope, id string,
 ) error {
-	return r.scoped(ctx, scope).Where("id = ?", id).Delete(&types.MemoryTopicStat{}).Error
+	return r.withSubjectMutation(ctx, scope, func(r *memoryRepository) error {
+		return r.scoped(ctx, scope).Where("id = ?", id).Delete(&types.MemoryTopicStat{}).Error
+	})
 }
 
 func (r *memoryRepository) DeleteAllTopics(
 	ctx context.Context, scope interfaces.MemoryScope,
 ) error {
-	return r.scoped(ctx, scope).Delete(&types.MemoryTopicStat{}).Error
+	return r.withSubjectMutation(ctx, scope, func(r *memoryRepository) error {
+		return r.scoped(ctx, scope).Delete(&types.MemoryTopicStat{}).Error
+	})
 }
 
 func (r *memoryRepository) BumpDocAffinity(
 	ctx context.Context, scope interfaces.MemoryScope, docs []types.MemoryDocAffinity,
 ) error {
-	now := time.Now()
-	for _, doc := range docs {
-		if doc.KnowledgeID == "" {
-			continue
+	return r.withSubjectMutation(ctx, scope, func(r *memoryRepository) error {
+		now := time.Now()
+		for _, doc := range docs {
+			if doc.KnowledgeID == "" {
+				continue
+			}
+			row := &types.MemoryDocAffinity{
+				ID:              uuid.New().String(),
+				TenantID:        scope.TenantID,
+				SubjectID:       scope.SubjectID,
+				KnowledgeID:     doc.KnowledgeID,
+				KnowledgeBaseID: doc.KnowledgeBaseID,
+				Title:           doc.Title,
+				Hits:            0,
+				LastUsedAt:      now,
+			}
+			if err := r.db.WithContext(ctx).
+				Clauses(clause.OnConflict{
+					Columns: []clause.Column{
+						{Name: "tenant_id"}, {Name: "subject_id"}, {Name: "knowledge_id"},
+					},
+					DoNothing: true,
+				}).
+				Create(row).Error; err != nil {
+				return err
+			}
+			updates := map[string]interface{}{
+				"hits":         gorm.Expr("hits + 1"),
+				"last_used_at": now,
+				"updated_at":   now,
+			}
+			if doc.Title != "" {
+				updates["title"] = doc.Title
+			}
+			if doc.KnowledgeBaseID != "" {
+				updates["knowledge_base_id"] = doc.KnowledgeBaseID
+			}
+			if err := r.scoped(ctx, scope).
+				Model(&types.MemoryDocAffinity{}).
+				Where("knowledge_id = ?", doc.KnowledgeID).
+				Updates(updates).Error; err != nil {
+				return err
+			}
 		}
-		row := &types.MemoryDocAffinity{
-			ID:              uuid.New().String(),
-			TenantID:        scope.TenantID,
-			SubjectID:       scope.SubjectID,
-			KnowledgeID:     doc.KnowledgeID,
-			KnowledgeBaseID: doc.KnowledgeBaseID,
-			Title:           doc.Title,
-			Hits:            0,
-			LastUsedAt:      now,
-		}
-		if err := r.db.WithContext(ctx).
-			Clauses(clause.OnConflict{
-				Columns: []clause.Column{
-					{Name: "tenant_id"}, {Name: "subject_id"}, {Name: "knowledge_id"},
-				},
-				DoNothing: true,
-			}).
-			Create(row).Error; err != nil {
-			return err
-		}
-		updates := map[string]interface{}{
-			"hits":         gorm.Expr("hits + 1"),
-			"last_used_at": now,
-			"updated_at":   now,
-		}
-		if doc.Title != "" {
-			updates["title"] = doc.Title
-		}
-		if doc.KnowledgeBaseID != "" {
-			updates["knowledge_base_id"] = doc.KnowledgeBaseID
-		}
-		if err := r.scoped(ctx, scope).
-			Model(&types.MemoryDocAffinity{}).
-			Where("knowledge_id = ?", doc.KnowledgeID).
-			Updates(updates).Error; err != nil {
-			return err
-		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func (r *memoryRepository) DocAffinity(
@@ -966,13 +1003,17 @@ func (r *memoryRepository) ListFamiliarDocs(
 func (r *memoryRepository) DeleteDocAffinity(
 	ctx context.Context, scope interfaces.MemoryScope, id string,
 ) error {
-	return r.scoped(ctx, scope).Where("id = ?", id).Delete(&types.MemoryDocAffinity{}).Error
+	return r.withSubjectMutation(ctx, scope, func(r *memoryRepository) error {
+		return r.scoped(ctx, scope).Where("id = ?", id).Delete(&types.MemoryDocAffinity{}).Error
+	})
 }
 
 func (r *memoryRepository) DeleteAllDocAffinity(
 	ctx context.Context, scope interfaces.MemoryScope,
 ) error {
-	return r.scoped(ctx, scope).Delete(&types.MemoryDocAffinity{}).Error
+	return r.withSubjectMutation(ctx, scope, func(r *memoryRepository) error {
+		return r.scoped(ctx, scope).Delete(&types.MemoryDocAffinity{}).Error
+	})
 }
 
 func (r *memoryRepository) CountActive(

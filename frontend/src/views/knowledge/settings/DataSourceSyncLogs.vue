@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getSyncLogs, type SyncLog, type SyncItemError } from '@/api/datasource'
+import { getSyncLogs, type SyncLog, type SyncItemError, type SyncDeletedItem } from '@/api/datasource'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 
 const props = defineProps<{
   dataSourceId: string
@@ -137,6 +138,21 @@ const FAILED_ITEMS_CAP = 50
 
 function failedItems(log: SyncLog): SyncItemError[] {
   return (log.result?.errors || []).slice(0, FAILED_ITEMS_CAP)
+}
+
+function deletedItems(log: SyncLog): SyncDeletedItem[] {
+  return (log.result?.deleted_items || []).slice(0, FAILED_ITEMS_CAP)
+}
+
+function deletedItemsCount(log: SyncLog): number {
+  return Math.max(log.items_deleted || 0, (log.result?.deleted_items || []).length)
+}
+
+function formatDeletedItem(item: SyncDeletedItem): string {
+  const title = (item.title || '').trim()
+  const id = (item.external_id || item.source_resource_id || '').trim()
+  if (title && id && title !== id) return `${title} (${id})`
+  return title || id
 }
 
 // Render one failure sample. The backend sends a stable i18n `code` (+ params)
@@ -284,6 +300,41 @@ const groupedLogs = computed(() => {
                 </div>
                 <div v-else-if="log.error_message" class="tl-error">
                   {{ log.error_message }}
+                </div>
+                <AssistantActionButton
+                  v-if="log.status === 'failed' || log.status === 'partial' || log.items_failed > 0"
+                  :label="t('assistant.actions.diagnose')"
+                  :query="t('assistant.prompts.syncFailure', { source: props.dataSourceName || props.dataSourceId, id: props.dataSourceId, log: log.id })"
+                  :selection="{
+                    field: t('datasource.syncHistory'),
+                    text: JSON.stringify({
+                      data_source_id: props.dataSourceId,
+                      sync_log_id: log.id,
+                      status: log.status,
+                      started_at: log.started_at,
+                      items_total: log.items_total,
+                      items_failed: log.items_failed,
+                      error_message: log.error_message.slice(0, 1000),
+                      error_samples: failedItems(log).slice(0, 5).map(e => formatSyncError(e).slice(0, 300)),
+                    }, null, 2),
+                  }" />
+
+                <!-- Per-item source deletions: which documents were deleted upstream. -->
+                <div v-if="deletedItems(log).length" class="tl-deleted">
+                  <div class="tl-deleted-title">
+                    {{ t('datasource.logDetail.deletedItems') }} ({{ deletedItemsCount(log) }})
+                  </div>
+                  <div
+                    v-for="(item, i) in deletedItems(log)"
+                    :key="i"
+                    class="tl-deleted-item"
+                    :title="formatDeletedItem(item)"
+                  >
+                    {{ formatDeletedItem(item) }}
+                  </div>
+                  <div v-if="deletedItemsCount(log) > deletedItems(log).length" class="tl-deleted-more">
+                    {{ t('datasource.logDetail.deletedItemsMore', { n: (deletedItemsCount(log) - deletedItems(log).length) }) }}
+                  </div>
                 </div>
 
                 <!-- Per-item failures: which documents failed and why.
@@ -557,22 +608,29 @@ const groupedLogs = computed(() => {
   word-break: break-word;
 }
 
-/* --- Per-item failure list --- */
-.tl-failed {
+/* --- Per-item failure / deletion lists --- */
+.tl-failed,
+.tl-deleted {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.tl-failed-title {
+.tl-failed-title,
+.tl-deleted-title {
   font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-error-color);
   margin-bottom: 2px;
 }
 
-.tl-failed-item {
+.tl-deleted-title {
+  color: var(--td-warning-color);
+}
+
+.tl-failed-item,
+.tl-deleted-item {
   font-size: var(--app-text-xs);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
@@ -584,7 +642,12 @@ const groupedLogs = computed(() => {
   white-space: nowrap;
 }
 
-.tl-failed-more {
+.tl-deleted-item {
+  border-left-color: var(--td-warning-color-3);
+}
+
+.tl-failed-more,
+.tl-deleted-more {
   font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   padding: 2px 8px;

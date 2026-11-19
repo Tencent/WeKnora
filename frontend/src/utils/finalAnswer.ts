@@ -89,26 +89,12 @@ export function normaliseForComparison(content: string): string {
 
 /**
  * Returns true when `thinking` and `answer` represent the same final answer
- * after normalisation. Tolerates small differences (≤2% length delta with
- * matching head/tail) to absorb chunk-boundary whitespace noise.
+ * after normalisation. Whitespace and answer wrappers are already handled
+ * above; differences in the remaining content must keep the thinking visible.
  */
 export function thinkingEqualsAnswer(thinking: string, answer: string): boolean {
   const a = normaliseForComparison(thinking);
   const b = normaliseForComparison(answer);
   if (!a || !b) return false;
-  if (a === b) return true;
-
-  const maxLen = Math.max(a.length, b.length);
-  // Require at least ~80 chars of signal to avoid matching trivial prefixes.
-  if (maxLen < 80) return false;
-
-  const lenDelta = Math.abs(a.length - b.length);
-  if (lenDelta > maxLen * 0.02) return false;
-
-  const head = 50;
-  const tail = 50;
-  return (
-    a.slice(0, head) === b.slice(0, head) &&
-    a.slice(-tail) === b.slice(-tail)
-  );
+  return a === b;
 }

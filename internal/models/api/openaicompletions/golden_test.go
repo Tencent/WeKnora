@@ -307,6 +307,48 @@ func TestGolden(t *testing.T) {
 			want: map[string]any{"enable_search": true, "temperature": 0.2},
 		},
 		{
+			name: "Isolated extra_body drops tools and tool_choice",
+			mutate: func(c *Config) {
+				c.Settings.ExtraBody = map[string]any{"tools": []any{"x"}, "tool_choice": "auto", "enable_search": true}
+			},
+			opts: &api.Options{Isolated: true},
+			want: map[string]any{"enable_search": true, "tools": nil, "tool_choice": nil},
+		},
+		{
+			name: "Isolated sends temperature 0 even when extra_body sets another",
+			mutate: func(c *Config) {
+				c.Settings.ExtraBody = map[string]any{"temperature": 0.9}
+			},
+			opts: &api.Options{Isolated: true},
+			want: map[string]any{"temperature": 0.0},
+		},
+		{
+			name: "Isolated sends temperature 0 even when the vendor pins one",
+			mutate: func(c *Config) {
+				one := 1.0
+				c.Settings.FixedTemperature = &one
+			},
+			opts: &api.Options{Isolated: true},
+			want: map[string]any{"temperature": 0.0},
+		},
+		{
+			name: "Isolated thinking model still omits temperature",
+			mutate: func(c *Config) {
+				c.Settings.SupportsTemperature = false
+				c.Settings.ExtraBody = map[string]any{"temperature": 0.9}
+			},
+			opts: &api.Options{Isolated: true},
+			want: map[string]any{"temperature": nil},
+		},
+		{
+			name: "ordinary temperature 0 stays unset so extra_body can supply one",
+			mutate: func(c *Config) {
+				c.Settings.ExtraBody = map[string]any{"temperature": 0.9}
+			},
+			opts: &api.Options{},
+			want: map[string]any{"temperature": 0.9},
+		},
+		{
 			name: "both caller budget aliases produce only the configured wire field",
 			opts: &api.Options{MaxTokens: 100, MaxCompletionTokens: 200},
 			want: map[string]any{"max_completion_tokens": float64(200), "max_tokens": nil},

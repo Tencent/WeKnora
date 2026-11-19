@@ -309,9 +309,30 @@ func (s *modelService) ListModels(ctx context.Context) ([]*types.Model, error) {
 		})
 		return nil, err
 	}
+	// GetModelByID is left alone: its result is written back by UpdateModel,
+	// and this overlay must never be persisted.
+	if settings := s.workspaceDefaultSettings(ctx, tenantID); settings != nil {
+		settings.ApplyModelDefaults(models)
+	}
 
 	logger.Infof(ctx, "Retrieved %d models successfully", len(models))
 	return models, nil
+}
+
+// workspaceDefaultSettings prefers the tenant the request already loaded and
+// reads it from storage for background contexts that carry only the ID.
+func (s *modelService) workspaceDefaultSettings(ctx context.Context, tenantID uint64) *types.DefaultSettings {
+	if tenant, ok := types.TenantInfoFromContext(ctx); ok && tenant.ID == tenantID {
+		return tenant.DefaultSettings
+	}
+	if s.tenantService == nil {
+		return nil
+	}
+	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
+	if err != nil || tenant == nil {
+		return nil
+	}
+	return tenant.DefaultSettings
 }
 
 // UpdateModel updates an existing model in the repository
@@ -755,9 +776,6 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 
 	return vlmModel, nil
 }
-
-// Note: default model selection logic has been removed; models no longer
-// maintain a per-type default flag at the service layer.
 
 // GetASRModel retrieves and initializes an automatic speech recognition model instance.
 func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR, error) {

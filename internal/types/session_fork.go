@@ -20,6 +20,10 @@ type SandboxCheckpoint struct {
 	SandboxID   string    `json:"sandbox_id"`
 	CommitSHA   string    `json:"commit_sha"`
 	CommittedAt time.Time `json:"committed_at"`
+	// BackgroundActive marks a commit taken while background work was live in
+	// the session. The work may have been mid-write, so fork and rewind never
+	// roll a workspace back to it.
+	BackgroundActive bool `json:"background_active,omitempty"`
 }
 
 // Value implements the driver.Valuer interface for database serialization.

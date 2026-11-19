@@ -40,7 +40,8 @@ ConfigResponse 为 `{id,name,description,sandbox_type,config,created_at,updated_
 | `desktop_enabled` | bool | 声明所选模板是 Cube/E2B 桌面模板；已安装技能后不能切换 |
 | `allow_private_endpoints` | bool | 允许私网集群地址，不放行 link-local/云元数据 |
 | `env_vars` | map[string]string | 该沙箱配置的环境，值加密保存 |
-| `skill_rollout` | string | next_turn（默认）/new_session |
+| `skill_rollout` | string | next_turn（默认）/new_session；`allocation_mode=user` 时不生效，已有共用机器始终保留当前镜像 |
+| `allocation_mode` | string | session（默认，每会话一台）/user（同一用户共用）；只影响首次分配，不迁移已有会话 |
 | `network` | object | Cube/E2B 网络策略，见下 |
 | `cube` / `e2b` / `docker` | object | 与 sandbox_type 对应的连接配置 |
 | `volume_mount` | object | 可选卷配置；后端能力决定是否生效，不能仅凭字段存在认定支持 |
@@ -161,6 +162,8 @@ curl -N "$BASE/api/v1/sandbox-configs/cfg-1/skills/skill-1/install-events" \
 进度载荷为 `{percent,stage,log?,status?,done}`。断开连接不取消安装；done 可能只是无法继续跟随进度，最终结果以技能 status 为准。无 Redis 时流提示改为轮询状态。transcript 的 204 表示安装刚开始、事件定位尚未准备；404 可表示无日志或日志已过期，不能据此判定安装失败。
 
 `GET /skills?sandbox_config_id=cfg-1` 返回可用于智能体的技能元数据 `{success,data:[{name,description}],skills_available}`，与管理员看到的全部安装记录不同。
+
+助手通过 `skill.list` 调用此接口，必须传入 `agent.get` 返回的 `sandbox_config_id`（可为空）；仅投影 `name`、`description` 和 `skills_available`，不暴露共享智能体查询参数或技能管理接口。空配置 ID 返回空列表且 `skills_available:false`，应提示用户在智能体编辑器选择沙箱；配置技能时使用返回的 `name`，不是安装记录 ID。
 
 同时传 `agent_id` 和 `agent_source_tenant_id`（共享智能体的来源空间 ID）时，列出该共享智能体可 @ 的技能：沙箱配置取自智能体本身，忽略查询中的 `sandbox_config_id`；智能体技能范围为 `selected` 时只返回指定技能，禁用时返回空列表且 `skills_available:false`。调用者无权使用该智能体时返回 403。
 

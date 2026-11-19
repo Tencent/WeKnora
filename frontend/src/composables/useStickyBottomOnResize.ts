@@ -12,6 +12,7 @@ import { onMounted, onUnmounted, type Ref } from 'vue'
 export function useStickyBottomOnResize(
   scrollContainer: Ref<HTMLElement | null>,
   userHasScrolledUp: Ref<boolean>,
+  onFollow?: () => void,
 ): void {
   let resizeObserver: ResizeObserver | null = null
 
@@ -25,6 +26,7 @@ export function useStickyBottomOnResize(
     // answer, then snaps it back on the next frame. Correct the scroll offset
     // now; changing scrollTop does not resize the observed content wrapper.
     container.scrollTop = container.scrollHeight
+    onFollow?.()
   }
 
   onMounted(() => {

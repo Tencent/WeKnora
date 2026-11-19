@@ -157,8 +157,8 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			serverTotal = total
 			accum = append(accum, chunks...)
 			if len(accum) >= opts.Limit {
+				truncated = len(accum) > opts.Limit || int64(len(accum)) < total
 				accum = accum[:opts.Limit]
-				truncated = true
 				break
 			}
 			if len(chunks) == 0 || int64(len(accum)) >= total {

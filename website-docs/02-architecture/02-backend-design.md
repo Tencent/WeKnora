@@ -2,6 +2,13 @@
 
 Go 后端以 Handler、Service、Repository 和基础设施分层组织请求处理，通过 uber/dig 装配依赖。`cmd/server` 负责启动与退出，`internal/` 实现路由鉴权、业务服务和存储访问。
 
+
+## 助手与任务运行模块
+
+`internal/agent/policy` 统一判断读取、探测、写入和破坏性操作；`agent_prompts` 与 `agent_run_suspensions` 保存可恢复的人工交互，`agent_grants` 保存有范围的授权。`agent_collaborations` 记录子智能体状态，自动化服务维护任务计划、运行和通知。后台 Shell 使用独立工作标识及等待、取消接口，不等同于交互终端进程。
+
+这些运行能力与普通文档入库队列各有职责，不能把恢复待审批状态理解成可重放任意外部写入。
+
 ## 分层架构 {#_1-分层架构}
 
 后端遵循经典的 **Handler → Service → Repository → 数据库** 四层结构，层间依赖全部通过接口（`internal/types/interfaces/`）解耦，由 DI 容器在启动时装配：
@@ -338,7 +345,7 @@ type AppError struct {
 
 ## 日志体系（internal/logger） {#_8-日志体系-internal-logger}
 
-- 基于 **logrus**，私有 `appLogger` 单例 + 自定义 Formatter（彩色终端输出；`LOG_FORMAT` 可用 `%d` `%level` `%traceId` `%msg` 等占位符自定义模板；`LOG_PATH` 设置后经 lumberjack 轮转写文件并剥离 ANSI 颜色码）；
+- 基于 **logrus**，私有 `appLogger` 单例 + 自定义 Formatter（彩色终端输出；`WEKNORA_LOG_FORMAT` 可用 `%d` `%level` `%traceId` `%msg` 等占位符自定义模板；`LOG_PATH` 设置后经 lumberjack 轮转写文件并剥离 ANSI 颜色码）；
 - **request_id 贯穿**：`middleware.RequestID` 写入 context → `logger.GetLogger(ctx)` 自动提取并注入 `request_id` 字段；常用出口为 `logger.Infof/Warnf/Errorf(ctx, format, ...)` 与 `ErrorWithFields`；
 - **LLM 调试日志**（`llm_logger.go`）：`LLM_DEBUG_LOG=true` 时启用，按 request_id 分文件记录每次 LLM 调用（`LLMCallRecord`：CallType Chat/Embedding/Rerank/VLM、模型、耗时、完整消息与工具调用、错误），7 天自动清理，用于排查提示词和上下文问题。
 

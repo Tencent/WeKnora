@@ -173,7 +173,7 @@ func ParseSQL(sql string) *SQLParseResult {
 	}
 
 	// Parse the SQL using pg_query_go
-	parseResult, err := pg_query.Parse(sql)
+	parseResult, err := parsePostgreSQL(sql)
 	if err != nil {
 		result.IsSelect = false
 		result.ParseError = fmt.Sprintf("Failed to parse SQL: %v", err)
@@ -733,7 +733,7 @@ func ValidateSQL(sql string, opts ...SQLValidationOption) (*SQLParseResult, *SQL
 	}
 
 	// Phase 2: Parse SQL using PostgreSQL's official parser
-	parseResult, err := pg_query.Parse(sql)
+	parseResult, err := parsePostgreSQL(sql)
 	if err != nil {
 		validationResult.Valid = false
 		validationResult.Errors = append(validationResult.Errors, SQLValidationError{
@@ -923,7 +923,7 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 	}
 
 	// Parse again to get normalized SQL
-	result, err := pg_query.Parse(sql)
+	result, err := parsePostgreSQL(sql)
 	if err != nil {
 		return "", validationResult, fmt.Errorf("failed to parse SQL: %v", err)
 	}
@@ -950,7 +950,7 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 				fragment = validator.injectHiddenKBFilter(fragment, tables)
 				fragment = validator.injectChunkEnabledFilter(fragment, tables)
 				fragment = validator.injectSearchScopeConditions(fragment, tables)
-				filters, err := pg_query.Parse(fragment)
+				filters, err := parsePostgreSQL(fragment)
 				if err != nil {
 					return fmt.Errorf("failed to build SQL security filter: %w", err)
 				}
@@ -974,7 +974,7 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 	if err != nil {
 		return "", validationResult, err
 	}
-	securedSQL, err := pg_query.Deparse(result)
+	securedSQL, err := deparsePostgreSQL(result)
 	if err != nil {
 		return "", validationResult, fmt.Errorf("failed to deparse secured SQL: %w", err)
 	}
@@ -1030,7 +1030,7 @@ func InjectAndConditions(sql, filter string) string {
 	if strings.TrimSpace(filter) == "" {
 		return sql
 	}
-	parsed, err := pg_query.Parse(sql)
+	parsed, err := parsePostgreSQL(sql)
 	if err != nil || len(parsed.Stmts) != 1 {
 		return ""
 	}
@@ -1038,7 +1038,7 @@ func InjectAndConditions(sql, filter string) string {
 	if stmt == nil || stmt.Op != pg_query.SetOperation_SETOP_NONE {
 		return ""
 	}
-	filters, err := pg_query.Parse("SELECT 1 WHERE " + filter)
+	filters, err := parsePostgreSQL("SELECT 1 WHERE " + filter)
 	if err != nil || len(filters.Stmts) != 1 {
 		return ""
 	}
@@ -1047,7 +1047,7 @@ func InjectAndConditions(sql, filter string) string {
 		return ""
 	}
 	addSQLPredicate(stmt, predicate.WhereClause)
-	out, err := pg_query.Deparse(parsed)
+	out, err := deparsePostgreSQL(parsed)
 	if err != nil {
 		return ""
 	}
@@ -1645,7 +1645,24 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 		if tc.TypeName != nil {
 			typeName := v.getTypeName(tc.TypeName)
 			if strings.HasPrefix(strings.ToLower(typeName), "pg_") {
-				return fmt.Errorf("casting to system type '%s' is not allowed", typeName)
+				// The parser qualifies standard scalar types (e.g. INTEGER) with pg_catalog.
+				switch typeName {
+				case "pg_catalog.int2", "pg_catalog.int4", "pg_catalog.int8",
+					"pg_catalog.float4", "pg_catalog.float8", "pg_catalog.numeric",
+					"pg_catalog.bool", "pg_catalog.bpchar", "pg_catalog.varchar", "pg_catalog.text",
+					"pg_catalog.date", "pg_catalog.time", "pg_catalog.timetz",
+					"pg_catalog.timestamp", "pg_catalog.timestamptz", "pg_catalog.interval":
+					if len(tc.TypeName.Names) != 2 {
+						return fmt.Errorf("casting to system type '%s' is not allowed", typeName)
+					}
+				default:
+					return fmt.Errorf("casting to system type '%s' is not allowed", typeName)
+				}
+			}
+			for _, modifier := range tc.TypeName.Typmods {
+				if err := v.validateNode(modifier, result); err != nil {
+					return err
+				}
 			}
 		}
 	}

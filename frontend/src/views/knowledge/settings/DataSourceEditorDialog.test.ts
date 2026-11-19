@@ -31,6 +31,7 @@ async function fixture({
   settings = { projects: [{ project_id: '123', paths: [] }] },
   resources = [],
   dataSource = null,
+  detailDataSource = null,
 }: {
   configured?: boolean
   create?: boolean
@@ -38,6 +39,7 @@ async function fixture({
   settings?: Record<string, unknown>
   resources?: any[]
   dataSource?: any
+  detailDataSource?: any
 } = {}) {
   const calls: Array<{ method: string; args: any[] }> = []
   const warnings: string[] = []
@@ -45,7 +47,7 @@ async function fixture({
   const api = {
     async validateCredentials(type: string, credentials: Record<string, string>) {
       calls.push({ method: 'validateCredentials', args: [type, { ...credentials }] })
-      if (credentials.access_token !== 'rotated-token') throw new Error('gitlab API /user: status 401')
+      if (type !== 'confluence' && credentials.access_token !== 'rotated-token') throw new Error('gitlab API /user: status 401')
     },
     async validateConnection(id: string) {
       calls.push({ method: 'validateConnection', args: [id] })
@@ -70,8 +72,25 @@ async function fixture({
     },
     async resolveResourceAncestors(id: string, ids: string[]) {
       calls.push({ method: 'resolveResourceAncestors', args: [id, ids] })
-      return { data: { ancestors: [] } }
+      const byId = new Map(resources.map((r: any) => [r.external_id, r]))
+      const ancestors: string[] = []
+      const seen = new Set<string>()
+      for (const rid of ids) {
+        for (let cur = byId.get(rid)?.parent_id; cur; cur = byId.get(cur)?.parent_id) {
+          if (!seen.has(cur)) {
+            seen.add(cur)
+            ancestors.push(cur)
+          }
+        }
+      }
+      return { data: { ancestors } }
     },
+    ...(detailDataSource ? {
+      async getDataSource(id: string) {
+        calls.push({ method: 'getDataSource', args: [id] })
+        return detailDataSource
+      },
+    } : {}),
   }
   const props = reactive({
     visible: false, kbId: 'kb-one',
@@ -258,6 +277,53 @@ test('Seafile requires a selection before the strategy step', async () => {
   } finally { f.close() }
 })
 
+test('Nextcloud declares an app password and requires an explicit root selection', async () => {
+  const f = await fixture({ create: true, resources: [
+    { external_id: '/', name: 'Nextcloud', type: 'directory', has_children: true },
+    { external_id: '/docs', name: 'docs', type: 'directory', parent_id: '/', has_children: true },
+  ] })
+  try {
+    const def = f.vm.connectorDefs.find((def: any) => def.type === 'nextcloud')
+    assert.ok(def?.available)
+    assert.equal(def.fields.find((field: any) => field.key === 'app_password')?.secret, true)
+    assert.deepEqual([...def.fields].map((field: any) => field.key), ['base_url', 'username', 'app_password'])
+    f.vm.selectType(def)
+    f.vm.form.config.credentials = {
+      base_url: 'https://nextcloud.example.com/cloud', username: 'alice', app_password: 'app-password-for-tests',
+    }
+    f.vm.form.config.settings = { include_extensions: '.pdf, .md', exclude_extensions: '.html' }
+    f.vm.step = 2
+    await f.vm.loadResources()
+    await f.vm.nextStep()
+    assert.equal(f.vm.step, 2)
+    assert.deepEqual(f.warnings, ['datasource.nextcloud.selectionRequired'])
+    await f.vm.ensureChildrenLoaded('/')
+    f.vm.toggleResource('/docs')
+    await f.vm.nextStep()
+    assert.equal(f.vm.step, 3)
+    assert.deepEqual([...f.vm.selectedResourceIds], ['/docs'])
+    assert.equal(f.vm.form.config.settings.include_extensions, '.pdf, .md')
+    assert.equal(f.vm.form.config.credentials.include_extensions, undefined)
+  } finally { f.close() }
+})
+
+test('unchecking a Nextcloud root clears saved descendants missing from the lazy tree', async () => {
+  const f = await fixture({ type: 'nextcloud', resources: [
+    { external_id: '/', name: 'Nextcloud', type: 'directory', has_children: true },
+  ], dataSource: {
+    id: 'source-one', name: 'Nextcloud', type: 'nextcloud',
+    credentials: { credentials: { configured: true } },
+    config: { resource_ids: ['/docs/vanished.pdf'], settings: {} },
+  } })
+  try {
+    f.vm.step = 2
+    await f.vm.loadResources()
+    f.vm.toggleResource('/')
+    f.vm.toggleResource('/')
+    assert.deepEqual([...f.vm.selectedResourceIds], [])
+  } finally { f.close() }
+})
+
 test('a vanished saved Seafile selection is cleared by unchecking its library', async () => {
   const f = await fixture({ resources: seafileResources, dataSource: {
     id: 'source-one', name: 'Seafile', type: 'seafile',
@@ -392,5 +458,384 @@ test('Cloud hierarchy limitation stays visible after an empty space expansion', 
     f.vm.resources = [{ ...f.vm.resources[0], has_children: false }]
     await nextTick()
     assert.equal(f.vm.visibleTree.some((row: any) => row.noticeAfter), true)
+  } finally { f.close() }
+})
+
+for (const type of ['feishu', 'lark', 'feishu_drive', 'lark_drive']) {
+  test(`${type} preserves inherited parse mode when saving unrelated settings`, async () => {
+    const settings = { timezone: 'Asia/Shanghai', resync_required: true }
+    const f = await fixture({ type, settings })
+    try {
+      assert.equal(f.vm.feishuParseMode, '')
+      assert.equal(f.vm.form.config.settings.parse_mode, undefined)
+      f.vm.form.name = 'Renamed source'
+      await f.vm.handleSubmit()
+      const saved = f.calls.find(call => call.method === 'updateDataSource')
+      assert.ok(saved)
+      assert.deepEqual(saved.args[1].config.settings, settings)
+      assert.equal('parse_mode' in settings, false, 'opening the editor must not mutate props')
+    } finally { f.close() }
+  })
+}
+
+test('Feishu explicit mode changes are saved without mutating the source configuration', async () => {
+  const settings = { parse_mode: 'export', timezone: 'Asia/Shanghai' }
+  const f = await fixture({ type: 'feishu', settings })
+  try {
+    assert.equal(f.vm.feishuParseMode, 'export')
+    f.vm.feishuParseMode = 'blocks'
+    assert.equal(settings.parse_mode, 'export')
+    assert.equal(f.vm.buildConfigPayload().settings.parse_mode, 'blocks')
+    f.vm.feishuParseMode = ''
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.buildConfigPayload().settings)), { timezone: 'Asia/Shanghai' })
+    assert.equal(settings.parse_mode, 'export')
+  } finally { f.close() }
+})
+
+test('new Feishu sources keep the blocks default and do not leak it to another connector', async () => {
+  const f = await fixture({ create: true })
+  try {
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'feishu'))
+    assert.equal(f.vm.feishuParseMode, 'blocks')
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'gitlab'))
+    assert.equal(f.vm.form.config.settings.parse_mode, undefined)
+  } finally { f.close() }
+})
+
+
+test('Confluence PAT permits connection testing and saving without Basic credentials', async () => {
+  const f = await fixture({ create: true, configured: false, settings: {} })
+  try {
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'confluence'))
+    f.vm.form.config.credentials = { edition: 'server', base_url: 'https://confluence.test/wiki', token: 'pat-value' }
+    await nextTick()
+    const fields = f.vm.displayedCredentialFields
+    assert.equal(fields.find((field: any) => field.key === 'token').secret, true)
+    assert.equal(fields.find((field: any) => field.key === 'username').optional, true)
+    assert.equal(fields.find((field: any) => field.key === 'password').optional, true)
+    assert.equal(fields.some((field: any) => field.key === 'api_token'), false)
+    await f.vm.testConnection()
+    assert.equal(f.vm.testResult, 'success')
+    assert.equal(f.calls.find(c => c.method === 'validateCredentials')?.args[1].token, 'pat-value')
+    await f.vm.loadResources()
+    const created = f.calls.find(c => c.method === 'createDataSource')?.args[0]
+    assert.equal(created.config.credentials.token, 'pat-value')
+    assert.equal(created.config.settings.token, undefined)
+    assert.deepEqual(f.warnings, [])
+  } finally { f.close() }
+})
+
+test('Confluence requires Basic credentials without a PAT and hides PAT in Cloud', async () => {
+  const f = await fixture({ type: 'confluence', configured: false, settings: {} })
+  try {
+    f.vm.form.config.credentials = { edition: 'server', base_url: 'https://confluence.test/wiki', token: '  ' }
+    await nextTick()
+    assert.equal(f.vm.displayedCredentialFields.find((field: any) => field.key === 'username').optional, false)
+    assert.equal(f.vm.displayedCredentialFields.find((field: any) => field.key === 'password').optional, false)
+    await f.vm.testConnection()
+    assert.equal(f.calls.some(c => c.method === 'validateCredentials'), false)
+    f.vm.form.config.credentials.edition = 'cloud'
+    f.vm.form.config.credentials.token = 'stale-server-token'
+    await nextTick()
+    assert.deepEqual(Array.from(f.vm.displayedCredentialFields, (field: any) => field.key), ['base_url', 'username', 'api_token'])
+    assert.equal(f.vm.displayedCredentialFields.find((field: any) => field.key === 'username').optional, false)
+  } finally { f.close() }
+})
+
+
+test('Confluence PAT replacement uses the credentials subresource and keeps the token out of settings', async () => {
+  const f = await fixture({ type: 'confluence', settings: { edition: 'server', base_url: 'https://confluence.test/wiki' } })
+  try {
+    f.vm.enterReplaceCredentials()
+    f.vm.form.config.credentials.token = 'replacement-pat'
+    await nextTick()
+    await f.vm.testConnection()
+    assert.equal(f.vm.testResult, 'success')
+    await f.vm.handleSubmit()
+    const replacement = f.calls.find(c => c.method === 'putDataSourceCredentials')
+    assert.equal(replacement?.args[1].token, 'replacement-pat')
+    const update = f.calls.find(c => c.method === 'updateDataSource')?.args[1]
+    assert.deepEqual(update.config.credentials, {})
+    assert.equal(update.config.settings.token, undefined)
+  } finally { f.close() }
+})
+
+test('a deleted Feishu node selection stays visible in the picker so the user can uncheck and save', async () => {
+  const spaceId = '7701598185524874545'
+  const deletedId = `${spaceId}:Ut8Gw3GsbiNIAnkNp2kcaZTpnAe`
+  const liveId = `${spaceId}:DocBNodeToken`
+  const f = await fixture({
+    type: 'feishu',
+    resources: [
+      { external_id: spaceId, name: '研发知识库', type: 'wiki_space', has_children: true },
+      { external_id: liveId, name: '文档 B', type: 'wiki_node', parent_id: spaceId, has_children: false },
+    ],
+    dataSource: {
+      id: 'ds-feishu-5633',
+      name: 'Feishu Wiki',
+      type: 'feishu',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: [deletedId, liveId], settings: { parse_mode: 'blocks' } },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+      latest_sync_log: {
+        id: 'log-2',
+        status: 'success',
+        result: {
+          deleted_items: [{
+            external_id: 'Ut8Gw3GsbiNIAnkNp2kcaZTpnAe',
+            source_resource_id: deletedId,
+            title: '文档 A',
+          }],
+        },
+      },
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    assert.equal(f.vm.step, 2)
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.unavailableResources)), [
+      { external_id: deletedId, label: '文档 A' },
+    ])
+    assert.equal(f.vm.resourceRowState(deletedId), 'checked')
+    assert.equal(f.vm.resourceRowState(liveId), 'checked')
+    assert.equal(f.vm.selectedResourceCount, 2)
+
+    // Unchecking the deleted node removes it from selectedResourceIds while
+    // keeping its row visible as unchecked until the drawer is saved.
+    f.vm.toggleResource(deletedId)
+    assert.equal(f.vm.resourceRowState(deletedId), 'unchecked')
+    assert.equal(f.vm.selectedResourceCount, 1)
+    assert.deepEqual([...f.vm.selectedResourceIds], [liveId])
+
+    await f.vm.nextStep()
+    await f.vm.handleSubmit()
+    const saved = f.calls.find(c => c.method === 'updateDataSource')?.args[1]
+    assert.deepEqual(saved.config.resource_ids, [liveId])
+  } finally { f.close() }
+})
+
+test('selecting a whole Feishu space subsumes vanished node selections under that space', async () => {
+  const spaceId = '7701598185524874545'
+  const deletedId = `${spaceId}:Ut8Gw3GsbiNIAnkNp2kcaZTpnAe`
+  const f = await fixture({
+    type: 'feishu',
+    resources: [
+      { external_id: spaceId, name: '研发知识库', type: 'wiki_space', has_children: true },
+    ],
+    dataSource: {
+      id: 'ds-feishu-space',
+      name: 'Feishu Wiki',
+      type: 'feishu',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: [deletedId], settings: {} },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    f.vm.toggleResource(spaceId)
+    assert.deepEqual([...f.vm.selectedResourceIds], [spaceId])
+    assert.equal(f.vm.resourceRowState(deletedId), 'unchecked')
+    assert.equal(f.vm.selectedResourceCount, 1)
+    // Clicking the superseded deleted row while the space is selected must not re-add it.
+    f.vm.toggleResource(deletedId)
+    assert.deepEqual([...f.vm.selectedResourceIds], [spaceId])
+    f.vm.toggleResource(spaceId)
+    assert.deepEqual([...f.vm.selectedResourceIds], [])
+    assert.equal(f.vm.selectedResourceCount, 0)
+  } finally { f.close() }
+})
+
+test('unavailable parent wiki node resolves its own title rather than a deleted child title', async () => {
+  const spaceId = '7701598185524874545'
+  const folderId = `${spaceId}:folderToken`
+  const f = await fixture({
+    type: 'feishu',
+    resources: [
+      { external_id: spaceId, name: '研发知识库', type: 'wiki_space', has_children: true },
+    ],
+    dataSource: {
+      id: 'ds-feishu-folder',
+      name: 'Feishu Wiki',
+      type: 'feishu',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: [folderId], settings: {} },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+      latest_sync_log: {
+        id: 'log-subtree',
+        status: 'success',
+        result: {
+          deleted_items: [
+            { external_id: 'a-child-token', source_resource_id: folderId, title: '子文档一' },
+            { external_id: 'folderToken', source_resource_id: folderId, title: '父目录文档' },
+          ],
+        },
+      },
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.unavailableResources)), [
+      { external_id: folderId, label: '父目录文档' },
+    ])
+  } finally { f.close() }
+})
+
+test('Confluence Cloud folder-limited spaces do not misclassify unexpanded live pages as unavailable', async () => {
+  const f = await fixture({
+    type: 'confluence',
+    resources: [
+      {
+        external_id: '101',
+        name: 'Engineering',
+        type: 'space',
+        has_children: true,
+        metadata: { hierarchy_limitation: 'cloud_top_level_containers' },
+      },
+    ],
+    dataSource: {
+      id: 'ds-conf-cloud',
+      name: 'Confluence Cloud',
+      type: 'confluence',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: ['page:101:999'], settings: { edition: 'cloud', base_url: 'https://team.atlassian.net/wiki' } },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.unavailableResources)), [])
+    assert.deepEqual([...f.vm.selectedResourceIds], ['page:101:999'])
+
+    // Selecting the whole space subsumes hidden/vanished page:<spaceId>:<pageId>
+    // selections instead of leaving stale page IDs alongside the space ID.
+    f.vm.toggleResource('101')
+    assert.deepEqual([...f.vm.selectedResourceIds], ['101'])
+    assert.equal(f.vm.selectedResourceCount, 1)
+    f.vm.toggleResource('101')
+    assert.deepEqual([...f.vm.selectedResourceIds], [])
+    assert.equal(f.vm.selectedResourceCount, 0)
+  } finally { f.close() }
+})
+
+test('selecting a DingTalk workspace or folder subsumes vanished child selections', async () => {
+  const wsId = 'ws-eng'
+  const folderId = 'dingtalk:v1?node=folder-1&workspace=ws-eng'
+  const vanishedDocId = 'dingtalk:v1?ancestor=folder-1&node=doc-deleted&workspace=ws-eng'
+  const f = await fixture({
+    type: 'dingtalk',
+    resources: [
+      { external_id: wsId, name: '研发空间', type: 'workspace', has_children: true },
+      { external_id: folderId, name: '架构目录', type: 'folder', parent_id: wsId, has_children: true },
+    ],
+    dataSource: {
+      id: 'ds-dingtalk-cover',
+      name: 'DingTalk',
+      type: 'dingtalk',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: [vanishedDocId], settings: {} },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    await f.vm.ensureChildrenLoaded(wsId)
+    f.vm.toggleResource(folderId)
+    assert.deepEqual([...f.vm.selectedResourceIds], [folderId])
+    assert.equal(f.vm.resourceRowState(wsId), 'indeterminate')
+    f.vm.toggleResource(wsId)
+    assert.deepEqual([...f.vm.selectedResourceIds], [])
+    f.vm.toggleResource(wsId)
+    assert.deepEqual([...f.vm.selectedResourceIds], [wsId])
+  } finally { f.close() }
+})
+
+test('editing a Feishu Drive source does not overwrite saved sub-selections before save', async () => {
+  const f = await fixture({
+    type: 'feishu_drive',
+    resources: [
+      { external_id: 'root-folder', name: '研发云盘', type: 'drive_folder', has_children: true },
+      { external_id: 'root-folder:sub', name: '架构子目录', type: 'folder', parent_id: 'root-folder', has_children: true },
+      { external_id: 'root-folder:shortcut-1', name: '快捷方式规范', type: 'shortcut', parent_id: 'root-folder:sub', has_children: false },
+    ],
+    dataSource: {
+      id: 'ds-drive-edit',
+      name: 'Feishu Drive',
+      type: 'feishu_drive',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: ['root-folder:shortcut-1'], settings: { parse_mode: 'blocks' } },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    await flush()
+    assert.equal(f.calls.some(c => c.method === 'updateDataSource'), false)
+    assert.deepEqual([...f.vm.selectedResourceIds], ['root-folder:shortcut-1'])
+  } finally { f.close() }
+})
+
+test('unavailable Feishu selection refreshes deleted item title when list snapshot was stale', async () => {
+  const spaceId = '7701598185524874545'
+  const deletedId = `${spaceId}:Ut8Gw3GsbiNIAnkNp2kcaZTpnAe`
+  const f = await fixture({
+    type: 'feishu',
+    resources: [
+      { external_id: spaceId, name: '研发知识库', type: 'wiki_space', has_children: true },
+    ],
+    dataSource: {
+      id: 'ds-feishu-stale',
+      name: 'Feishu Wiki',
+      type: 'feishu',
+      credentials: { credentials: { configured: true } },
+      config: { resource_ids: [deletedId], settings: { parse_mode: 'blocks' } },
+      sync_schedule: '0 0 */6 * * *',
+      sync_mode: 'incremental',
+      conflict_strategy: 'overwrite',
+      sync_deletions: true,
+    },
+    detailDataSource: {
+      id: 'ds-feishu-stale',
+      last_sync_result: {
+        deleted_items: [{
+          external_id: 'Ut8Gw3GsbiNIAnkNp2kcaZTpnAe',
+          source_resource_id: deletedId,
+          title: '文档 A.md',
+        }],
+      },
+    },
+  })
+  try {
+    await f.vm.nextStep()
+    await flush()
+    await flush()
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.unavailableResources)), [
+      { external_id: deletedId, label: '文档 A.md' },
+    ])
+    assert.ok(f.calls.some(c => c.method === 'getDataSource' && c.args[0] === 'ds-feishu-stale'))
   } finally { f.close() }
 })

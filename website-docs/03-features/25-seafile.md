@@ -2,6 +2,9 @@
 
 `seafile` 将一个 Seafile 资料库中勾选的目录和文件同步到知识库，支持定时、增量、断点续传和源端删除对账。兼容基线为 Seafile 社区版 Server 10.0.1（api2 接口）。通用同步流程见[数据源同步](10-datasource.md)。
 
+
+<Screenshot src="/screenshots/datasource-seafile.png" caption="Seafile 数据源：配置服务地址与 API 令牌" hint="展示 Seafile 数据源配置和资源树，隐藏 Token 与真实服务地址。" />
+
 ## 账号与 API Token
 
 使用一个能登录 Seafile、对目标资料库至少有只读权限的账号；同步范围以该账号的权限为准。凭据是该账号的用户 API Token，连接器只保存和使用 Token，不处理账号密码、SSO 登录或资料库专用令牌。

@@ -67,7 +67,7 @@ const (
 
 type CustomFormatter struct {
 	ForceColor bool   // 是否强制使用颜色，即使在非终端环境下
-	Template   string // 自定义日志格式模板，通过 LOG_FORMAT 环境变量配置，为空则使用内置默认格式
+	Template   string // 自定义日志格式模板，通过 WEKNORA_LOG_FORMAT 环境变量配置，为空则使用内置默认格式
 	// 模板占位符：%d=时间 %level=级别 %thread=goroutine %logger=caller %traceId=请求ID %msg=消息+结构化字段
 
 	// threadNeeded 缓存模板是否引用了 %thread，避免每条日志都调用一次 runtime.Stack。
@@ -233,7 +233,7 @@ func init() {
 }
 
 // ConfigureFromEnv 重新从环境变量应用日志配置。
-// 这允许在 main() 中加载 .env 后，让 LOG_LEVEL / LOG_PATH 立即生效。
+// 这允许在 main() 中加载 .env 后，让 LOG_LEVEL / LOG_PATH / WEKNORA_LOG_FORMAT 立即生效。
 func ConfigureFromEnv() {
 	loggerMu.Lock()
 	defer loggerMu.Unlock()
@@ -346,11 +346,30 @@ func resolveLogPathFromEnv() string {
 	return defaultMacAppLogPath()
 }
 
-// resolveLogFormatFromEnv 从环境变量 LOG_FORMAT 读取自定义日志格式模板。
-// 为空则使用内置默认格式；非空则作为模板，支持占位符：
+// resolveLogFormatFromEnv prefers WEKNORA_LOG_FORMAT, including an explicitly
+// empty value, and falls back to the deprecated LOG_FORMAT only when unset.
+// Nonempty templates must include %msg so configuration cannot hide log bodies.
+// 支持占位符：
 // %d=时间 %level=级别 %thread=goroutine %logger=caller %traceId=请求ID %msg=消息+结构化字段
 func resolveLogFormatFromEnv() string {
-	return strings.TrimSpace(os.Getenv("LOG_FORMAT"))
+	name := "WEKNORA_LOG_FORMAT"
+	raw, ok := os.LookupEnv(name)
+	if !ok {
+		name = "LOG_FORMAT"
+		raw = os.Getenv(name)
+	}
+	tmpl := strings.TrimSpace(raw)
+	if tmpl == "" {
+		return ""
+	}
+	if !strings.Contains(tmpl, "%msg") {
+		fmt.Fprintf(os.Stderr, "logger: %s must contain %%msg; using the default log format\n", name)
+		return ""
+	}
+	if name == "LOG_FORMAT" {
+		fmt.Fprintln(os.Stderr, "logger: LOG_FORMAT is deprecated; use WEKNORA_LOG_FORMAT instead")
+	}
+	return tmpl
 }
 
 func defaultMacAppLogPath() string {

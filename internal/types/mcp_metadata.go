@@ -23,20 +23,28 @@ var (
 	ErrMCPMetadataInvalidTools = errors.New("MCP directory contains empty or duplicate tool names")
 )
 
+// MCPServerInfo is the server identity an MCP initialize reported for a
+// directory, kept so a later connection can tell whether the server changed.
+type MCPServerInfo struct {
+	Name        string
+	Version     string
+	Description string
+}
+
 // MCPMetadata is a complete, explicitly synchronized directory. OAuth snapshots
 // are scoped to the authorizing principal; they must never become tenant-wide.
 type MCPMetadata struct {
 	TenantID          uint64     `json:"-"                  gorm:"primaryKey;autoIncrement:false"`
-	ServiceID         string     `json:"service_id"         gorm:"primaryKey;type:varchar(36)"`
+	ServiceID         string     `json:"service_id"         gorm:"primaryKey;type:varchar(36)" extensions:"x-agent=mcp_service_id"`
 	Principal         string     `json:"-"                  gorm:"primaryKey;type:varchar(255)"`
 	ConfigFingerprint string     `json:"-"                  gorm:"type:varchar(64);not null"`
-	Tools             []*MCPTool `json:"tools"              gorm:"serializer:json;type:jsonb;not null"`
+	Tools             []*MCPTool `json:"tools"              gorm:"serializer:json;type:jsonb;not null" extensions:"x-agent"`
 	Instructions      string     `json:"instructions"       gorm:"type:text"`
-	ServerName        string     `json:"server_name"`
-	ServerVersion     string     `json:"server_version"`
+	ServerName        string     `json:"server_name" extensions:"x-agent"`
+	ServerVersion     string     `json:"server_version" extensions:"x-agent"`
 	ServerDescription string     `json:"server_description" gorm:"type:text"`
-	SyncedAt          time.Time  `json:"synced_at"`
-	Stale             bool       `json:"stale"              gorm:"-"`
+	SyncedAt          time.Time  `json:"synced_at" extensions:"x-agent"`
+	Stale             bool       `json:"stale"              gorm:"-" extensions:"x-agent"`
 }
 
 // MCPMetadataSummary is the list-card view of a snapshot: counts only, no tool payloads.

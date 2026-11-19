@@ -37,7 +37,8 @@ type MetasoProvider struct {
 	scope   string
 }
 
-func NewMetasoProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+// NewMetasoProvider creates a Metaso web-search client from saved parameters.
+func NewMetasoProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if err := ValidateMetasoParameters(params); err != nil {
 		return nil, err
 	}
@@ -71,8 +72,10 @@ func metasoScope(extraConfig map[string]string) string {
 
 func (p *MetasoProvider) Name() string { return "metaso" }
 
-func (p *MetasoProvider) Search(ctx context.Context, query string, maxResults int, includeDate bool) ([]*types.WebSearchResult, error) {
-	query = strings.TrimSpace(query)
+// Search queries the Metaso API and converts its results to WeKnora's format.
+func (p *MetasoProvider) Search(ctx context.Context, request types.WebSearchRequest) ([]*types.WebSearchResult, error) {
+	maxResults, includeDate := request.MaxResults, request.IncludeDate
+	query := strings.TrimSpace(request.Query)
 	if query == "" {
 		return nil, fmt.Errorf("query is empty")
 	}
@@ -167,10 +170,8 @@ func metasoHTTPError(statusCode int, body []byte) error {
 			return fmt.Errorf("Metaso API returned status %d: %s", statusCode, detail)
 		}
 	}
-	detail := strings.TrimSpace(string(body))
-	if len(detail) > 4096 {
-		detail = detail[:4096]
-	}
+	detail := errorPreviewString(body)
+
 	if detail == "" {
 		return fmt.Errorf("Metaso API returned status %d", statusCode)
 	}

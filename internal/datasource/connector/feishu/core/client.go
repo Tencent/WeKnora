@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -44,6 +45,41 @@ const maxJSONResponseBytes = 16 << 20
 // errResponseTooLarge marks a body over the cap. It is deterministic: the same
 // request returns the same oversized body, so callers must not retry it.
 var errResponseTooLarge = errors.New("response exceeds maximum size")
+
+const (
+	// feishuErrCodeWikiNotFound is Feishu Wiki's "not found" error code
+	// (e.g. "not found: node has been deleted", "node not found").
+	feishuErrCodeWikiNotFound = 131005
+	// feishuErrCodeDriveNotFound is Feishu Drive's "not found" error code.
+	feishuErrCodeDriveNotFound = 1061003
+)
+
+type feishuAPIError struct {
+	statusCode int
+	code       int
+	body       string
+}
+
+func newFeishuAPIError(statusCode int, respBody []byte) error {
+	var apiResp ApiResponse
+	_ = json.Unmarshal(respBody, &apiResp)
+	return &feishuAPIError{
+		statusCode: statusCode,
+		code:       apiResp.Code,
+		body:       string(respBody),
+	}
+}
+
+func (e *feishuAPIError) Error() string {
+	return fmt.Sprintf("feishu api error: status=%d body=%s", e.statusCode, e.body)
+}
+
+func (e *feishuAPIError) Unwrap() error {
+	if e.code == feishuErrCodeWikiNotFound || e.code == feishuErrCodeDriveNotFound {
+		return datasource.ErrResourceNotFound
+	}
+	return nil
+}
 
 // readCapped reads a response body, refusing anything larger than limit instead
 // of buffering it. Oversized payloads are reported as an error: a truncated
@@ -151,16 +187,8 @@ func (c *Client) GetTenantAccessToken(ctx context.Context) (string, error) {
 	}
 	c.tokenExpAt = time.Now().Add(ttl)
 
-	prefixLen := 8
-	if len(result.TenantAccessToken) < prefixLen {
-		prefixLen = len(result.TenantAccessToken)
-	}
-	suffixLen := 4
-	if len(result.TenantAccessToken) < suffixLen {
-		suffixLen = len(result.TenantAccessToken)
-	}
-	logger.Infof(ctx, "[Feishu] got tenant_access_token: %s...%s expire=%ds",
-		result.TenantAccessToken[:prefixLen], result.TenantAccessToken[len(result.TenantAccessToken)-suffixLen:], result.Expire)
+	// Never log token material: even a prefix/suffix narrows the bearer credential.
+	logger.Infof(ctx, "[Feishu] tenant access token refreshed expire=%ds", result.Expire)
 
 	return c.tokenCache, nil
 }
@@ -203,8 +231,16 @@ const (
 const maxFeishuErrorPreviewBytes = 4 << 10
 
 // maxFeishuDownloadBytes bounds a single file download to protect the sync
-// worker from adversarial or pathological oversized responses.
-const maxFeishuDownloadBytes = 512 * 1024 * 1024 // 512 MB
+// worker from adversarial or pathological oversized responses. downloadRawBytes
+// rejects early on an honest Content-Length, and tests exercise the
+// oversize-degrade path by declaring a huge Content-Length.
+const maxFeishuDownloadBytes = int64(512 * 1024 * 1024) // 512 MB
+
+// ErrDownloadTooLarge marks a download rejected by the maxFeishuDownloadBytes
+// cap (errors.Is-able). The connector degrades oversized attachments to an
+// inline Markdown placeholder instead of an error item — the file exists and is
+// fine, it just doesn't fit the sync budget.
+var ErrDownloadTooLarge = errors.New("download exceeds max size")
 
 var feishuRetryBackoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 
@@ -314,7 +350,7 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("feishu api error: status=%d body=%s", resp.StatusCode, string(respBody))
+			return newFeishuAPIError(resp.StatusCode, respBody)
 		}
 
 		if result != nil {
@@ -349,7 +385,14 @@ func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	// Back off to a rune boundary: a partial multi-byte rune is invalid UTF-8,
+	// and this preview reaches sync_logs / data_sources through the sync error
+	// message, which PostgreSQL rejects. Same rule as #4555.
+	cut := maxLen
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }
 
 // ListWikiSpaces returns all wiki spaces accessible to the app.
@@ -361,7 +404,7 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 	for {
 		path := "/open-apis/wiki/v2/spaces?page_size=50"
 		if pageToken != "" {
-			path += "&page_token=" + pageToken
+			path += "&page_token=" + url.QueryEscape(pageToken)
 		}
 
 		var resp WikiSpaceListResponse
@@ -380,8 +423,11 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 
 		allSpaces = append(allSpaces, resp.Data.Items...)
 
-		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+		if !resp.Data.HasMore {
 			break
+		}
+		if resp.Data.PageToken == "" {
+			return nil, fmt.Errorf("feishu wiki space pagination: has_more=true with a missing page token")
 		}
 		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
 			return nil, fmt.Errorf("feishu wiki space pagination repeated page token %q", resp.Data.PageToken)
@@ -407,7 +453,7 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			path += "&parent_node_token=" + parentNodeToken
 		}
 		if pageToken != "" {
-			path += "&page_token=" + pageToken
+			path += "&page_token=" + url.QueryEscape(pageToken)
 		}
 
 		var resp WikiNodeListResponse
@@ -415,6 +461,12 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			return nil, fmt.Errorf("list wiki nodes: %w", err)
 		}
 		if resp.Code != 0 {
+			if resp.Code == feishuErrCodeWikiNotFound {
+				return nil, fmt.Errorf(
+					"list wiki nodes error: code=%d msg=%s: %w",
+					resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+				)
+			}
 			return nil, fmt.Errorf("list wiki nodes error: code=%d msg=%s", resp.Code, resp.Msg)
 		}
 
@@ -428,8 +480,11 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			allNodes = append(allNodes, node)
 		}
 
-		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+		if !resp.Data.HasMore {
 			break
+		}
+		if resp.Data.PageToken == "" {
+			return nil, fmt.Errorf("feishu wiki node pagination: has_more=true with a missing page token")
 		}
 		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
 			return nil, fmt.Errorf("feishu wiki node pagination repeated page token %q", resp.Data.PageToken)
@@ -450,6 +505,12 @@ func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken stri
 		return WikiNode{}, fmt.Errorf("get wiki node: %w", err)
 	}
 	if resp.Code != 0 {
+		if resp.Code == feishuErrCodeWikiNotFound {
+			return WikiNode{}, fmt.Errorf(
+				"get wiki node error: code=%d msg=%s: %w",
+				resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+			)
+		}
 		return WikiNode{}, fmt.Errorf("get wiki node error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
@@ -826,10 +887,17 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
 		}
 
+		// Early reject on an honest Content-Length: avoids buffering a
+		// hopeless 512 MB body just to hit the LimitReader check below.
+		if resp.ContentLength > maxFeishuDownloadBytes {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("%w (Content-Length %d): %s", ErrDownloadTooLarge, resp.ContentLength, path)
+		}
+
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxFeishuDownloadBytes+1))
 		if readErr == nil && int64(len(data)) > maxFeishuDownloadBytes {
 			resp.Body.Close()
-			return nil, fmt.Errorf("download exceeds max size (%d bytes): %s", maxFeishuDownloadBytes, path)
+			return nil, fmt.Errorf("%w (%d bytes): %s", ErrDownloadTooLarge, maxFeishuDownloadBytes, path)
 		}
 		resp.Body.Close()
 		if readErr != nil {
@@ -885,6 +953,12 @@ func (c *Client) listDriveFiles(
 		return nil, "", false, fmt.Errorf("list drive files: %w", err)
 	}
 	if resp.Code != 0 {
+		if resp.Code == feishuErrCodeDriveNotFound {
+			return nil, "", false, fmt.Errorf(
+				"list drive files error: code=%d msg=%s: %w",
+				resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+			)
+		}
 		return nil, "", false, fmt.Errorf("list drive files error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
@@ -908,6 +982,12 @@ func (c *Client) GetDriveFolderMeta(ctx context.Context, folderToken string) (dr
 		return resp, fmt.Errorf("get drive folder meta: %w", err)
 	}
 	if resp.Code != 0 {
+		if resp.Code == feishuErrCodeDriveNotFound {
+			return resp, fmt.Errorf(
+				"get drive folder meta error: code=%d msg=%s: %w",
+				resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+			)
+		}
 		return resp, fmt.Errorf("get drive folder meta error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	return resp, nil
@@ -924,8 +1004,11 @@ func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string)
 			return nil, err
 		}
 		all = append(all, files...)
-		if !hasMore || next == "" {
+		if !hasMore {
 			break
+		}
+		if next == "" {
+			return nil, fmt.Errorf("feishu drive file pagination: has_more=true with a missing page token")
 		}
 		if _, exists := seenPageTokens[next]; exists {
 			return nil, fmt.Errorf("feishu drive file pagination repeated page token %q", next)
@@ -936,23 +1019,25 @@ func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string)
 	return all, nil
 }
 
-// ListDriveFilesRecursiveFrom walks a Drive folder subtree depth-first,
-// returning all non-folder files. Mirrors ListWikiNodesRecursiveFrom.
+// WalkDriveTree walks a Drive folder subtree depth-first and is the single
+// recursive Drive walker shared by the drive connector (it resurrects the
+// former ListDriveFilesRecursiveFrom semantics, which could not hand back
+// folder names). Contract:
+//   - folder -> recurse
+//   - shortcut -> expand to its target (target_type is never "folder")
+//   - other -> collect
 //
-//   - folder -> recurse (visited is a pure-defensive cycle guard; Drive folders
-//     have no shortcut concept so cycles are not expected - see glossary).
-//   - shortcut -> expand to its target (target_type is never "folder", verified)
-//     and include the target as a regular file. No extra API call: shortcut_info
-//     is returned by the list API.
-//   - other -> collect.
-//
-// Partial failures (a sub-folder listing returns an error) are collected into a
-// *PartialDriveFileListError and the walk continues, mirroring the wiki
-// connector's PartialWikiNodeListError semantics.
-func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken string) ([]DriveFile, error) {
+// Listing failures are collected into the returned failures and the walk
+// continues (PartialDriveFileListError semantics). dirPaths maps every visited
+// folder token to its cleaned directory path relative to the selected root;
+// the walk root's own prefix is baseDir (the root folder's display name for a
+// bare root selection, "<根名>/<子文件夹名>" for a sub-folder selection; ""
+// when the root name could not be resolved, mirroring pre-root-mirror paths).
+func WalkDriveTree(
+	ctx context.Context, client *Client, rootToken, baseDir string,
+) (files []DriveFile, dirPaths map[string]string, failures []DriveFileListFailure) {
+	dirPaths = map[string]string{rootToken: baseDir}
 	visited := make(map[string]bool)
-	var all []DriveFile
-	var failures []DriveFileListFailure
 
 	var walk func(folderToken string)
 	walk = func(folderToken string) {
@@ -961,7 +1046,7 @@ func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken st
 		}
 		visited[folderToken] = true
 
-		files, err := c.ListDriveFilesAllPages(ctx, folderToken)
+		entries, err := client.ListDriveFilesAllPages(ctx, folderToken)
 		if err != nil {
 			wrappedErr := fmt.Errorf("list children of %s: %w", folderToken, err)
 			failures = append(failures, DriveFileListFailure{
@@ -973,35 +1058,120 @@ func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken st
 			return
 		}
 
-		for _, f := range files {
+		for _, f := range entries {
+			if f.ParentToken == "" {
+				f.ParentToken = folderToken
+			}
 			switch f.Type {
 			case "folder":
+				name := SanitizeFileName(f.Name)
+				if parent := dirPaths[folderToken]; parent != "" {
+					name = parent + "/" + name
+				}
+				dirPaths[f.Token] = name
 				walk(f.Token)
 			case "shortcut":
-				// Expand to target. target_type is never "folder" (verified), so
-				// no recursion here - the target is a regular file.
-				if f.ShortcutInfo != nil && f.ShortcutInfo.TargetToken != "" {
-					expanded := DriveFile{
-						Token:        f.ShortcutInfo.TargetToken,
-						Name:         f.Name,
-						Type:         f.ShortcutInfo.TargetType,
-						ParentToken:  f.ParentToken,
-						URL:          f.URL,
-						CreatedTime:  f.CreatedTime,
-						ModifiedTime: f.ModifiedTime,
-						OwnerID:      f.OwnerID,
-					}
-					all = append(all, expanded)
+				if target, ok := ExpandDriveShortcut(f); ok {
+					files = append(files, target)
 				}
 			default:
-				all = append(all, f)
+				files = append(files, f)
 			}
 		}
 	}
 
-	walk(folderToken)
-	if len(failures) > 0 {
-		return all, &PartialDriveFileListError{Failures: failures}
+	walk(rootToken)
+	return files, dirPaths, failures
+}
+
+// ExpandDriveShortcut preserves the shortcut's display name and location while
+// addressing its content by the target token. Folder targets are unsupported.
+func ExpandDriveShortcut(f DriveFile) (DriveFile, bool) {
+	if f.Type != "shortcut" {
+		return f, true
 	}
-	return all, nil
+	if f.ShortcutInfo == nil || f.ShortcutInfo.TargetToken == "" || f.ShortcutInfo.TargetType == "folder" {
+		return DriveFile{}, false
+	}
+	f.ShortcutToken = f.Token
+	f.Token, f.Type = f.ShortcutInfo.TargetToken, f.ShortcutInfo.TargetType
+	f.ShortcutInfo = nil
+	return f, true
+}
+
+// userNameResponse is the GET /contact/v3/users/:userID payload;
+// data.user.name is the user's display name.
+type userNameResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+	Data struct {
+		User struct {
+			Name string `json:"name"`
+		} `json:"user"`
+	} `json:"data"`
+}
+
+// DocTitles resolves display titles for document tokens via the drive
+// metadata batch API (one call for all refs, capped at the API's 200-item
+// limit). Tokens whose metadata is unavailable — no permission (970003),
+// deleted/mismatched (970005) — are simply absent from the result;
+// transport-level failures return nil. Callers degrade to the URL as link
+// text, so failures never block ingestion.
+func (c *Client) DocTitles(ctx context.Context, refs []pendingDocName) map[string]string {
+	if len(refs) == 0 {
+		return nil
+	}
+	type reqDoc struct {
+		DocToken string `json:"doc_token"`
+		DocType  string `json:"doc_type"`
+	}
+	reqs := make([]reqDoc, 0, len(refs))
+	for _, r := range refs {
+		if len(reqs) == 200 {
+			break
+		}
+		reqs = append(reqs, reqDoc{DocToken: r.Token, DocType: r.DocType})
+	}
+	var resp struct {
+		ApiResponse
+		Data struct {
+			Metas []struct {
+				DocToken string `json:"doc_token"`
+				Title    string `json:"title"`
+			} `json:"metas"`
+		} `json:"data"`
+	}
+	path := "/open-apis/drive/v1/metas/batch_query"
+	if err := c.DoRequest(ctx, http.MethodPost, path, map[string]any{"request_docs": reqs}, &resp); err != nil {
+		return nil
+	}
+	if resp.Code != 0 {
+		return nil
+	}
+	out := make(map[string]string, len(resp.Data.Metas))
+	for _, m := range resp.Data.Metas {
+		out[m.DocToken] = m.Title
+	}
+	return out
+}
+
+// UserName fetches a user's display name by OpenID via the contact API.
+// mention_user.user_id carries an OpenID, hence user_id_type=open_id. Requires
+// a contact read scope (contact:user.base:readonly / contact:contact:readonly);
+// callers degrade to a generic @ marker on any failure, so errors here never
+// block ingestion.
+func (c *Client) UserName(ctx context.Context, userID string) (string, error) {
+	if userID == "" {
+		return "", fmt.Errorf("empty user id")
+	}
+	path := fmt.Sprintf("/open-apis/contact/v3/users/%s?user_id_type=open_id", url.PathEscape(userID))
+
+	var resp userNameResponse
+	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return "", fmt.Errorf("get user %s: %w", userID, err)
+	}
+	if resp.Code != 0 {
+		return "", fmt.Errorf("get user %s error: code=%d msg=%s", userID, resp.Code, resp.Msg)
+	}
+	return resp.Data.User.Name, nil
 }

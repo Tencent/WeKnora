@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/gorilla/websocket"
@@ -30,6 +31,28 @@ type RemoteDesktopOptions struct {
 	// An empty user falls back to DesktopBasicAuthUser.
 	BasicAuthUser     string
 	BasicAuthPassword string
+
+	// Token selects the session's own screen (seat) on websockify, sent as
+	// "?token=N". It comes from the sandbox-side ensure script, never from the
+	// browser. Empty dials the bare path (legacy shared :0). Only 1-2 ASCII
+	// digits are accepted.
+	Token string
+}
+
+var desktopSeatToken = regexp.MustCompile(`^[0-9]{1,2}$`)
+
+// DesktopSeatIsolated reports whether token selects a per-session screen.
+// Empty and "0" are the shared :0 desktop and still take the machine-wide
+// slot. Seats are 1..99. Anything else fails closed (treated as shared).
+func DesktopSeatIsolated(token string) bool {
+	if !desktopSeatToken.MatchString(token) {
+		return false
+	}
+	n := 0
+	for _, c := range token {
+		n = n*10 + int(c-'0')
+	}
+	return n >= 1 && n <= 99
 }
 
 // dialSandboxDesktop is the provider-neutral half of DialDesktop. Both
@@ -46,6 +69,16 @@ func dialSandboxDesktop(
 			Kind: RemoteErrorKindInvalidRequest, Provider: provider,
 			Op: "DialDesktop", Message: "handle is required",
 		}
+	}
+	path := DesktopWebsockifyPath
+	if opts.Token != "" {
+		if !desktopSeatToken.MatchString(opts.Token) {
+			return nil, &RemoteError{
+				Kind: RemoteErrorKindInvalidRequest, Provider: provider,
+				Op: "DialDesktop", Message: "invalid desktop token",
+			}
+		}
+		path += "?token=" + opts.Token
 	}
 	header := http.Header{}
 	// Cube exec/PTY attach this from the SDK sandbox object, so a terminal
@@ -64,7 +97,7 @@ func dialSandboxDesktop(
 			[]byte(user+":"+opts.BasicAuthPassword)))
 	}
 	conn, resp, err := dialer.Dial(
-		ctx, handle.ID(), DesktopWebsockifyPort, DesktopWebsockifyPath, header)
+		ctx, handle.ID(), DesktopWebsockifyPort, path, header)
 	if err != nil {
 		kind := RemoteErrorKindUnavailable
 		status := 0

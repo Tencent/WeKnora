@@ -247,7 +247,8 @@ function resizePanel(delta: number) {
 <style scoped lang="less">
 .chat-sandbox-panel-clip {
   position: fixed;
-  inset: 0;
+  // Stops at a docked assistant panel.
+  inset: 0 var(--assistant-dock-width, 0px) 0 0;
   z-index: 1201;
   overflow: hidden;
   pointer-events: none;

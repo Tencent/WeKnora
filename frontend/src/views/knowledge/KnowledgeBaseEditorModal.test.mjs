@@ -33,8 +33,8 @@ test('shows a post-create hint after the first successful save', () => {
 
 test('create mode seeds the full default image actions table', () => {
   // Regression: an empty imageActions in initFormData made the attribute panel
-  // read `undefined.ocr.on_unobserved` the moment the attribute switch was turned
-  // on in the create dialog, crashing the modal.
+  // read `undefined.ocr.on` the moment the attribute switch was turned on in the
+  // create dialog, crashing the modal.
   const initBlock = source.match(/const initFormData[\s\S]*?imageActions: ([^,]+),/)?.[1]
   assert.ok(initBlock, 'expected to find imageActions in initFormData')
   assert.match(initBlock, /mergeImageActions\(\)/)
@@ -49,4 +49,13 @@ test('edit mode forwards image_processing_config in the update payload', () => {
   )?.[1]
   assert.ok(editBranch, 'expected to find the edit-mode update block')
   assert.match(editBranch, /if \(data\.image_processing_config\) \{\s*updateConfig\.image_processing_config = data\.image_processing_config\s*\}/)
+})
+
+test('Wiki auto-generation setting defaults on, loads from the KB, and is submitted', () => {
+  assert.match(source, /autoGenerate: true/)
+  assert.match(source, /autoGenerate: kb\.wiki_config\?\.auto_generate \?\? true/)
+  assert.match(source, /auto_generate: formData\.value\.wikiConfig\?\.autoGenerate \?\? true/)
+  assert.match(source, /auto_generate: formData\.value\.wikiConfig\.autoGenerate \?\? true/)
+  assert.match(source, /knowledgeEditor\.wiki\.autoGenerateLabel/)
+  assert.match(source, /knowledgeEditor\.wiki\.autoGenerateTip/)
 })

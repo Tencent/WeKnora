@@ -287,7 +287,7 @@ function backToList() {
 }
 
 function onSourceUnavailable() {
-  // No original file to show (manual entry, FAQ, deleted file): fall back
+  // No original document to show (FAQ or unsupported source): fall back
   // to the list with the cited card highlighted.
   backToList()
 }
@@ -448,9 +448,10 @@ watch(visible, (open) => {
 </script>
 
 <style scoped lang="less">
+// Both stop at a docked assistant panel.
 .chat-references-panel__backdrop {
   position: fixed;
-  inset: 0;
+  inset: 0 var(--assistant-dock-width, 0px) 0 0;
   background: rgba(0, 0, 0, 0.28);
   z-index: 1200;
 }
@@ -458,7 +459,7 @@ watch(visible, (open) => {
 .chat-references-panel {
   position: fixed;
   top: 0;
-  right: 0;
+  right: var(--assistant-dock-width, 0px);
   bottom: 0;
   width: min(420px, 100vw);
   z-index: 1201;

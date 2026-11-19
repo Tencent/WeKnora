@@ -202,18 +202,30 @@
                 <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
                   :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
                   @input="handlePromptInput" class="system-prompt-textarea" />
-                <PromptTemplateSelector type="agentSystemPrompt" position="corner"
-                  :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
-                  @reset-default="handleAgentSystemPromptResetDefault" />
+                <div class="textarea-actions">
+                  <AssistantActionButton class="prompt-assistant-action"
+                    :label="$t(formData.config.system_prompt?.trim() ? 'assistant.actions.refinePrompt' : 'assistant.actions.writePrompt')"
+                    :query="$t(formData.config.system_prompt?.trim() ? 'assistant.prompts.refinePrompt' : 'assistant.prompts.writePrompt')"
+                    :selection="{ field: $t('agent.editor.systemPrompt'), text: formData.config.system_prompt || '' }" />
+                  <PromptTemplateSelector type="agentSystemPrompt" position="inline"
+                    :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
+                    @reset-default="handleAgentSystemPromptResetDefault" />
+                </div>
               </div>
               <!-- 普通模式：单个提示词 -->
               <div v-else class="textarea-with-template">
                 <t-textarea ref="promptTextareaRef" v-model="formData.config.system_prompt"
                   :placeholder="systemPromptPlaceholder" :autosize="{ minRows: 10, maxRows: 25 }"
                   @input="handlePromptInput" class="system-prompt-textarea" />
-                <PromptTemplateSelector type="systemPrompt" position="corner"
-                  :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
-                  @reset-default="handleSystemPromptTemplateSelect" />
+                <div class="textarea-actions">
+                  <AssistantActionButton class="prompt-assistant-action"
+                    :label="$t(formData.config.system_prompt?.trim() ? 'assistant.actions.refinePrompt' : 'assistant.actions.writePrompt')"
+                    :query="$t(formData.config.system_prompt?.trim() ? 'assistant.prompts.refinePrompt' : 'assistant.prompts.writePrompt')"
+                    :selection="{ field: $t('agent.editor.systemPrompt'), text: formData.config.system_prompt || '' }" />
+                  <PromptTemplateSelector type="systemPrompt" position="inline"
+                    :hasKnowledgeBase="hasKnowledgeBase" @select="handleSystemPromptTemplateSelect"
+                    @reset-default="handleSystemPromptTemplateSelect" />
+                </div>
               </div>
               <!-- 占位符提示下拉框 -->
               <Teleport to="body">
@@ -259,9 +271,11 @@
                 <t-textarea ref="contextTemplateTextareaRef" v-model="formData.config.context_template"
                   :placeholder="contextTemplatePlaceholder" :autosize="{ minRows: 8, maxRows: 20 }"
                   @input="handleContextTemplateInput" class="system-prompt-textarea" />
-                <PromptTemplateSelector type="contextTemplate" position="corner"
-                  :hasKnowledgeBase="hasKnowledgeBase" @select="handleContextTemplateSelect"
-                  @reset-default="handleContextTemplateSelect" />
+                <div class="textarea-actions textarea-actions--right">
+                  <PromptTemplateSelector type="contextTemplate" position="inline"
+                    :hasKnowledgeBase="hasKnowledgeBase" @select="handleContextTemplateSelect"
+                    @reset-default="handleContextTemplateSelect" />
+                </div>
               </div>
               <!-- 上下文模板占位符提示下拉框 -->
               <Teleport to="body">
@@ -332,8 +346,10 @@
                       :disabled="props.readOnly || !selectedIntent"
                       :placeholder="currentIntentTemplate?.content || $t('agentEditor.intentPrompts.promptPlaceholder')"
                       @input="handleIntentPromptInput" />
-                    <PromptTemplateSelector type="intentPrompt" position="corner" :intent-id="selectedIntent"
-                      :show-template-picker="false" @reset-default="resetCurrentIntentPrompt" />
+                    <div class="textarea-actions textarea-actions--right">
+                      <PromptTemplateSelector type="intentPrompt" position="inline" :intent-id="selectedIntent"
+                        :show-template-picker="false" @reset-default="resetCurrentIntentPrompt" />
+                    </div>
                   </div>
 
                   <Teleport to="body">
@@ -383,8 +399,10 @@
                   <t-textarea ref="rewriteSystemTextareaRef" v-model="formData.config.rewrite_prompt_system"
                     :placeholder="defaultRewritePromptSystem || $t('agent.editor.rewritePromptSystemPlaceholder')"
                     :autosize="{ minRows: 4, maxRows: 10 }" @input="handleRewriteSystemInput" />
-                  <PromptTemplateSelector type="rewrite" position="corner" @select="handleRewriteTemplateSelect"
-                    @reset-default="handleRewriteTemplateSelect" />
+                  <div class="textarea-actions textarea-actions--right">
+                    <PromptTemplateSelector type="rewrite" position="inline" @select="handleRewriteTemplateSelect"
+                      @reset-default="handleRewriteTemplateSelect" />
+                  </div>
                 </div>
                 <Teleport to="body">
                   <div v-if="rewriteSystemPopup.show && filteredRewriteSystemPlaceholders.length > 0"
@@ -428,8 +446,10 @@
                   <t-textarea ref="rewriteUserTextareaRef" v-model="formData.config.rewrite_prompt_user"
                     :placeholder="defaultRewritePromptUser || $t('agent.editor.rewritePromptUserPlaceholder')"
                     :autosize="{ minRows: 4, maxRows: 10 }" @input="handleRewriteUserInput" />
-                  <PromptTemplateSelector type="rewrite" position="corner" @select="handleRewriteTemplateSelect"
-                    @reset-default="handleRewriteTemplateSelect" />
+                  <div class="textarea-actions textarea-actions--right">
+                    <PromptTemplateSelector type="rewrite" position="inline" @select="handleRewriteTemplateSelect"
+                      @reset-default="handleRewriteTemplateSelect" />
+                  </div>
                 </div>
                 <Teleport to="body">
                   <div v-if="rewriteUserPopup.show && filteredRewriteUserPlaceholders.length > 0"
@@ -479,9 +499,11 @@
                   <t-textarea v-model="formData.config.fallback_response"
                     :placeholder="defaultFallbackResponse || $t('agent.editor.fallbackResponsePlaceholder')"
                     :autosize="{ minRows: 2, maxRows: 6 }" />
-                  <PromptTemplateSelector type="fallback" position="corner" fallbackMode="fixed"
-                    @select="handleFallbackResponseTemplateSelect"
-                    @reset-default="handleFallbackResponseTemplateSelect" />
+                  <div class="textarea-actions textarea-actions--right">
+                    <PromptTemplateSelector type="fallback" position="inline" fallbackMode="fixed"
+                      @select="handleFallbackResponseTemplateSelect"
+                      @reset-default="handleFallbackResponseTemplateSelect" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -508,9 +530,11 @@
                   <t-textarea ref="fallbackPromptTextareaRef" v-model="formData.config.fallback_prompt"
                     :placeholder="defaultFallbackPrompt || $t('agent.editor.fallbackPromptPlaceholder')"
                     :autosize="{ minRows: 4, maxRows: 10 }" @input="handleFallbackPromptInput" />
-                  <PromptTemplateSelector type="fallback" position="corner" fallbackMode="model"
-                    @select="handleFallbackPromptTemplateSelect"
-                    @reset-default="handleFallbackPromptTemplateSelect" />
+                  <div class="textarea-actions textarea-actions--right">
+                    <PromptTemplateSelector type="fallback" position="inline" fallbackMode="model"
+                      @select="handleFallbackPromptTemplateSelect"
+                      @reset-default="handleFallbackPromptTemplateSelect" />
+                  </div>
                 </div>
                 <Teleport to="body">
                   <div v-if="fallbackPromptPopup.show && filteredFallbackPlaceholders.length > 0"
@@ -653,7 +677,7 @@
               </label>
               <p class="desc">
                 {{ $t('agent.editor.rerankModelDesc') }}
-                <template v-if="!needsRerankModel">
+                <template v-if="!isAgentMode && !needsRerankModel">
                   <br />
                   <span class="hint">{{ $t('agent.editor.rerankModelOptionalHint') }}</span>
                 </template>
@@ -1281,6 +1305,20 @@
                 theme="column" :placeholder="$t('agentEditor.mcp.authWaitTimeoutPlaceholder')" />
             </div>
           </div>
+
+          <!-- 执行权限上限：修改数据的工具（MCP、Wiki 写入）能否不经确认直接执行 -->
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agentEditor.mcp.accessLevel') }}</label>
+              <p class="desc">{{ $t('agentEditor.mcp.accessLevelDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="formData.config.access_level">
+                <t-option v-for="level in ASSISTANT_ACCESS_LEVELS" :key="level" :value="level"
+                  :label="$t(`assistant.access.levels.${level}.label`)" />
+              </t-select>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1849,6 +1887,7 @@
 </template>
 
 <script setup lang="ts">
+import { useAssistantDataChange } from '@/utils/assistantDataChange';
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import AgentCreateContextualGuide from '@/components/AgentCreateContextualGuide.vue';
@@ -1862,7 +1901,9 @@ import { hydrateAgentPromptRefs, serializeAgentPrompts } from '@/utils/agentProm
 import { copyWithToast } from '@/utils/clipboard';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useModalShell } from '@/composables/useModalShell'
+import { useAssistantPageContext } from '@/composables/useAssistantPageContext'
 import SettingsModalShell from '@/components/SettingsModalShell.vue'
+import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 import {
   createAgent,
   updateAgent,
@@ -1905,6 +1946,7 @@ import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/setti
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import { SKILL_ICON } from '@/types/mention';
 import { listEmbedChannels } from '@/api/embed';
+import { ASSISTANT_ACCESS_LEVELS, type AssistantAccessLevel } from '@/api/assistant';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import { integrationSectionKey } from '@/config/settingsRoute';
 import { toolboxLocation } from '@/config/toolbox';
@@ -1974,6 +2016,17 @@ const savedAgent = ref<CustomAgent | null>(null);
 const editorMode = computed(() => (savedAgent.value ? 'edit' : props.mode));
 const editorAgent = computed(() => savedAgent.value ?? props.agent ?? null);
 const isPostCreateSession = computed(() => !!savedAgent.value);
+
+useAssistantDataChange((changes) => {
+  const agentId = editorAgent.value?.id;
+  if (!props.visible || !agentId) return;
+  const relevant = changes.filter(change => change.ids.agentIds.includes(agentId)
+    && change.operation !== 'agent.copy');
+  if (!relevant.length) return;
+  const deleted = relevant.some(change => change.operation === 'agent.delete');
+  MessagePlugin.warning(t(deleted ? 'agent.editor.assistantDeleted' : 'agent.editor.assistantChanged'));
+}, { areas: ['agent'] });
+
 const saveButtonLabel = computed(() =>
   editorMode.value === 'create'
     ? t('agent.editor.buttons.create')
@@ -1995,6 +2048,8 @@ function resolveEditorSection(section?: string | null): string {
 }
 
 const currentSection = ref(resolveEditorSection(props.initialSection));
+// Refines the agent AgentList publishes; on its own it names no page.
+useAssistantPageContext(() => props.visible && props.mode === 'edit' ? { section: currentSection.value } : null);
 const suggestionTab = ref<'starters' | 'followUps'>('starters');
 const contentWrapperRef = ref<HTMLElement | null>(null);
 const highlightedField = ref<AgentNotReadyReasonKey | null>(null);
@@ -2453,7 +2508,7 @@ const defaultVectorThreshold = ref(0.5);
 const defaultRerankTopK = ref(5);
 const defaultRerankThreshold = ref(0.5);
 const defaultQuickAnswerMaxCompletionTokens = 2048;
-const defaultSmartReasoningMaxCompletionTokens = 4096;
+const defaultSmartReasoningMaxCompletionTokens = 24576;
 const defaultSandboxWriteMaxCompletionTokens = 24576;
 const defaultTemperature = ref(0.7);
 
@@ -2494,6 +2549,7 @@ const keepAllowedToolsUnset = ref(false);
 const toolTexts = computed<Record<string, ToolText>>(() => ({
   thinking: { label: t('agentEditor.tools.thinking'), description: t('agentEditor.tools.thinkingDesc') },
   todo_write: { label: t('agentEditor.tools.todoWrite'), description: t('agentEditor.tools.todoWriteDesc') },
+  ask_user: { label: t('agentEditor.tools.askUser'), description: t('agentEditor.tools.askUserDesc') },
   search_conversations: { label: t('agentEditor.tools.searchConversations'), description: t('agentEditor.tools.searchConversationsDesc') },
   search_knowledge: { label: t('agentEditor.tools.searchKnowledge'), description: t('agentEditor.tools.searchKnowledgeDesc') },
   read_document: { label: t('agentEditor.tools.readDocument'), description: t('agentEditor.tools.readDocumentDesc') },
@@ -2876,6 +2932,8 @@ const defaultFormData = {
     mcp_services: [] as string[],
     // 对话中触发 OAuth 授权时的等待超时（秒），默认 600
     mcp_auth_wait_timeout: 600,
+    // 执行权限上限，默认自动执行
+    access_level: 'auto_write' as AssistantAccessLevel,
     // Skills 设置
     skills_selection_mode: 'none' as 'all' | 'selected' | 'none',
     selected_skills: [] as string[],
@@ -2992,11 +3050,19 @@ const applyDefaultModelsIfEmpty = () => {
   if (props.mode !== 'create' || !formData.value) return
   const chatModelId = selectInitialModelId(allModels.value, 'KnowledgeQA')
   const rerankModelId = selectInitialModelId(allModels.value, 'Rerank')
+  const vlmModelId = selectInitialModelId(allModels.value, 'VLLM')
+  const asrModelId = selectInitialModelId(allModels.value, 'ASR')
   if (!formData.value.config.model_id && chatModelId) {
     formData.value.config.model_id = chatModelId
   }
   if (!formData.value.config.rerank_model_id && rerankModelId) {
     formData.value.config.rerank_model_id = rerankModelId
+  }
+  if (!formData.value.config.vlm_model_id && vlmModelId) {
+    formData.value.config.vlm_model_id = vlmModelId
+  }
+  if (!formData.value.config.asr_model_id && asrModelId) {
+    formData.value.config.asr_model_id = asrModelId
   }
 }
 
@@ -3544,8 +3610,13 @@ const contextTemplatePlaceholder = computed(() => {
   return t('agent.editor.contextTemplatePlaceholder');
 });
 
-// 是否需要配置 ReRank 模型（仅当关联的知识库中有 RAG 类型时需要）
 const needsRerankModel = computed(() => {
+  if (isAgentMode.value) {
+    return agentRequiresRerankModel({
+      kb_selection_mode: kbSelectionMode.value,
+      allowed_tools: allowedToolsToSave(),
+    });
+  }
   if (!hasKnowledgeBase.value) return false;
   const mode = kbSelectionMode.value;
   if (mode === 'all') {
@@ -3618,6 +3689,7 @@ watch(() => props.visible, async (val) => {
       if (agentData.config.mcp_auth_wait_timeout == null || agentData.config.mcp_auth_wait_timeout <= 0) {
         agentData.config.mcp_auth_wait_timeout = 600;
       }
+      if (!agentData.config.access_level) agentData.config.access_level = 'auto_write';
       if (!agentData.config.selected_skills) agentData.config.selected_skills = [];
       if (!agentData.config.supported_file_types) agentData.config.supported_file_types = [];
       if (!agentData.config.chat_parser_engine_rules) agentData.config.chat_parser_engine_rules = [];
@@ -3676,6 +3748,7 @@ watch(() => props.visible, async (val) => {
       newFormData.config.rerank_top_k = defaultRerankTopK.value;
       newFormData.config.rerank_threshold = defaultRerankThreshold.value;
       newFormData.config.max_completion_tokens = 0;
+      newFormData.config.max_iterations = -1;
       newFormData.config.temperature = defaultTemperature.value;
       // 应用系统默认提示词（根据模式填充）
       const isAgent = newFormData.config.agent_mode === 'smart-reasoning';
@@ -3785,7 +3858,10 @@ const initMcpSelectionMode = () => {
     // 有指定 MCP 服务
     mcpSelectionMode.value = 'selected';
   } else {
-    mcpSelectionMode.value = 'none';
+    // Legacy configs with no mode run with every enabled MCP service for the
+    // owner (registerMCPTools treats "" as "all"). Show that actual runtime
+    // behaviour so the editor matches what the agent can call.
+    mcpSelectionMode.value = 'all';
   }
 };
 
@@ -3853,6 +3929,10 @@ watch(kbSelectionMode, (mode) => {
 
 // 监听 MCP 选择模式变化
 watch(mcpSelectionMode, (mode) => {
+  // Hydration may map a legacy empty mode to "all" for display only; do not
+  // persist that translation or clear the stored service list until the user
+  // actually edits the MCP selection.
+  if (isInitializing.value) return;
   formData.value.config.mcp_selection_mode = mode;
   if (mode === 'none') {
     // 不使用 MCP，清空相关配置
@@ -3863,6 +3943,14 @@ watch(mcpSelectionMode, (mode) => {
   }
   // selected 模式保持 mcp_services 不变
 });
+
+// Editing a legacy list is an explicit selection even if the radio was
+// already displayed as "selected". An empty list must also stay selected,
+// since an unset mode would allow every enabled service at runtime.
+watch(() => formData.value.config.mcp_services, () => {
+  if (isInitializing.value || mcpSelectionMode.value !== 'selected') return;
+  formData.value.config.mcp_selection_mode = 'selected';
+}, { deep: true });
 
 watch(() => formData.value.config.sandbox_config_id, async () => {
   if (!props.visible) return
@@ -3922,7 +4010,7 @@ watch(agentMode, (val, _oldVal) => {
     // 用户主动切换模式后列表即为显式选择，不再保持未设置。
     if (!isInitializing.value) keepAllowedToolsUnset.value = false;
     if (!isInitializing.value && formData.value.config.allowed_tools.length === 0) {
-      const tools: string[] = [];
+      const tools: string[] = ['ask_user'];
       if (hasRagKnowledgeBase.value) {
         tools.push(...knowledgeBaseTools);
       }
@@ -3932,7 +4020,7 @@ watch(agentMode, (val, _oldVal) => {
       formData.value.config.allowed_tools = tools;
     }
     if (formData.value.config.max_iterations >= 0 && formData.value.config.max_iterations <= 1) {
-      formData.value.config.max_iterations = 10;
+      formData.value.config.max_iterations = -1;
     }
     // 切换到 Agent 模式时，如果系统提示词是快速问答的默认值或为空，替换为 Agent 默认提示词
     if (defaultAgentSystemPrompt.value) {
@@ -6338,10 +6426,41 @@ const handleSave = async () => {
   }
 }
 
-// textarea 与模板选择器容器
+// textarea 与模板选择器容器：按钮全部放在输入框下方操作栏，不再悬浮侵入输入框空间，
+// 避免内容较长时操作按钮（无背景色）与输入文本重叠。
 .textarea-with-template {
-  position: relative;
   width: 100%;
+
+  .textarea-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 32px;
+    margin-top: 4px;
+    padding: 2px 0;
+
+    &--right {
+      justify-content: flex-end;
+    }
+  }
+
+  .prompt-assistant-action {
+    flex-shrink: 0;
+  }
+
+  :deep(.prompt-template-selector) {
+    flex-shrink: 0;
+    max-width: 100%;
+    margin-inline-start: auto;
+  }
+
+  // 停靠侧栏占用较多空间时，模板组内的按钮也需要换行。
+  :deep(.template-btn-group) {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }
 
 .intent-prompts-editor {

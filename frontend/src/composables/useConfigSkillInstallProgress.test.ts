@@ -200,6 +200,7 @@ async function panelFixture(
       }
       if (name === '@/api/skill') return { installSkillCatalog: async () => ({ data: { installs: {} } }), ...skillApi }
       if (name === '@/utils/skillUpgrade') return skillUpgrade
+      if (name === '@/utils/assistantDataChange') return { useAssistantDataChange() {} }
       if (name === '@/views/settings/envVarState') return { skillHasDeclaredEnvs: () => false }
       if (name.endsWith('.vue') || ['@/types/mention', '@/utils/index', 'tdesign-icons-vue-next'].includes(name)) return { default: {}, SETTING_DRAWER_HEADER_ACTIONS_ID: 'header' }
       throw new Error(`Unexpected import: ${name}`)

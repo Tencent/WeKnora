@@ -80,6 +80,23 @@ func TestDataSourceResponse_NilSafe(t *testing.T) {
 	assert.Equal(t, []*DataSourceResponse{}, NewDataSourceResponses(nil))
 }
 
+func TestNextcloudResponseOmitsAppPassword(t *testing.T) {
+	cfg := types.DataSourceConfig{Type: types.ConnectorTypeNextcloud, Credentials: map[string]any{
+		"base_url": "https://nextcloud.example.com", "username": "alice", "app_password": "app-password-for-tests",
+	}, ResourceIDs: []string{"/docs"}}
+	blob, err := cfg.ToJSON()
+	assert.NoError(t, err)
+	ds := &types.DataSource{ID: "ds-nextcloud", Type: types.ConnectorTypeNextcloud, Config: blob}
+	for _, response := range []any{NewDataSourceResponse(ds), NewDataSourceResponses([]*types.DataSource{ds})} {
+		body, err := json.Marshal(response)
+		assert.NoError(t, err)
+		assert.NotContains(t, string(body), "app_password")
+		assert.NotContains(t, string(body), "app-password-for-tests")
+		assert.NotContains(t, string(body), "nextcloud.example.com")
+		assert.Contains(t, string(body), `"configured":true`)
+	}
+}
+
 func TestDataSourceResponse_RSSFeedURLsFromCredentials(t *testing.T) {
 	cfg := types.DataSourceConfig{
 		Type: types.ConnectorTypeRSS,

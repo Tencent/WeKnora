@@ -104,7 +104,8 @@ type EditSandboxFileInput struct {
 type EditSandboxFileTool struct {
 	BaseTool
 	sessionBound
-	editor SandboxFileEditor
+	editor    SandboxFileEditor
+	approvals HostApprovals
 }
 
 // NewEditSandboxFileTool constructs the tool. `editor` MUST NOT be nil.
@@ -116,6 +117,14 @@ func NewEditSandboxFileTool(editor SandboxFileEditor) *EditSandboxFileTool {
 		},
 		editor: editor,
 	}
+}
+
+// WithHostApprovals lets edits outside the host workspace be approved.
+func (t *EditSandboxFileTool) WithHostApprovals(h HostApprovals) *EditSandboxFileTool {
+	if t != nil {
+		t.approvals = h
+	}
+	return t
 }
 
 // Description is built from the session sandbox layout so host paths never
@@ -140,7 +149,9 @@ func (t *EditSandboxFileTool) boundLayout() sandbox.WorkspaceLayout {
 	return t.describeLayout(t.editor)
 }
 
-const hostEditSandboxFileDescription = "Apply exact text replacements to an existing text file in %s.\n" +
+const hostEditSandboxFileDescription = "Apply exact text replacements to an existing text file in %s, " +
+	"or in a directory already approved for this session. " +
+	"A file outside that can be edited once the change is approved; only that one file is opened.\n" +
 	"Read the relevant content first. Send edits as an array, even for one replacement. \n" +
 	"Every old_string matches the original file, must be unique unless replace_all=true, " +
 	"and must not overlap another edit. \n" +
@@ -192,12 +203,39 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 	}
 
 	clean := resolveIn(layout, trimmed)
-	rootDir, ok := writableRootIn(layout, clean)
-	if !ok {
+	rootDir, inScope := writableRootIn(layout, clean)
+	if !inScope && !layout.IsHost() {
 		return &types.ToolResult{
 			Success: false,
 			Error:   writeScopeErrorIn(layout, input.Path),
 		}, nil
+	}
+	if !inScope {
+		rootDir = path.Dir(clean)
+		apply := func(current []byte, exists bool) ([]byte, error) {
+			if !exists {
+				return nil, fmt.Errorf("the file does not exist")
+			}
+			if len(current) > maxWriteSandboxBytes || isBinaryShellOutput(string(current)) {
+				return nil, fmt.Errorf("the file cannot be edited")
+			}
+			updated, _, err := applySandboxEdits(string(current), input.Edits)
+			if err != nil {
+				return nil, err
+			}
+			if len(updated) > maxWriteSandboxBytes || isBinaryShellOutput(updated) {
+				return nil, fmt.Errorf("the result cannot be written")
+			}
+			return []byte(updated), nil
+		}
+		var refusal string
+		ctx, refusal = authorizeHostWrite(
+			ctx, t.editor, t.approvals, ToolEditSandboxFile, sessionID, clean, "edit", apply,
+			sandboxEditsPreview(input.Edits),
+		)
+		if refusal != "" {
+			return &types.ToolResult{Success: false, Error: refusal}, nil
+		}
 	}
 
 	// This tool is read-modify-write, so it has to hold the path against
@@ -369,7 +407,11 @@ func applySandboxEdits(content string, edits []SandboxEdit) (string, int, error)
 		if err := validateSandboxEdit(e, i, multi); err != nil {
 			return "", 0, err
 		}
-		found := indexAllNonOverlapping(content, e.OldString)
+		step := 1 // Uniqueness includes occurrences that overlap each other.
+		if e.ReplaceAll {
+			step = len(e.OldString)
+		}
+		found := indexSandboxMatches(content, e.OldString, step)
 		if len(found) == 0 {
 			return "", 0, notFoundSandboxEditError(i, multi)
 		}
@@ -409,14 +451,21 @@ func applySandboxEdits(content string, edits []SandboxEdit) (string, int, error)
 // counting the same way strings.Count does: after a match, scanning resumes
 // past it rather than one byte in.
 func indexAllNonOverlapping(content, sub string) []int {
+	return indexSandboxMatches(content, sub, len(sub))
+}
+
+func indexSandboxMatches(content, sub string, step int) []int {
 	var found []int
+	if sub == "" {
+		return found
+	}
 	for offset := 0; ; {
 		i := strings.Index(content[offset:], sub)
 		if i < 0 {
 			return found
 		}
 		found = append(found, offset+i)
-		offset += i + len(sub)
+		offset += i + step
 	}
 }
 

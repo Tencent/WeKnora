@@ -42,16 +42,54 @@ func tokenize(text string) []string {
 	return tokens
 }
 
-// bigrams pairs adjacent CJK ideographs. A single Chinese character matches far
-// too much on its own ("数" appears in 数据, 数量, 参数), so scoring counts
-// two-character sequences as well and weights them higher.
-func bigrams(tokens []string) []string {
-	var pairs []string
-	for i := 0; i+1 < len(tokens); i++ {
-		a, b := tokens[i], tokens[i+1]
-		if isSingleHan(a) && isSingleHan(b) {
-			pairs = append(pairs, a+b)
+// hanSegments splits each Han run of the text at jieba word boundaries and
+// keeps the multi-character words, so 「连接池」 reaches the scorer as one
+// term instead of a pile of characters. A run that yields no multi-character
+// word stays whole — novel names jieba cannot parse keep the in-word pair
+// fallback instead of losing it. Single-character words (的了是…) are dropped:
+// as features they are stopwords, and the per-character unigrams already
+// carry them.
+func hanSegments(text string) []string {
+	var segments []string
+	var run strings.Builder
+	flush := func() {
+		defer run.Reset()
+		if run.Len() == 0 {
+			return
 		}
+		text := run.String()
+		found := len(segments)
+		for _, word := range types.Jieba.Cut(text, true) {
+			if len([]rune(word)) >= 2 {
+				segments = append(segments, word)
+			}
+		}
+		if len(segments) == found {
+			if runes := []rune(text); len(runes) >= 2 {
+				segments = append(segments, text)
+			}
+		}
+	}
+	for _, r := range text {
+		if unicode.Is(unicode.Han, r) {
+			run.WriteRune(r)
+		} else {
+			flush()
+		}
+	}
+	flush()
+	return segments
+}
+
+// wordPairs returns the character pairs inside one segment. Pairs never cross
+// a segment boundary: 「连接池配置」 used to hand the scorer fragments like
+// 池配, which match unrelated text sharing characters across different word
+// boundaries.
+func wordPairs(segment string) []string {
+	runes := []rune(segment)
+	pairs := make([]string, 0, len(runes)-1)
+	for i := 0; i+1 < len(runes); i++ {
+		pairs = append(pairs, string(runes[i:i+2]))
 	}
 	return pairs
 }
@@ -61,20 +99,46 @@ func isSingleHan(token string) bool {
 	return len(runes) == 1 && unicode.Is(unicode.Han, runes[0])
 }
 
+// Match tiers, strongest first. A whole-word hit is the best evidence two
+// texts share a term, an in-word character pair still says they spell
+// something the same way, and a lone shared ideograph says very little —
+// 「数」 sits in 数据, 参数 and 数量 alike — so it counts at half.
+const (
+	wordHitWeight   = 4.0
+	bigramHitWeight = 2.0
+)
+
+func unigramWeight(token string) float64 {
+	if isSingleHan(token) {
+		return 0.5
+	}
+	return 1.0
+}
+
 type scoredItem struct {
 	item  *types.MemoryItem
 	score float64
 }
 
 // scoreItems ranks situational items against the current query. Scoring is
-// deliberately simple: overlap of query tokens with the item, with bigram hits
-// weighted higher and importance used only to break ties.
+// deliberately simple: overlap of query features with the item across the
+// three tiers above — whole words, in-word character pairs, lone characters —
+// with importance used only to break ties.
 func scoreItems(query string, items []*types.MemoryItem) []scoredItem {
 	queryTokens := tokenize(query)
 	if len(queryTokens) == 0 || len(items) == 0 {
 		return nil
 	}
 
+	querySegments := hanSegments(query)
+	queryWords := make(map[string]struct{}, len(querySegments))
+	queryBigrams := make(map[string]struct{})
+	for _, segment := range querySegments {
+		queryWords[segment] = struct{}{}
+		for _, pair := range wordPairs(segment) {
+			queryBigrams[pair] = struct{}{}
+		}
+	}
 	queryUnigrams := make(map[string]struct{}, len(queryTokens))
 	for _, token := range queryTokens {
 		// One-character latin tokens carry no signal and match everywhere.
@@ -82,10 +146,6 @@ func scoreItems(query string, items []*types.MemoryItem) []scoredItem {
 			continue
 		}
 		queryUnigrams[token] = struct{}{}
-	}
-	queryBigrams := make(map[string]struct{})
-	for _, pair := range bigrams(queryTokens) {
-		queryBigrams[pair] = struct{}{}
 	}
 	if len(queryUnigrams) == 0 && len(queryBigrams) == 0 {
 		return nil
@@ -97,18 +157,21 @@ func scoreItems(query string, items []*types.MemoryItem) []scoredItem {
 			continue
 		}
 		// Score against the topic as well as the statement, indexed separately
-		// so no bigram spans the boundary between them. The normalized key is
-		// deliberately not used: it is a sorted character soup built for
+		// so no word or pair spans the boundary between them. The normalized
+		// key is deliberately not used: it is a sorted character soup built for
 		// collision detection, so its adjacency carries no meaning.
+		itemWords := make(map[string]struct{})
 		itemUnigrams := make(map[string]struct{})
 		itemBigrams := make(map[string]struct{})
 		for _, text := range []string{item.Content, item.Topic} {
-			tokens := tokenize(text)
-			for _, token := range tokens {
-				itemUnigrams[token] = struct{}{}
+			for _, segment := range hanSegments(text) {
+				itemWords[segment] = struct{}{}
+				for _, pair := range wordPairs(segment) {
+					itemBigrams[pair] = struct{}{}
+				}
 			}
-			for _, pair := range bigrams(tokens) {
-				itemBigrams[pair] = struct{}{}
+			for _, token := range tokenize(text) {
+				itemUnigrams[token] = struct{}{}
 			}
 		}
 		if len(itemUnigrams) == 0 {
@@ -116,22 +179,32 @@ func scoreItems(query string, items []*types.MemoryItem) []scoredItem {
 		}
 
 		var hits float64
+		for word := range queryWords {
+			if _, ok := itemWords[word]; ok {
+				hits += wordHitWeight
+			}
+		}
 		for token := range queryUnigrams {
 			if _, ok := itemUnigrams[token]; ok {
-				hits++
+				hits += unigramWeight(token)
 			}
 		}
 		for pair := range queryBigrams {
 			if _, ok := itemBigrams[pair]; ok {
-				hits += 2
+				hits += bigramHitWeight
 			}
 		}
 		if hits == 0 {
 			continue
 		}
-		// Normalizing by query length keeps a long query from favouring long
-		// items purely because there was more to match against.
-		denominator := float64(len(queryUnigrams) + 2*len(queryBigrams))
+		// Normalizing by the query's total feature weight keeps a long query
+		// from favouring long items purely because there was more to match
+		// against.
+		denominator := float64(len(queryWords))*wordHitWeight +
+			float64(len(queryBigrams))*bigramHitWeight
+		for token := range queryUnigrams {
+			denominator += unigramWeight(token)
+		}
 		if denominator == 0 {
 			continue
 		}

@@ -109,6 +109,22 @@ func TestExtractionPrefersTheConfiguredModel(t *testing.T) {
 	require.Equal(t, "cheap-model", models.requestedModelID)
 }
 
+func TestExtractionUsesWorkspaceUtilityWithoutRequestContext(t *testing.T) {
+	svc, tenantRepo, messages, models, _ := newExtractionHarness(t)
+	tenantRepo.set(7, &types.MemoryConfig{Enabled: true, WriteMode: types.MemoryWriteAuto})
+	messages.messages = []*types.Message{{ID: "m", Role: "user", Content: "hello"}}
+	models.response = `{"memories":[]}`
+	models.workspaceModels = []*types.Model{
+		{ID: "chat", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive, IsDefault: true},
+		{ID: "utility", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive},
+	}
+	(&types.DefaultSettings{UtilityModelID: "utility"}).ApplyModelDefaults(models.workspaceModels)
+	require.NoError(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
+		TenantID: 7, SubjectID: "web_user:alice", SessionID: "s", MessageID: "m",
+	})))
+	require.Equal(t, "utility", models.requestedModelID)
+}
+
 // TestExtractionReadsOnlyUserMessages is a prompt-injection guard: a document
 // or tool result echoed by the assistant must never become a stored fact about
 // the user.

@@ -396,6 +396,16 @@ func MergeSandboxConfigForUpdate(incoming, existing *TenantSandboxConfig) *Tenan
 		if strings.TrimSpace(out.SkillRollout) == "" {
 			out.SkillRollout = existing.SkillRollout
 		}
+		// The runtime form may omit the allocation policy. Only an explicit
+		// "session" switches a user config back.
+		if strings.TrimSpace(out.AllocationMode) == "" {
+			out.AllocationMode = existing.AllocationMode
+		}
+		// 0 is indistinguishable from an omitted field here, so it keeps the
+		// stored value. Returning to the default means sending 7 explicitly.
+		if out.UserSandboxEmptyRetentionDays == 0 {
+			out.UserSandboxEmptyRetentionDays = existing.UserSandboxEmptyRetentionDays
+		}
 	}
 
 	return &out

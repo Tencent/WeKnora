@@ -9,7 +9,7 @@ import {
   settingsQueryUnchanged,
 } from './settingsRoute'
 
-test('every settings nav item writes only section', () => {
+test('settings nav writes section, and keeps a system-settings panel only there', () => {
   assert.deepEqual(
     buildSettingsRouteQuery('models', {
       section: 'system-global',
@@ -25,6 +25,18 @@ test('every settings nav item writes only section', () => {
   assert.deepEqual(
     buildSettingsRouteQuery('runtime-queues', { section: 'system-global' }),
     { section: 'runtime-queues' },
+  )
+  assert.deepEqual(
+    buildSettingsRouteQuery('system-global', { section: 'system-global', panel: 'users', tab: 'im' }),
+    { section: 'system-global', panel: 'users' },
+  )
+  assert.deepEqual(
+    buildSettingsRouteQuery('models', { section: 'system-global', panel: 'users' }),
+    { section: 'models' },
+  )
+  assert.deepEqual(
+    buildSettingsRouteQuery('system-global', { section: 'system-global', panel: 'billing' }),
+    { section: 'system-global' },
   )
   assert.deepEqual(
     buildSettingsRouteQuery(integrationSectionKey('claw'), {
@@ -73,6 +85,13 @@ test('canonical settings query skips a redundant replace', () => {
     settingsQueryUnchanged(
       { section: 'integrations', tab: 'claw' },
       { section: 'integration-claw' },
+    ),
+    false,
+  )
+  assert.equal(
+    settingsQueryUnchanged(
+      { section: 'system-global', panel: 'users' },
+      { section: 'system-global', panel: 'access' },
     ),
     false,
   )

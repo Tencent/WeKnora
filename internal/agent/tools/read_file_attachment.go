@@ -215,7 +215,8 @@ func (r *attachmentFileReader) text(
 		header += "Sandbox parsed text: " + parsedPath + "\n"
 	}
 	if len(images) > 0 {
-		header += fmt.Sprintf("It has %d images, marked [image #N]; read_file %s/images/N returns image N.\n",
+		header += fmt.Sprintf("It has %d images, marked [image #N]. Start with read_file path=%s/images/1; "+
+			"replace the final number to read another image, keeping the full attachment address.\n",
 			len(images), address)
 	}
 	showImage := strings.HasPrefix(document.MimeType, "image/") &&

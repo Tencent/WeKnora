@@ -11,14 +11,14 @@ import (
 // TenantResponse is the viewer-safe tenant profile shape. Secret-bearing
 // columns are omitted or redacted unless the caller has Admin+.
 type TenantResponse struct {
-	ID                  uint64                     `json:"id"`
-	Name                string                     `json:"name"`
-	Description         string                     `json:"description"`
-	Status              string                     `json:"status"`
+	ID                  uint64                     `json:"id" extensions:"x-agent=workspace_id"`
+	Name                string                     `json:"name" extensions:"x-agent"`
+	Description         string                     `json:"description" extensions:"x-agent"`
+	Status              string                     `json:"status" extensions:"x-agent"`
 	RetrieverEngines    types.RetrieverEngines     `json:"retriever_engines"`
 	Business            string                     `json:"business"`
-	StorageQuota        int64                      `json:"storage_quota"`
-	StorageUsed         int64                      `json:"storage_used"`
+	StorageQuota        int64                      `json:"storage_quota" extensions:"x-agent"`
+	StorageUsed         int64                      `json:"storage_used" extensions:"x-agent"`
 	ContextConfig       *types.ContextConfig       `json:"context_config,omitempty"`
 	WebSearchConfig     *types.WebSearchConfig     `json:"web_search_config,omitempty"`
 	ParserEngineConfig  *types.ParserEngineConfig  `json:"parser_engine_config,omitempty"`
@@ -27,8 +27,9 @@ type TenantResponse struct {
 	ChatHistoryConfig   *types.ChatHistoryConfig   `json:"chat_history_config,omitempty"`
 	RetrievalConfig     *types.RetrievalConfig     `json:"retrieval_config,omitempty"`
 	MemoryConfig        *types.MemoryConfig        `json:"memory_config,omitempty"`
-	CreatedAt           time.Time                  `json:"created_at"`
-	UpdatedAt           time.Time                  `json:"updated_at"`
+	AssistantConfig     *types.AssistantConfig     `json:"assistant_config,omitempty"`
+	CreatedAt           time.Time                  `json:"created_at" extensions:"x-agent"`
+	UpdatedAt           time.Time                  `json:"updated_at" extensions:"x-agent"`
 	DeletedAt           gorm.DeletedAt             `json:"deleted_at"`
 }
 
@@ -57,6 +58,7 @@ func NewTenantResponseWithRole(tenant *types.Tenant, role types.TenantRole) *Ten
 		ChatHistoryConfig: tenant.ChatHistoryConfig,
 		RetrievalConfig:   tenant.RetrievalConfig,
 		MemoryConfig:      tenant.MemoryConfig,
+		AssistantConfig:   tenant.AssistantConfig,
 		CreatedAt:         tenant.CreatedAt,
 		UpdatedAt:         tenant.UpdatedAt,
 		DeletedAt:         tenant.DeletedAt,

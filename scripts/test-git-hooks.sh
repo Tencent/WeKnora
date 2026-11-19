@@ -8,7 +8,8 @@ trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/scripts/git-hooks" "$fixture/bin"
 cp "$repo_root/scripts/git-hooks/common.sh" "$fixture/scripts/git-hooks/"
 export HOOK_TEST_LOG="$fixture/go.log"
-export LOG_FORMAT="developer-custom-template"
+export LOG_FORMAT="legacy: %msg"
+export WEKNORA_LOG_FORMAT="developer: %msg"
 cat > "$fixture/bin/go" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -19,7 +20,7 @@ case "$1" in
     printf '%s\n' example/internal/agent/tools example/internal/application/service example/docreader/proto
     ;;
   vet|test)
-    if [[ "$1" == test && -n "${LOG_FORMAT:-}" ]]; then
+    if [[ "$1" == test && ( -n "${WEKNORA_LOG_FORMAT:-}" || "${WEKNORA_LOG_FORMAT+x}" != x ) ]]; then
       echo "App tests inherited the developer log template" >&2
       exit 1
     fi
@@ -39,8 +40,8 @@ run_checks() {
 run_checks
 cat > "$fixture/expected.log" <<'EOF'
 list ./...
-vet example/internal/agent/tools example/internal/application/service
-test -count=1 example/internal/agent/tools example/internal/application/service
+vet -tags sqlite_fts5 example/internal/agent/tools example/internal/application/service
+test -tags sqlite_fts5 -count=1 example/internal/agent/tools example/internal/application/service
 EOF
 diff -u "$fixture/expected.log" "$HOOK_TEST_LOG"
 
@@ -63,5 +64,28 @@ for phase in list vet test; do
   esac > "$fixture/failure-expected.log"
   diff -u "$fixture/failure-expected.log" "$HOOK_TEST_LOG"
 done
+
+mkdir -p "$fixture/client"
+cat > "$fixture/client/sample.go" <<'EOF'
+package client
+
+type Sample struct {
+	ID string
+}
+EOF
+: > "$HOOK_TEST_LOG"
+bash -c 'source "$1"; run_client_checks' bash "$fixture/scripts/git-hooks/common.sh" > /dev/null
+cat > "$fixture/client-expected.log" <<'EOF'
+vet ./...
+test -race -count=1 ./...
+EOF
+diff -u "$fixture/client-expected.log" "$HOOK_TEST_LOG"
+
+printf 'package client\ntype Bad struct{   ID string }\n' > "$fixture/client/bad.go"
+: > "$HOOK_TEST_LOG"
+if bash -c 'source "$1"; run_client_checks' bash "$fixture/scripts/git-hooks/common.sh" > "$fixture/client-fail.log" 2>&1; then
+  echo "run_client_checks accepted unformatted client Go code" >&2
+  exit 1
+fi
 
 echo 'Git hook coverage checks passed'

@@ -26,6 +26,7 @@ var validIDChars = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 //   - Non-empty (generates deterministic ID from tool name + index if empty)
 //   - Within length limits (truncated with hash suffix if too long)
 //   - Alphanumeric-safe (special characters replaced)
+//   - Distinguished by the original ID when replacement or truncation is needed
 func NormalizeToolCallID(id string, toolName string, index int) string {
 	id = strings.TrimSpace(id)
 
@@ -35,14 +36,17 @@ func NormalizeToolCallID(id string, toolName string, index int) string {
 		id = fmt.Sprintf("call_%x", hash[:6])
 	}
 
-	// Remove unsafe characters
+	// Retain the original identity: replacement alone collapses distinct IDs
+	// such as "call/a", "call?a" and the already-safe "call_a".
+	originalID := id
 	id = validIDChars.ReplaceAllString(id, "_")
 
-	// Truncate if too long, preserving uniqueness with hash suffix
-	if len(id) > maxToolCallIDLen {
-		hash := sha256.Sum256([]byte(id))
+	// Hash before sanitization, including for long IDs whose sanitized forms
+	// are identical. Already-safe IDs within the limit remain unchanged.
+	if id != originalID || len(id) > maxToolCallIDLen {
+		hash := sha256.Sum256([]byte(originalID))
 		suffix := fmt.Sprintf("_%x", hash[:4])
-		id = id[:maxToolCallIDLen-len(suffix)] + suffix
+		id = id[:min(len(id), maxToolCallIDLen-len(suffix))] + suffix
 	}
 
 	return id

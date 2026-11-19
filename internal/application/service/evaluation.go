@@ -152,22 +152,12 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 			return nil, err
 		}
 
-		var embeddingModelID, llmModelID string
-		for _, model := range models {
-			if model == nil {
-				continue
-			}
-			if model.Type == types.ModelTypeEmbedding {
-				embeddingModelID = model.ID
-			}
-			if model.Type == types.ModelTypeKnowledgeQA {
-				llmModelID = model.ID
-			}
-		}
-
-		if embeddingModelID == "" || llmModelID == "" {
+		embeddingModel := types.PickDefaultModel(models, types.ModelTypeEmbedding)
+		llmModel := types.PickChatModel(models, "")
+		if embeddingModel == nil || llmModel == nil {
 			return nil, fmt.Errorf("no default models found for evaluation")
 		}
+		embeddingModelID, llmModelID := embeddingModel.ID, llmModel.ID
 
 		kb, err := e.knowledgeBaseService.CreateKnowledgeBase(ctx, &types.KnowledgeBase{
 			Name:             "evaluation",
@@ -214,14 +204,8 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		// 获取默认的重排模型
 		models, err := e.modelService.ListModels(ctx)
 		if err == nil {
-			for _, model := range models {
-				if model == nil {
-					continue
-				}
-				if model.Type == types.ModelTypeRerank {
-					rerankModelID = model.ID
-					break
-				}
+			if model := types.PickDefaultModel(models, types.ModelTypeRerank); model != nil {
+				rerankModelID = model.ID
 			}
 		}
 		if rerankModelID == "" {
@@ -235,14 +219,8 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		// 获取默认的LLM模型
 		models, err := e.modelService.ListModels(ctx)
 		if err == nil {
-			for _, model := range models {
-				if model == nil {
-					continue
-				}
-				if model.Type == types.ModelTypeKnowledgeQA {
-					chatModelID = model.ID
-					break
-				}
+			if model := types.PickChatModel(models, ""); model != nil {
+				chatModelID = model.ID
 			}
 		}
 		if chatModelID == "" {
@@ -354,20 +332,17 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 
 	// Create knowledge base from passages (sync: wait for indexing to complete before querying)
 	knowledge, err := e.knowledgeService.CreateKnowledgeFromPassageSync(ctx, knowledgeBaseID, passages, "")
-	if err != nil {
-		logger.Errorf(ctx, "Failed to create knowledge from passages: %v", err)
-		return err
-	}
-	logger.Infof(ctx, "Knowledge created and indexed successfully, ID: %s", knowledge.ID)
-
-	// Setup cleanup of temporary resources
+	// The KB already exists, and a failed synchronous call can still return its
+	// partially created knowledge. Register cleanup before checking the error.
 	defer func() {
-		logger.Infof(ctx, "Cleaning up resources - deleting knowledge: %s", knowledge.ID)
-		if err := deleteReferencedKnowledge(ctx,
-			e.knowledgeService,
-			knowledgeBaseID,
-			[]string{knowledge.ID}); err != nil {
-			logger.Errorf(ctx, "Failed to delete knowledge: %v, knowledge ID: %s", err, knowledge.ID)
+		if knowledge != nil {
+			logger.Infof(ctx, "Cleaning up resources - deleting knowledge: %s", knowledge.ID)
+			if err := deleteReferencedKnowledge(ctx,
+				e.knowledgeService,
+				knowledgeBaseID,
+				[]string{knowledge.ID}); err != nil {
+				logger.Errorf(ctx, "Failed to delete knowledge: %v, knowledge ID: %s", err, knowledge.ID)
+			}
 		}
 
 		logger.Infof(ctx, "Cleaning up resources - deleting knowledge base: %s", knowledgeBaseID)
@@ -379,6 +354,11 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 			)
 		}
 	}()
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create knowledge from passages: %v", err)
+		return err
+	}
+	logger.Infof(ctx, "Knowledge created and indexed successfully, ID: %s", knowledge.ID)
 
 	// Initialize parallel evaluation metrics
 	var finished int

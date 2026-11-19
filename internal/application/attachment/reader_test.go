@@ -3,7 +3,10 @@ package attachment
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"sync"
@@ -298,4 +301,34 @@ func TestCancelledCallerDoesNotFailSharedDescription(t *testing.T) {
 	close(release)
 	require.Equal(t, "chart", (<-second).Text)
 	require.Equal(t, int32(1), calls.Load())
+}
+
+func TestChartPromptDoesNotReuseLegacyUnstructuredObservation(t *testing.T) {
+	store, data := imageFixture(t)
+	const oldPrompt = "Describe this image in at most 120 words. " +
+		"Include its type, key labels, numbers and relationships. Do not transcribe long passages. " +
+		"Say when content is illegible; do not guess. Plain text only."
+	identity, err := json.Marshal([]string{"vision", oldPrompt, fmt.Sprintf("%x", sha256.Sum256(data))})
+	require.NoError(t, err)
+	key := fmt.Sprintf("%x", sha256.Sum256(identity))
+	cache := &testCache{values: map[string]Description{
+		store.doc.ID + key: {Text: "160 148 120 116 96", Model: "vision"},
+	}}
+	reader := NewReader(store, 0, func(context.Context, string) ([]byte, error) { return data, nil })
+	calls := 0
+	reader.Images = &ImageReader{
+		Model: "vision", Cache: cache,
+		Describe: func(_ context.Context, image []byte, prompt string) (string, error) {
+			calls++
+			require.NotEmpty(t, image)
+			require.Contains(t, prompt, "one labelled row per category")
+			return "East: Q1=102, Q2=148 (万元)", nil
+		},
+	}
+	first, err := readOne(t.Context(), reader, 1, "brief", "")
+	require.NoError(t, err)
+	require.Equal(t, "East: Q1=102, Q2=148 (万元)", *first.Description)
+	_, err = readOne(t.Context(), reader, 1, "brief", "")
+	require.NoError(t, err)
+	require.Equal(t, 1, calls, "reuse the new observation, not the legacy OCR list")
 }

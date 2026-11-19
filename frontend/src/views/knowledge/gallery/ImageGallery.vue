@@ -17,6 +17,7 @@ import GallerySourcePicker from './GallerySourcePicker.vue'
 
 const props = defineProps<{
   knowledgeBaseId: string
+  canEdit?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -114,6 +115,12 @@ const blobByRawUrl = new Map<string, string>()
 // Fetches in flight, so the grid and the viewer asking for the same image at
 // once share one request.
 const inflight = new Map<string, Promise<string>>()
+let imageRequests = new AbortController()
+
+function abortImageRequests(): void {
+  imageRequests.abort()
+  inflight.clear()
+}
 
 /** Revoke every cached object URL whose raw URL is not in keep. */
 function releaseBlobs(keep: Set<string> = new Set()): void {
@@ -124,13 +131,17 @@ function releaseBlobs(keep: Set<string> = new Set()): void {
   }
 }
 
-async function fetchBlobUrl(rawUrl: string): Promise<string> {
+async function fetchBlobUrl(rawUrl: string, signal: AbortSignal): Promise<string> {
   const req = galleryImageRequest(rawUrl, props.knowledgeBaseId)
   if (!req) return rawUrl
   try {
-    const resp = await fetch(req.url, { headers: req.headers })
-    if (!resp.ok) return rawUrl
-    const objectUrl = URL.createObjectURL(await resp.blob())
+    const resp = await fetch(req.url, { headers: req.headers, signal })
+    if (!resp.ok || signal.aborted) return rawUrl
+    const blob = await resp.blob()
+    // Cancellation can race with a completed body read. Never create a URL
+    // after this query's cleanup, even if the response ignored the abort.
+    if (signal.aborted) return rawUrl
+    const objectUrl = URL.createObjectURL(blob)
     blobByRawUrl.set(rawUrl, objectUrl)
     return objectUrl
   } catch {
@@ -139,11 +150,15 @@ async function fetchBlobUrl(rawUrl: string): Promise<string> {
 }
 
 function resolveImageSrc(rawUrl: string): Promise<string> {
+  if (imageRequests.signal.aborted) return Promise.resolve(rawUrl)
   const cached = blobByRawUrl.get(rawUrl)
   if (cached) return Promise.resolve(cached)
   let pending = inflight.get(rawUrl)
   if (!pending) {
-    pending = fetchBlobUrl(rawUrl).finally(() => inflight.delete(rawUrl))
+    pending = fetchBlobUrl(rawUrl, imageRequests.signal).finally(() => {
+      // A newer query may already have started the same URL's replacement.
+      if (inflight.get(rawUrl) === pending) inflight.delete(rawUrl)
+    })
     inflight.set(rawUrl, pending)
   }
   return pending
@@ -217,6 +232,15 @@ function onThumbError(id: string) {
 const ATTR_NAMESPACE = 'knowledgeEditor.wikiBrowser.gallery.attr'
 
 const sanitizeKey = (id: string) => id.replace(/[:.]/g, '_')
+
+const IMAGE_SOURCE_PAGE_ATTR = 'source.page'
+const IMAGE_SOURCE_INDEX_ATTR = 'source.image_index'
+
+/** 解析器页码从 1 开始；旧数据或非法属性不展示页码。 */
+function imagePage(img: ImageAsset): number | null {
+  const page = img.attrs?.[IMAGE_SOURCE_PAGE_ATTR]
+  return typeof page === 'number' && Number.isSafeInteger(page) && page > 0 ? page : null
+}
 
 /** The pipeline's own wording for an attribute, keyed by its source-local name. */
 function pipelineKey(attr: GalleryResolvedAttr, suffix = ''): string {
@@ -493,6 +517,8 @@ function loadMore(): Promise<boolean> {
 
 function resetResults() {
   listToken++
+  abortImageRequests()
+  imageRequests = new AbortController()
   viewerOpen.value = false
   items.value = []
   total.value = 0
@@ -560,7 +586,12 @@ function onOpenSource(knowledgeId: string) {
 }
 
 function attrRows(img: ImageAsset): GalleryAttrRow[] {
-  return Object.entries(img.attrs || {}).map(([name, raw]) => {
+  // 原文序号仅供稳定排序；页码用用户可读的名称展示，避免泄露内部属性键。
+  return Object.entries(img.attrs || {}).filter(([name]) => name !== IMAGE_SOURCE_INDEX_ATTR
+    && (name !== IMAGE_SOURCE_PAGE_ATTR || imagePage(img) !== null)).map(([name, raw]) => {
+    if (name === IMAGE_SOURCE_PAGE_ATTR) {
+      return { key: name, label: t(`${NS}.attr.builtin_page`), value: String(imagePage(img)) }
+    }
     const attr = findAttrByRawName(name)
     return {
       key: name,
@@ -583,14 +614,15 @@ onBeforeUnmount(() => {
   // Orphan any in-flight listing so it cannot map new blobs after unmount.
   listToken++
   initToken++
+  abortImageRequests()
   cardObserver?.disconnect()
   scrollObserver?.disconnect()
   releaseBlobs()
 })
 
-// Newest first unless the contract no longer offers it; picking by id keeps
-// the default independent of source registration order.
-const DEFAULT_SORT_ID = 'builtin:created_at'
+// 按字段 ID 选择页码升序；未开放页码排序时回退创建时间降序。
+const DEFAULT_SORT_ID = 'builtin:page'
+const LEGACY_DEFAULT_SORT_ID = 'builtin:created_at'
 
 let initToken = 0
 
@@ -605,6 +637,7 @@ async function initGallery() {
   error.value = ''
   keyword.value = ''
   sortBy.value = ''
+  sortOrder.value = 'desc'
   attrSelections.value = {}
   attrVerdicts.value = {}
   sourceDocIds.value = []
@@ -626,7 +659,11 @@ async function initGallery() {
     // default search still work.
   }
   if (!sortBy.value && sortAttrs.value.length) {
-    sortBy.value = sortAttrs.value.find((a) => a.id === DEFAULT_SORT_ID)?.id ?? sortAttrs.value[0].id
+    // 页码是画廊显式选择的默认排序；未开放该能力时保留创建时间降序。
+    sortBy.value = sortAttrs.value.find((a) => a.id === DEFAULT_SORT_ID)?.id
+      ?? sortAttrs.value.find((a) => a.id === LEGACY_DEFAULT_SORT_ID)?.id
+      ?? sortAttrs.value[0].id
+    sortOrder.value = sortBy.value === DEFAULT_SORT_ID ? 'asc' : 'desc'
   }
   await reload()
 }
@@ -902,6 +939,9 @@ watch(
                 <t-icon name="image-error" size="20px" />
                 <span>{{ t(`${NS}.imageLoadError`) }}</span>
               </div>
+              <span v-if="imagePage(img) !== null" class="ig-card__page">
+                {{ t(`${NS}.sourcePage`, { page: imagePage(img) }) }}
+              </span>
               <span v-if="!img.is_enabled" class="ig-card__badge">
                 {{ t(`${NS}.attr.builtin_is_enabled_value_false`) }}
               </span>
@@ -938,10 +978,12 @@ watch(
       :thumb-urls="thumbUrls"
       :resolve-src="resolveImageSrc"
       :attr-rows="attrRows"
+      :can-edit="props.canEdit"
       @select="(i: number) => (viewerIndex = i)"
       @load-more="onViewerLoadMore"
       @close="closeViewer"
       @open-source="onOpenSource"
+      @saved="closeViewer(); reload()"
     />
   </div>
 </template>
@@ -1356,6 +1398,18 @@ watch(
     color: var(--td-text-color-placeholder);
     font-size: var(--app-text-sm);
     text-align: center;
+  }
+
+  &__page {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.6);
+    font-size: var(--app-text-sm);
+    pointer-events: none;
   }
 
   &__badge {

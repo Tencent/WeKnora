@@ -10,6 +10,17 @@ import (
 )
 
 // GetModelCatalog returns the catalog layers, overlay and version history.
+// @Summary      Get the system model catalog
+// @Description  System administrator JWT only; API keys are not accepted. Returns built-in, deployment and effective
+// @Description  catalogs, the current overlay, version/baseline tokens, and the latest 20 published revisions.
+// @Tags         系统管理
+// @Produce      json
+// @Success      200  {object}  service.CatalogState
+// @Failure      401  {object}  map[string]interface{}
+// @Failure      403  {object}  map[string]interface{}
+// @Failure      503  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/model-catalog [get]
 func (h *SystemHandler) GetModelCatalog(c *gin.Context) {
 	state, err := h.modelCatalogSvc.State(c.Request.Context())
 	if err != nil {
@@ -20,9 +31,41 @@ func (h *SystemHandler) GetModelCatalog(c *gin.Context) {
 }
 
 // PreviewModelCatalog validates an overlay and returns the candidate catalog.
+// @Summary      Preview a model catalog overlay
+// @Description  System administrator JWT only; API keys are not accepted. Validates the overlay without publishing
+// @Description  it. Supply the current version and baseline; stale values return 409. The response contains the
+// @Description  candidate effective catalog and normalized overlay; history, builtin and deployment are null.
+// @Tags         系统管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body  service.CatalogUpdate  true  "Version, baseline and overlay object (max 1 MiB)"
+// @Success      200  {object}  service.CatalogState
+// @Failure      400  {object}  map[string]interface{}
+// @Failure      401  {object}  map[string]interface{}
+// @Failure      403  {object}  map[string]interface{}
+// @Failure      409  {object}  map[string]interface{}
+// @Failure      500  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/model-catalog/preview [post]
 func (h *SystemHandler) PreviewModelCatalog(c *gin.Context) { h.changeModelCatalog(c, false) }
 
 // PublishModelCatalog validates, persists and applies an overlay.
+// @Summary      Publish a model catalog overlay
+// @Description  System administrator JWT only; API keys are not accepted. Validates and publishes a new overlay
+// @Description  revision using the current version and baseline. Stale values return 409. To restore a historical
+// @Description  configuration, submit its overlay with the current version and baseline.
+// @Tags         系统管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body  service.CatalogUpdate  true  "Version, baseline and overlay object (max 1 MiB)"
+// @Success      200  {object}  service.CatalogState
+// @Failure      400  {object}  map[string]interface{}
+// @Failure      401  {object}  map[string]interface{}
+// @Failure      403  {object}  map[string]interface{}
+// @Failure      409  {object}  map[string]interface{}
+// @Failure      500  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/model-catalog [put]
 func (h *SystemHandler) PublishModelCatalog(c *gin.Context) { h.changeModelCatalog(c, true) }
 
 func (h *SystemHandler) changeModelCatalog(c *gin.Context, publish bool) {

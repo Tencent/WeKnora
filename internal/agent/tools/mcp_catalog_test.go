@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/policy"
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -23,10 +25,20 @@ type catalogPolicy struct {
 func (g *catalogPolicy) IsEnabled(_ context.Context, _ uint64, server, name string) (bool, error) {
 	return !g.disabled[server+"/"+name], g.err
 }
-func (*catalogPolicy) NeedsApproval(context.Context, uint64, string, string) bool { return false }
+
+func (*catalogPolicy) Action(context.Context, uint64, string, *types.MCPTool) policy.Action {
+	return policy.Action{Risk: policy.RiskRead}
+}
+
 func (*catalogPolicy) RequestAndWait(context.Context, approval.PendingRequest) (approval.Decision, error) {
 	return approval.Decision{Approved: true}, nil
 }
+
+func (*catalogPolicy) ResumeDecision(_ context.Context, p *types.AgentPrompt, _ *event.EventBus) approval.Decision {
+	return approval.Decision{PendingID: p.ID, Approved: true}
+}
+
+func (*catalogPolicy) MarkExecuted(context.Context, string) {}
 
 func catalogTestContext() context.Context {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
@@ -652,5 +664,34 @@ func TestMCPCallInvalidArgumentsExplainObjectEnvelope(t *testing.T) {
 		require.False(t, result.Success)
 		require.Contains(t, result.Error, "JSON object, not a JSON-encoded string")
 		require.Contains(t, result.Error, `"arguments":{}`)
+	}
+}
+
+func TestMCPCatalogHidesWriteToolsFromReadOnlyRuns(t *testing.T) {
+	server := &types.MCPService{ID: "server-1", Name: "orders", Enabled: true}
+	for name, gate := range map[string]approval.MCPApproval{
+		"policy gate": approval.NewGate(nil, nil, nil),
+		"custom gate": &catalogPolicy{disabled: map[string]bool{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			readOnly := true
+			c := newMCPCatalog(catalogTestContext(), []*types.MCPService{server}, gate,
+				func(_ context.Context, s *types.MCPService, _ bool) ([]*MCPTool, error) {
+					lookup := catalogTestTool(s, "lookup", "find orders", gate)
+					lookup.mcpTool.Annotations = &types.MCPToolAnnotations{ReadOnlyHint: &readOnly}
+					return []*MCPTool{lookup, catalogTestTool(s, "cancel", "cancel orders", gate)}, nil
+				}, nil)
+			r := NewToolRegistry()
+			installMCPCatalog(r, c)
+			list := map[string]any{"mode": "list_tools", "server_id": "server-1"}
+
+			readOnlyCtx := types.WithAccessLevel(catalogTestContext(), types.AssistantAccessReadOnly)
+			page := discoverPage(readOnlyCtx, t, r, list)
+			require.Len(t, page.Tools, 1)
+			require.Equal(t, "lookup", page.Tools[0].Name)
+
+			confirmCtx := types.WithAccessLevel(catalogTestContext(), types.AssistantAccessConfirm)
+			require.Len(t, discoverPage(confirmCtx, t, r, list).Tools, 2)
+		})
 	}
 }

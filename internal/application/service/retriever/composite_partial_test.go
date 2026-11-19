@@ -100,17 +100,15 @@ func TestCompositeRetrieveStaysSilentWhenResultSetsAreComplete(t *testing.T) {
 	require.NoError(t, results[0].Error)
 }
 
-// An engine-level error is not a partial result: it still drops everything
-// collected so far, so the existing all-or-nothing policy is unchanged.
-func TestCompositeRetrieveDropsResultsOnEngineLevelError(t *testing.T) {
-	cause := errors.New("vector store unavailable")
+func TestCompositeRetrieveKeepsVectorResultsWhenKeywordSearchFails(t *testing.T) {
+	cause := errors.New("postgres BM25 index is inconsistent")
 	engine := &cannedEngine{
-		engineType: types.QdrantRetrieverEngineType,
+		engineType: types.PostgresRetrieverEngineType,
 		support:    []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType},
 		results: map[types.RetrieverType][]*types.RetrieveResult{
 			types.VectorRetrieverType: {{
 				Results:             []*types.IndexWithScore{{ChunkID: "vector-1", Score: 0.9}},
-				RetrieverEngineType: types.QdrantRetrieverEngineType,
+				RetrieverEngineType: types.PostgresRetrieverEngineType,
 				RetrieverType:       types.VectorRetrieverType,
 			}},
 		},
@@ -123,7 +121,23 @@ func TestCompositeRetrieveDropsResultsOnEngineLevelError(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, cause)
-	require.Nil(t, results, "an engine-level failure still drops all results")
+	require.Len(t, results, 1, "a failed BM25 leg must not discard successful vector results")
+	require.Len(t, results[0].Results, 1)
+	require.Equal(t, "vector-1", results[0].Results[0].ChunkID)
+}
+
+func TestCompositeRetrieveReturnsErrorWhenNoLegSucceeds(t *testing.T) {
+	cause := errors.New("vector store unavailable")
+	engine := &cannedEngine{
+		engineType: types.QdrantRetrieverEngineType,
+		support:    []types.RetrieverType{types.KeywordsRetrieverType},
+		errs:       map[types.RetrieverType]error{types.KeywordsRetrieverType: cause},
+	}
+
+	results, err := compositeWith(engine).Retrieve(context.Background(), keywordsParams("q"))
+
+	require.ErrorIs(t, err, cause)
+	require.Nil(t, results, "when no retriever leg succeeds there are no fallback results")
 }
 
 // The canned engine must stay usable wherever the registry hands out an

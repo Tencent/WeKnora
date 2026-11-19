@@ -44,7 +44,7 @@ func (s *memoryWebPages) Read(_ context.Context, path string) ([]byte, error) {
 func TestFetchSavedPageSurvivesCacheEvictionAndModelEncoding(t *testing.T) {
 	store := &memoryWebPages{pages: map[string]string{}}
 	fetcher := newStubWebContentFetcher(map[string]string{}, nil)
-	fetch := newWebFetchTool(fetcher).WithPageSource(store)
+	fetch := NewWebFetchTool(fetcher).WithPageSource(store)
 	var saved string
 	for i := 0; i < 9; i++ {
 		url := fmt.Sprintf("https://example.com/%d", i)
@@ -108,14 +108,14 @@ func TestSavedWebPageReadsOversizedUnicodeLineWithoutShell(t *testing.T) {
 }
 
 func TestSearchOptionsAndExplicitPageContent(t *testing.T) {
-	svc := &searchOnlyWebService{results: []*types.WebSearchResult{
+	svc := &fakeWebSearchProvider{filtered: true, results: []*types.WebSearchResult{
 		{URL: "https://example.com/a", Snippet: "search snippet", Age: "yesterday"},
 		{URL: "https://example.com/b", Snippet: "still useful"},
 	}}
 	fetcher := newStubWebContentFetcher(map[string]string{"https://example.com/a": "verified page"},
 		map[string]error{"https://example.com/b": fmt.Errorf("page failed")})
-	pages := newWebFetchTool(fetcher).WithPageSource(&memoryWebPages{pages: map[string]string{}})
-	search := NewWebSearchTool(svc, 5, "provider").WithPageReader(pages)
+	pages := NewWebFetchTool(fetcher).WithPageSource(&memoryWebPages{pages: map[string]string{}})
+	search := NewWebSearchTool(svc, 5).WithPageReader(pages)
 	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
 	_, err := search.Execute(ctx, []byte(`{"query":"query","count":2}`))
 	require.NoError(t, err)
@@ -124,9 +124,8 @@ func TestSearchOptionsAndExplicitPageContent(t *testing.T) {
 		[]byte(`{"query":"query","count":2,"country":"de","freshness":"pw","content":true}`))
 	require.NoError(t, err)
 	require.True(t, result.Success)
-	require.Equal(t, 2, svc.config.MaxResults)
-	require.Equal(t, "DE", svc.config.Filters.Country)
-	require.Equal(t, "pw", svc.config.Filters.Freshness)
+	require.Equal(t, 2, svc.request.MaxResults)
+	require.Equal(t, types.WebSearchFilters{Country: "DE", Freshness: "pw"}, svc.request.Filters)
 	rows := result.Data["results"].([]map[string]interface{})
 	require.Equal(t, true, rows[0]["page_verified"])
 	require.Equal(t, "verified page", rows[0]["page_content"])
@@ -152,7 +151,7 @@ func TestSearchOptionsAndExplicitPageContent(t *testing.T) {
 		require.False(t, result.Success)
 		require.Equal(t, calls, svc.calls)
 	}
-	failedStorage := newWebFetchTool(fetcher).WithPageSource(&memoryWebPages{fail: true})
+	failedStorage := NewWebFetchTool(fetcher).WithPageSource(&memoryWebPages{fail: true})
 	search.WithPageReader(failedStorage)
 	result, err = search.Execute(ctx, []byte(`{"query":"q","count":1,"content":true}`))
 	require.NoError(t, err)

@@ -3,7 +3,9 @@ package handler
 import (
 	stderrors "errors"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -19,9 +21,11 @@ import (
 // @Description  Returns every skill definition in this workspace and which sandbox configs it is installed on.
 // @Tags         Skills
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.DataResponse{data=[]service.SkillCatalogView}
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"skill.list_catalog","risk":"read","max_items":200}
+// @x-agent-hint "Lists the skills already added to this workspace, with the sandbox config ids each is installed_on. skill.install_catalog puts one onto more sandboxes without fetching it again; for a skill not listed here, use skill.install with its source."
 // @Router       /skills/catalog [get]
 func (h *SkillHandler) ListCatalog(c *gin.Context) {
 	if h.catalog == nil {
@@ -34,6 +38,38 @@ func (h *SkillHandler) ListCatalog(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
+}
+
+// GetCatalog godoc
+// @Summary      Get a workspace skill
+// @Description  Returns one skill definition of this workspace and which sandbox configs it is installed on.
+// @Tags         Skills
+// @Produce      json
+// @Param        id   path  string  true  "Catalog skill ID"  extensions(x-agent=catalog_skill_id)
+// @Success      200  {object}  handler.DataResponse{data=service.SkillCatalogView}
+// @Failure      404  {object}  apperrors.AppError  "Skill not found"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"skill.get_catalog","risk":"read"}
+// @Router       /skills/catalog/{id} [get]
+func (h *SkillHandler) GetCatalog(c *gin.Context) {
+	if h.catalog == nil {
+		_ = c.Error(apperrors.NewNotFoundError("skill not found"))
+		return
+	}
+	rows, err := h.catalog.ListCatalog(c.Request.Context(), sandboxConfigTenantID(c))
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	id := c.Param("id")
+	for _, row := range rows {
+		if row.ID == id {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": row})
+			return
+		}
+	}
+	_ = c.Error(apperrors.NewNotFoundError("skill not found"))
 }
 
 // RegisterCatalog godoc
@@ -119,7 +155,27 @@ func (h *SkillHandler) registerCatalogFromSource(c *gin.Context) {
 }
 
 type catalogInstallRequest struct {
-	SandboxConfigIDs []string `json:"sandbox_config_ids"`
+	// Sandbox config ids to install onto: an agent's sandbox_config_id, or host on WeKnora Lite
+	SandboxConfigIDs []string `json:"sandbox_config_ids" validate:"required" extensions:"x-agent,x-agent-maximum=20"`
+}
+
+// catalogInstallData is the data of an accepted catalog install. installs and
+// errors map a sandbox config id to its new skill id or to why it failed;
+// started and failed carry the same as lists.
+type catalogInstallData struct {
+	Installs map[string]string `json:"installs"`
+	Errors   map[string]string `json:"errors,omitempty"`
+	// Sandbox config ids whose install started
+	Started []string `json:"started" extensions:"x-agent"`
+	// "sandbox config id: reason" for each sandbox that was not started
+	Failed []string `json:"failed,omitempty" extensions:"x-agent"`
+}
+
+// catalogInstallResponse is the body of POST /skills/catalog/{id}/install.
+type catalogInstallResponse struct {
+	// false when any sandbox failed to start
+	Success bool               `json:"success" extensions:"x-agent"`
+	Data    catalogInstallData `json:"data" extensions:"x-agent"`
 }
 
 // InstallCatalog godoc
@@ -128,8 +184,13 @@ type catalogInstallRequest struct {
 // @Tags         Skills
 // @Accept       json
 // @Produce      json
-// @Param        id   path  string  true  "Catalog skill ID"
-// @Success      202  {object}  map[string]interface{}
+// @Param        id       path  string                 true  "Catalog skill ID"  extensions(x-agent=catalog_skill_id)
+// @Param        request  body  catalogInstallRequest  true  "Target sandboxes"
+// @Success      202  {object}  handler.catalogInstallResponse
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @x-agent      {"id":"skill.install_catalog","risk":"write","role":"admin","target":"skill.get_catalog","label":"name","always_confirm":true,"root":""}
+// @x-agent-hint "Installs a workspace skill from skill.list_catalog onto sandboxes, reusing its stored bundle. Like skill.install it runs as root in each image and always asks the user, and each install takes minutes; check them with skill.list_installed."
 // @Router       /skills/catalog/{id}/install [post]
 func (h *SkillHandler) InstallCatalog(c *gin.Context) {
 	if h.catalog == nil {
@@ -156,14 +217,12 @@ func (h *SkillHandler) InstallCatalog(c *gin.Context) {
 	if result == nil {
 		result = &service.CatalogInstallResult{}
 	}
-	data := gin.H{"installs": result.Installs}
-	if len(result.Errors) > 0 {
-		data["errors"] = result.Errors
+	data := catalogInstallData{Installs: result.Installs, Errors: result.Errors, Started: []string{}}
+	data.Started = append(data.Started, slices.Sorted(maps.Keys(result.Installs))...)
+	for _, configID := range slices.Sorted(maps.Keys(result.Errors)) {
+		data.Failed = append(data.Failed, configID+": "+result.Errors[configID])
 	}
-	c.JSON(http.StatusAccepted, gin.H{
-		"success": len(result.Errors) == 0,
-		"data":    data,
-	})
+	c.JSON(http.StatusAccepted, catalogInstallResponse{Success: len(result.Errors) == 0, Data: data})
 }
 
 // DeleteCatalog godoc
@@ -171,7 +230,7 @@ func (h *SkillHandler) InstallCatalog(c *gin.Context) {
 // @Description  Refused while any sandbox still has an installation of this skill.
 // @Tags         Skills
 // @Param        id   path  string  true  "Catalog skill ID"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.SuccessResponse
 // @Router       /skills/catalog/{id} [delete]
 func (h *SkillHandler) DeleteCatalog(c *gin.Context) {
 	if h.catalog == nil {
@@ -193,7 +252,7 @@ func (h *SkillHandler) DeleteCatalog(c *gin.Context) {
 // @Tags         Skills
 // @Produce      json
 // @Param        id   path  string  true  "Catalog skill ID"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.DataResponse{data=[]service.SkillFileEntry}
 // @Router       /skills/catalog/{id}/files [get]
 func (h *SkillHandler) ListCatalogFiles(c *gin.Context) {
 	if h.catalog == nil {
@@ -216,7 +275,7 @@ func (h *SkillHandler) ListCatalogFiles(c *gin.Context) {
 // @Produce      json
 // @Param        id    path   string  true  "Catalog skill ID"
 // @Param        path  query  string  true  "Skill-root-relative file path"
-// @Success      200   {object}  map[string]interface{}
+// @Success      200   {object}  handler.DataResponse{data=service.SkillFileContent}
 // @Router       /skills/catalog/{id}/files/content [get]
 func (h *SkillHandler) GetCatalogFile(c *gin.Context) {
 	if h.catalog == nil {

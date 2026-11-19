@@ -101,6 +101,14 @@ func (r *RedisStreamManager) AppendEvent(
 	return nil
 }
 
+// ResetEvents deletes the message's event list.
+func (r *RedisStreamManager) ResetEvents(ctx context.Context, sessionID, messageID string) error {
+	if err := r.client.Del(ctx, r.buildKey(sessionID, messageID)).Err(); err != nil {
+		return fmt.Errorf("failed to reset stream events: %w", err)
+	}
+	return nil
+}
+
 // GetEvents gets events starting from offset using Redis LRange
 // Returns: events slice, next offset, error
 func (r *RedisStreamManager) GetEvents(

@@ -3,6 +3,7 @@ package utils
 import (
 	"regexp"
 	"strconv"
+	"unicode/utf8"
 )
 
 var imageDataURLPatternForLog = regexp.MustCompile(`data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+`)
@@ -25,5 +26,11 @@ func CompactImageDataURLForLog(raw string) string {
 	if len(masked) <= defaultMaxLogChars {
 		return masked
 	}
-	return masked[:defaultMaxLogChars] + "... (truncated, total " + strconv.Itoa(len(masked)) + " chars)"
+	// Back off to a rune boundary: request bodies are often Chinese, and a
+	// partial rune leaves invalid UTF-8 in the log line.
+	cut := defaultMaxLogChars
+	for cut > 0 && !utf8.RuneStart(masked[cut]) {
+		cut--
+	}
+	return masked[:cut] + "... (truncated, total " + strconv.Itoa(len(masked)) + " chars)"
 }

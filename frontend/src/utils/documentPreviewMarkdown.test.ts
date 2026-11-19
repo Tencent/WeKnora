@@ -71,6 +71,30 @@ test('preview Markdown skips highlightAuto on huge unlabeled fences', () => {
   assert.doesNotMatch(html, /hljs-/)
 })
 
+test('preview Markdown marks only Mermaid fences and escapes their diagram source', () => {
+  const markdown = [
+    'Intro',
+    '',
+    '```Mermaid title="Process"',
+    'flowchart LR',
+    '  A["Left & right<br>Next"] --> B[Done]',
+    '```',
+    '',
+    '```text',
+    'flowchart LR',
+    '```',
+  ].join('\n')
+  const html = renderDocumentPreviewMarkdown(markdown, value => value, { renderMermaid: true })
+
+  assert.match(html, /<p>Intro<\/p>/)
+  assert.equal(html.match(/data-preview-mermaid/g)?.length, 1)
+  assert.match(html, /<pre data-preview-mermaid><code class="hljs">flowchart LR\n/)
+  assert.match(html, /Left &amp; right&lt;br&gt;Next/)
+  assert.doesNotMatch(html, /<br>Next/)
+  assert.match(html, /<pre><code class="hljs">/)
+  assert.doesNotMatch(renderDocumentPreviewMarkdown(markdown, value => value), /data-preview-mermaid/)
+})
+
 test('raw HTML images cannot override preview loading attributes', () => {
   const attributes = new Map([
     ['alt', 'score > 90'],
@@ -88,4 +112,25 @@ test('raw HTML images cannot override preview loading attributes', () => {
   assert.equal(attributes.get('loading'), 'lazy')
   assert.equal(attributes.get('decoding'), 'async')
   assert.equal(attributes.get('fetchpriority'), 'low')
+})
+
+// GFM task lists must survive the preview pipeline as sanitizer-safe spans:
+// marked's default <input type="checkbox"> is stripped by the DOMPurify tag
+// allowlist, which degraded "- [x] 任务" to a plain bullet.
+test('task list items render styled checkbox spans, checked and unchecked', () => {
+  const html = renderDocumentPreviewMarkdown(
+    '- [x] 任务1\n\n- [ ] 任务2\n',
+    value => value,
+  )
+
+  assert.match(html, /<span class="task-checkbox checked"><\/span>任务1/)
+  assert.match(html, /<span class="task-checkbox"><\/span>任务2/)
+  assert.ok(!html.includes('<input'), 'no raw checkbox input may be emitted')
+})
+
+test('plain bullets are not affected by the task checkbox override', () => {
+  const html = renderDocumentPreviewMarkdown('- 普通项\n', value => value)
+
+  assert.match(html, /<li>普通项<\/li>/)
+  assert.ok(!html.includes('task-checkbox'))
 })

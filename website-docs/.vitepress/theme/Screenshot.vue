@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { withBase } from 'vitepress'
+import { ref, computed, watch } from 'vue'
+import { useData, withBase } from 'vitepress'
 
 const props = defineProps<{
   /** 相对站点根的图片路径，约定放在 public/screenshots/ 下 */
@@ -11,26 +11,31 @@ const props = defineProps<{
   hint?: string
 }>()
 
-// 图片可能尚未补充。默认先渲染占位框，只有确实加载成功才换成图片，
-// 这样缺图时不会先闪一个碎图标再降级。
-const loaded = ref(false)
+const { theme } = useData()
+const size = computed(() => theme.value.weknoraScreenshotSizes?.[props.src])
+const failed = ref(false)
 const resolved = computed(() => withBase(props.src))
+watch(resolved, () => { failed.value = false })
 </script>
 
 <template>
   <figure class="wk-shot">
-    <img
-      v-show="loaded"
-      class="wk-shot-img"
-      :src="resolved"
-      :alt="caption"
-      @load="loaded = true"
-    />
-    <div v-if="!loaded" class="wk-shot-placeholder">
-      <div class="wk-shot-placeholder-badge">截图待补充</div>
-      <div class="wk-shot-placeholder-caption">{{ caption }}</div>
-      <p v-if="hint" class="wk-shot-placeholder-hint">{{ hint }}</p>
-      <code class="wk-shot-placeholder-path">website-docs/public{{ src }}</code>
+    <div class="wk-shot-media" :style="size ? { aspectRatio: `${size.width} / ${size.height}` } : undefined">
+      <img
+        v-if="size && !failed"
+        class="wk-shot-img"
+        :src="resolved"
+        :alt="caption"
+        :width="size.width"
+        :height="size.height"
+        @error="failed = true"
+      />
+      <div v-else class="wk-shot-placeholder" :class="{ 'wk-shot-placeholder-sized': size }">
+        <div class="wk-shot-placeholder-badge">{{ failed ? '图片加载失败' : '截图待补充' }}</div>
+        <div class="wk-shot-placeholder-caption">{{ caption }}</div>
+        <p v-if="hint" class="wk-shot-placeholder-hint">{{ hint }}</p>
+        <code class="wk-shot-placeholder-path">website-docs/public{{ src }}</code>
+      </div>
     </div>
     <figcaption class="wk-shot-caption">{{ caption }}</figcaption>
   </figure>
@@ -41,9 +46,19 @@ const resolved = computed(() => withBase(props.src))
   margin: 24px 0;
 }
 
+.wk-shot-media { position: relative; }
+
+.wk-shot-placeholder-sized {
+  position: absolute;
+  inset: 0;
+  justify-content: center;
+  overflow: auto;
+}
+
 .wk-shot-img {
   display: block;
   width: 100%;
+  height: auto;
   border: 1px solid var(--vp-c-divider);
   border-radius: 10px;
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -273,7 +274,7 @@ func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string)
 	for page := 1; ; page++ {
 		path := fmt.Sprintf("/v1/blocks/%s/children", blockID)
 		if startCursor != "" {
-			path += "?start_cursor=" + startCursor
+			path += "?start_cursor=" + url.QueryEscape(startCursor)
 		}
 
 		respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
@@ -333,11 +334,12 @@ func (c *notionClient) GetBlockChildrenAll(ctx context.Context, blockID string) 
 func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID string, depth int) ([]notionBlock, error) {
 	var allBlocks []notionBlock
 	var startCursor string
+	seenCursors := make(map[string]struct{})
 
-	for {
+	for page := 1; ; page++ {
 		path := fmt.Sprintf("/v1/blocks/%s/children", blockID)
 		if startCursor != "" {
-			path += "?start_cursor=" + startCursor
+			path += "?start_cursor=" + url.QueryEscape(startCursor)
 		}
 
 		respBody, err := c.doRequest(ctx, http.MethodGet, path, nil)
@@ -376,7 +378,14 @@ func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID st
 		if len(allBlocks) >= maxBlocksPerPage || !resp.HasMore || resp.NextCursor == "" {
 			break
 		}
-		startCursor = resp.NextCursor
+		// maxBlocksPerPage counts appended blocks, so an empty page carrying
+		// has_more=true never reaches it. Guard the cursor itself as well: a
+		// repeated one would otherwise be requested forever.
+		next, err := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
+		if err != nil {
+			return nil, fmt.Errorf("get block children for %s: %w", blockID, err)
+		}
+		startCursor = next
 	}
 
 	if depth >= maxBlockDepth {
@@ -394,8 +403,16 @@ func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID st
 		}
 		children, err := c.getBlockChildrenRecursive(ctx, allBlocks[i].ID, depth+1)
 		if err != nil {
-			logger.Warnf(ctx, "[Notion] failed to get children for block %s (depth %d): %v", allBlocks[i].ID, depth, err)
-			continue
+			// A cross-page synced_block whose source page is not shared with the
+			// integration (or was trashed) still reports has_children=true while
+			// GET /v1/blocks/{id}/children deterministically returns 404. Skip the
+			// inaccessible subtree instead of aborting the whole page and sync run.
+			if errors.Is(err, datasource.ErrResourceNotFound) {
+				logger.Warnf(ctx, "[Notion] failed to get children for block %s (depth %d): %v",
+					allBlocks[i].ID, depth, err)
+				continue
+			}
+			return nil, err
 		}
 		allBlocks[i].Children = children
 	}
@@ -597,8 +614,11 @@ func (c *notionClient) paginatePages(ctx context.Context, method, path string) (
 				errQueryResultTruncated, resp.RequestStatus.IncompleteReason, path, len(allPages))
 		}
 
-		if !resp.HasMore || resp.NextCursor == "" {
+		if !resp.HasMore {
 			break
+		}
+		if resp.NextCursor == "" {
+			return nil, fmt.Errorf("paginate %s: has_more=true without a next_cursor", path)
 		}
 		next, err := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
 		if err != nil {

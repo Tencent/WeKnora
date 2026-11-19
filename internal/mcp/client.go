@@ -76,6 +76,8 @@ type mcpGoClient struct {
 	initialized  atomic.Bool
 	metadataMu   sync.RWMutex
 	instructions string
+	serverInfo   ServerInfo
+	initializeAt time.Time
 	toolSchemas  map[string]json.RawMessage
 	// newProbe builds an independent connection with the same outbound policy.
 	newProbe func() (*mcpGoClient, error)
@@ -238,17 +240,25 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for SSE transport")
 		}
+		// SSE keeps its GET response body open for the connection lifetime.
+		// OAuth retains the bounded HTTP client; SSE bounds startup and RPCs
+		// separately without putting an expiration on the event stream.
+		sseHTTPClient := *httpClient
+		sseHTTPClient.Timeout = 0
 		options := []transport.ClientOption{
-			transport.WithHTTPClient(httpClient),
+			transport.WithHTTPClient(&sseHTTPClient),
 			transport.WithHeaders(headers),
+			transport.WithEndpointTimeout(timeout),
+			transport.WithResponseTimeout(timeout),
 		}
 		if useOAuth {
 			options = append(options, transport.WithOAuth(oauthConfig))
 		}
-		connection, err = transport.NewSSE(*config.Service.URL, options...)
+		sse, err := transport.NewSSE(*config.Service.URL, options...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create SSE client: %w", err)
 		}
+		connection = &boundedSSEConnection{SSE: sse, timeout: timeout}
 	case types.MCPTransportHTTPStreamable:
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for HTTP Streamable transport")
@@ -494,6 +504,13 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 	c.initialized.Store(true)
 	c.metadataMu.Lock()
 	c.instructions = result.Instructions
+	c.serverInfo = ServerInfo{
+		Name:        result.ServerInfo.Name,
+		Version:     result.ServerInfo.Version,
+		Title:       result.ServerInfo.Title,
+		Description: result.ServerInfo.Description,
+	}
+	c.initializeAt = time.Now()
 	c.metadataMu.Unlock()
 	serviceName := secutils.SanitizeForLog(c.service.Name)
 	logger.Debugf(
@@ -596,6 +613,23 @@ func (c *mcpGoClient) ServerInstructions() string {
 	return c.instructions
 }
 
+// ServerInfo returns the server identity reported by the last initialize, so
+// a caller can tell whether a saved directory came from the same server build.
+func (c *mcpGoClient) ServerInfo() ServerInfo {
+	c.metadataMu.RLock()
+	defer c.metadataMu.RUnlock()
+	return c.serverInfo
+}
+
+// InitializedAt returns when the last initialize completed. A connection is
+// reused for as long as it stays open, so its server identity and
+// instructions are only as recent as this time.
+func (c *mcpGoClient) InitializedAt() time.Time {
+	c.metadataMu.RLock()
+	defer c.metadataMu.RUnlock()
+	return c.initializeAt
+}
+
 // ListTools retrieves the list of available tools
 func (c *mcpGoClient) ListTools(ctx context.Context) ([]*types.MCPTool, error) {
 	if !c.initialized.Load() {
@@ -687,9 +721,10 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 		}
 		var page struct {
 			Tools []struct {
-				Name        string          `json:"name"`
-				Description string          `json:"description"`
-				InputSchema json.RawMessage `json:"inputSchema"`
+				Name        string                    `json:"name"`
+				Description string                    `json:"description"`
+				InputSchema json.RawMessage           `json:"inputSchema"`
+				Annotations *types.MCPToolAnnotations `json:"annotations"`
 			} `json:"tools"`
 			NextCursor string `json:"nextCursor"`
 		}
@@ -704,7 +739,10 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 			}
 			tools = append(
 				tools,
-				&types.MCPTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema},
+				&types.MCPTool{
+					Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema,
+					Annotations: tool.Annotations,
+				},
 			)
 		}
 		if len(tools) > maxToolsPerService {
@@ -803,7 +841,7 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 			schema, cached = c.toolSchemas[name]
 			c.metadataMu.RUnlock()
 			if !cached {
-				return nil, fmt.Errorf("tool %q not found in MCP directory", name)
+				return nil, toolNotInDirectoryError(name)
 			}
 		}
 		// Raw directory reads bypass the SDK's tool cache. Reuse its annotation
@@ -818,11 +856,22 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 		}
 	}
 
+	var callErr error
 	result, err := oauthCall(ctx, c, func() (*mcp.CallToolResult, error) {
-		return c.client.CallTool(ctx, req)
+		result, err := c.client.CallTool(ctx, req)
+		callErr = err
+		return result, err
 	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
+		// Inspect the actual call error, not a preflight/refresh error from
+		// oauthCall. A rejected authorization did not execute the tool.
+		if callErr != nil && !IsToolCallRetrySafe(callErr) {
+			return nil, fmt.Errorf(
+				"%w; it may already have completed. Verify the remote outcome before retrying: %w",
+				ErrToolCallOutcomeUnknown, err,
+			)
+		}
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
 
