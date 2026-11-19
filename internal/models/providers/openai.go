@@ -117,6 +117,14 @@ func newOpenaiProvider() *Definition {
 				SendEncodingFormat: api.Ptr(true),
 				DimensionsField:    api.Ptr("dimensions"),
 				MaxBatchSize:       api.Ptr(2048),
+				// "Each input must not exceed the max input tokens for the
+				// model": 8191 for text-embedding-3-small and -large, 8192 for
+				// ada-002
+				// (https://developers.openai.com/cookbook/examples/embedding_long_inputs).
+				// Vendors state the ceiling in tokens; runes are the closest
+				// count without a tokenizer, and undercounting is the safe
+				// direction.
+				MaxInputChars: api.Ptr(8191),
 			},
 			OpenAICompletions: api.OpenAICompletionsCompat{
 				ThinkingFormat:          api.Ptr(api.ThinkingFormatOpenAI),
