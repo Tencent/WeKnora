@@ -30,8 +30,16 @@ func NewConnector(region core.Region) *Connector {
 
 // Feishu supports resumable streaming sync; the service prefers FetchStream over
 // FetchAll/FetchIncremental when a connector implements StreamingConnector.
-var _ datasource.StreamingConnector = (*Connector)(nil)
-var _ datasource.FullStreamingConnector = (*Connector)(nil)
+var (
+	_ datasource.StreamingConnector            = (*Connector)(nil)
+	_ datasource.FullStreamingConnector        = (*Connector)(nil)
+	_ datasource.ItemFailureIsolatingConnector = (*Connector)(nil)
+)
+
+// IsolatesItemIngestFailures reports that the wiki connector tracks each node's
+// edit time independently and can skip advancing a single failed node without
+// aborting the rest of the sync.
+func (c *Connector) IsolatesItemIngestFailures() bool { return true }
 
 // Type returns the connector type identifier.
 func (c *Connector) Type() string {

@@ -1001,6 +1001,50 @@ func resolveDeletedItemTitle(
 	return ""
 }
 
+// syncErrorItemLabel formats a user-facing item label for sync error samples.
+// When FileName carries a folder path (e.g. Feishu Drive/Wiki path-qualified
+// names) and Title is a bare name, combine them so operators can immediately
+// locate the failing file.
+func syncErrorItemLabel(item *types.FetchedItem) string {
+	if item == nil {
+		return ""
+	}
+	title := strings.TrimSpace(item.Title)
+	fileName := strings.TrimSpace(item.FileName)
+	if fileName != "" {
+		folder, base := types.SplitKnowledgeRelativePath(fileName)
+		if folder != "" {
+			if title == "" {
+				if base != "" {
+					return folder + "/" + base
+				}
+				return fileName
+			}
+			if !strings.Contains(title, "/") {
+				return folder + "/" + title
+			}
+		}
+	}
+	if title != "" {
+		return title
+	}
+	return fileName
+}
+
+// isGlobalIngestAbortError reports whether an ingestion error reflects a
+// workspace/context-level failure that affects all remaining items and must
+// abort streaming immediately rather than isolating per item.
+func isGlobalIngestAbortError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var quotaErr *types.StorageQuotaExceededError
+	return errors.As(err, &quotaErr)
+}
+
 // fetchFailureSyncError maps a connector error item into a structured, user-
 // facing sample. Connectors that classify their errors (Feishu) provide a stable
 // i18n code + params via metadata so the frontend localises it to the viewer's
@@ -1008,7 +1052,7 @@ func resolveDeletedItemTitle(
 // without codes keep the raw text as a Message fallback. Best practice per
 // Airbyte/Fivetran/Onyx: humanised, actionable, localised UI; raw detail in logs.
 func fetchFailureSyncError(item *types.FetchedItem, rawMsg string) types.SyncItemError {
-	e := types.SyncItemError{Title: item.Title}
+	e := types.SyncItemError{Title: syncErrorItemLabel(item)}
 	if code := item.Metadata["error_reason_code"]; code != "" {
 		e.Code = code
 		if v := item.Metadata["error_reason_code_value"]; v != "" {
@@ -1129,7 +1173,10 @@ func (s *DataSourceService) applyFetchedItem(
 
 	isUpdate, err := s.ingestItem(ctx, ds, item, tagIDs)
 	if err != nil {
+		itemLabel := syncErrorItemLabel(item)
 		var dupErr *types.DuplicateKnowledgeError
+		var appErr *werrors.AppError
+		var quotaErr *types.StorageQuotaExceededError
 		switch {
 		case errors.As(err, &dupErr):
 			// Duplicate file/URL is not a failure — count as skipped.
@@ -1138,30 +1185,62 @@ func (s *DataSourceService) applyFetchedItem(
 		case errors.Is(err, ErrInvalidFileType):
 			result.Failed++
 			recordSyncError(result, types.SyncItemError{
-				Title: item.Title, Code: "unsupported_file_type", Message: "Unsupported file type",
+				Title: itemLabel, Code: "unsupported_file_type", Message: "Unsupported file type",
 			})
 			return false, err
-		default:
-			var appErr *werrors.AppError
-			if errors.As(err, &appErr) && appErr.Code == werrors.ErrImportPrerequisiteMissing {
-				// A missing VLM/ASR prerequisite can never succeed on replay:
-				// the file waits for the operator to configure a model.
-				// Classify it as a permanent rejection — visible in the sync
-				// log, stream keeps going, cursor advances past it — so one
-				// image cannot abort the round and force every later sync to
-				// re-fetch the same items again (Tencent/WeKnora#4712).
-				result.Failed++
-				recordSyncError(result, types.SyncItemError{
-					Title:   item.Title,
-					Code:    "prerequisite_not_configured",
-					Message: appErr.Message,
-				})
-				return true, nil
-			}
+		case errors.Is(err, ErrInvalidURL):
+			result.Failed++
+			recordSyncError(result, types.SyncItemError{
+				Title: itemLabel, Code: "invalid_url", Message: "Invalid or unsafe URL",
+			})
+			return true, nil
+		case errors.Is(err, errInvalidJSONContent):
+			result.Failed++
+			recordSyncError(result, types.SyncItemError{
+				Title:   itemLabel,
+				Code:    "invalid_json_content",
+				Message: "Invalid or empty JSON file content",
+			})
+			return true, nil
+		case errors.As(err, &appErr) && appErr.Code == werrors.ErrImportPrerequisiteMissing:
+			// A missing VLM/ASR prerequisite can never succeed on replay:
+			// the file waits for the operator to configure a model.
+			// Classify it as a permanent rejection — visible in the sync
+			// log, stream keeps going, cursor advances past it — so one
+			// image cannot abort the round and force every later sync to
+			// re-fetch the same items again (Tencent/WeKnora#4712).
+			result.Failed++
+			recordSyncError(result, types.SyncItemError{
+				Title:   itemLabel,
+				Code:    "prerequisite_not_configured",
+				Message: appErr.Message,
+			})
+			return true, nil
+		case errors.As(err, &appErr) && appErr.Code == werrors.ErrValidation:
+			// Filename or folder-path validation errors cannot succeed until
+			// the source item is renamed; keep them visible without blocking
+			// unrelated files or newly added directories.
+			result.Failed++
+			recordSyncError(result, types.SyncItemError{
+				Title:   itemLabel,
+				Code:    "invalid_item_name",
+				Message: "File name or folder path contains invalid characters",
+			})
+			return true, nil
+		case errors.As(err, &quotaErr):
 			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
 			result.Failed++
 			recordSyncError(result, types.SyncItemError{
-				Title:   item.Title,
+				Title:   itemLabel,
+				Code:    "storage_quota_exceeded",
+				Message: "Storage quota exceeded",
+			})
+			return false, &dataSourceIngestError{cause: err}
+		default:
+			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
+			result.Failed++
+			recordSyncError(result, types.SyncItemError{
+				Title:   itemLabel,
 				Code:    "ingest_failed",
 				Message: "Ingest failed; see server logs",
 			})
@@ -1248,6 +1327,12 @@ func (s *DataSourceService) clearResyncMarker(ctx context.Context, ds *types.Dat
 	}
 }
 
+// maxConsecutiveIsolatedIngestFailures caps how many consecutive unexpected
+// item ingest failures an isolating streaming connector may skip before the
+// sync aborts as a systemic storage/DB outage instead of burning remote API
+// budget across the remaining tree.
+const maxConsecutiveIsolatedIngestFailures = 10
+
 // streamSyncHandler adapts a streaming fetch to the knowledge-base ingest path.
 // Emit ingests each item as it arrives (bounding memory) and Checkpoint persists
 // the connector cursor plus live progress counts at page boundaries.
@@ -1261,10 +1346,16 @@ type streamSyncHandler struct {
 	// Count separately from the capped error samples; unsupported and oversized
 	// files must not disable future syncs, including runs with both failure types.
 	nonBlockingFailures int
+	// isolateItemFailures is true when the connector tracks per-item cursors
+	// independently and honors datasource.ErrItemIngestFailed by leaving only
+	// the failed item unadvanced instead of aborting the whole round.
+	isolateItemFailures       bool
+	consecutiveIngestFailures int
 }
 
-// Emit ingests one streamed item. Unexpected ingestion errors abort the stream
-// before the connector can checkpoint past the failed item.
+// Emit ingests one streamed item. Unexpected ingestion errors either isolate
+// the single item (for ItemFailureIsolatingConnector, up to the consecutive
+// failure cap) or abort the stream before the connector can checkpoint past it.
 func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) error {
 	if h.ingestErr != nil {
 		return h.ingestErr
@@ -1274,6 +1365,8 @@ func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) er
 	}
 	h.result.Total++
 	failedBefore := h.result.Failed
+	createdBefore := h.result.Created
+	updatedBefore := h.result.Updated
 	nonBlocking, err := h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
 	if item.RetryOnFailure && h.result.Failed > failedBefore {
 		h.ingestErr = fmt.Errorf("streamed item %q was not accepted; retry synchronization", item.ExternalID)
@@ -1282,6 +1375,18 @@ func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) er
 	if nonBlocking || errors.Is(err, ErrInvalidFileType) {
 		h.nonBlockingFailures++
 		return nil
+	}
+	if err == nil {
+		if h.result.Created > createdBefore || h.result.Updated > updatedBefore {
+			h.consecutiveIngestFailures = 0
+		}
+		return nil
+	}
+	if h.isolateItemFailures && !isGlobalIngestAbortError(err) {
+		h.consecutiveIngestFailures++
+		if h.consecutiveIngestFailures < maxConsecutiveIsolatedIngestFailures {
+			return fmt.Errorf("%w: %w", datasource.ErrItemIngestFailed, err)
+		}
 	}
 	h.ingestErr = err
 	return h.ingestErr
@@ -1377,8 +1482,19 @@ func (s *DataSourceService) processSyncStreaming(
 		return err
 	}
 
+	isolateItemFailures := false
+	if iso, ok := sc.(datasource.ItemFailureIsolatingConnector); ok && iso.IsolatesItemIngestFailures() {
+		isolateItemFailures = true
+	}
 	result := &types.SyncResult{}
-	handler := &streamSyncHandler{svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog}
+	handler := &streamSyncHandler{
+		svc:                 s,
+		ds:                  ds,
+		tagIDs:              autoTagIDs,
+		result:              result,
+		syncLog:             syncLog,
+		isolateItemFailures: isolateItemFailures,
+	}
 
 	fullBaseline := startCursor
 	if forceFull {
@@ -1395,17 +1511,21 @@ func (s *DataSourceService) processSyncStreaming(
 	}
 
 	nextCursor, fetchErr := streamingFetch(ctx, sc, config, forceFull, startCursor, fullBaseline, handler)
+	abortErrMsg := ""
 	if handler.ingestErr != nil {
 		// Do not publish a final cursor even if the connector ignored an Emit error.
 		fetchErr = handler.ingestErr
+		abortErrMsg = handler.ingestErr.Error()
+	} else if fetchErr != nil {
+		abortErrMsg = fmt.Sprintf("Fetch failed: %v", fetchErr)
 	}
 	if fetchErr != nil {
 		// Progress so far is already checkpointed onto ds.LastSyncCursor; leave
 		// it in place so the Asynq retry resumes from there. Persist counts.
-		logger.Errorf(ctx, "streaming fetch failed: %v", fetchErr)
+		logger.Errorf(ctx, "streaming sync failed: %v", fetchErr)
 		resultJSON, _ := result.ToJSON()
 		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON,
-			types.SyncLogStatusFailed, fmt.Sprintf("Fetch failed: %v", fetchErr), wasPaused)
+			types.SyncLogStatusFailed, abortErrMsg, wasPaused)
 		return fetchErr
 	}
 
@@ -1657,6 +1777,15 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	// also uses that type and must remain retryable.
 	if len(item.Content) > 0 && (IsVideoType(getFileType(item.FileName)) || !isValidFileType(item.FileName)) {
 		return false, ErrInvalidFileType
+	}
+	if len(item.Content) == 0 && item.URL != "" && isFileURL(item.URL, item.FileName, "") {
+		fileName := item.FileName
+		if fileName == "" {
+			fileName = extractFileNameFromURL(item.URL)
+		}
+		if IsVideoType(getFileType(fileName)) || !isValidFileType(fileName) {
+			return false, ErrInvalidFileType
+		}
 	}
 	// Channel decides the knowledge "source" label shown in the UI. Prefer the
 	// connector-supplied metadata["channel"] (e.g. Feishu Drive sets it to

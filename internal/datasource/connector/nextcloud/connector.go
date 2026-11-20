@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	_ datasource.Connector              = (*Connector)(nil)
-	_ datasource.FullStreamingConnector = (*Connector)(nil)
+	_ datasource.Connector                     = (*Connector)(nil)
+	_ datasource.FullStreamingConnector        = (*Connector)(nil)
+	_ datasource.ItemFailureIsolatingConnector = (*Connector)(nil)
 )
 
 // Connector keeps no credentials or sync state between data sources.
@@ -25,6 +26,10 @@ func NewConnector() *Connector { return &Connector{} }
 
 // Type returns the registered connector type.
 func (*Connector) Type() string { return types.ConnectorTypeNextcloud }
+
+// IsolatesItemIngestFailures reports that Nextcloud tracks per-file
+// fingerprints independently so one failed item does not block remaining files.
+func (*Connector) IsolatesItemIngestFailures() bool { return true }
 
 // Validate verifies account access with Depth 0, without enumerating files.
 func (*Connector) Validate(ctx context.Context, ds *types.DataSourceConfig) error {

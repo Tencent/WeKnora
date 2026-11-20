@@ -283,6 +283,9 @@ func (r *syncRun) syncFile(p string, e dirent) error {
 		return r.fetchError(p, e, err, downloadReason(err))
 	}
 	if err := r.emit(r.buildItem(p, e, body)); err != nil {
+		if errors.Is(err, datasource.ErrItemIngestFailed) {
+			return r.markFailed(p)
+		}
 		return err
 	}
 	r.cur.Files[p] = fp

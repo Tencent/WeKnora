@@ -124,6 +124,16 @@ test('DataSourceSyncLogs surfaces deleted_items with titles and external IDs acr
     }
     assert.equal(vm.deletedItems(manyDeletedLog).length, 50)
     assert.equal(vm.deletedItemsCount(manyDeletedLog), 65)
+
+    // Coded ingest errors format with path-qualified title and fallback message when key is absent.
+    assert.equal(
+      vm.formatSyncError({
+        title: '云盘目录/目录一/源码管理流程.png',
+        code: 'prerequisite_not_configured',
+        message: '上传图片文件需要设置VLM模型',
+      }),
+      '云盘目录/目录一/源码管理流程.png — 上传图片文件需要设置VLM模型',
+    )
   } finally {
     app.unmount()
   }

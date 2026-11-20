@@ -31,8 +31,16 @@ func NewDriveConnector(region core.Region) *DriveConnector {
 
 // Drive supports resumable streaming sync; the service prefers FetchStream over
 // FetchAll/FetchIncremental when a connector implements StreamingConnector.
-var _ datasource.StreamingConnector = (*DriveConnector)(nil)
-var _ datasource.FullStreamingConnector = (*DriveConnector)(nil)
+var (
+	_ datasource.StreamingConnector            = (*DriveConnector)(nil)
+	_ datasource.FullStreamingConnector        = (*DriveConnector)(nil)
+	_ datasource.ItemFailureIsolatingConnector = (*DriveConnector)(nil)
+)
+
+// IsolatesItemIngestFailures reports that the Drive connector tracks each
+// file's modified time independently and can skip advancing a single failed
+// file without aborting the rest of the sync.
+func (c *DriveConnector) IsolatesItemIngestFailures() bool { return true }
 
 // Type returns the connector type identifier.
 func (c *DriveConnector) Type() string {

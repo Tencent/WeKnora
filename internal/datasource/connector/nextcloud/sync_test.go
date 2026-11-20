@@ -249,3 +249,52 @@ func TestEachFingerprintComponentInvalidatesTheCursor(t *testing.T) {
 		})
 	}
 }
+
+type isolatingNextcloudHandler struct {
+	recorder
+	failPath string
+}
+
+func (h *isolatingNextcloudHandler) Emit(ctx context.Context, item types.FetchedItem) error {
+	if item.Metadata["nextcloud_path"] == h.failPath {
+		return fmt.Errorf("%w: isolated ingest error", datasource.ErrItemIngestFailed)
+	}
+	return h.recorder.Emit(ctx, item)
+}
+
+func TestItemIngestFailureDoesNotBlockRemainingFiles(t *testing.T) {
+	f := newFakeNextcloud(t)
+	f.add("/docs/a_bad.png", "png")
+	f.add("/docs/b_ok.pdf", "pdf")
+	c := NewConnector()
+	cfg := f.config("/docs")
+
+	h := &isolatingNextcloudHandler{failPath: "/docs/a_bad.png"}
+	next, err := c.FetchStream(t.Context(), cfg, nil, h)
+	if err != nil {
+		t.Fatalf("FetchStream() unexpected error: %v", err)
+	}
+	if len(h.items) != 1 || h.items[0].Metadata["nextcloud_path"] != "/docs/b_ok.pdf" {
+		t.Fatalf("emitted items = %+v, want only /docs/b_ok.pdf", h.items)
+	}
+	cur, err := decodeCursor(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.Files["/docs/b_ok.pdf"] == "" {
+		t.Fatalf("healthy file missing from cursor: %+v", cur.Files)
+	}
+	if _, ok := cur.Files["/docs/a_bad.png"]; ok {
+		t.Fatalf("failed file must stay out of cursor for retry: %+v", cur.Files)
+	}
+
+	// Next sync retries only /docs/a_bad.png and skips /docs/b_ok.pdf.
+	retry := &recorder{}
+	_, err = c.FetchStream(t.Context(), cfg, next, retry)
+	if err != nil {
+		t.Fatalf("retry FetchStream() error: %v", err)
+	}
+	if len(retry.items) != 1 || retry.items[0].Metadata["nextcloud_path"] != "/docs/a_bad.png" {
+		t.Fatalf("retry emitted = %+v, want only /docs/a_bad.png", retry.items)
+	}
+}

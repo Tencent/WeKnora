@@ -234,21 +234,31 @@ func runSync[N any](
 				}); eerr != nil {
 					return nil, eerr
 				}
-			} else {
-				// Fetched, or an unsupported type (nothing to fetch): record
-				// the current edit time so the node is not re-processed next run.
-				newTimes[resourceID][tok] = editTimeStr
-				if len(items) > 0 {
-					tally.fetch()
-					for _, it := range items {
-						if eerr := h.Emit(ctx, *it); eerr != nil {
-							return nil, eerr
+			} else if len(items) > 0 {
+				itemIngestFailed := false
+				for _, it := range items {
+					if eerr := h.Emit(ctx, *it); eerr != nil {
+						if errors.Is(eerr, datasource.ErrItemIngestFailed) {
+							itemIngestFailed = true
+							continue
 						}
+						return nil, eerr
 					}
-				} else {
-					// Unsupported type (mindnote/slides/…): no item.
-					tally.Skip(ops.ObjType(node))
 				}
+				if itemIngestFailed {
+					tally.fail()
+					// Keep the prior edit time (or leave the node absent) so a
+					// single item's ingest failure retries on a later sync
+					// without blocking unrelated nodes or newly added resources.
+				} else {
+					tally.fetch()
+					newTimes[resourceID][tok] = editTimeStr
+				}
+			} else {
+				// Unsupported type (mindnote/slides/…): record the current edit
+				// time so the node is not re-processed next run.
+				newTimes[resourceID][tok] = editTimeStr
+				tally.Skip(ops.ObjType(node))
 			}
 
 			processed++

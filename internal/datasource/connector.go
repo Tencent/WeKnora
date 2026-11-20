@@ -104,6 +104,21 @@ type FullStreamingConnector interface {
 	) (*types.SyncCursor, error)
 }
 
+// ItemFailureIsolatingConnector is an optional interface for streaming
+// connectors whose cursor tracks items independently (such as a per-node or
+// per-file map rather than a linear offset or commit SHA).
+//
+// When implemented and returning true, StreamHandler.Emit may return an error
+// matching errors.Is(err, ErrItemIngestFailed) for an individual item's ingest
+// failure without aborting the stream. The connector must keep that item's
+// cursor entry unadvanced so it retries on a later sync, and continue syncing
+// remaining items and resources. Any other Emit error remains fatal.
+type ItemFailureIsolatingConnector interface {
+	StreamingConnector
+
+	IsolatesItemIngestFailures() bool
+}
+
 // FullSyncWithCursor is optional. The batch sync path uses it for ForceFull and
 // sync_mode=full so a connector can re-fetch every document while still
 // reconciling deletions against the previous cursor. Connectors that omit it
