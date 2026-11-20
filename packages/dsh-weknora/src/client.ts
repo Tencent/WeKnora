@@ -181,7 +181,7 @@ export class WeknoraClient {
     } catch (cause) {
       throw new WeknoraApiError(`${init.method} ${path} failed: ${describeTransportFailure(cause, signal)}`)
     }
-    const text = await response.text()
+    const text = await readResponseText(response, `${init.method} ${path}`, signal)
     if (!response.ok) {
       throw new WeknoraApiError(`${init.method} ${path} failed with HTTP ${response.status}: ${reasonOf(text)}`, response.status)
     }
@@ -310,14 +310,14 @@ export class WeknoraClient {
     }
     let response = await open()
     if (!response.ok) {
-      const text = await response.text()
+      const text = await readResponseText(response, `POST ${path}`, signal)
       const error = new WeknoraApiError(`POST ${path} failed with HTTP ${response.status}: ${reasonOf(text)}`, response.status)
       if (!this.isPublicModeForbidden(error)) throw error
       this.publicModeBlocked = true
       response = await open()
     }
     if (!response.ok) {
-      const text = await response.text()
+      const text = await readResponseText(response, `POST ${path}`, signal)
       throw new WeknoraApiError(`POST ${path} failed with HTTP ${response.status}: ${reasonOf(text)}`, response.status)
     }
     if (response.body === null) {
@@ -334,6 +334,14 @@ function describeTransportFailure(cause: unknown, callerSignal: AbortSignal): st
   }
   if (cause instanceof Error && cause.name === 'TimeoutError') return 'the request timed out'
   return cause instanceof Error ? cause.message : String(cause)
+}
+
+async function readResponseText(response: Response, request: string, callerSignal: AbortSignal): Promise<string> {
+  try {
+    return await response.text()
+  } catch (cause) {
+    throw new WeknoraApiError(`${request} failed: ${describeTransportFailure(cause, callerSignal)}`)
+  }
 }
 
 /** One decoded `data:` payload of the WeKnora stream. */
