@@ -2,6 +2,7 @@ package imageprep
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/gif"
@@ -29,8 +30,9 @@ func encoded(
 	return buf.Bytes()
 }
 
-func pngEncode(b *bytes.Buffer, img image.Image) error { return png.Encode(b, img) }
-func gifEncode(b *bytes.Buffer, img image.Image) error { return gif.Encode(b, img, nil) }
+func pngEncode(b *bytes.Buffer, img image.Image) error  { return png.Encode(b, img) }
+func gifEncode(b *bytes.Buffer, img image.Image) error  { return gif.Encode(b, img, nil) }
+func jpegEncode(b *bytes.Buffer, img image.Image) error { return jpeg.Encode(b, img, nil) }
 
 // noise does not compress, so its size follows its pixel count.
 func noise() func(x, y int) color.Color {
@@ -93,4 +95,58 @@ func TestPrepareImageRejectsWhatIsNotAnImage(t *testing.T) {
 	assert.ErrorContains(t, err, "not an image")
 	_, err = Prepare(nil, Limits{})
 	assert.ErrorContains(t, err, "empty")
+}
+
+// TestPrepareImageSendsColourChannels is the regression test for #5528: a
+// vision processor that takes three channels fails on a grayscale or palette
+// image, and Prepare used to pass those through untouched.
+func TestPrepareImageSendsColourChannels(t *testing.T) {
+	gray := image.NewGray(image.Rect(0, 0, 8, 8))
+	for i := range gray.Pix {
+		gray.Pix[i] = uint8(i * 4)
+	}
+	paletted := image.NewPaletted(gray.Bounds(), color.Palette{color.Black, color.White, color.RGBA{255, 0, 0, 255}})
+	for i := range paletted.Pix {
+		paletted.Pix[i] = uint8(i % 3)
+	}
+	for _, tc := range []struct {
+		name     string
+		src      image.Image
+		encode   func(*bytes.Buffer, image.Image) error
+		wantMIME string
+		wantType string
+	}{
+		{"grayscale PNG", gray, pngEncode, "image/png", "*image.RGBA"},
+		{"palette PNG", paletted, pngEncode, "image/png", "*image.RGBA"},
+		{"grayscale JPEG", gray, jpegEncode, "image/jpeg", "*image.YCbCr"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			require.NoError(t, tc.encode(&buf, tc.src))
+			img, err := Prepare(buf.Bytes(), Limits{})
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantMIME, img.MIMEType)
+			decoded, _, err := image.Decode(bytes.NewReader(img.Data))
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantType, fmt.Sprintf("%T", decoded), "sent as three colour channels")
+			if tc.wantMIME == "image/png" {
+				for _, p := range []image.Point{{0, 0}, {4, 5}, {7, 7}} {
+					assert.Equal(t, color.RGBAModel.Convert(tc.src.At(p.X, p.Y)), decoded.At(p.X, p.Y),
+						"a PNG is redrawn losslessly")
+				}
+			}
+		})
+	}
+}
+
+func TestPrepareImagePassesColourImagesThrough(t *testing.T) {
+	half := func(x, _ int) color.Color { return color.NRGBA{200, 30, 30, uint8(x * 30)} }
+	for name, data := range map[string][]byte{
+		"RGBA PNG":    encoded(t, 8, 8, pngEncode, half),
+		"colour JPEG": encoded(t, 8, 8, jpegEncode, noise()),
+	} {
+		img, err := Prepare(data, Limits{})
+		require.NoError(t, err, name)
+		assert.Equal(t, data, img.Data, "%s is sent untouched", name)
+	}
 }
