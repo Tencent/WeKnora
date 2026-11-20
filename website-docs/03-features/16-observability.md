@@ -176,6 +176,20 @@ X-Langfuse-Metadata: {"ticket_id":"T-123","biz_line":"order","priority":"P1"}
 - 值只接受标量（字符串/数字/布尔），嵌套对象与数组会被跳过；最多合并 32 个 key，超出部分按 key 名排序截断。
 - header 原始值超过 4 KiB 时整段忽略；非法 JSON、空值同样静默忽略，不影响业务请求。不传该 header 时行为与之前完全一致。
 
+#### 服务端回填的业务维度
+
+问答接口在解析完请求后会把已解析的业务维度合并进当前 trace 的 metadata（此时中间件尚不知晓这些字段）。在 Langfuse/LiteFuse 控制台可直接按这些维度过滤、聚合成本与质量：
+
+| Key | 含义 | 取值来源 |
+| --- | --- | --- |
+| `channel` | 请求来源渠道（如 `web`、`api`、`im`） | 请求体 `channel` 字段 |
+| `agent_id` / `agent_name` / `agent_mode` | 会话使用的自定义智能体及其模式（`quick-answer` / `smart-reasoning`） | 解析后的自定义智能体 |
+| `tenant_name` | 发起请求的工作空间名 | 请求上下文中的租户信息 |
+| `language` | 会话语言（如 `zh-CN`、`en-US`） | 语言中间件解析结果 |
+
+- 可选维度（渠道、智能体、租户）在未设置时不会出现在 metadata 中。
+- 回填不会覆盖内置关联字段，也不会覆盖调用方通过 `X-Langfuse-Metadata` 传入的同名 key。
+
 ### 审计日志 {#_4-审计日志}
 
 #### 数据模型（`internal/types/audit_log.go`） {#_4-1-数据模型-internal-types-audit-log-go}
