@@ -16,6 +16,7 @@ func addDocumentTool() mcp.Tool {
 			"document id."),
 		mcp.WithString("knowledge_base_id", mcp.Required(), mcp.Description("Knowledge base id or exact name")),
 		mcp.WithString("title", mcp.Required(), mcp.Description("Document title")),
+		mcp.WithString("folder_path", mcp.Description("Relative target directory, default root")),
 		mcp.WithString("content", mcp.Description("Markdown content; required unless url is given")),
 		mcp.WithString("url", mcp.Description("Web page or file URL to import instead of content")),
 		mcp.WithBoolean("publish", mcp.Description("For text documents: publish immediately (default true) or keep "+
@@ -83,10 +84,15 @@ func (s *Server) handleAddDocument(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError("this endpoint is not allowed to write to knowledge base " + kb.ID), nil
 	}
 
+	folder, err := requestFolder(req)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	options := types.KnowledgeCreationOptions{FolderPath: folder}
 	var created *types.Knowledge
 	if url != "" {
 		created, err = s.knowledgeService.CreateKnowledgeFromURL(
-			ctx, kb.ID, url, "", "", nil, title, nil, askChannel, nil,
+			ctx, kb.ID, url, "", "", nil, title, nil, askChannel, nil, options,
 		)
 	} else {
 		created, err = s.knowledgeService.CreateKnowledgeFromManual(ctx, kb.ID, &types.ManualKnowledgePayload{
@@ -94,7 +100,7 @@ func (s *Server) handleAddDocument(ctx context.Context, req mcp.CallToolRequest)
 			Content: content,
 			Status:  manualStatus(req.GetBool("publish", true)),
 			Channel: askChannel,
-		}, askChannel)
+		}, askChannel, options)
 	}
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("failed to add document", err), nil
