@@ -12,6 +12,7 @@ import (
 // knowledge base inherits the key's global capabilities.
 type KnowledgeBasePermissionMap map[string]StringArray
 
+// Value implements driver.Valuer for JSONB / TEXT persistence.
 func (m KnowledgeBasePermissionMap) Value() (driver.Value, error) {
 	if m == nil {
 		return []byte("{}"), nil
@@ -19,6 +20,7 @@ func (m KnowledgeBasePermissionMap) Value() (driver.Value, error) {
 	return json.Marshal(m)
 }
 
+// Scan implements sql.Scanner for JSONB / TEXT persistence.
 func (m *KnowledgeBasePermissionMap) Scan(src any) error {
 	if src == nil {
 		*m = KnowledgeBasePermissionMap{}
@@ -119,14 +121,14 @@ func normalizeKnowledgeBasePermissionMap(
 		filtered := StringArray{}
 		seen := map[string]struct{}{}
 		for _, item := range grants {
-			cap := storedKBPermissionCapability(APIKeyCapability(item))
-			if !isKBPermissionCapability(cap) {
+			capability := storedKBPermissionCapability(APIKeyCapability(item))
+			if !isKBPermissionCapability(capability) {
 				continue
 			}
-			if !knowledgeBasePermissionCeiling(capabilities, cap) {
+			if !knowledgeBasePermissionCeiling(capabilities, capability) {
 				continue
 			}
-			s := string(cap)
+			s := string(capability)
 			if _, dup := seen[s]; dup {
 				continue
 			}
@@ -188,14 +190,14 @@ func KnowledgeBasePermissionsExceedCeiling(perms KnowledgeBasePermissionMap, cap
 	}
 	for _, grants := range perms {
 		for _, item := range grants {
-			cap := storedKBPermissionCapability(APIKeyCapability(item))
-			if cap == "" {
+			capability := storedKBPermissionCapability(APIKeyCapability(item))
+			if capability == "" {
 				continue
 			}
-			if !isKBPermissionCapability(cap) {
+			if !isKBPermissionCapability(capability) {
 				return true
 			}
-			if !knowledgeBasePermissionCeiling(capabilities, cap) {
+			if !knowledgeBasePermissionCeiling(capabilities, capability) {
 				return true
 			}
 		}

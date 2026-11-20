@@ -196,7 +196,8 @@ func TestBuildKBResponse_IncludesCallerPermission(t *testing.T) {
 			"kb-2": types.StringArray{"retrieve", "ingest", "manage_kbs"},
 		},
 	})
-	readOnly := buildKBResponse(&types.KnowledgeBase{ID: "kb-1", Name: "a", TenantID: 1}, types.DefaultStoreDisplay(), withKBPermission(ctx, &types.KnowledgeBase{ID: "kb-1", TenantID: 1}, 1, nil))
+	kb1 := &types.KnowledgeBase{ID: "kb-1", Name: "a", TenantID: 1}
+	readOnly := buildKBResponse(kb1, types.DefaultStoreDisplay(), withKBPermission(ctx, kb1, 1, nil))
 	m, ok := readOnly.(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected map result, got %T", readOnly)
@@ -212,7 +213,8 @@ func TestBuildKBResponse_IncludesCallerPermission(t *testing.T) {
 		t.Fatal("expected capabilities to remain on the KB payload")
 	}
 
-	full := buildKBResponse(&types.KnowledgeBase{ID: "kb-2", Name: "b", TenantID: 1}, types.DefaultStoreDisplay(), withKBPermission(ctx, &types.KnowledgeBase{ID: "kb-2", TenantID: 1}, 1, nil))
+	kb2 := &types.KnowledgeBase{ID: "kb-2", Name: "b", TenantID: 1}
+	full := buildKBResponse(kb2, types.DefaultStoreDisplay(), withKBPermission(ctx, kb2, 1, nil))
 	fm := full.(map[string]interface{})
 	fp := fm["permission"].(types.KnowledgeBaseAccess)
 	if !fp.Read || !fp.Write || !fp.Manage {

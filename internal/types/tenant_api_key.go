@@ -28,7 +28,7 @@ type TenantAPIKey struct {
 	// Capabilities. Keys are knowledge-base IDs; values are subsets of
 	// retrieve / ingest / manage_kbs. An empty map means every allow-listed
 	// KB inherits the key's global capabilities.
-	KnowledgeBasePermissions KnowledgeBasePermissionMap `json:"knowledge_base_permissions" gorm:"type:jsonb;not null;default:'{}'"`
+	KnowledgeBasePermissions KnowledgeBasePermissionMap `json:"knowledge_base_permissions" gorm:"type:jsonb;not null;default:'{}'"` //nolint:lll
 	// Capabilities are bounded grants for non-full-access keys. Each
 	// capability maps to an integration persona (retrieval, chat, ingest,
 	// tenant infrastructure management, and history access). KB scoping
@@ -366,19 +366,19 @@ func (s TenantAPIKeyScope) AllowsKnowledgeBases(kbIDs []string) bool {
 	return true
 }
 
-// AllowsKnowledgeBaseCapability reports whether this scope may use cap against
+// AllowsKnowledgeBaseCapability reports whether this scope may use capability against
 // kbID. Global capabilities are always the ceiling; an empty permissions map
 // inherits that ceiling for every allow-listed KB.
-func (s TenantAPIKeyScope) AllowsKnowledgeBaseCapability(kbID string, cap APIKeyCapability) bool {
+func (s TenantAPIKeyScope) AllowsKnowledgeBaseCapability(kbID string, capability APIKeyCapability) bool {
 	s = s.Normalize()
-	cap = storedKBPermissionCapability(cap)
-	if cap == "" || !isKBPermissionCapability(cap) {
+	capability = storedKBPermissionCapability(capability)
+	if capability == "" || !isKBPermissionCapability(capability) {
 		return false
 	}
 	if s.FullAccess {
 		return true
 	}
-	if !knowledgeBasePermissionCeiling(s.Capabilities, cap) {
+	if !knowledgeBasePermissionCeiling(s.Capabilities, capability) {
 		return false
 	}
 	if !s.IsKnowledgeBaseRestricted() {
@@ -391,7 +391,7 @@ func (s TenantAPIKeyScope) AllowsKnowledgeBaseCapability(kbID string, cap APIKey
 	if !ok {
 		return true
 	}
-	return grantsContainCapability(grants, cap)
+	return grantsContainCapability(grants, capability)
 }
 
 func normalizeIDArray(in StringArray) StringArray {
@@ -492,10 +492,10 @@ func FilterKnowledgeBasesForTenantAPIKeyScope(
 }
 
 // AuthorizeTenantAPIKeyKnowledgeBaseCapability rejects KB-restricted API key
-// callers that lack cap on kbID. JWT callers and unrestricted keys pass
+// callers that lack capability on kbID. JWT callers and unrestricted keys pass
 // through (route-level APIKeyGate still applies).
-func AuthorizeTenantAPIKeyKnowledgeBaseCapability(ctx context.Context, kbID string, cap APIKeyCapability) error {
-	return AuthorizeTenantAPIKeyKnowledgeBaseAnyCapability(ctx, kbID, cap)
+func AuthorizeTenantAPIKeyKnowledgeBaseCapability(ctx context.Context, kbID string, capability APIKeyCapability) error {
+	return AuthorizeTenantAPIKeyKnowledgeBaseAnyCapability(ctx, kbID, capability)
 }
 
 // AuthorizeTenantAPIKeyKnowledgeBaseAnyCapability allows the request when any
@@ -508,8 +508,8 @@ func AuthorizeTenantAPIKeyKnowledgeBaseAnyCapability(ctx context.Context, kbID s
 	if len(caps) == 0 {
 		return nil
 	}
-	for _, cap := range caps {
-		if scope.AllowsKnowledgeBaseCapability(kbID, cap) {
+	for _, capability := range caps {
+		if scope.AllowsKnowledgeBaseCapability(kbID, capability) {
 			return nil
 		}
 	}

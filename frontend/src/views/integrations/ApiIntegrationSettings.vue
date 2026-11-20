@@ -2355,7 +2355,7 @@ onBeforeUnmount(stopPlayground)
 .kb-permission-matrix__head {
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
 }
 
@@ -2369,7 +2369,7 @@ onBeforeUnmount(stopPlayground)
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .principal-section {
