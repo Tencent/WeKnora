@@ -39,7 +39,7 @@ func startFake(t *testing.T, api *fakeAPI) (*httptest.Server, *core.Config) {
 			ApiResponse: core.ApiResponse{Code: 0}, TenantAccessToken: "fake-token", Expire: 7200,
 		})
 	})
-	mux.HandleFunc("GET /open-apis/wiki/v2/spaces", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /open-apis/wiki/v2/spaces", func(w http.ResponseWriter, _ *http.Request) {
 		api.listSpacesHit++
 		writeJSON(w, core.WikiSpaceListResponse{ApiResponse: core.ApiResponse{Code: 0}})
 	})
