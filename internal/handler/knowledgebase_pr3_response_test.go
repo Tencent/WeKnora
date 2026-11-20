@@ -186,3 +186,36 @@ func TestBuildKBResponse_KeepsVectorStoreIDForOwnerKB(t *testing.T) {
 		t.Fatalf("owner KB must surface store name, got %v", m["vector_store_name"])
 	}
 }
+
+func TestBuildKBResponse_IncludesCallerPermission(t *testing.T) {
+	ctx := types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+		Capabilities:     types.StringArray{"retrieve", "ingest", "manage_kbs"},
+		KnowledgeBaseIDs: types.StringArray{"kb-1", "kb-2"},
+		KnowledgeBasePermissions: types.KnowledgeBasePermissionMap{
+			"kb-1": types.StringArray{"retrieve"},
+			"kb-2": types.StringArray{"retrieve", "ingest", "manage_kbs"},
+		},
+	})
+	readOnly := buildKBResponse(&types.KnowledgeBase{ID: "kb-1", Name: "a", TenantID: 1}, types.DefaultStoreDisplay(), withKBPermission(ctx, &types.KnowledgeBase{ID: "kb-1", TenantID: 1}, 1, nil))
+	m, ok := readOnly.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map result, got %T", readOnly)
+	}
+	perm, ok := m["permission"].(types.KnowledgeBaseAccess)
+	if !ok {
+		t.Fatalf("expected permission object, got %T %v", m["permission"], m["permission"])
+	}
+	if !perm.Read || perm.Write || perm.Manage {
+		t.Fatalf("kb-1 permission: %+v", perm)
+	}
+	if _, ok := m["capabilities"]; !ok {
+		t.Fatal("expected capabilities to remain on the KB payload")
+	}
+
+	full := buildKBResponse(&types.KnowledgeBase{ID: "kb-2", Name: "b", TenantID: 1}, types.DefaultStoreDisplay(), withKBPermission(ctx, &types.KnowledgeBase{ID: "kb-2", TenantID: 1}, 1, nil))
+	fm := full.(map[string]interface{})
+	fp := fm["permission"].(types.KnowledgeBaseAccess)
+	if !fp.Read || !fp.Write || !fp.Manage {
+		t.Fatalf("kb-2 permission: %+v", fp)
+	}
+}

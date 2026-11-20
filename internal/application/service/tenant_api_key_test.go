@@ -106,6 +106,7 @@ func (r *fakeTenantAPIKeyRepo) UpdateAPIKey(
 			key.Name = update.Name
 			key.FullAccess = update.FullAccess
 			key.KnowledgeBaseIDs = append(types.StringArray(nil), update.KnowledgeBaseIDs...)
+			key.KnowledgeBasePermissions = cloneKnowledgeBasePermissions(update.KnowledgeBasePermissions)
 			key.Capabilities = append(types.StringArray(nil), update.Capabilities...)
 			key.ExpiresAt = update.ExpiresAt
 			cp := *key
@@ -158,10 +159,61 @@ func TestTenantAPIKeyServiceUpdateNormalizesConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("updating to full access returned error: %v", err)
 	}
-	if !full.FullAccess || len(full.KnowledgeBaseIDs) != 0 || len(full.Capabilities) != 0 {
-		t.Fatalf("full access scope = full:%v kbs:%v caps:%v, want true/empty/empty",
-			full.FullAccess, full.KnowledgeBaseIDs, full.Capabilities)
+	if !full.FullAccess || len(full.KnowledgeBaseIDs) != 0 || len(full.Capabilities) != 0 || len(full.KnowledgeBasePermissions) != 0 {
+		t.Fatalf("full access scope = full:%v kbs:%v caps:%v perms:%v, want true/empty/empty/empty",
+			full.FullAccess, full.KnowledgeBaseIDs, full.Capabilities, full.KnowledgeBasePermissions)
 	}
+}
+
+func TestTenantAPIKeyServicePersistsKnowledgeBasePermissions(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeTenantAPIKeyRepo()
+	svc := NewTenantAPIKeyService(repo)
+	created, err := svc.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
+		TenantID:         42,
+		Name:             "scoped",
+		Capabilities:     []string{"retrieve", "ingest", "manage_kbs"},
+		KnowledgeBaseIDs: []string{"kb-1", "kb-2"},
+		KnowledgeBasePermissions: types.KnowledgeBasePermissionMap{
+			"kb-1": types.StringArray{"retrieve"},
+			"kb-2": types.StringArray{"retrieve", "ingest", "manage_kbs"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIKey returned error: %v", err)
+	}
+	if got := []string(created.APIKey.KnowledgeBasePermissions["kb-1"]); !apiKeyEqualStrings(got, []string{"retrieve"}) {
+		t.Fatalf("kb-1 grants = %#v, want [retrieve]", got)
+	}
+
+	updated, err := svc.UpdateAPIKey(ctx, interfaces.TenantAPIKeyUpdateRequest{
+		TenantID: 42, APIKeyID: created.APIKey.ID, Name: "scoped",
+		Capabilities:     []string{"retrieve", "ingest"},
+		KnowledgeBaseIDs: []string{"kb-1", "kb-2"},
+		KnowledgeBasePermissions: types.KnowledgeBasePermissionMap{
+			"kb-1": types.StringArray{"retrieve", "ingest"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateAPIKey returned error: %v", err)
+	}
+	if _, ok := updated.KnowledgeBasePermissions["kb-2"]; ok {
+		t.Fatal("kb-2 should inherit after its overlay entry is omitted")
+	}
+	if got := []string(updated.KnowledgeBasePermissions["kb-1"]); !apiKeyEqualStrings(got, []string{"retrieve", "ingest"}) {
+		t.Fatalf("kb-1 grants = %#v, want [retrieve ingest]", got)
+	}
+}
+
+func cloneKnowledgeBasePermissions(in types.KnowledgeBasePermissionMap) types.KnowledgeBasePermissionMap {
+	if len(in) == 0 {
+		return types.KnowledgeBasePermissionMap{}
+	}
+	out := types.KnowledgeBasePermissionMap{}
+	for kbID, grants := range in {
+		out[kbID] = append(types.StringArray(nil), grants...)
+	}
+	return out
 }
 
 func apiKeyEqualStrings(a, b []string) bool {

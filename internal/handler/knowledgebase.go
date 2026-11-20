@@ -181,9 +181,19 @@ func (h *KnowledgeBaseHandler) buildKBListResponse(
 				view = v
 			}
 		}
-		out = append(out, buildKBResponse(kb, view, nil))
+		out = append(out, buildKBResponse(kb, view, withKBPermission(ctx, kb, callerTenantID, nil)))
 	}
 	return out
+}
+
+// withKBPermission stamps the caller's per-KB read/write/manage flags onto
+// the response extras, next to id / name / capabilities.
+func withKBPermission(ctx context.Context, kb *types.KnowledgeBase, callerTenantID uint64, extras map[string]interface{}) map[string]interface{} {
+	if extras == nil {
+		extras = make(map[string]interface{}, 1)
+	}
+	extras["permission"] = types.CallerKnowledgeBasePermission(ctx, kb, callerTenantID)
+	return extras
 }
 
 // sharedKBRow projects a SharedKnowledgeBaseInfo into a response payload
@@ -543,7 +553,7 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), withKBPermission(ctx, kb, callerTenantID, nil)),
 	})
 }
 
@@ -598,7 +608,7 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 		// Include my_permission in data so frontend can show role (e.g. "只读") instead of "--" for agent-visible KBs
 		extras = map[string]interface{}{"my_permission": permission}
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": buildKBResponse(kb, storeView, extras)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": buildKBResponse(kb, storeView, withKBPermission(c.Request.Context(), kb, tenantID, extras))})
 }
 
 // ListKnowledgeBases godoc
@@ -815,11 +825,10 @@ func (h *KnowledgeBaseHandler) TogglePinKnowledgeBase(c *gin.Context) {
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), withKBPermission(ctx, kb, callerTenantID, nil)),
 	})
 }
 
-// UpdateKnowledgeBaseRequest defines the request body structure for updating a knowledge base
 type UpdateKnowledgeBaseRequest struct {
 	Name        string                     `json:"name"        binding:"required"`
 	Description string                     `json:"description"`
@@ -930,7 +939,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), withKBPermission(ctx, kb, callerTenantID, nil)),
 	})
 }
 
@@ -1499,6 +1508,12 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 		c.Error(err)
 		return
 	}
+	if req.TargetID != "" {
+		if err := types.AuthorizeTenantAPIKeyKnowledgeBaseCapability(ctx, req.TargetID, types.APIKeyCapabilityManageKnowledgeBases); err != nil {
+			c.Error(err)
+			return
+		}
+	}
 	sourceKB := sourceGrant.KnowledgeBase
 	if sourceKB.TenantID != caller.TenantID {
 		_ = c.Error(errors.NewForbiddenError("No permission to copy this knowledge base"))
@@ -1684,7 +1699,7 @@ func (h *KnowledgeBaseHandler) DuplicateKnowledgeBase(c *gin.Context) {
 			SourceID:      sourceID,
 			TargetID:      targetKB.ID,
 			Message:       "Knowledge base duplicate created",
-			KnowledgeBase: buildKBResponse(targetKB, h.resolveKBStoreView(ctx, targetKB, callerTenantID), nil),
+			KnowledgeBase: buildKBResponse(targetKB, h.resolveKBStoreView(ctx, targetKB, callerTenantID), withKBPermission(ctx, targetKB, callerTenantID, nil)),
 		},
 	})
 }
