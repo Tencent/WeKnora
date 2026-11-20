@@ -803,11 +803,29 @@ func (s *wikiIngestService) enqueueFinalizeRow(ctx context.Context, op *types.Ta
 	return accepted
 }
 
+// wikiFinalizeEnqueueBudget scales the detached enqueue window with the
+// number of durable rows the tail has to write: the old tail shared the flat
+// 10-second cleanup budget, so a thousand-page batch's per-row inserts blew
+// through it and the surplus rows were dropped with only a WARN (#5716).
+// The cap keeps a runaway batch from pinning a worker indefinitely.
+func wikiFinalizeEnqueueBudget(rows int) time.Duration {
+	budget := 30*time.Second + time.Duration(rows)*50*time.Millisecond
+	if budget > 10*time.Minute {
+		budget = 10 * time.Minute
+	}
+	return budget
+}
+
 // enqueueFinalize persists this batch's KB-global convergence work into the
 // finalize lane of task_pending_ops and schedules a debounced trigger. One
 // "slug" row per affected page (carrying its fresh title when this batch wrote
 // it, for cross-linking) plus one "change" row per doc added/removed (for the
 // index-intro change description).
+//
+// The rows land through the batch guard in one transaction when the repository
+// supports it, falling back to the per-row loop otherwise. It returns how many
+// rows were accepted and how many failed so the caller can surface partial
+// loss in the batch stats instead of reporting unqualified success.
 func (s *wikiIngestService) enqueueFinalize(
 	ctx context.Context,
 	payload WikiIngestPayload,
@@ -815,18 +833,18 @@ func (s *wikiIngestService) enqueueFinalize(
 	freshTitleBySlug map[string]string,
 	changes []wikiFinalizeChange,
 	folderIDs []string,
-) {
+) (enqueued, failed int) {
 	if s.pendingRepo == nil {
-		return
+		return 0, 0
 	}
-	acceptedAny := false
+	ops := make([]*types.TaskPendingOp, 0, len(affectedSlugs)+len(changes)+1)
 	for _, slug := range affectedSlugs {
 		row := wikiFinalizeRow{Slug: slug, Title: freshTitleBySlug[slug]}
 		b, err := json.Marshal(row)
 		if err != nil {
 			continue
 		}
-		if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
+		ops = append(ops, &types.TaskPendingOp{
 			TenantID: payload.TenantID,
 			TaskType: wikiFinalizeTaskType,
 			Scope:    wikiTaskScope,
@@ -834,9 +852,7 @@ func (s *wikiIngestService) enqueueFinalize(
 			Op:       wikiFinalizeOpSlug,
 			DedupKey: slug,
 			Payload:  b,
-		}) {
-			acceptedAny = true
-		}
+		})
 	}
 	for i := range changes {
 		row := wikiFinalizeRow{Change: &changes[i]}
@@ -844,7 +860,7 @@ func (s *wikiIngestService) enqueueFinalize(
 		if err != nil {
 			continue
 		}
-		if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
+		ops = append(ops, &types.TaskPendingOp{
 			TenantID: payload.TenantID,
 			TaskType: wikiFinalizeTaskType,
 			Scope:    wikiTaskScope,
@@ -852,14 +868,12 @@ func (s *wikiIngestService) enqueueFinalize(
 			Op:       wikiFinalizeOpChange,
 			DedupKey: "",
 			Payload:  b,
-		}) {
-			acceptedAny = true
-		}
+		})
 	}
 	if len(folderIDs) > 0 {
 		row := wikiFinalizeRow{FolderIDs: uniqueWikiFolderIDs(folderIDs)}
 		if b, err := json.Marshal(row); err == nil {
-			if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
+			ops = append(ops, &types.TaskPendingOp{
 				TenantID: payload.TenantID,
 				TaskType: wikiFinalizeTaskType,
 				Scope:    wikiTaskScope,
@@ -867,15 +881,36 @@ func (s *wikiIngestService) enqueueFinalize(
 				Op:       wikiFinalizeOpFolderPrune,
 				DedupKey: "",
 				Payload:  b,
-			}) {
-				acceptedAny = true
-			}
+			})
 		}
 	}
-	if !acceptedAny {
-		return
+	if len(ops) == 0 {
+		return 0, 0
 	}
-	s.scheduleFinalize(ctx, payload)
+	if batch, ok := s.pendingRepo.(interfaces.TaskPendingOpsBatchGuard); ok {
+		accepted, err := batch.EnqueueBatchIfKnowledgeBaseActive(ctx, ops)
+		if err != nil {
+			logger.Warnf(ctx, "wiki finalize: enqueue batch of %d rows failed: %v", len(ops), err)
+			return 0, len(ops)
+		}
+		if accepted > 0 {
+			s.scheduleFinalize(ctx, payload)
+		}
+		return accepted, len(ops) - accepted
+	}
+	acceptedAny := false
+	for _, op := range ops {
+		if s.enqueueFinalizeRow(ctx, op) {
+			acceptedAny = true
+			enqueued++
+		} else {
+			failed++
+		}
+	}
+	if acceptedAny {
+		s.scheduleFinalize(ctx, payload)
+	}
+	return enqueued, failed
 }
 
 func uniqueWikiFolderIDs(values []string) []string {

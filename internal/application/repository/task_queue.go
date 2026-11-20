@@ -99,9 +99,61 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 	return accepted, err
 }
 
+// EnqueueBatchIfKnowledgeBaseActive is the batch form of the guard above: it
+// validates the whole batch up front, then persists every row in one
+// transaction behind a single SHARE-locked KB lookup and tenant-liveness
+// check. All rows must target the same tenant and knowledge base — that is
+// the shape every caller produces — so one guard decision covers the batch,
+// and either every row lands or none does. Duplicate dedup_keys within the
+// batch (or against rows already queued) are allowed exactly like N
+// sequential guarded enqueues; the consumer collapses them.
+func (r *taskPendingOpsRepository) EnqueueBatchIfKnowledgeBaseActive(
+	ctx context.Context, ops []*types.TaskPendingOp,
+) (int, error) {
+	if len(ops) == 0 {
+		return 0, nil
+	}
+	for _, op := range ops {
+		if err := preparePendingOp(op); err != nil {
+			return 0, err
+		}
+		if op.Scope != types.TaskScopeKnowledgeBase {
+			return 0, errors.New("task pending ops: guarded batch enqueue requires knowledge_base scope")
+		}
+		if op.TenantID != ops[0].TenantID || op.ScopeID != ops[0].ScopeID {
+			return 0, errors.New("task pending ops: guarded batch enqueue requires one tenant and knowledge base")
+		}
+	}
+	accepted := 0
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&types.KnowledgeBase{}).
+			Select("id").
+			Where("id = ? AND tenant_id = ?", ops[0].ScopeID, ops[0].TenantID)
+		if tx.Name() == "postgres" {
+			query = query.Clauses(clause.Locking{Strength: "SHARE"})
+		}
+		var kb types.KnowledgeBase
+		if err := query.Take(&kb).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		active, err := tenantActiveWithinTx(tx, ops[0].TenantID)
+		if err != nil || !active {
+			return err
+		}
+		const insertChunk = 500
+		if err := tx.CreateInBatches(ops, insertChunk).Error; err != nil {
+			return err
+		}
+		accepted = len(ops)
+		return nil
+	})
+	return accepted, err
+}
+
 // tenantActiveWithinTx reports whether the tenant row exists and is not
-// soft-deleted, inside the caller's transaction. Callers that cannot see a
-// tenants table (legacy test doubles) fail closed.
 func tenantActiveWithinTx(tx *gorm.DB, tenantID uint64) (bool, error) {
 	if tenantID == 0 {
 		return false, nil

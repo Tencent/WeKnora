@@ -135,6 +135,20 @@ type TaskPendingOpsKnowledgeBaseGuard interface {
 	EnqueueIfKnowledgeBaseActive(ctx context.Context, op *types.TaskPendingOp) (accepted bool, err error)
 }
 
+// TaskPendingOpsBatchGuard is the batch side of the KB guard: it persists a
+// whole batch of same-KB operations in one transaction behind a single
+// active-KB check. Callers whose rows span multiple knowledge bases must fall
+// back to the single-row guard. The batch has the same visibility as N
+// sequential guarded enqueues — duplicates by dedup_key are allowed and
+// collapsed by the consumer — but costs one round trip instead of N, which is
+// what lets a thousand-page batch's finalize rows survive a bounded tail
+// window (#5716).
+type TaskPendingOpsBatchGuard interface {
+	EnqueueBatchIfKnowledgeBaseActive(
+		ctx context.Context, ops []*types.TaskPendingOp,
+	) (accepted int, err error)
+}
+
 // TaskPendingOpsTenantLiveness reports whether a tenant is still alive (not
 // soft-deleted). Wiki task consumers use it to guarantee a deleted tenant
 // never triggers new model requests: the check runs at task entry (ingest

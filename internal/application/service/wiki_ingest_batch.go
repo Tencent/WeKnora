@@ -283,11 +283,16 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	loggedMapPar := 0
 	loggedReducePar := 0
 	loggedMaxInflight := 0
+	// Finalize-row accounting for the stats log: the tail writes one durable
+	// row per affected page, and a partial loss must be visible here (#5716)
+	// instead of hiding behind status=success.
+	finalizeRowsEnqueued := 0
+	finalizeRowsFailed := 0
 
 	defer func() {
 		logger.Infof(
 			ctx,
-			"wiki ingest stats: kb=%s tenant=%d retry=%d/%d status=%s elapsed=%s mode=%s pending_ops=%d ops(ingest=%d,retract=%d) ingest(success=%d,failed=%d) retract_handled=%d pages(total=%d) followup=%v tunables(batch=%d,map_par=%d,reduce_par=%d,max_inflight=%d) preview=%s",
+			"wiki ingest stats: kb=%s tenant=%d retry=%d/%d status=%s elapsed=%s mode=%s pending_ops=%d ops(ingest=%d,retract=%d) ingest(success=%d,failed=%d) retract_handled=%d pages(total=%d) finalize(enqueued=%d,failed=%d) followup=%v tunables(batch=%d,map_par=%d,reduce_par=%d,max_inflight=%d) preview=%s", //nolint:lll // one-line stats format
 			payload.KnowledgeBaseID,
 			payload.TenantID,
 			retryCount,
@@ -302,6 +307,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			ingestFailed,
 			retractHandled,
 			totalPagesAffected,
+			finalizeRowsEnqueued,
+			finalizeRowsFailed,
 			followUpScheduled,
 			loggedBatchSize,
 			loggedMapPar,
@@ -927,7 +934,28 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				})
 			}
 		}
-		s.enqueueFinalize(tailCtx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs)
+		// The finalize rows get their own detached budget, scaled by the row
+		// count: sharing the flat 10-second cleanup budget made a
+		// thousand-page batch blow through the window mid-loop and drop the
+		// surplus rows with only a WARN (#5716). With the batch insert this
+		// is one round trip, so the budget is headroom rather than a race.
+		finalizeRowCount := len(allPagesAffected) + len(changes)
+		if len(retractFolderIDs) > 0 {
+			finalizeRowCount++
+		}
+		enqueueCtx, enqueueCancel := context.WithTimeout(
+			context.WithoutCancel(ctx), wikiFinalizeEnqueueBudget(finalizeRowCount))
+		defer enqueueCancel()
+		finalizeRowsEnqueued, finalizeRowsFailed = s.enqueueFinalize(
+			enqueueCtx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs)
+		if finalizeRowsFailed > 0 {
+			if exitStatus == "success" {
+				exitStatus = "success_partial"
+			}
+			logger.Warnf(ctx,
+				"wiki ingest: finalize enqueue incomplete for KB %s: enqueued=%d failed=%d of %d row(s)",
+				payload.KnowledgeBaseID, finalizeRowsEnqueued, finalizeRowsFailed, finalizeRowCount)
+		}
 	}
 
 	// Close postprocess.wiki spans for every successfully-mapped doc.
