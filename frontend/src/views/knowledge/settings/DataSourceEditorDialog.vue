@@ -3184,7 +3184,7 @@ const drawerConfirmText = computed(() => {
 }
 
 .links-parse-count {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
@@ -3200,7 +3200,7 @@ const drawerConfirmText = computed(() => {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   border-bottom: 1px solid var(--td-component-stroke);
 }
 
@@ -3221,12 +3221,12 @@ const drawerConfirmText = computed(() => {
 }
 
 .links-result-type {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
 }
 
 .links-result-error {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-error-color);
 }
 
