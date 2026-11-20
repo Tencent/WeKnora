@@ -60,6 +60,7 @@ func TestEveryRerankVendorResolvesToAKnownProtocol(t *testing.T) {
 func TestRerankProtocolAssignment(t *testing.T) {
 	for id, want := range map[string]api.RerankAPI{
 		"aliyun":          api.RerankDashScope,
+		"mixedbread":      api.RerankMixedbread,
 		"nvidia":          api.RerankNIM,
 		"pinecone":        api.RerankPinecone,
 		"huggingface_tei": api.RerankTEI,
