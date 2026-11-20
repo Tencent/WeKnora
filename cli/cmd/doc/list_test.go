@@ -252,13 +252,15 @@ func TestList_StatusFilter_RejectsUnknownValue(t *testing.T) {
 
 func TestList_StatusFilter_AcceptsAllEnumValues(t *testing.T) {
 	chdirIsolated(t)
-	for _, v := range docListStatusValues {
+	for _, v := range []string{"draft", "pending", "processing", "finalizing", "completed", "failed", "deleting", "cancelled"} {
 		_, _ = iostreams.SetForTest(t)
 		svc := &fakeListSvc{}
 		opts := &ListOptions{PageSize: 20, Limit: 30, Status: v}
 		require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"),
 			"status=%q should be accepted", v)
+		assert.Equal(t, v, svc.got.filter.ParseStatus)
 	}
+	assert.Contains(t, NewCmdList(nil).Flags().Lookup("status").Usage, "draft")
 }
 
 // makeDocs returns N Knowledge records with distinct IDs and descending

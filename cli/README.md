@@ -422,8 +422,8 @@ a fast vs deep choice:
 | `weknora agent check <agent-id>`  | 1+N HTTP | also probes every KB in the agent's scope |
 
 `weknora doc wait <doc-id> [<doc-id>...]` blocks until each document
-reaches a terminal `parse_status` (completed or failed). Exit codes:
-0 (all completed), 1 (any failed), 124 (`--timeout` reached), 130
+reaches a terminal `parse_status` (completed, failed, or cancelled). Exit codes:
+0 (all completed), 1 (any failed or cancelled), 124 (`--timeout` reached), 130
 (Ctrl-C / SIGTERM). Multi-target is polled concurrently (max 5 in
 flight; pipe through `xargs -P` for more).
 
