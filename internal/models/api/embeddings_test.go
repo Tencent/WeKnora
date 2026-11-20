@@ -24,15 +24,28 @@ func TestPlaceEmbeddingsHonoursTheReportedIndex(t *testing.T) {
 	assert.Equal(t, [][]float32{{1}, {2}}, got)
 }
 
+// DashScope compatible-mode qwen3.7-text-embedding-flash labels every item
+// index 0. The vectors are still one per input, in request order.
+func TestPlaceEmbeddingsKeepsOrderWhenEveryIndexIsTheSame(t *testing.T) {
+	got, err := place(3, []placed{
+		{0, []float32{1}},
+		{0, []float32{2}},
+		{0, []float32{3}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, [][]float32{{1}, {2}, {3}}, got)
+}
+
 // Every way a reply can fail to cover the inputs exactly once is an error:
 // each of them would otherwise store a vector under the wrong chunk or an
 // empty one.
 func TestPlaceEmbeddingsRefusesAReplyThatDoesNotCoverEachInputOnce(t *testing.T) {
 	cases := map[string][]placed{
-		"short":        {{0, []float32{1}}},
-		"out of range": {{0, []float32{1}}, {2, []float32{2}}},
-		"duplicate":    {{0, []float32{1}}, {0, []float32{2}}, {1, []float32{3}}},
-		"empty vector": {{0, []float32{1}}, {1, nil}},
+		"short":                {{0, []float32{1}}},
+		"out of range":         {{0, []float32{1}}, {2, []float32{2}}},
+		"duplicate":            {{0, []float32{1}}, {0, []float32{2}}, {1, []float32{3}}},
+		"empty vector":         {{0, []float32{1}}, {1, nil}},
+		"constant index empty": {{0, []float32{1}}, {0, nil}},
 	}
 	for name, reply := range cases {
 		t.Run(name, func(t *testing.T) {
