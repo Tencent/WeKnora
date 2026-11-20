@@ -1,0 +1,10 @@
+services:
+  app:
+    image: weknora-wecom-e2e
+    build: null
+    environment:
+      REDIS_ADDR: redis:6379
+  
+  frontend:
+    image: weknora-wecom-ui-e2e
+    build: null
