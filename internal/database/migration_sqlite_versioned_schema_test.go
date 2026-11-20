@@ -21,6 +21,8 @@ import (
 var versionedSQLiteTables = []string{
 	"memory_extraction_sessions",
 	"task_pending_ops",
+	"wiki_ingest_plans",
+	"wiki_ingest_page_progress",
 	"task_dead_letters",
 	"system_settings",
 	"model_catalog_configs",
@@ -53,6 +55,13 @@ var versionedSQLiteTables = []string{
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
+	// 000054: durable Wiki plans, page receipts and the worker fencing token.
+	"wiki_ingest_plans": {"source_attempt", "payload"},
+	"task_pending_ops":  {"claim_epoch"},
+	"wiki_ingest_page_progress": {
+		"applied", "effects_done", "page_id", "page_version", "changed", "old_out_links", "new_out_links",
+	},
+
 	"automations":           {"model_id"},                                                  // 000049
 	"automation_runs":       {"execution_duration_ms"},                                     // 000048
 	"model_catalog_configs": {"version", "overlay", "history", "updated_by", "updated_at"}, // 000031
@@ -89,7 +98,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 53
+const expectedSQLiteMigrationVersion = 54
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
