@@ -73,7 +73,11 @@ func TestTenantAPIKeyRepositoryUpdateIsTenantScoped(t *testing.T) {
 	require.Equal(t, "updated", updated.Name)
 	require.Equal(t, types.StringArray{"kb-1", "kb-2"}, updated.KnowledgeBaseIDs)
 	require.Equal(t, types.StringArray{"retrieve", "chat"}, updated.Capabilities)
-	require.Equal(t, types.KnowledgeBasePermissionMap{"kb-1": types.StringArray{"retrieve"}}, updated.KnowledgeBasePermissions)
+	require.Equal(
+		t,
+		types.KnowledgeBasePermissionMap{"kb-1": types.StringArray{"retrieve"}},
+		updated.KnowledgeBasePermissions,
+	)
 	require.NotNil(t, updated.ExpiresAt)
 	require.True(t, updated.ExpiresAt.Equal(expiresAt))
 

@@ -159,9 +159,12 @@ func TestTenantAPIKeyServiceUpdateNormalizesConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("updating to full access returned error: %v", err)
 	}
-	if !full.FullAccess || len(full.KnowledgeBaseIDs) != 0 || len(full.Capabilities) != 0 || len(full.KnowledgeBasePermissions) != 0 {
-		t.Fatalf("full access scope = full:%v kbs:%v caps:%v perms:%v, want true/empty/empty/empty",
-			full.FullAccess, full.KnowledgeBaseIDs, full.Capabilities, full.KnowledgeBasePermissions)
+	if !full.FullAccess || len(full.KnowledgeBaseIDs) != 0 ||
+		len(full.Capabilities) != 0 || len(full.KnowledgeBasePermissions) != 0 {
+		t.Fatalf(
+			"full access scope = full:%v kbs:%v caps:%v perms:%v, want true/empty/empty/empty",
+			full.FullAccess, full.KnowledgeBaseIDs, full.Capabilities, full.KnowledgeBasePermissions,
+		)
 	}
 }
 
@@ -182,8 +185,9 @@ func TestTenantAPIKeyServicePersistsKnowledgeBasePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAPIKey returned error: %v", err)
 	}
-	if got := []string(created.APIKey.KnowledgeBasePermissions["kb-1"]); !apiKeyEqualStrings(got, []string{"retrieve"}) {
-		t.Fatalf("kb-1 grants = %#v, want [retrieve]", got)
+	gotKB1 := []string(created.APIKey.KnowledgeBasePermissions["kb-1"])
+	if !apiKeyEqualStrings(gotKB1, []string{"retrieve"}) {
+		t.Fatalf("kb-1 grants = %#v, want [retrieve]", gotKB1)
 	}
 
 	updated, err := svc.UpdateAPIKey(ctx, interfaces.TenantAPIKeyUpdateRequest{
@@ -200,8 +204,9 @@ func TestTenantAPIKeyServicePersistsKnowledgeBasePermissions(t *testing.T) {
 	if _, ok := updated.KnowledgeBasePermissions["kb-2"]; ok {
 		t.Fatal("kb-2 should inherit after its overlay entry is omitted")
 	}
-	if got := []string(updated.KnowledgeBasePermissions["kb-1"]); !apiKeyEqualStrings(got, []string{"retrieve", "ingest"}) {
-		t.Fatalf("kb-1 grants = %#v, want [retrieve ingest]", got)
+	gotUpdated := []string(updated.KnowledgeBasePermissions["kb-1"])
+	if !apiKeyEqualStrings(gotUpdated, []string{"retrieve", "ingest"}) {
+		t.Fatalf("kb-1 grants = %#v, want [retrieve ingest]", gotUpdated)
 	}
 }
 
