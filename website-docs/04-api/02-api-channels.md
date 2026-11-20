@@ -340,6 +340,21 @@ curl -X POST $BASE/api/v1/embed/ec-1/sessions/s-1/stop \
   -H 'Content-Type: application/json' -d '{"message_id":"m-1"}'
 ```
 
+### DELETE /api/v1/embed/:channel_id/sessions/:session_id
+
+用途：删除当前签名句柄对应的访客会话。需要有效的渠道凭证和创建会话时返回的 `X-Embed-Session`；仅有 publish token 或会话 ID 不足以删除会话。Origin 校验和限流与其他 Embed 接口一致。
+
+```bash
+curl -X DELETE $BASE/api/v1/embed/ec-1/sessions/s-1 \
+  -H "Authorization: Embed $EMBED_TOKEN" \
+  -H "X-Embed-Session: $SIG" \
+  -H "Origin: https://your-allowed-host.example"
+```
+
+成功返回 `200 {"success":true,"message":"Session deleted successfully"}`。会话不存在或已删除时返回 404；签名无效或会话不属于该渠道时返回 403。
+
+该接口复用普通会话的**软删除**及清理流程，生成文件的物理对象仍按现有策略保留，不提供磁盘空间回收保证。调用方应清除本地缓存的会话 ID 和签名；接口不会主动清除 iframe 中的 `localStorage`。
+
 ### GET|POST /api/v1/embed/:channel_id/sessions/:session_id/messages/:message_id/suggestions
 
 用途：读取 / 触发生成消息建议（渠道关闭建议时返回 `suppressed`）。需 `X-Embed-Session`。
