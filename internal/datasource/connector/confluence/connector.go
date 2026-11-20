@@ -418,9 +418,11 @@ func (c *Connector) fetchStream(
 			if versionKnown {
 				if forceFull {
 					if next.SpacePages[resourceID][summary.ID] == version {
+						datasource.RecordUnchangedItem(h)
 						continue
 					}
 				} else if priorPages[summary.ID] == version {
+					datasource.RecordUnchangedItem(h)
 					continue
 				}
 			}

@@ -1351,6 +1351,16 @@ type streamSyncHandler struct {
 	// the failed item unadvanced instead of aborting the whole round.
 	isolateItemFailures       bool
 	consecutiveIngestFailures int
+	// unchangedItems counts in-scope items skipped by the connector's cursor
+	// fast-path as already up to date during this run.
+	unchangedItems int
+}
+
+var _ datasource.UnchangedItemRecorder = (*streamSyncHandler)(nil)
+
+// RecordUnchanged marks one in-scope item as verified unchanged via cursor.
+func (h *streamSyncHandler) RecordUnchanged() {
+	h.unchangedItems++
 }
 
 // Emit ingests one streamed item. Unexpected ingestion errors either isolate
@@ -1530,10 +1540,19 @@ func (s *DataSourceService) processSyncStreaming(
 	}
 
 	resultJSON, _ := result.ToJSON()
-	if err := allFetchedItemsFailedError(result, handler.nonBlockingFailures); err != nil {
-		logger.Errorf(ctx, "streaming sync failed while processing fetched items: %v", err)
-		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
-		return err
+	// When the stream completed without aborting and at least one in-scope item
+	// was already verified up to date via the cursor fast-path, a lingering
+	// per-item failure is a partial sync rather than a total outage. Keeping
+	// ds.Status active preserves scheduled incremental syncs so new/edited
+	// documents keep syncing and the failed item retries on future ticks.
+	if handler.unchangedItems == 0 {
+		if err := allFetchedItemsFailedError(result, handler.nonBlockingFailures); err != nil {
+			logger.Errorf(ctx, "streaming sync failed while processing fetched items: %v", err)
+			_ = s.updateSyncRunResult(
+				ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused,
+			)
+			return err
+		}
 	}
 
 	// Persist the final cursor for the next incremental sync.
@@ -1645,6 +1664,7 @@ func (s *DataSourceService) updateSyncRunResult(
 		logger.Errorf(ctx, "failed to update sync log: %v", logErr)
 	}
 
+	priorStatus := ds.Status
 	if status == types.SyncLogStatusFailed {
 		if !wasPaused {
 			ds.Status = types.DataSourceStatusError
@@ -1672,6 +1692,14 @@ func (s *DataSourceService) updateSyncRunResult(
 	sourceErr := s.dsRepo.UpdateSyncState(ctx, ds)
 	if sourceErr != nil {
 		logger.Errorf(ctx, "failed to update data source: %v", sourceErr)
+	} else if s.scheduler != nil && priorStatus == types.DataSourceStatusError &&
+		ds.Status == types.DataSourceStatusActive {
+		// Re-read persisted status so a concurrent PauseDataSource is never undone.
+		if fresh, ferr := s.dsRepo.FindByID(ctx, ds.ID); ferr == nil && fresh != nil {
+			if serr := s.scheduler.AddOrUpdate(fresh); serr != nil {
+				logger.Warnf(ctx, "failed to restore cron schedule after sync recovery for ds=%s: %v", ds.ID, serr)
+			}
+		}
 	}
 	if err := errors.Join(logErr, sourceErr); err != nil {
 		return fmt.Errorf("persist sync result: %w", err)

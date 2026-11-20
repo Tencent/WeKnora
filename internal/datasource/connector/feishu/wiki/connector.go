@@ -343,6 +343,7 @@ func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID stri
 func (o *wikiOps) Token(n core.WikiNode) string   { return n.NodeToken }
 func (o *wikiOps) Title(n core.WikiNode) string   { return n.Title }
 func (o *wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
+func (o *wikiOps) DirPath(n core.WikiNode) string { return o.dirPaths[n.NodeToken] }
 
 // EditTime is an opaque change key including the effective destination path.
 // An ancestor rename/move changes that path without touching this node's times.

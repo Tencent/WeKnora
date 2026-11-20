@@ -333,7 +333,7 @@ flowchart LR
   - 重复文件（`DuplicateKnowledgeError`）计为 Skipped，不算失败；
   - 每个条目自动带上 metadata：`external_id`、`source_resource_id`、`datasource_id` 以及连接器附加的 metadata。若源端提供时间，还保存 UTC RFC3339 格式的 `source_created_at` / `source_updated_at`；它们表示源文档时间，与 WeKnora 的 created_at/updated_at 分开。
 - **自动打标**：`resolveAutoTagIDs` 按数据源名称在目标 KB 中 FindOrCreate 一个标签，所有同步条目自动挂上，便于在 KB 中识别来源；打标失败不阻断同步。
-- **结果状态**：全部条目失败 → `failed`（`allFetchedItemsFailedError`）；RSS 部分 feed 失败（`PartialFetchError`）或流式路径存在失败文档 → `partial`；其余 → `success`。失败样本以 `SyncItemError` 形式最多保留 100 条。
+- **结果状态**：按条目独立跟踪游标的流式连接器（Feishu/Lark、Seafile、Nextcloud、Confluence）实现 `ItemFailureIsolatingConnector`，单个条目的入库失败会被隔离（不推进该条目游标以便后续重试，连续失败达到上限或配额超限等全局异常仍立即中止），不会阻塞同目录其余文件或新增目录；增量轮次若存在游标命中的未变更条目，残留的单条失败仍记为 `partial` 并保持定时同步活跃。全部条目失败且无未变更/非阻断条目 → `failed`（`allFetchedItemsFailedError`）；RSS 部分 feed 失败（`PartialFetchError`）或存在单条失败文档 → `partial`；其余 → `success`。失败样本以 `SyncItemError` 形式最多保留 100 条。
 - 抓取失败时若连接器返回了新游标（如 RSS），仍会持久化游标，避免瞬时故障后被迫全量重抓。
 
 ```mermaid

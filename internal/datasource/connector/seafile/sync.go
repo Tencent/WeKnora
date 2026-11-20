@@ -265,6 +265,7 @@ func (r *syncRun) syncFile(p string, e dirent) error {
 	size := *e.Size
 	fp := fingerprint(e.ID, e.Mtime, size)
 	if previous := r.cur.Files[p]; previous != "" && previous == fp {
+		datasource.RecordUnchangedItem(r.h)
 		return nil
 	}
 	if size > r.limit {

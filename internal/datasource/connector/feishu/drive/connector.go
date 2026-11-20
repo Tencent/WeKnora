@@ -357,6 +357,7 @@ func (o *driveOps) List(ctx context.Context, client *core.Client, resourceID str
 func (o *driveOps) Token(n core.DriveFile) string   { return n.Token }
 func (o *driveOps) Title(n core.DriveFile) string   { return n.Name }
 func (o *driveOps) ObjType(n core.DriveFile) string { return n.Type }
+func (o *driveOps) DirPath(n core.DriveFile) string { return o.dirPaths[n.ParentToken] }
 func (o *driveOps) EditTime(n core.DriveFile) string {
 	return core.DocxChangeKey(n.ModifiedTime, n.Type, o.parseMode)
 }

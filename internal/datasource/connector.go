@@ -119,6 +119,24 @@ type ItemFailureIsolatingConnector interface {
 	IsolatesItemIngestFailures() bool
 }
 
+// UnchangedItemRecorder is an optional StreamHandler capability implemented by
+// the service's streaming handler. Connectors that skip already-up-to-date
+// items via their cursor fast-path may call RecordUnchangedItem so the service
+// can tell a quiet incremental round (healthy items already synced, only a
+// lingering failed item retried) apart from a round where every item failed.
+type UnchangedItemRecorder interface {
+	RecordUnchanged()
+}
+
+// RecordUnchangedItem notifies h that one in-scope item matched the persisted
+// cursor and was skipped as already up to date. No-op when h does not
+// implement UnchangedItemRecorder.
+func RecordUnchangedItem(h StreamHandler) {
+	if r, ok := h.(UnchangedItemRecorder); ok {
+		r.RecordUnchanged()
+	}
+}
+
 // FullSyncWithCursor is optional. The batch sync path uses it for ForceFull and
 // sync_mode=full so a connector can re-fetch every document while still
 // reconciling deletions against the previous cursor. Connectors that omit it

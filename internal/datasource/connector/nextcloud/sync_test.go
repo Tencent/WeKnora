@@ -298,3 +298,48 @@ func TestItemIngestFailureDoesNotBlockRemainingFiles(t *testing.T) {
 		t.Fatalf("retry emitted = %+v, want only /docs/a_bad.png", retry.items)
 	}
 }
+
+func TestFetchFullStreamItemIngestFailureRetainsDeletionBaseline(t *testing.T) {
+	f := newFakeNextcloud(t)
+	f.add("/docs/a_bad.png", "png-v1")
+	f.add("/docs/b_ok.pdf", "pdf-v1")
+	c := NewConnector()
+	cfg := f.config("/docs")
+
+	initial, err := c.FetchStream(t.Context(), cfg, nil, &recorder{})
+	if err != nil {
+		t.Fatalf("initial FetchStream() error: %v", err)
+	}
+
+	h := &isolatingNextcloudHandler{failPath: "/docs/a_bad.png"}
+	next, err := c.FetchFullStream(t.Context(), cfg, initial, h)
+	if err != nil {
+		t.Fatalf("FetchFullStream() unexpected error: %v", err)
+	}
+	if len(h.items) != 1 || h.items[0].Metadata["nextcloud_path"] != "/docs/b_ok.pdf" {
+		t.Fatalf("emitted items = %+v, want only /docs/b_ok.pdf", h.items)
+	}
+	cur, err := decodeCursor(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val, ok := cur.Files["/docs/a_bad.png"]; !ok || val != "" {
+		t.Fatalf("failed file cursor = (%q, %v), want (\"\", true)", val, ok)
+	}
+	if cur.Files["/docs/b_ok.pdf"] == "" {
+		t.Fatalf("healthy file missing from cursor: %+v", cur.Files)
+	}
+
+	// If the failed file is removed before recovery, reconciliation still emits its deletion.
+	f.mu.Lock()
+	delete(f.nodes, "/docs/a_bad.png")
+	f.mu.Unlock()
+	delRec := &recorder{}
+	if _, err := c.FetchStream(t.Context(), cfg, next, delRec); err != nil {
+		t.Fatalf("deletion FetchStream() error: %v", err)
+	}
+	if len(delRec.items) != 1 || !delRec.items[0].IsDeleted ||
+		delRec.items[0].Metadata["nextcloud_path"] != "/docs/a_bad.png" {
+		t.Fatalf("deletion emitted = %+v, want deleted /docs/a_bad.png", delRec.items)
+	}
+}

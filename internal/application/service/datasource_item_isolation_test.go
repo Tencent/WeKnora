@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"mime/multipart"
+	"net/http"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -171,6 +174,20 @@ func TestProcessSync_FeishuDriveSingleItemIngestFailureDoesNotBlockScopeExpansio
 	assert.Empty(t, cur2.FileTimes[rootTok+":"+dir1Tok][badPNG], "failed PNG must remain unadvanced for retry")
 	assert.NotEmpty(t, cur2.FileTimes[rootTok+":"+dir2Tok][okDoc2])
 	assert.NotEmpty(t, cur2.FileTimes[rootTok+":"+dir2Tok][okDoc3])
+
+	// Round 2b (quiet incremental round): no healthy docs changed and badPNG
+	// still fails. Because 3 healthy docs matched the cursor fast-path, the
+	// round must stay partial/active (not flip to failed/error) so scheduled
+	// incremental syncs stay alive.
+	ks.attempted = nil
+	log2b, err := runFeishuSyncRound(t, svc, ds, logRepo, "drive-5724-2b")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusPartial, log2b.Status)
+	assert.Equal(t, types.DataSourceStatusActive, ds.Status)
+	assert.Equal(t, 1, log2b.ItemsTotal)
+	assert.Equal(t, 1, log2b.ItemsFailed)
+	assert.Equal(t, 0, log2b.ItemsCreated)
+	assert.Equal(t, []string{badPNG}, ks.attempted)
 
 	// Round 3: PNG recovers -> only the failed PNG is retried; healthy docs are skipped via cursor.
 	delete(ks.failByExtID, badPNG)
@@ -526,6 +543,16 @@ func TestProcessSync_SeafileIsolatesSingleItemIngestFailure(t *testing.T) {
 	_, badTracked := files["/docs/a_bad.png"]
 	assert.False(t, badTracked, "failed Seafile item must stay out of cursor for retry")
 
+	// Quiet incremental round while /docs/a_bad.png still fails: /docs/b_ok.pdf
+	// matches the cursor, so the round stays partial/active without disabling cron.
+	h.syncLog.Status = types.SyncLogStatusRunning
+	log1b, err := h.run(t, false)
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusPartial, log1b.Status)
+	assert.Equal(t, types.DataSourceStatusActive, h.ds.Status)
+	assert.Equal(t, 1, log1b.ItemsTotal)
+	assert.Equal(t, 1, log1b.ItemsFailed)
+
 	// Next round after recovery: only /docs/a_bad.png is retried.
 	ks.failErr = nil
 	h.knowledge.created = nil
@@ -613,4 +640,281 @@ func TestProcessSync_RealKnowledgeServiceFeishuDrivePermanentRejections(t *testi
 	require.NoError(t, err)
 	assert.Equal(t, types.SyncLogStatusSuccess, log2.Status)
 	assert.Equal(t, 0, log2.ItemsTotal)
+}
+
+// Verifies that when a scheduled data source enters error state (only failing
+// items in scope), expanding scope via UpdateDataSource removes the cron job
+// while in error, and the subsequent recovering sync immediately restores the
+// cron entry in the live Scheduler — and keeps it alive across quiet rounds.
+func TestProcessSync_ErrorRecoveryRestoresCronAndQuietRoundKeepsSchedule(t *testing.T) {
+	const (
+		rootTok = "fld-sched-root"
+		dir1Tok = "fld-sched-dir1"
+		dir2Tok = "fld-sched-dir2"
+		badPNG  = "file-sched-bad"
+		okDoc   = "doc-sched-ok"
+	)
+
+	srv := newFeishuSelectedNodeServer(t, "unused")
+	srv.driveFiles[rootTok] = []core.DriveFile{
+		{Token: dir1Tok, Name: "目录一", Type: "folder", ParentToken: rootTok},
+		{Token: dir2Tok, Name: "目录二", Type: "folder", ParentToken: rootTok},
+	}
+	srv.driveFiles[dir1Tok] = []core.DriveFile{
+		{Token: badPNG, Name: "源码管理流程.png", Type: "file", ParentToken: dir1Tok, ModifiedTime: "100"},
+	}
+	srv.driveFiles[dir2Tok] = []core.DriveFile{
+		{Token: okDoc, Name: "正常文档", Type: "docx", ParentToken: dir2Tok, ModifiedTime: "100"},
+	}
+	srv.docxText[okDoc] = "healthy doc content"
+
+	ctx := context.Background()
+	f := newSQLiteDataSourceDeleteFixture(t)
+	svc, templateDS, _, baseKS := newFeishuSyncServiceHarness(
+		t, srv, types.ConnectorTypeFeishuDrive, []string{rootTok + ":" + dir1Tok}, true,
+	)
+	ks := &failingFeishuKnowledgeService{
+		feishuStatefulKnowledgeService: baseKS,
+		failByExtID:                    map[string]error{badPNG: errors.New("temporary storage error")},
+	}
+
+	f.ds.Type = types.ConnectorTypeFeishuDrive
+	f.ds.Config = templateDS.Config
+	f.ds.SyncMode = types.SyncModeIncremental
+	f.ds.SyncSchedule = "0 0 * * * *"
+	f.ds.Status = types.DataSourceStatusActive
+	require.NoError(t, f.dsRepo.Update(ctx, f.ds))
+	require.NoError(t, f.scheduler.AddOrUpdate(f.ds))
+	require.Equal(t, 1, f.scheduler.EntryCount())
+
+	svc.dsRepo = f.dsRepo
+	svc.syncLogRepo = f.syncLogRepo
+	svc.scheduler = f.scheduler
+	svc.knowledgeService = ks
+	svc.kbService = &processSyncKBService{kb: &types.KnowledgeBase{
+		ID: f.ds.KnowledgeBaseID, TenantID: f.ds.TenantID,
+	}}
+	svc.tenantRepo = &processSyncTenantRepo{tenant: &types.Tenant{ID: f.ds.TenantID}}
+
+	runSQLiteRound := func(logID string) (*types.SyncLog, error) {
+		log := &types.SyncLog{
+			ID:           logID,
+			DataSourceID: f.ds.ID,
+			TenantID:     f.ds.TenantID,
+			Status:       types.SyncLogStatusRunning,
+			StartedAt:    time.Now().UTC(),
+		}
+		require.NoError(t, f.syncLogRepo.Create(ctx, log))
+		payload, err := json.Marshal(types.DataSourceSyncPayload{
+			DataSourceID: f.ds.ID,
+			TenantID:     f.ds.TenantID,
+			SyncLogID:    logID,
+		})
+		require.NoError(t, err)
+		runErr := svc.ProcessSync(ctx, asynq.NewTask(types.TypeDataSourceSync, payload))
+		saved, readErr := f.syncLogRepo.FindByID(ctx, logID)
+		require.NoError(t, readErr)
+		return saved, runErr
+	}
+
+	// Round 1: only badPNG is in scope -> fails and transitions ds to error.
+	log1, err := runSQLiteRound("sched-round-1")
+	require.Error(t, err)
+	assert.Equal(t, types.SyncLogStatusFailed, log1.Status)
+	stored, err := f.dsRepo.FindByID(ctx, f.ds.ID)
+	require.NoError(t, err)
+	assert.Equal(t, types.DataSourceStatusError, stored.Status)
+
+	// User expands scope via UpdateDataSource while ds is in error state:
+	// UpdateDataSource unregisters the cron entry because status != active.
+	setDataSourceResourceIDs(t, stored, []string{rootTok + ":" + dir1Tok, rootTok + ":" + dir2Tok})
+	_, err = svc.UpdateDataSource(ctx, stored)
+	require.NoError(t, err)
+	assert.Equal(t, 0, f.scheduler.EntryCount())
+
+	// Round 2: manual sync picks up dir2, transitions ds error -> active, and
+	// immediately re-registers the cron entry in the live Scheduler.
+	log2, err := runSQLiteRound("sched-round-2")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusPartial, log2.Status)
+	assert.Equal(t, 1, log2.ItemsCreated)
+	assert.Equal(t, 1, log2.ItemsFailed)
+	stored, err = f.dsRepo.FindByID(ctx, f.ds.ID)
+	require.NoError(t, err)
+	assert.Equal(t, types.DataSourceStatusActive, stored.Status)
+	assert.Equal(t, 1, f.scheduler.EntryCount(), "recovering from error -> active must restore cron entry")
+
+	// Round 3: quiet scheduled tick while badPNG still fails -> stays partial/active
+	// and preserves the cron entry.
+	log3, err := runSQLiteRound("sched-round-3")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusPartial, log3.Status)
+	assert.Equal(t, 1, log3.ItemsTotal)
+	assert.Equal(t, 1, log3.ItemsFailed)
+	stored, err = f.dsRepo.FindByID(ctx, f.ds.ID)
+	require.NoError(t, err)
+	assert.Equal(t, types.DataSourceStatusActive, stored.Status)
+	assert.Equal(t, 1, f.scheduler.EntryCount())
+}
+
+// Verifies Feishu Drive fetch-stage failures include the resolved folder path
+// in SyncItemError.Title just like ingest-stage failures do.
+func TestProcessSync_FeishuDriveFetchFailureIncludesFolderPath(t *testing.T) {
+	const (
+		rootTok = "fld-fetch-root"
+		dir1Tok = "fld-fetch-dir1"
+		badPNG  = "file-fetch-403"
+		okDoc   = "doc-fetch-ok"
+	)
+
+	srv := newFeishuSelectedNodeServer(t, "unused")
+	srv.driveFiles[rootTok] = []core.DriveFile{
+		{Token: dir1Tok, Name: "目录一", Type: "folder", ParentToken: rootTok},
+	}
+	srv.driveFiles[dir1Tok] = []core.DriveFile{
+		{Token: badPNG, Name: "源码管理流程.png", Type: "file", ParentToken: dir1Tok, ModifiedTime: "100"},
+		{Token: okDoc, Name: "正常文档", Type: "docx", ParentToken: dir1Tok, ModifiedTime: "100"},
+	}
+	srv.docxText[okDoc] = "healthy doc"
+	srv.failDownload = map[string]int{badPNG: http.StatusForbidden}
+
+	svc, ds, logRepo, _ := newFeishuSyncServiceHarness(
+		t, srv, types.ConnectorTypeFeishuDrive, []string{rootTok + ":" + dir1Tok}, true,
+	)
+
+	log, err := runFeishuSyncRound(t, svc, ds, logRepo, "drive-fetch-path")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusPartial, log.Status)
+	assert.Equal(t, 1, log.ItemsCreated)
+	assert.Equal(t, 1, log.ItemsFailed)
+
+	res, parseErr := log.ParseResult()
+	require.NoError(t, parseErr)
+	require.Len(t, res.Errors, 1)
+	assert.Equal(t, "云盘目录/目录一/源码管理流程.png", res.Errors[0].Title)
+	assert.Equal(t, "feishu_auth_or_permission", res.Errors[0].Code)
+}
+
+type failingRealKnowledgeService struct {
+	*knowledgeService
+	failByExtID map[string]error
+}
+
+func (k *failingRealKnowledgeService) CreateKnowledgeFromFile(
+	ctx context.Context, kbID string, fh *multipart.FileHeader, metadata map[string]string,
+	enableMultimodel *bool, customFileName string, tagIDs []string, channel string,
+	processOverrides *types.KnowledgeProcessOverrides,
+) (*types.Knowledge, error) {
+	if err := k.failByExtID[metadata["external_id"]]; err != nil {
+		return nil, err
+	}
+	return k.knowledgeService.CreateKnowledgeFromFile(
+		ctx, kbID, fh, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides,
+	)
+}
+
+func (k *failingRealKnowledgeService) ReplaceKnowledgeFromDataSource(
+	ctx context.Context, existingID string, item *types.FetchedItem,
+	metadata map[string]string, tagIDs []string, channel string,
+) (*types.Knowledge, error) {
+	if err := k.failByExtID[item.ExternalID]; err != nil {
+		return nil, err
+	}
+	return k.knowledgeService.ReplaceKnowledgeFromDataSource(
+		ctx, existingID, item, metadata, tagIDs, channel,
+	)
+}
+
+// End-to-end SQLite test for Feishu multi-item docx fan-out when an attachment
+// sub-item hits an isolated ingest failure while the parent docx succeeds:
+// the prior attachment row must be preserved via SubtreeKeep, the node cursor
+// must stay unadvanced, and recovery must converge cleanly on retry.
+func TestProcessSync_FeishuDocxAttachmentIngestFailurePreservesSubtreeAndRetries(t *testing.T) {
+	h, _, _, _ := datasourceReplacementFixture(t)
+	kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 7}
+	h.svc.kbService = &processSyncKBService{kb: kb}
+	h.svc.task = &replaceFileEnqueuer{events: &[]string{}}
+
+	const (
+		rootTok = "fld-docx-att"
+		docTok  = "doc-with-att"
+		attTok  = "att-file-1"
+	)
+	attExtID := types.SubtreeChildID(docTok, "file", attTok)
+
+	srv := newFeishuSelectedNodeServer(t, "unused")
+	srv.driveFiles[rootTok] = []core.DriveFile{
+		{Token: docTok, Name: "架构设计", Type: "docx", ParentToken: rootTok, ModifiedTime: "100"},
+	}
+	srv.docxText[docTok] = "version 1 body"
+	srv.docxAttach[docTok] = attTok
+
+	svc, ds, logRepo, _ := newFeishuSyncServiceHarness(
+		t, srv, types.ConnectorTypeFeishuDrive, []string{rootTok}, true,
+	)
+	ds.ID = "ds-1"
+	ds.TenantID = 7
+	ds.KnowledgeBaseID = "kb-1"
+	svc.dsRepo = newKBDeleteDSRepo(ds.KnowledgeBaseID, ds)
+	svc.kbService = &processSyncKBService{kb: kb}
+	svc.tenantRepo = &processSyncTenantRepo{tenant: &types.Tenant{ID: 7, StorageQuota: 10 * 1024 * 1024}}
+	ks := &failingRealKnowledgeService{
+		knowledgeService: h.svc,
+		failByExtID:      map[string]error{},
+	}
+	svc.knowledgeService = ks
+
+	// Round 1: both attachment and parent docx succeed in SQLite.
+	log1, err := runFeishuSyncRound(t, svc, ds, logRepo, "docx-att-1")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusSuccess, log1.Status)
+	assert.Equal(t, 2, log1.ItemsCreated)
+
+	origAtt, err := h.svc.repo.FindByDataSourceExternalID(context.Background(), 7, "kb-1", "ds-1", attExtID)
+	require.NoError(t, err)
+	require.NotNil(t, origAtt)
+	cur1 := decodeFeishuDriveCursor(t, ds)
+	priorEdit := cur1.FileTimes[rootTok][docTok]
+	require.NotEmpty(t, priorEdit)
+
+	// Round 2: docx is updated; attachment replace fails ingest while parent
+	// docx replace succeeds. SubtreeKeep must preserve the Round-1 attachment,
+	// and the node cursor must retain priorEdit for retry.
+	srv.mu.Lock()
+	srv.driveFiles[rootTok][0].ModifiedTime = "200"
+	srv.docxText[docTok] = "version 2 body"
+	srv.mu.Unlock()
+	ks.failByExtID[attExtID] = errors.New("transient attachment storage error")
+
+	log2, err := runFeishuSyncRound(t, svc, ds, logRepo, "docx-att-2")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusPartial, log2.Status)
+	assert.Equal(t, 1, log2.ItemsUpdated)
+	assert.Equal(t, 1, log2.ItemsFailed)
+
+	keptAtt, err := h.svc.repo.FindByDataSourceExternalID(context.Background(), 7, "kb-1", "ds-1", attExtID)
+	require.NoError(t, err)
+	require.NotNil(t, keptAtt, "SubtreeKeep must preserve previously synced attachment when re-ingest fails")
+	assert.Equal(t, origAtt.ID, keptAtt.ID)
+
+	cur2 := decodeFeishuDriveCursor(t, ds)
+	assert.Equal(t, priorEdit, cur2.FileTimes[rootTok][docTok], "node cursor must not advance while attachment failed")
+
+	// Round 3: attachment recovers -> both items converge cleanly without
+	// duplicate errors, and the node cursor advances to the new edit time.
+	delete(ks.failByExtID, attExtID)
+	log3, err := runFeishuSyncRound(t, svc, ds, logRepo, "docx-att-3")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusSuccess, log3.Status)
+	assert.Equal(t, 2, log3.ItemsUpdated)
+	assert.Equal(t, 0, log3.ItemsFailed)
+
+	cur3 := decodeFeishuDriveCursor(t, ds)
+	assert.NotEqual(t, priorEdit, cur3.FileTimes[rootTok][docTok])
+
+	// Round 4: steady state -> 0 items fetched.
+	log4, err := runFeishuSyncRound(t, svc, ds, logRepo, "docx-att-4")
+	require.NoError(t, err)
+	assert.Equal(t, types.SyncLogStatusSuccess, log4.Status)
+	assert.Equal(t, 0, log4.ItemsTotal)
 }

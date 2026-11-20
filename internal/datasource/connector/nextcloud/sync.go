@@ -184,6 +184,7 @@ func (r *syncRun) syncFile(e entry) error {
 	r.seen[e.Path] = true
 	fp := fingerprint(e)
 	if r.cur.Files[e.Path] == fp {
+		datasource.RecordUnchangedItem(r.h)
 		return nil
 	}
 	body, err := r.client.download(r.ctx, e, r.limit)
