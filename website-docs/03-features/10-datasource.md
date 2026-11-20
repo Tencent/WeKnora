@@ -28,6 +28,7 @@
 | --- | --- | --- |
 | 飞书 / Lark 知识库 | `feishu` / `lark` | Wiki 空间与节点 |
 | 飞书云盘 / Lark Drive | `feishu_drive` / `lark_drive` | 指定云盘文件夹，见[飞书云盘接入](24-feishu-drive.md) |
+| 飞书 / Lark 链接列表 | `feishu_links` / `lark_links` | 按单篇文档 URL 同步，不枚举 Wiki 空间、不遍历云盘文件夹 |
 | Notion | `notion` | 页面与数据库 |
 | Confluence | `confluence` | Server / Data Center 或 Cloud 空间中的页面 |
 | 语雀 | `yuque` | 知识库文档 |
@@ -137,6 +138,16 @@
 - **增量逻辑**：Wiki 游标 `FeishuCursor.SpaceNodeTimes` 保存 `resourceID → nodeToken → 变更键`，由 `obj_edit_time`、`node_edit_time` 的较新值、目标路径指纹以及 docx 的有效解析模式组成，同时识别内容编辑和祖先目录改名/移动；文档源更新时间仍保留内容编辑时间。旧格式游标会刷新一次以升级格式。抓取失败的节点**不推进游标**（保留旧变更键，下次重试），避免瞬时导出失败导致文档被永久跳过。
 - **FetchStream / FetchFullStream**：增量按变更键跳过未修改文档；全量重新抓取全部文档，同时保留旧游标中的删除基线，只有完整列举后才确认删除。若用户直接勾选的单个 Wiki 节点或云盘子资源在源端被删除（Wiki `131005` / Drive `1061003`），会按已删资源对账其知识条目并继续同步其余勾选资源，不会中断整轮同步（权限不足等非 404 错误仍按失败中止并保留知识条目）。中途 checkpoint 保留尚未遍历的旧节点，抓取失败的节点会在后续同步重试。每处理 `FeishuStreamCheckpointInterval = 50` 个节点、或距上次 checkpoint 超过 `FeishuStreamCheckpointMaxInterval = 30s` 就落盘一次游标——后者兜底"少量文档但每篇导出都极慢（被限流）"导致 2 小时超时前从未 checkpoint 的场景。
 - **错误分类**（`feishuFailure`）：把原始错误归类为稳定 i18n code（`feishu_auth_or_permission` / `feishu_rate_limited` / `feishu_timeout` / `feishu_server_unavailable` / `feishu_api_error`(+code) / `sync_failed`），前端本地化展示；原始 status/body/log_id 只留在服务端日志。
+
+
+#### 飞书 / Lark 链接列表（`feishu_links` / `lark_links`）
+
+按用户粘贴的单篇文档 URL 同步，不枚举 Wiki 空间、不遍历云盘文件夹。类型标识为 `feishu_links` / `lark_links`，源码在 `internal/datasource/connector/feishu/links/`，与 Wiki/云盘共用 `core.Client`、Region 与 `FetchDocxWithBlocks`。
+
+- **支持的 URL**：`/wiki/{node_token}`（只拉这一篇，不递归子页）、`/docx/{token}`、`/docs/{token}`、`/sheets/{token}`、`/base/{token}`、`/file/{token}`。
+- **拒绝**：`/wiki/space/`（整库请用 `feishu`）、`/drive/folder/`（整夹请用 `feishu_drive`）、mindnote / slides。
+- **解析与去重**：wiki 走 `get_node`，云文档走 `POST /drive/v1/metas/batch_query`。先按规范化 URL 去重，再按 `{obj_type}:{obj_token}` 去重（同一篇的 wiki copylink 与 `/docx/` 会合并）。
+- **权限**：`wiki:wiki:readonly`（wiki copylink）、`drive:drive.metadata:readonly` 或 `drive:drive`（云文档 URL 的 `metas/batch_query`；`drive:drive:readonly` 不够）、`drive:drive:readonly`、`drive:export:readonly`、`docx:document:readonly`。开通后须发布应用版本。把应用加为该文档协作者即可，不必进群分享整库或整夹。
 
 #### GitLab（`connector/gitlab/`）
 
@@ -480,6 +491,8 @@ registry.Register(wiki.NewConnector(core.RegionFeishu))             // feishu
 registry.Register(wiki.NewConnector(core.RegionLark))               // lark（国际版，同一实现不同 Region）
 registry.Register(drive.NewDriveConnector(core.RegionFeishuDrive))  // feishu_drive
 registry.Register(drive.NewDriveConnector(core.RegionLarkDrive))    // lark_drive
+registry.Register(links.NewConnector(core.RegionFeishuLinks))       // feishu_links
+registry.Register(links.NewConnector(core.RegionLarkLinks))         // lark_links
 registry.Register(notionConnector.NewConnector())                   // notion
 registry.Register(confluenceConnector.NewConnector())               // confluence
 registry.Register(yuqueConnector.NewConnector())                    // yuque
@@ -491,7 +504,7 @@ registry.Register(seafileConnector.NewConnector())                  // seafile
 registry.Register(nextcloudConnector.NewConnector())                // nextcloud
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`、`seafile`、`nextcloud`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`feishu_links`、`lark_links`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`、`seafile`、`nextcloud`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ### 数据模型（internal/types/datasource.go）
 
