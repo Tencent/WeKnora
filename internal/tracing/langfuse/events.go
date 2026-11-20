@@ -58,6 +58,49 @@ const (
 	obsTypeGeneration = "generation"
 )
 
+// Specific observation types accepted by Langfuse's OTel ingestion. Pass one
+// to SpanOptions.Type or GenerationOptions.Type so the UI groups the
+// observation correctly: "agent" drives the Agent Graph, "tool" powers tool
+// analytics, "retriever" and "embedding" feed retrieval/cost views, and
+// "chain" marks a step that links other observations together. Call sites
+// that leave Type empty keep the generic span/generation type.
+//
+// https://langfuse.com/docs/observability/features/observation-types
+const (
+	ObsTypeSpan       = obsTypeSpan
+	ObsTypeGeneration = obsTypeGeneration
+	ObsTypeEvent      = "event"
+	ObsTypeAgent      = "agent"
+	ObsTypeTool       = "tool"
+	ObsTypeChain      = "chain"
+	ObsTypeRetriever  = "retriever"
+	ObsTypeEmbedding  = "embedding"
+	ObsTypeEvaluator  = "evaluator"
+)
+
+// spanObsType resolves a requested observation type for a Span. Agent, tool,
+// chain, retriever and evaluator are the non-generation types Langfuse
+// understands; anything else (including empty) falls back to "span" so a typo
+// can never degrade the trace into an unknown observation type.
+func spanObsType(requested string) string {
+	switch requested {
+	case ObsTypeAgent, ObsTypeTool, ObsTypeChain, ObsTypeRetriever, ObsTypeEvaluator:
+		return requested
+	}
+	return obsTypeSpan
+}
+
+// generationObsType resolves a requested observation type for a Generation.
+// Embedding and evaluator are the generation-bearing specific types; all other
+// values fall back to "generation".
+func generationObsType(requested string) string {
+	switch requested {
+	case ObsTypeEmbedding, ObsTypeEvaluator:
+		return requested
+	}
+	return obsTypeGeneration
+}
+
 func isoTime(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }

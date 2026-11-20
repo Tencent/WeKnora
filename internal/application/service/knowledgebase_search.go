@@ -319,6 +319,7 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 	logger.Infof(ctx, "Starting multi-store retrieval, group count: %d", len(groups))
 	retrieveCtx, retrieveSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 		Name: "retrieve",
+		Type: langfuse.ObsTypeRetriever,
 		Input: map[string]interface{}{
 			"query_text":             params.QueryText,
 			"kb_ids":                 searchKBIDs,

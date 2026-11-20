@@ -578,7 +578,7 @@ func (e *AgentEngine) runToolCallAnswered(
 	})
 
 	// Open a Langfuse span for the tool invocation so the Langfuse UI shows
-	// trace → agent.execute → agent.round.N → agent.tool.<name>, alongside
+	// trace → agent.execute → agent.round → agent.tool.<name>, alongside
 	// any nested generations (embedding/rerank/VLM) that the tool itself
 	// triggers. No-op when Langfuse is disabled.
 	mgr := langfuse.GetManager()
@@ -594,6 +594,7 @@ func (e *AgentEngine) runToolCallAnswered(
 	argumentResolution, _ := toolSpanInput["argument_resolution"].(string)
 	toolCtx, toolSpan := mgr.StartSpan(ctx, langfuse.SpanOptions{
 		Name:  "agent.tool." + executionName,
+		Type:  langfuse.ObsTypeTool,
 		Input: toolSpanInput,
 		Metadata: map[string]interface{}{
 			"iteration":               iteration,

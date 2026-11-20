@@ -730,6 +730,7 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	})
 	webCtx, webSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 		Name: "web_search",
+		Type: langfuse.ObsTypeRetriever,
 		Input: map[string]interface{}{
 			"provider_id": providerID,
 			"query":       chatManage.RewriteQuery,

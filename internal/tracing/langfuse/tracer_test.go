@@ -456,6 +456,89 @@ func TestAttachTraceparent_FollowUpJoinsOriginatingTrace(t *testing.T) {
 	}
 }
 
+// TestObservationTypes verifies callers can select the specific Langfuse
+// observation types (agent/tool/retriever/chain/embedding) used for the Agent
+// Graph and retrieval analytics, and that an unknown value falls back to the
+// handle's generic type instead of leaking an unsupported type.
+func TestObservationTypes(t *testing.T) {
+	m, exp := newTestManager(t)
+
+	ctx, trace := m.StartTrace(context.Background(), TraceOptions{Name: "root"})
+	_, agentSpan := m.StartSpan(ctx, SpanOptions{Name: "agent.execute", Type: ObsTypeAgent})
+	_, toolSpan := m.StartSpan(ctx, SpanOptions{Name: "agent.tool.search", Type: ObsTypeTool})
+	_, retrieverSpan := m.StartSpan(ctx, SpanOptions{Name: "retrieve", Type: ObsTypeRetriever})
+	_, chainSpan := m.StartSpan(ctx, SpanOptions{Name: "pipeline.search", Type: ObsTypeChain})
+	_, unknownSpan := m.StartSpan(ctx, SpanOptions{Name: "unknown", Type: "not-a-type"})
+	_, embedGen := m.StartGeneration(ctx, GenerationOptions{
+		Name: "embedding.embed", Model: "emb", Type: ObsTypeEmbedding,
+	})
+	_, unknownGen := m.StartGeneration(ctx, GenerationOptions{Name: "llm", Model: "m", Type: ObsTypeRetriever})
+
+	agentSpan.Finish(nil, nil, nil)
+	toolSpan.Finish(nil, nil, nil)
+	retrieverSpan.Finish(nil, nil, nil)
+	chainSpan.Finish(nil, nil, nil)
+	unknownSpan.Finish(nil, nil, nil)
+	embedGen.Finish(nil, nil, nil)
+	unknownGen.Finish(nil, nil, nil)
+	trace.Finish(nil, nil)
+
+	want := map[string]string{
+		"agent.execute":     ObsTypeAgent,
+		"agent.tool.search": ObsTypeTool,
+		"retrieve":          ObsTypeRetriever,
+		"pipeline.search":   ObsTypeChain,
+		"unknown":           obsTypeSpan,
+		"embedding.embed":   ObsTypeEmbedding,
+		"llm":               obsTypeGeneration,
+	}
+	seen := 0
+	for _, s := range exp.GetSpans() {
+		if expected, ok := want[s.Name]; ok {
+			if got := spanType(s); got != expected {
+				t.Errorf("%s type = %q, want %q", s.Name, got, expected)
+			}
+			seen++
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("asserted %d/%d typed spans, some were not exported", seen, len(want))
+	}
+}
+
+// TestRootObservationInputOutput verifies the root span carries input/output
+// under the observation keys, which is what Langfuse v4 reads for the trace
+// table (trace-level input/output are deprecated there). The legacy trace keys
+// are kept for v3/LiteFuse.
+func TestRootObservationInputOutput(t *testing.T) {
+	m, exp := newTestManager(t)
+
+	_, trace := m.StartTrace(context.Background(), TraceOptions{
+		Name:  "root",
+		Input: map[string]interface{}{"query": "hello"},
+	})
+	trace.SetInput("updated query")
+	trace.Finish(map[string]interface{}{"status": 200}, nil)
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	root := spans[0]
+	if got := spanAttr(root.Attributes, attrObsInput); got != `"updated query"` {
+		t.Errorf("observation input = %s, want SetInput value", got)
+	}
+	if got := spanAttr(root.Attributes, attrObsOutput); got == "" {
+		t.Error("observation output missing; v4 trace table would be empty")
+	}
+	if got := spanAttr(root.Attributes, attrTraceInput); got == "" {
+		t.Error("legacy trace input missing; v3/LiteFuse would be empty")
+	}
+	if got := spanAttr(root.Attributes, attrTraceOutput); got == "" {
+		t.Error("legacy trace output missing; v3/LiteFuse would be empty")
+	}
+}
+
 // TestAttachTraceparent_LeavesExistingTrace ensures same-request background
 // work (completeAssistantMessage) is not re-parented onto a stale remote
 // span when ctx already carries a live *Trace.
