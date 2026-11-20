@@ -352,6 +352,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("File upload failed").WithDetails(err.Error()))
 		return
 	}
+	utils.RestoreMultipartFilename(file)
 	if file.Size > maxSize {
 		logger.Error(ctx, "File size too large")
 		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", maxSizeMB)))
