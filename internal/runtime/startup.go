@@ -118,9 +118,10 @@ var startupEnvVars = []envVarSpec{
 //	[startup-env] DB_DRIVER=postgres
 //
 // Special call-outs are printed afterwards for misconfigurations that
-// would silently degrade behaviour (e.g. SYSTEM_AES_KEY set but wrong
-// length is treated as unset by crypto.GetAESKey — easy to miss without
-// a loud warning).
+// would silently degrade behaviour (e.g. SYSTEM_AES_KEY set but not
+// decodable to 32 bytes is treated as unset by crypto.GetAESKey — easy
+// to miss without a loud warning; see ValidateStartupEnv, which turns
+// that case into a fatal startup error instead of a warning).
 func LogStartupEnv(ctx context.Context) {
 	// Sort by name for deterministic output.
 	specs := make([]envVarSpec, len(startupEnvVars))
@@ -133,12 +134,15 @@ func LogStartupEnv(ctx context.Context) {
 		logger.Infof(ctx, "[startup-env]   %s=%s", s.name, formatEnvValue(s, val))
 	}
 
-	// Targeted warnings for footguns. SYSTEM_AES_KEY set to wrong length
-	// is the most common one — utils.GetAESKey() silently falls back to
-	// nil (== "no encryption") when len != 32.
-	if k := os.Getenv("SYSTEM_AES_KEY"); k != "" && len(k) != 32 {
+	// Targeted warnings for footguns. SYSTEM_AES_KEY set but not decodable
+	// to 32 bytes is the most common one — utils.GetAESKey() falls back
+	// to nil (== "no encryption"). ValidateStartupEnv (called by main
+	// right after this banner) turns it into a fatal error; the warning
+	// stays so the banner alone still names the problem.
+	if k := os.Getenv("SYSTEM_AES_KEY"); k != "" && utils.GetAESKey() == nil {
 		logger.Warnf(ctx,
-			"[startup-env] SYSTEM_AES_KEY is set but %d bytes long; AES-256 requires exactly 32 bytes — encryption is DISABLED",
+			"[startup-env] SYSTEM_AES_KEY is set but does not decode to 32 bytes (%d chars); "+
+				"AES-256 requires exactly 32 bytes — encryption is DISABLED",
 			len(k))
 	}
 	// Upgrades from example configs keep the published example AES key,
@@ -154,6 +158,32 @@ func LogStartupEnv(ctx context.Context) {
 		logger.Warn(ctx,
 			"[startup-env] REDIS_TLS_INSECURE_SKIP_VERIFY=true — Redis TLS certificate verification is DISABLED; do not use in production")
 	}
+}
+
+// ValidateStartupEnv rejects configurations that would silently degrade
+// security. Currently it covers one case:
+//
+//   - SYSTEM_AES_KEY is set (non-empty) but does not decode to 32 bytes
+//     under utils.GetAESKey: every Value() hook then skips encryption and
+//     credentials are written to the database in plaintext. A refused
+//     boot is recoverable in seconds; plaintext credentials sitting in a
+//     database backup are not.
+//
+// An unset SYSTEM_AES_KEY is still allowed (fresh installs and
+// deployments that intentionally run without at-rest encryption keep
+// today's behaviour); only a set-but-invalid value is fatal. Callers in
+// cmd/server and cmd/desktop run this right after LogStartupEnv and exit
+// non-zero on error, before any credential is written.
+func ValidateStartupEnv() error {
+	if raw := os.Getenv("SYSTEM_AES_KEY"); raw != "" && utils.GetAESKey() == nil {
+		return fmt.Errorf(
+			"SYSTEM_AES_KEY is set (%d chars) but does not decode to 32 bytes; "+
+				"refusing to start rather than write credentials in plaintext: "+
+				"set it to a raw 32-byte value, `openssl rand -hex 16` (32 chars), "+
+				"a 64-char hex encoding, or a base64 encoding of 32 bytes",
+			len(raw))
+	}
+	return nil
 }
 
 func formatEnvValue(s envVarSpec, val string) string {
