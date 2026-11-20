@@ -138,7 +138,7 @@ export class WeknoraClient {
     for (const [key, value] of Object.entries(query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value))
     }
-    if (this.resourceMode() === 'public') url.searchParams.set('resource_urls', 'public')
+    url.searchParams.set('resource_urls', this.resourceMode())
     return url.toString()
   }
 
