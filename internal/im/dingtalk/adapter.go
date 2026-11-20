@@ -315,8 +315,11 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		return nil, "", fmt.Errorf("download file: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := im.ReadIMResponse(resp.Body)
 		resp.Body.Close()
+		if err != nil {
+			return nil, "", fmt.Errorf("read dingtalk download file response: %w", err)
+		}
 		return nil, "", fmt.Errorf("download file returned %d: %s", resp.StatusCode, string(body))
 	}
 	return resp.Body, msg.FileName, nil
@@ -556,7 +559,10 @@ func (a *Adapter) replyViaSessionWebhook(ctx context.Context, webhookURL, conten
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, err := im.ReadIMResponse(resp.Body)
+		if err != nil {
+			return fmt.Errorf("read dingtalk sessionWebhook response: %w", err)
+		}
 		return fmt.Errorf("dingtalk sessionWebhook returned %d: %s", resp.StatusCode, string(respBody))
 	}
 	return nil
@@ -607,7 +613,10 @@ func (a *Adapter) replyViaOpenAPI(ctx context.Context, incoming *im.IncomingMess
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, err := im.ReadIMResponse(resp.Body)
+		if err != nil {
+			return fmt.Errorf("read dingtalk OpenAPI response: %w", err)
+		}
 		return fmt.Errorf("dingtalk OpenAPI returned %d: %s", resp.StatusCode, string(respBody))
 	}
 	return nil
@@ -651,7 +660,10 @@ func (a *Adapter) getAccessToken(ctx context.Context) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, err := im.ReadIMResponse(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("read dingtalk accessToken response: %w", err)
+		}
 		return "", fmt.Errorf("dingtalk accessToken returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -659,7 +671,7 @@ func (a *Adapter) getAccessToken(ctx context.Context) (string, error) {
 		AccessToken string `json:"accessToken"`
 		ExpireIn    int64  `json:"expireIn"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return "", fmt.Errorf("decode token response: %w", err)
 	}
 	if result.AccessToken == "" {
@@ -699,7 +711,10 @@ func (a *Adapter) dingtalkAPI(ctx context.Context, method, path string, body int
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := im.ReadIMResponse(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read dingtalk API %s response: %w", path, err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("dingtalk API %s returned %d: %s", path, resp.StatusCode, string(respBody))
 	}

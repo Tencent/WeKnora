@@ -4,6 +4,7 @@ import test, { type TestContext } from 'node:test'
 import * as vue from 'vue'
 import * as pinia from 'pinia'
 import { fixture, flush } from '../test-utils/vueFixture.ts'
+import * as knowledgeReadOptions from '../api/knowledge-base/knowledgeReadOptions.ts'
 
 type Request = {
   url: string
@@ -27,6 +28,7 @@ function setup(t: TestContext) {
       put,
     },
     './knowledgeFileListQuery': {},
+    './knowledgeReadOptions': knowledgeReadOptions,
   })
   const stores = f.evaluate(readFileSync(new URL('../stores/knowledge.ts', import.meta.url), 'utf8'), { vue, pinia })
   const root = pinia.createPinia()

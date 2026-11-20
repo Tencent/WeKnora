@@ -3,6 +3,7 @@ export const MODEL_IN_USE_ERROR_CODE = 2300
 export const KNOWN_MODEL_USAGE_BINDINGS = [
   'embedding_model',
   'summary_model',
+  'question_model',
   'image_processing_model',
   'vlm_model',
   'asr_model',
@@ -126,13 +127,14 @@ export function modelUsageListTruncated(resources: readonly ModelUsageResource[]
 
 export type ModelUsageResourceKind = 'knowledge_base' | 'agent'
 
-export type KnowledgeBaseModelUsageSection = 'models' | 'multimodal' | 'asr'
+export type KnowledgeBaseModelUsageSection = 'models' | 'multimodal' | 'asr' | 'advanced'
 
 export type AgentModelUsageSection = 'model' | 'multimodal' | 'suggestions'
 
 const knowledgeBaseUsageSections: Partial<Record<KnownModelUsageBinding, KnowledgeBaseModelUsageSection>> = {
   embedding_model: 'models',
   summary_model: 'models',
+  question_model: 'advanced',
   wiki_synthesis_model: 'models',
   auto_tag_model: 'models',
   image_processing_model: 'multimodal',

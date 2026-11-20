@@ -48,7 +48,7 @@ const decodeOIDCResult = (encoded: string) => {
 }
 
 const clearOIDCCallbackState = (path = '/') => {
-  window.history.replaceState({}, document.title, path)
+  window.history.replaceState(window.history.state, document.title, router.resolve(path).href)
 }
 
 const syncOIDCUserContext = async () => {

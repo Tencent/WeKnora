@@ -1,7 +1,10 @@
 package tools
 
 import (
+	"bytes"
 	"encoding/json"
+	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -49,13 +52,19 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 		}
 
 		var val interface{}
-		if err := json.Unmarshal(rawVal, &val); err != nil {
+		decoder := json.NewDecoder(bytes.NewReader(rawVal))
+		if targetType == "string" || targetType == "integer" {
+			// A numeric identifier must reach the tool as the original literal,
+			// not a rounded float64 string. Keep other conversions unchanged.
+			decoder.UseNumber()
+		}
+		if err := decoder.Decode(&val); err != nil {
 			continue
 		}
 		// Integer literals already have the requested JSON representation. A
 		// float64-to-int64 round trip would corrupt values above 2^53. Keep
 		// decimal/exponent notation on the existing normalization path.
-		if _, isNumber := val.(float64); isNumber && targetType == "integer" &&
+		if _, isNumber := val.(json.Number); isNumber && targetType == "integer" &&
 			!strings.ContainsAny(string(rawVal), ".eE") {
 			continue
 		}
@@ -87,8 +96,9 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 	switch targetType {
 	case "array":
 		if s, ok := val.(string); ok {
-			// Try JSON parsing first (handles "[{...}]" → []interface{})
-			var parsed []interface{}
+			// Unwrap serialized arrays without decoding their elements through
+			// float64, which would round IDs and precise nested numeric values.
+			var parsed []json.RawMessage
 			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
 				return parsed, true
 			}
@@ -122,6 +132,9 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 		}
 
 	case "integer":
+		if number, ok := val.(json.Number); ok {
+			return castIntegerNumber(number)
+		}
 		if s, ok := val.(string); ok {
 			if i, err := strconv.ParseInt(s, 10, 64); err == nil {
 				return i, true
@@ -137,6 +150,15 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 	case "number":
 		if s, ok := val.(string); ok {
 			if f, err := strconv.ParseFloat(s, 64); err == nil {
+				// Keep the literal text: marshaling the parsed float64 would
+				// round integers above 2^53 and long decimals, the same way
+				// untouched arguments and integer literals are preserved.
+				// Literals ParseFloat accepts but JSON rejects (inf, +5)
+				// still fall back to the float64 normalization below.
+				var literal json.Number
+				if json.Unmarshal([]byte(s), &literal) == nil {
+					return literal, true
+				}
 				return f, true
 			}
 		}
@@ -144,6 +166,8 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 	case "string":
 		// Non-string values -> string (e.g., number or bool passed as non-string)
 		switch v := val.(type) {
+		case json.Number:
+			return v.String(), true
 		case bool:
 			if v {
 				return "true", true
@@ -157,4 +181,28 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 	}
 
 	return val, false
+}
+
+// castIntegerNumber normalizes decimal/exponent notation only when the exact
+// value is an int64. A float64 round trip can change IDs above 2^53, round
+// fractions into integers, or move out-of-range values onto the int64 boundary.
+func castIntegerNumber(number json.Number) (interface{}, bool) {
+	// Reject clearly fractional or out-of-range magnitudes before constructing
+	// a rational. In particular, tiny exponents must not allocate huge denominators.
+	f, err := number.Float64()
+	if err != nil || math.Trunc(f) != f {
+		return number, false
+	}
+	if f == 0 {
+		mantissa, _, _ := strings.Cut(strings.ToLower(number.String()), "e")
+		if strings.ContainsAny(mantissa, "123456789") {
+			return number, false // a nonzero fraction underflowed to zero
+		}
+		return int64(0), true
+	}
+	exact, ok := new(big.Rat).SetString(number.String())
+	if !ok || !exact.IsInt() || !exact.Num().IsInt64() {
+		return number, false
+	}
+	return exact.Num().Int64(), true
 }

@@ -226,3 +226,41 @@ func TestMaxSessionTitleRunesFitsColumn(t *testing.T) {
 		t.Fatalf("maxSessionTitleRunes=%d exceeds the sessions.title column limit", maxSessionTitleRunes)
 	}
 }
+
+func TestSanitizeGeneratedTitleJSONResponses(t *testing.T) {
+	tests := []struct {
+		name, raw, want string
+		fallback        bool
+	}{
+		{"compact object", `{"title":"Agent search tools"}`, "Agent search tools", false},
+		{"pretty object", "{\n  \"title\": \"Agent search tools\"\n}", "Agent search tools", false},
+		{"fenced object", "```json\n{\"title\":\"Agent search tools\"}\n```", "Agent search tools", false},
+		{"reasoning before object", `<think>draft</think>{"title":"Agent search tools"}`, "Agent search tools", false},
+		{"nested JSON title", `{"title":"{\"type\":\"object\"}"}`, "Original question", true},
+		{"schema with title", `{"type":"object","title":"Schema"}`, "Original question", true},
+		{"schema properties", `{"title":"Schema","properties":{"name":{"type":"string"}}}`, "Original question", true},
+		{"plain brace placeholder", "{name} syntax", "{name} syntax", false},
+		{"schema object", `{"type":"object"}`, "Original question", true},
+		{"wrong title type", `{"title":{"type":"string"}}`, "Original question", true},
+		{"empty title", `{"title":"  "}`, "Original question", true},
+		{"truncated object", `{"title":"Agent search tools`, "Original question", true},
+		{"array", `["Agent search tools"]`, "Original question", true},
+		{"plain text with braces", "Explain {name} syntax", "Explain {name} syntax", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeGeneratedTitle(tt.raw, "Original question")
+			if got.Title != tt.want || got.FromQuery != tt.fallback {
+				t.Fatalf("got %+v; want title %q, fallback %v", got, tt.want, tt.fallback)
+			}
+		})
+	}
+}
+
+func TestSanitizeJSONTitleKeepsRuneLimit(t *testing.T) {
+	raw := `{"title":"` + strings.Repeat("保", 30) + `"}`
+	got := sanitizeGeneratedTitle(raw, "Original question")
+	if got.Title != strings.Repeat("保", maxSessionTitleRunes) || !got.Truncated || got.FromQuery {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}

@@ -157,6 +157,21 @@ let unmounted = false
 // network black hole), the worst case is one stuck request blocking
 // retries until axios timeout (30s); the loop itself stays alive.
 let fetchInFlight = false
+// A document switch must bypass the previous read's overlap gate. Track
+// visits as well as IDs so A -> B -> A cannot accept the first A response.
+let documentGeneration = 0
+let spansRequest = 0
+
+function invalidateSpansRequest() {
+  spansRequest += 1
+  fetchInFlight = false
+  loading.value = false
+  refreshing.value = false
+}
+
+function isCurrentDocument(id: string, generation: number): boolean {
+  return !unmounted && id === props.knowledgeId && generation === documentGeneration
+}
 
 const stages = computed<SpanNode[]>(() => {
   const trace = data.value?.trace
@@ -361,14 +376,19 @@ function shouldPollNow(): boolean {
 }
 
 async function fetchSpans(opts: { manual?: boolean } = {}) {
-  if (!props.knowledgeId) return
+  if (unmounted || !props.knowledgeId) return
   if (fetchInFlight) return
+  const id = props.knowledgeId
+  const generation = documentGeneration
+  const request = ++spansRequest
+  const isCurrent = () => isCurrentDocument(id, generation) && request === spansRequest
   fetchInFlight = true
   if (opts.manual) refreshing.value = true
   if (!data.value) loading.value = true
   let attemptOk = false
   try {
-    const res: any = await getKnowledgeSpans(props.knowledgeId, selectedAttempt.value)
+    const res: any = await getKnowledgeSpans(id, selectedAttempt.value)
+    if (!isCurrent()) return
     if (res?.success && res.data) {
       data.value = res.data as SpansResponse
       attemptOk = true
@@ -410,11 +430,14 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
       emit('update:hasSpans', knowledgeSpansPayloadHasTrace(data.value))
       // flatRows is derived from data.value; wait for it to recompute
       // before picking a row out of it.
-      nextTick(autoSelectSpan)
+      nextTick(() => {
+        if (isCurrent()) autoSelectSpan()
+      })
     } else {
       emit('update:hasSpans', false)
     }
   } catch (e) {
+    if (!isCurrent()) return
     // Surface the error in the console — silent failures here is
     // exactly what hid the polling-stalled bug from us before.
     console.warn('[KnowledgeTimeline] fetchSpans failed', e)
@@ -424,26 +447,31 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
     // failing endpoint would leave "更新于 X 秒前" frozen forever while
     // the spinner spins. Pair with failedAttempts to render a "fetch
     // failed" hint when consecutive errors pile up.
-    lastFetchedAt.value = Date.now()
-    lastFetchOk.value = attemptOk
-    if (attemptOk) {
-      failedAttempts.value = 0
-    } else {
-      failedAttempts.value += 1
+    if (isCurrent()) {
+      lastFetchedAt.value = Date.now()
+      lastFetchOk.value = attemptOk
+      if (attemptOk) {
+        failedAttempts.value = 0
+      } else {
+        failedAttempts.value += 1
+      }
+      loading.value = false
+      refreshing.value = false
+      fetchInFlight = false
     }
-    loading.value = false
-    refreshing.value = false
-    fetchInFlight = false
   }
 }
 
 function ensureAttemptStatuses() {
+  const id = props.knowledgeId
+  const generation = documentGeneration
   const latest = data.value?.latest_attempt || 0
   if (latest <= 1) return
   for (let n = 1; n <= latest; n++) {
     if (attemptStatuses.has(n)) continue
-    getKnowledgeSpans(props.knowledgeId, n)
+    getKnowledgeSpans(id, n)
       .then((res: any) => {
+        if (!isCurrentDocument(id, generation)) return
         if (res?.success && res.data?.trace) {
           attemptStatuses.set(n, resolveTimelineHeaderStatus({
             parseStatus: res.data.parse_status,
@@ -543,6 +571,7 @@ async function onCancelParseConfirm() {
 
 function onAttemptChange(n: number) {
   if (Number.isNaN(n)) return
+  invalidateSpansRequest()
   selectedAttempt.value = n
   selectedSpanId.value = null
   autoSelectPending.value = true
@@ -556,6 +585,11 @@ function onAttemptChange(n: number) {
 watch(
   () => props.knowledgeId,
   () => {
+    documentGeneration += 1
+    invalidateSpansRequest()
+    lastFetchedAt.value = 0
+    lastFetchOk.value = true
+    failedAttempts.value = 0
     selectedAttempt.value = undefined
     data.value = null
     processOverrides.value = null
@@ -565,9 +599,11 @@ watch(
     autoSelectPending.value = true
     attemptStatuses.clear()
     userToggledRows.value = new Set()
+    emit('update:hasSpans', false)
     fetchSpans()
     fetchProcessOverrides()
   },
+  { flush: 'sync' },
 )
 
 function onKeydown(ev: KeyboardEvent) {
@@ -577,9 +613,12 @@ function onKeydown(ev: KeyboardEvent) {
 }
 
 async function fetchProcessOverrides() {
-  if (props.compact || !props.knowledgeId) return
+  if (unmounted || props.compact || !props.knowledgeId) return
+  const id = props.knowledgeId
+  const generation = documentGeneration
   try {
-    const res: any = await getKnowledgeDetails(props.knowledgeId)
+    const res: any = await getKnowledgeDetails(id)
+    if (!isCurrentDocument(id, generation)) return
     if (res?.success && res.data) {
       processOverrides.value = res.data.metadata?.process_overrides ?? null
       currentKnowledgeFileType.value = normalizeFileType(
@@ -587,6 +626,7 @@ async function fetchProcessOverrides() {
       )
     }
   } catch {
+    if (!isCurrentDocument(id, generation)) return
     processOverrides.value = null
     currentKnowledgeFileType.value = ''
   }
@@ -618,6 +658,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   unmounted = true
+  invalidateSpansRequest()
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null

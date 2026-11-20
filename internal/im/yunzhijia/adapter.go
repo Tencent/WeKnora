@@ -374,7 +374,10 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, err := im.ReadIMResponse(resp.Body)
+		if err != nil {
+			return fmt.Errorf("read yunzhijia sendMsgUrl response: %w", err)
+		}
 		return fmt.Errorf("yunzhijia sendMsgUrl returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -621,7 +624,7 @@ func (a *Adapter) getAppAccessToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("request yunzhijia app access token: %w", err)
 	}
 	defer resp.Body.Close()
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := im.ReadIMResponse(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("read yunzhijia token response: %w", err)
 	}

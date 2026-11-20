@@ -90,45 +90,46 @@ func TestBuildDoesNotProtectGitForSessionWorkspace(t *testing.T) {
 	}
 }
 
-// Ask mode still compiles a sandbox; approval is enforced above this layer.
-func TestBuildAskModeKeepsWorkspaceReadableButNotWritable(t *testing.T) {
+// Ask and auto differ only in who answers an approval, so they share one
+// sandbox: the same writable workspace, network and deny-read set.
+func TestBuildAskAndAutoShareOnePolicy(t *testing.T) {
 	b, ws := builderFixture(t)
-	p, err := b.Build(ModeAsk, ws)
+	ask, err := b.Build(ModeAsk, ws)
+	require.NoError(t, err)
+	auto, err := b.Build(ModeAuto, ws)
 	require.NoError(t, err)
 
-	require.Contains(t, p.ReadableRoots, ws.Root)
-	require.Empty(t, p.WritableRoots)
-	require.Equal(t, ws.Root, p.Cwd)
-	require.Equal(t, NetworkDenied, p.Network)
+	require.Equal(t, ask.Fingerprint(), auto.Fingerprint())
+	require.Len(t, ask.WritableRoots, 1)
+	require.Equal(t, ws.Root, ask.WritableRoots[0].Path)
 }
 
-// Full access has no policy at all; representing it as a very wide policy
-// would invite treating it as "still sandboxed".
 // Which modes this build can actually serve is a property of the sandbox, not
 // of whatever happens to read the preferences file. One list, here.
-func TestApprovalModeShippedIsAutoOnly(t *testing.T) {
+func TestApprovalModeShippedIsAskAndAuto(t *testing.T) {
+	require.True(t, ModeAsk.Shipped())
 	require.True(t, ModeAuto.Shipped())
-	require.False(t, ModeAsk.Shipped(), "ask needs the approval round-trip")
 	require.False(t, ModeFull.Shipped(), "full needs the unsandboxed path")
 	require.False(t, ApprovalMode("yolo").Shipped())
 
-	require.True(t, ModeAsk.Known(), "ask is a real mode, just not shipped yet")
+	require.True(t, ModeFull.Known())
 	require.False(t, ApprovalMode("yolo").Known())
 }
 
-// Unknown values fall back to Auto so a typo cannot stop the agent.
-// Known-but-unshipped modes stay themselves: mapping ask→auto would widen
-// access past what was asked for, and Service refuses them instead.
-func TestParseApprovalModeKeepsKnownModes(t *testing.T) {
+// Unknown values fall back to ask, the mode that asks the user, so a typo
+// cannot hand approvals to a model.
+func TestParseApprovalModeDefaultsToAsk(t *testing.T) {
 	require.Equal(t, ModeAuto, ParseApprovalMode("auto"))
 	require.Equal(t, ModeAuto, ParseApprovalMode(" AUTO "))
 	require.Equal(t, ModeAsk, ParseApprovalMode("ask"))
 	require.Equal(t, ModeFull, ParseApprovalMode("full"))
 	for _, raw := range []string{"", "yolo"} {
-		require.Equal(t, ModeAuto, ParseApprovalMode(raw), raw)
+		require.Equal(t, ModeAsk, ParseApprovalMode(raw), raw)
 	}
 }
 
+// Full access has no policy at all; representing it as a very wide policy
+// would invite treating it as "still sandboxed".
 func TestBuildFullAccessHasNoPolicy(t *testing.T) {
 	b, ws := builderFixture(t)
 	_, err := b.Build(ModeFull, ws)

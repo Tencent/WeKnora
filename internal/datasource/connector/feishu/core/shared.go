@@ -25,6 +25,28 @@ import (
 
 const FeishuWikiNodeResourceSeparator = ":"
 
+// SelectedResourceDeletedError reports that a directly selected wiki node or
+// Drive item in config.resource_ids has been deleted in Feishu. The sync engine
+// reconciles its deletion and continues processing remaining selected resources.
+type SelectedResourceDeletedError struct {
+	Token string
+	Cause error
+}
+
+func (e *SelectedResourceDeletedError) Error() string {
+	if e == nil {
+		return "selected resource has been deleted in source"
+	}
+	return fmt.Sprintf("selected resource %s has been deleted: %v", e.Token, e.Cause)
+}
+
+func (e *SelectedResourceDeletedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
 // shared.go holds the helpers used by BOTH the wiki Connector (connector.go)
 // and the Drive DriveConnector (connector.go): error classification,
 // config parsing, stream-Checkpoint tuning, the fetch tally, filename/time

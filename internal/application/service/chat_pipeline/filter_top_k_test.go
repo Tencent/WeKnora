@@ -166,3 +166,71 @@ func searchResultIDs(results []*types.SearchResult) []string {
 	}
 	return ids
 }
+
+// Sibling children of one parent must occupy a single top-k slot, and that
+// slot must carry the parent body plus the matched child ids (#4739).
+func TestPluginFilterTopKCollapsesSameParentIntoOneSlot(t *testing.T) {
+	parent := &types.SearchResult{
+		ID: "p1", KnowledgeID: "doc-a", Content: "whole table",
+		MatchType: types.MatchTypeParentChunk, Score: 0.1,
+	}
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 2, ParentSlotAggregation: true},
+		PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{
+			parent,
+			{ID: "c1", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.9},
+			{ID: "c2", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.8},
+			{ID: "c3", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.7},
+			{ID: "other", KnowledgeID: "doc-b", Score: 0.6},
+		}},
+	}
+
+	err := (&PluginFilterTopK{}).OnEvent(
+		context.Background(), types.FILTER_TOP_K, chatManage, func() *PluginError { return nil },
+	)
+	require.Nil(t, err)
+	require.Len(t, chatManage.MergeResult, 2)
+	assert.Equal(t, []string{"p1", "other"}, searchResultIDs(chatManage.MergeResult))
+	assert.Equal(t, "whole table", chatManage.MergeResult[0].Content)
+	assert.Equal(t, 0.9, chatManage.MergeResult[0].Score, "the parent inherits its best child's score")
+	assert.ElementsMatch(t, []string{"c1", "c2", "c3"}, chatManage.MergeResult[0].SubChunkID)
+}
+
+// When the merge stage did not resolve a parent body, the best child represents
+// the group and still carries the sibling ids.
+func TestPluginFilterTopKParentSlotWithoutResolvedParentKeepsBestChild(t *testing.T) {
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 2, ParentSlotAggregation: true},
+		PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{
+			{ID: "c1", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.9},
+			{ID: "c2", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.8},
+			{ID: "other", KnowledgeID: "doc-b", Score: 0.6},
+		}},
+	}
+
+	err := (&PluginFilterTopK{}).OnEvent(
+		context.Background(), types.FILTER_TOP_K, chatManage, func() *PluginError { return nil },
+	)
+	require.Nil(t, err)
+	require.Len(t, chatManage.MergeResult, 2)
+	assert.Equal(t, []string{"c1", "other"}, searchResultIDs(chatManage.MergeResult))
+	assert.Equal(t, []string{"c2"}, chatManage.MergeResult[0].SubChunkID)
+}
+
+// Opting out keeps the historical one-slot-per-child behaviour.
+func TestPluginFilterTopKWithoutParentSlotAggregationKeepsChildren(t *testing.T) {
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 2},
+		PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{
+			{ID: "c1", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.9},
+			{ID: "c2", ParentChunkID: "p1", KnowledgeID: "doc-a", Score: 0.8},
+			{ID: "other", KnowledgeID: "doc-b", Score: 0.6},
+		}},
+	}
+
+	err := (&PluginFilterTopK{}).OnEvent(
+		context.Background(), types.FILTER_TOP_K, chatManage, func() *PluginError { return nil },
+	)
+	require.Nil(t, err)
+	assert.Equal(t, []string{"c1", "c2"}, searchResultIDs(chatManage.MergeResult))
+}

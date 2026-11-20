@@ -156,3 +156,84 @@ func TestExtractMarkdownZipEnforcesTotalImageBudget(t *testing.T) {
 		}
 	})
 }
+
+func TestMinerUMaxImageBytes(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  int64
+	}{
+		{name: "empty", want: maxZipImagesTotalBytes},
+		{name: "whitespace", value: " \t ", want: maxZipImagesTotalBytes},
+		{name: "larger budget", value: "2147483648", want: 2 << 30},
+		{name: "smaller budget", value: "1", want: 1},
+		{name: "trimmed", value: " 1024\t", want: 1024},
+		{name: "maximum int64", value: "9223372036854775807", want: 1<<63 - 1},
+		{name: "zero", value: "0", want: maxZipImagesTotalBytes},
+		{name: "negative", value: "-1", want: maxZipImagesTotalBytes},
+		{name: "invalid", value: "invalid", want: maxZipImagesTotalBytes},
+		{name: "size suffix", value: "2GiB", want: maxZipImagesTotalBytes},
+		{name: "fraction", value: "1.5", want: maxZipImagesTotalBytes},
+		{name: "overflow", value: "9223372036854775808", want: maxZipImagesTotalBytes},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("WEKNORA_MINERU_MAX_IMAGE_BYTES", tt.value)
+			if got := minerUMaxImageBytes(); got != tt.want {
+				t.Errorf("minerUMaxImageBytes() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractMarkdownZipUsesConfiguredImageBudget(t *testing.T) {
+	const markdown = "![a](images/a.png)\n![b](images/b.png)\n![a again](images/a.png)"
+	data := buildZip(t, map[string]string{
+		"doc.md":            markdown,
+		"images/a.png":      "aaaa",
+		"images/b.png":      "bbbb",
+		"images/unused.png": strings.Repeat("i", 1024),
+	})
+	tests := []struct {
+		name    string
+		budget  string
+		wantErr bool
+	}{
+		{name: "default"},
+		{name: "over budget", budget: "7", wantErr: true},
+		{name: "exact budget", budget: "8"},
+		{name: "raised budget", budget: "9"},
+		{name: "invalid uses default", budget: "invalid"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("WEKNORA_MINERU_MAX_IMAGE_BYTES", tt.budget)
+			md, refs, err := extractMarkdownZip(data, "Test")
+			if tt.wantErr {
+				if !errors.Is(err, errResultPackageTooLarge) {
+					t.Fatalf("err = %v, want errResultPackageTooLarge", err)
+				}
+				for _, detail := range []string{"8 bytes", "7 bytes", "WEKNORA_MINERU_MAX_IMAGE_BYTES"} {
+					if !strings.Contains(err.Error(), detail) {
+						t.Errorf("error = %q, want it to contain %q", err, detail)
+					}
+				}
+				if md != "" || len(refs) != 0 {
+					t.Errorf("over-budget extraction returned partial content: markdown=%q, images=%d", md, len(refs))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("extractMarkdownZip() = %v, want nil", err)
+			}
+			if md != markdown || len(refs) != 2 {
+				t.Fatalf("markdown=%q, images=%d; want original markdown and 2 unique images", md, len(refs))
+			}
+			for _, ref := range refs {
+				if len(ref.ImageData) != 4 {
+					t.Errorf("%s: %d bytes, want 4", ref.Filename, len(ref.ImageData))
+				}
+			}
+		})
+	}
+}

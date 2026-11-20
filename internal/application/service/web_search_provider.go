@@ -132,6 +132,7 @@ func isValidProviderType(provider types.WebSearchProviderType) bool {
 		types.WebSearchProviderTypeBocha,
 		types.WebSearchProviderTypeSerply,
 		types.WebSearchProviderTypeDeepSeek,
+		types.WebSearchProviderTypeSearchAPI,
 		types.WebSearchProviderTypeFirecrawl:
 		return true
 	default:
@@ -149,6 +150,10 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 	case types.WebSearchProviderTypeSerply:
 		if strings.TrimSpace(params.APIKey) == "" {
 			return fmt.Errorf("API key is required for Serply provider")
+		}
+	case types.WebSearchProviderTypeSearchAPI:
+		if strings.TrimSpace(params.APIKey) == "" {
+			return fmt.Errorf("API key is required for SearchApi provider")
 		}
 	case types.WebSearchProviderTypeFirecrawl:
 		if strings.TrimSpace(params.APIKey) == "" {

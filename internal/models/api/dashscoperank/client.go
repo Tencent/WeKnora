@@ -46,8 +46,8 @@ type parameters struct {
 type response struct {
 	Output struct {
 		Results []struct {
-			Index          int     `json:"index"`
-			RelevanceScore float64 `json:"relevance_score"`
+			Index          *int     `json:"index"`
+			RelevanceScore *float64 `json:"relevance_score"`
 			Document       struct {
 				Text string `json:"text"`
 			} `json:"document"`
@@ -100,14 +100,25 @@ func (c *Client) Rerank(ctx context.Context, query string, documents []string) (
 	if decoded.Code != "" {
 		return nil, fmt.Errorf("DashScope rerank error %s: %s", decoded.Code, decoded.Message)
 	}
+	if decoded.Output.Results == nil {
+		return nil, fmt.Errorf("DashScope rerank response is missing a results array")
+	}
 	out := make([]api.RerankResult, 0, len(decoded.Output.Results))
+	seen := make([]bool, len(documents))
 	for _, item := range decoded.Output.Results {
-		if item.Index < 0 || item.Index >= len(documents) {
-			return nil, fmt.Errorf("rerank index %d out of range for %d documents", item.Index, len(documents))
+		if item.Index == nil || item.RelevanceScore == nil {
+			return nil, fmt.Errorf("DashScope rerank result is missing index or relevance_score")
 		}
+		if *item.Index < 0 || *item.Index >= len(documents) {
+			return nil, fmt.Errorf("rerank index %d out of range for %d documents", *item.Index, len(documents))
+		}
+		if seen[*item.Index] {
+			return nil, fmt.Errorf("DashScope rerank returned duplicate index %d", *item.Index)
+		}
+		seen[*item.Index] = true
 		out = append(out, api.RerankResult{
-			Index: item.Index,
-			Score: item.RelevanceScore,
+			Index: *item.Index,
+			Score: *item.RelevanceScore,
 			Text:  item.Document.Text,
 		})
 	}

@@ -37,6 +37,9 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 	if err != nil {
 		return nil, err
 	}
+	if batchSize <= 0 {
+		return nil, fmt.Errorf("BATCH_EMBED_SIZE must be greater than 0")
+	}
 	textEmbeddings := utils.MapSlice(texts, func(text string) *textEmbedding {
 		return &textEmbedding{text: text}
 	})

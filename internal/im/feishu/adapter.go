@@ -133,7 +133,7 @@ func (a *Adapter) BotOpenID(ctx context.Context) (string, error) {
 			OpenID string `json:"open_id"`
 		} `json:"bot"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return "", fmt.Errorf("decode bot info: %w", err)
 	}
 	if result.Code != 0 {
@@ -417,8 +417,9 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	// Keep webhook delivery in sync with the WebSocket path. In group chats
 	// Feishu may deliver every message when the app has the "receive all group
 	// messages" permission; only continue when this app's own bot is mentioned.
+	botOpenID := ""
 	if msg.ChatType == "group" {
-		botOpenID, err := a.BotOpenID(c.Request.Context())
+		botOpenID, err = a.BotOpenID(c.Request.Context())
 		if err != nil {
 			logger.Warnf(c.Request.Context(),
 				"[%s] failed to resolve bot open_id; ignoring group message: %v", a.region.Label, err)
@@ -461,18 +462,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			return nil, fmt.Errorf("unmarshal text content: %w", err)
 		}
 
-		// Strip @bot mention from group messages
-		content := textContent.Text
-		if chatType == im.ChatTypeGroup {
-			for strings.HasPrefix(content, "@_user_") {
-				idx := strings.Index(content, " ")
-				if idx >= 0 {
-					content = content[idx+1:]
-				} else {
-					break
-				}
-			}
-		}
+		content := renderTextMentions(textContent.Text, msg.Mentions, botOpenID, chatType)
 
 		return &im.IncomingMessage{
 			Platform:    a.region.Platform,
@@ -548,8 +538,9 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			var lineText strings.Builder
 			for _, elem := range line {
 				var tag struct {
-					Tag  string `json:"tag"`
-					Text string `json:"text"`
+					Tag    string `json:"tag"`
+					Text   string `json:"text"`
+					UserID string `json:"user_id"`
 				}
 				if err := json.Unmarshal(elem, &tag); err != nil {
 					continue
@@ -557,6 +548,8 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 				switch tag.Tag {
 				case "text", "a":
 					lineText.WriteString(tag.Text)
+				case "at":
+					lineText.WriteString(renderPostMention(tag.UserID, msg.Mentions, botOpenID, chatType))
 				}
 			}
 			if t := strings.TrimSpace(lineText.String()); t != "" {
@@ -565,17 +558,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		}
 
 		content := strings.Join(textParts, "\n")
-		if chatType == im.ChatTypeGroup {
-			for strings.HasPrefix(content, "@_user_") {
-				idx := strings.Index(content, " ")
-				if idx >= 0 {
-					content = content[idx+1:]
-				} else {
-					break
-				}
-			}
-		}
-		content = strings.TrimSpace(content)
+		content = strings.TrimSpace(renderTextMentions(content, msg.Mentions, botOpenID, chatType))
 		if content == "" {
 			return nil, nil
 		}
@@ -766,7 +749,7 @@ func (a *Adapter) postFeishuMessage(ctx context.Context, accessToken, url string
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return 0, "", fmt.Errorf("decode response: %w", err)
 	}
 	return result.Code, result.Msg, nil
@@ -1101,7 +1084,7 @@ func (a *Adapter) cardkitCreate(ctx context.Context, accessToken, cardJSON strin
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := im.ReadIMResponse(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("read response: %w", err)
 	}
@@ -1183,7 +1166,7 @@ func (a *Adapter) cardkitUpdateElement(ctx context.Context, accessToken, cardID,
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return fmt.Errorf("decode: %w", err)
 	}
 	if result.Code != 0 {
@@ -1374,7 +1357,7 @@ func (a *Adapter) uploadImageFromURL(ctx context.Context, accessToken, rawURL st
 			ImageKey string `json:"image_key"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return "", fmt.Errorf("decode upload response: %w", err)
 	}
 	if result.Code != 0 {
@@ -1421,7 +1404,7 @@ func (a *Adapter) cardkitSetStreaming(
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return fmt.Errorf("decode: %w", err)
 	}
 	if result.Code != 0 {
@@ -1465,7 +1448,7 @@ func (a *Adapter) getTenantAccessToken(ctx context.Context) (string, error) {
 		TenantAccessToken string `json:"tenant_access_token"`
 		Expire            int    `json:"expire"` // seconds
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 	if result.Code != 0 {
@@ -1502,8 +1485,13 @@ func (a *Adapter) decrypt(encrypted string) ([]byte, error) {
 		return nil, fmt.Errorf("new cipher: %w", err)
 	}
 
-	if len(ciphertext) < aes.BlockSize {
-		return nil, fmt.Errorf("ciphertext too short")
+	// CBC decrypts block by block and panics on a partial block, so the length
+	// must be checked here: this runs on the webhook body before the
+	// verification token is compared.
+	if len(ciphertext) < aes.BlockSize || len(ciphertext)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf(
+			"ciphertext length %d is not a positive multiple of the %d-byte AES block", len(ciphertext), aes.BlockSize,
+		)
 	}
 
 	iv := ciphertext[:aes.BlockSize]

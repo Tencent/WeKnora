@@ -87,6 +87,9 @@ func (b *seatbeltBackend) Prepare(ctx context.Context, p core.Policy) (core.Prep
 func (b *seatbeltBackend) Spawn(
 	ctx context.Context, prep core.Prepared, cmd core.Command,
 ) (core.Process, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := cmd.Validate(); err != nil {
 		return nil, err
 	}
@@ -160,6 +163,15 @@ func resolvePolicyPaths(p core.Policy) (core.Policy, error) {
 		}
 		out.WritableRoots[i] = core.WritableRoot{
 			Path: path, ReadOnlySubpaths: subs, ProtectGitDirs: root.ProtectGitDirs,
+			ProtectBareGitDirs: root.ProtectBareGitDirs,
+		}
+	}
+	out.WritableFiles = make([]string, len(p.WritableFiles))
+	for i, file := range p.WritableFiles {
+		var err error
+		out.WritableFiles[i], err = resolveExisting(file)
+		if err != nil {
+			return core.Policy{}, err
 		}
 	}
 	out.ReadableRoots = make([]string, len(p.ReadableRoots))

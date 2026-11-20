@@ -17,6 +17,10 @@ import {
   postEmbedReady,
   type EmbedChannelPublicConfig,
 } from '@/api/embed'
+import {
+  readEmbedHistory, saveEmbedHistory, rememberEmbedSession, clearEmbedHistory,
+  embedHistoryStorageKey, embedHistoryRevisionKey, readEmbedHistoryRevision, type EmbedHistoryEntry,
+} from '@/utils/embedSessionHistory'
 import { applyEmbedLocale, readEmbedLocaleFromUrl, syncEmbedLocaleFromUrl } from '@/i18n/embed'
 
 // Persist the chat session id per channel so a page refresh resumes the same
@@ -26,6 +30,7 @@ interface StoredSession {
   sig: string
   /** Agent bound when the session was created; mismatch forces a new session. */
   agentId?: string
+  visitorId?: string
 }
 
 function readStoredSession(channelId: string): StoredSession | null {
@@ -39,6 +44,7 @@ function readStoredSession(channelId: string): StoredSession | null {
         id: parsed.id,
         sig: parsed.sig,
         ...(agentId ? { agentId } : {}),
+        ...(typeof parsed.visitorId === 'string' ? { visitorId: parsed.visitorId } : {}),
       }
     }
   } catch {
@@ -73,9 +79,17 @@ async function isStoredSessionValid(
   try {
     await getEmbedMessageList(channelId, apiToken, session.id, 1, undefined, session.sig)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    if (isUnavailableSession(error)) return false
+    // A temporary outage is not evidence that the signed handle is invalid.
+    throw error
   }
+}
+
+function isUnavailableSession(error: unknown): boolean {
+  const failure = error as { $httpStatus?: number; status?: number; response?: { status?: number } } | null
+  const status = failure?.$httpStatus ?? failure?.response?.status ?? failure?.status
+  return status === 403 || status === 404 || status === 410
 }
 
 export function useEmbedBridge(channelId: Ref<string>) {
@@ -91,6 +105,57 @@ export function useEmbedBridge(channelId: Ref<string>) {
   const awaitingToken = ref(false)
   const bootstrapping = ref(false)
   const hostContext = ref<Record<string, unknown>>({})
+  const sessionHistory = ref<EmbedHistoryEntry[]>([])
+  const sessionBusy = ref(false)
+  const historyError = ref('')
+  const sessionHasMessages = ref(false)
+  let operation = 0
+  const historyScope = () => ({
+    channelId: channelId.value, agentId: config.value?.agent_id || '', visitorId: visitorId.value,
+  })
+  let historyRevision = ''
+  let suppressedSessionId = ''
+  const syncHistoryClear = () => {
+    const revision = readEmbedHistoryRevision(historyScope())
+    if (revision !== historyRevision) {
+      historyRevision = revision
+      operation++
+      sessionBusy.value = false
+      sessionHistory.value = readEmbedHistory(historyScope())
+      // Keep the open chat usable, but do not resurrect its cleared handle.
+      suppressedSessionId = sessionId.value
+    }
+  }
+  const onHistoryStorage = (event: StorageEvent) => {
+    try {
+      if (event.storageArea && event.storageArea !== window.localStorage) return
+    } catch { return }
+    if (event.key === null) {
+      operation++
+      sessionBusy.value = false
+      suppressedSessionId = sessionId.value
+    }
+    if (event.key === null || event.key === embedHistoryRevisionKey(historyScope())
+      || event.key === embedHistoryStorageKey(historyScope())) {
+      syncHistoryClear()
+      sessionHistory.value = readEmbedHistory(historyScope())
+    }
+  }
+  const rememberCurrentSession = (title?: string) => {
+    syncHistoryClear()
+    if (!sessionHasMessages.value || !sessionId.value || suppressedSessionId === sessionId.value) return
+    const previous = sessionHistory.value.find(item => item.id === sessionId.value)
+    sessionHistory.value = rememberEmbedSession(historyScope(), {
+      id: sessionId.value, sig: sessionSig.value, title: title?.trim() || previous?.title || '', updatedAt: Date.now(),
+    }, sessionHistory.value)
+    writeStoredSession(channelId.value, {
+      id: sessionId.value, sig: sessionSig.value, agentId: config.value?.agent_id || '', visitorId: visitorId.value,
+    })
+  }
+  const setSessionHasMessages = (hasMessages: boolean) => {
+    sessionHasMessages.value = hasMessages
+    if (hasMessages) rememberCurrentSession()
+  }
 
   let removeHostListener: (() => void) | null = null
   let removeLocaleListener: (() => void) | null = null
@@ -108,6 +173,7 @@ export function useEmbedBridge(channelId: Ref<string>) {
     const id = channelId.value
     if (!id || !embedToken || bootstrapped) return
     bootstrapped = true
+    loadError.value = ''
     awaitingToken.value = false
     bootstrapping.value = true
     token.value = embedToken
@@ -140,6 +206,7 @@ export function useEmbedBridge(channelId: Ref<string>) {
       const res = await getEmbedConfig(id, apiToken)
       if (!res?.success || !res.data) {
         loadError.value = t('embedPublish.invalidChannel')
+        bootstrapped = false
         return
       }
       config.value = res.data
@@ -153,8 +220,11 @@ export function useEmbedBridge(channelId: Ref<string>) {
       const configAgentId = String(res.data.agent_id || '').trim()
       let resolved: StoredSession | null = null
       const stored = readStoredSession(id)
+      const revisionBeforeValidation = readEmbedHistoryRevision(historyScope())
       const agentMatches = !stored?.agentId || !configAgentId || stored.agentId === configAgentId
-      if (stored && agentMatches && (await isStoredSessionValid(id, apiToken, stored))) {
+      if (stored && agentMatches && (!stored.visitorId || stored.visitorId === visitorId.value)
+        && (await isStoredSessionValid(id, apiToken, stored))
+        && revisionBeforeValidation === readEmbedHistoryRevision(historyScope())) {
         resolved = { ...stored, agentId: configAgentId || stored.agentId }
       } else {
         const sessionRes = await createEmbedSession(id, apiToken)
@@ -165,8 +235,12 @@ export function useEmbedBridge(channelId: Ref<string>) {
       }
       if (!resolved) {
         loadError.value = t('embedPublish.sessionFailed')
+        bootstrapped = false
         return
       }
+      resolved.visitorId = visitorId.value
+      historyRevision = readEmbedHistoryRevision(historyScope())
+      sessionHistory.value = readEmbedHistory(historyScope())
       sessionId.value = resolved.id
       sessionSig.value = resolved.sig
       writeStoredSession(id, resolved)
@@ -187,24 +261,82 @@ export function useEmbedBridge(channelId: Ref<string>) {
     }
   }
 
-  // Discard the current conversation and start a fresh signed session. Backing
-  // the "新建对话" affordance — also the privacy escape hatch on shared devices.
-  const startNewSession = async () => {
+  // Serialize navigation, and only replace the active signed handle after a
+  // successful response. Failed or stale requests must leave the current chat intact.
+  const startNewSession = async (): Promise<boolean> => {
     const id = channelId.value
     const apiToken = token.value
-    if (!id || !apiToken) return
+    if (!id || !apiToken || sessionBusy.value) return false
+    syncHistoryClear()
+    const currentOperation = ++operation
+    sessionBusy.value = true
+    historyError.value = ''
     try {
       const sessionRes = await createEmbedSession(id, apiToken)
       const newId = sessionRes?.data?.id || ''
-      if (!newId) return
-      const agentId = String(config.value?.agent_id || '').trim()
-      const next: StoredSession = { id: newId, sig: sessionRes?.data?.sig || '', agentId }
+      if (!newId) throw new Error('missing session')
+      syncHistoryClear()
+      if (currentOperation !== operation || id !== channelId.value || apiToken !== token.value) return false
+      const next: StoredSession = {
+        id: newId, sig: sessionRes?.data?.sig || '',
+        agentId: config.value?.agent_id || '', visitorId: visitorId.value,
+      }
+      sessionHasMessages.value = false
       sessionSig.value = next.sig
       sessionId.value = next.id
       writeStoredSession(id, next)
+      return true
     } catch {
-      // Non-fatal: keep the current session if creating a new one fails.
+      if (currentOperation === operation) historyError.value = t('embedPublish.historyLoadFailed')
+      return false
+    } finally {
+      if (currentOperation === operation) sessionBusy.value = false
     }
+  }
+
+  const switchHistorySession = async (targetId: string): Promise<boolean> => {
+    if (sessionBusy.value) return false
+    syncHistoryClear()
+    const entry = sessionHistory.value.find(item => item.id === targetId)
+    if (!entry) return false
+    if (targetId === sessionId.value) return true
+    const id = channelId.value
+    const apiToken = token.value
+    const currentOperation = ++operation
+    sessionBusy.value = true
+    historyError.value = ''
+    try {
+      await getEmbedMessageList(id, apiToken, entry.id, 1, undefined, entry.sig)
+      syncHistoryClear()
+      if (currentOperation !== operation || id !== channelId.value || apiToken !== token.value) return false
+      sessionHasMessages.value = false
+      sessionSig.value = entry.sig
+      sessionId.value = entry.id
+      writeStoredSession(id, { ...entry, agentId: config.value?.agent_id || '', visitorId: visitorId.value })
+      return true
+    } catch (error: unknown) {
+      syncHistoryClear()
+      if (currentOperation !== operation || id !== channelId.value) return false
+      // A timeout or server error proves nothing about the saved session.
+      if (isUnavailableSession(error)) {
+        sessionHistory.value = saveEmbedHistory(historyScope(), sessionHistory.value.filter(item => item.id !== entry.id))
+        historyError.value = t('embedPublish.historyUnavailable')
+      } else {
+        historyError.value = t('embedPublish.historyLoadFailed')
+      }
+      return false
+    } finally {
+      if (currentOperation === operation) sessionBusy.value = false
+    }
+  }
+
+  const clearSessionHistory = async (): Promise<boolean> => {
+    // Preserve handles if creating the fresh replacement fails.
+    if (!await startNewSession()) return false
+    sessionHistory.value = clearEmbedHistory(historyScope())
+    historyRevision = readEmbedHistoryRevision(historyScope())
+    writeStoredSession(channelId.value, null)
+    return true
   }
 
   const start = async () => {
@@ -243,10 +375,13 @@ export function useEmbedBridge(channelId: Ref<string>) {
   }
 
   onMounted(() => {
+    window.addEventListener('storage', onHistoryStorage)
     start()
   })
 
   onUnmounted(() => {
+    operation++
+    window.removeEventListener('storage', onHistoryStorage)
     removeHostListener?.()
     removeLocaleListener?.()
     removeTokenListener?.()
@@ -263,5 +398,13 @@ export function useEmbedBridge(channelId: Ref<string>) {
     bootstrapping,
     hostContext,
     startNewSession,
+    retryBootstrap: () => bootstrap(token.value),
+    sessionHistory,
+    sessionBusy,
+    historyError,
+    switchHistorySession,
+    clearSessionHistory,
+    rememberCurrentSession,
+    setSessionHasMessages,
   }
 }

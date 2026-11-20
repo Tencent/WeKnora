@@ -1,4 +1,5 @@
 import base64
+import codecs
 from html import escape
 from io import BytesIO
 import os
@@ -12,6 +13,7 @@ from ebooklib import epub
 from PIL import Image
 
 from docreader.parser.epub_parser import EPUBParser
+from docreader.parser.parser import Parser
 from docreader.parser.registry import registry
 
 
@@ -166,7 +168,76 @@ def _epub_with_literal_path_characters(
     return output.getvalue(), expected.getvalue()
 
 
+def _epub_with_encoded_chapter(encoding: str, *, missing_navigation: bool) -> bytes:
+    declaration = "UTF-16" if encoding.startswith("utf-16") else "UTF-8"
+    chapter = (
+        f'<?xml version="1.0" encoding="{declaration}"?>'
+        '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Encoding</title>'
+        '</head><body><h1>Unicode chapter</h1><p>Café 中文 日本語</p>'
+        '<img alt="diagram" src="../images/pic.png"/></body></html>'
+    ).encode(encoding)
+    if encoding == "utf-16-le":
+        chapter = codecs.BOM_UTF16_LE + chapter
+    elif encoding == "utf-16-be":
+        chapter = codecs.BOM_UTF16_BE + chapter
+
+    output = BytesIO()
+    with zipfile.ZipFile(BytesIO(_minimal_epub_bytes())) as original:
+        with zipfile.ZipFile(output, "w") as archive:
+            for entry in original.infolist():
+                if missing_navigation and entry.filename.endswith("toc.ncx"):
+                    continue
+                payload = (
+                    chapter
+                    if entry.filename.endswith("chapter_01.xhtml")
+                    else original.read(entry)
+                )
+                archive.writestr(entry, payload)
+    return output.getvalue()
+
+
 class EPUBParserTest(unittest.TestCase):
+    def test_zip_recovery_decodes_unicode_chapters(self):
+        for encoding in ("utf-8", "utf-8-sig", "utf-16-le", "utf-16-be"):
+            for extract_images in (False, True):
+                with self.subTest(encoding=encoding, extract_images=extract_images):
+                    content = _epub_with_encoded_chapter(
+                        encoding, missing_navigation=True
+                    )
+                    with self.assertLogs(
+                        "docreader.parser.epub_parser", level="WARNING"
+                    ) as logs:
+                        document = Parser().parse_file(
+                            "unicode.epub",
+                            "epub",
+                            content,
+                            engine_overrides={"extract_images": extract_images},
+                        )
+                    self.assertTrue(
+                        any("trying ZIP fallback" in line for line in logs.output)
+                    )
+                    self.assertIn("Unicode chapter", document.content)
+                    self.assertIn("Café 中文 日本語", document.content)
+                    self.assertNotIn("\ufffd", document.content)
+                    self.assertEqual(len(document.images), int(extract_images))
+                    for image_path in document.images:
+                        self.assertIn(f"![diagram]({image_path})", document.content)
+
+    def test_ebooklib_path_decodes_unicode_chapters(self):
+        for encoding in ("utf-8", "utf-8-sig", "utf-16-le", "utf-16-be"):
+            with self.subTest(encoding=encoding):
+                parser = EPUBParser(file_name="unicode.epub", file_type="epub")
+                with patch.object(
+                    parser, "_parse_epub_fallback", wraps=parser._parse_epub_fallback
+                ) as fallback:
+                    document = parser.parse(
+                        _epub_with_encoded_chapter(
+                            encoding, missing_navigation=False
+                        )
+                    )
+                fallback.assert_not_called()
+                self.assertIn("Café 中文 日本語", document.content)
+
     def assert_literal_path_image_bytes(self, *, use_fallback: bool):
         cases = (
             ("Text#1/chapter.xhtml", "../images/pic.png",

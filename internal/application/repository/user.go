@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -167,20 +168,40 @@ func (r *userRepository) DeleteUserRetiringSessions(ctx context.Context, id stri
 	})
 }
 
-// ListUsers lists users with pagination
-func (r *userRepository) ListUsers(ctx context.Context, offset, limit int) ([]*types.User, error) {
+// applyUserKeywordFilter adds a dialect-aware, LIKE-escaped substring match
+// against username or email.
+func applyUserKeywordFilter(db *gorm.DB, keyword string) *gorm.DB {
+	userLike := "LOWER(username) LIKE LOWER(?) ESCAPE ?"
+	mailLike := "LOWER(email) LIKE LOWER(?) ESCAPE ?"
+	if db.Name() == "postgres" {
+		userLike = "username ILIKE ? ESCAPE ?"
+		mailLike = "email ILIKE ? ESCAPE ?"
+	}
+	searchPattern := "%" + escapeLikeKeyword(keyword) + "%"
+	return db.Where("("+userLike+" OR "+mailLike+")", searchPattern, likeEscapeChar, searchPattern, likeEscapeChar)
+}
+
+// ListUsers lists users with pagination and an optional username/email filter.
+// Both active and disabled users are included so administrators can locate
+// disabled accounts across pages. Ties on created_at are broken by id ASC for
+// deterministic pagination.
+func (r *userRepository) ListUsers(ctx context.Context, query string, offset, limit int) ([]*types.User, error) {
 	var users []*types.User
-	query := r.db.WithContext(ctx).Order("created_at DESC")
+	dbQuery := r.db.WithContext(ctx)
+	if q := strings.TrimSpace(query); q != "" {
+		dbQuery = applyUserKeywordFilter(dbQuery, q)
+	}
+	dbQuery = dbQuery.Order("created_at DESC, id ASC")
 
 	if limit > 0 {
-		query = query.Limit(limit)
+		dbQuery = dbQuery.Limit(limit)
 	}
 
 	if offset > 0 {
-		query = query.Offset(offset)
+		dbQuery = dbQuery.Offset(offset)
 	}
 
-	if err := query.Find(&users).Error; err != nil {
+	if err := dbQuery.Find(&users).Error; err != nil {
 		return nil, err
 	}
 	return users, nil
@@ -366,18 +387,7 @@ func (r *userRepository) SearchUsers(ctx context.Context, query string, limit in
 	// build), which has no ILIKE. The keyword is escaped either way: % and _
 	// are LIKE wildcards, so an unescaped search for "a_b" also matches "axb"
 	// and "%" returns every user.
-	isPostgres := r.db.Name() == "postgres"
-	userLike := "LOWER(username) LIKE LOWER(?) ESCAPE ?"
-	mailLike := "LOWER(email) LIKE LOWER(?) ESCAPE ?"
-	if isPostgres {
-		userLike = "username ILIKE ? ESCAPE ?"
-		mailLike = "email ILIKE ? ESCAPE ?"
-	}
-	escaped := escapeLikeKeyword(query)
-	searchPattern := "%" + escaped + "%"
-
-	dbQuery := r.db.WithContext(ctx).
-		Where(userLike+" OR "+mailLike, searchPattern, likeEscapeChar, searchPattern, likeEscapeChar).
+	dbQuery := applyUserKeywordFilter(r.db.WithContext(ctx), query).
 		Where("is_active = ?", true).
 		Order("username ASC")
 

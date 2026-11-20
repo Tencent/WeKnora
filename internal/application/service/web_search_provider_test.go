@@ -98,6 +98,20 @@ func TestValidateProviderParametersSerply(t *testing.T) {
 	}
 }
 
+func TestValidateProviderParametersSearchAPI(t *testing.T) {
+	valid := types.WebSearchProviderParameters{APIKey: "searchapi-test"}
+	if err := validateProviderParameters(types.WebSearchProviderTypeSearchAPI, valid); err != nil {
+		t.Fatalf("valid SearchApi parameters rejected: %v", err)
+	}
+	if !isValidProviderType(types.WebSearchProviderTypeSearchAPI) {
+		t.Fatal("SearchApi provider type is not accepted")
+	}
+	blank := types.WebSearchProviderParameters{APIKey: "   "}
+	if err := validateProviderParameters(types.WebSearchProviderTypeSearchAPI, blank); err == nil {
+		t.Fatal("blank SearchApi API key was accepted")
+	}
+}
+
 func TestValidateProviderParametersFirecrawl(t *testing.T) {
 	valid := types.WebSearchProviderParameters{APIKey: "fc-test"}
 	if err := validateProviderParameters(types.WebSearchProviderTypeFirecrawl, valid); err != nil {

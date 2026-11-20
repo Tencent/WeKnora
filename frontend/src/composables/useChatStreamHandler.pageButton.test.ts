@@ -7,6 +7,7 @@ import * as history from '../utils/rag-pipeline-history.ts'
 import * as timestamps from '../utils/messageTimestamp.ts'
 import * as steering from '../utils/steerStreamFork.ts'
 import * as hostApproval from '../views/chat/components/hostApproval.ts'
+import * as thinkBlocks from '../utils/thinkBlocks.ts'
 import { fixture } from '../test-utils/vueFixture.ts'
 
 function setup(t: TestContext) {
@@ -18,6 +19,7 @@ function setup(t: TestContext) {
     '@/utils/messageTimestamp': timestamps,
     '@/utils/steerStreamFork': steering,
     '@/utils/assistantDataChange': f.dataChange,
+    '@/utils/thinkBlocks': thinkBlocks,
     '@/views/chat/components/hostApproval': hostApproval,
   })
   const messagesList = vue.reactive<any[]>([])

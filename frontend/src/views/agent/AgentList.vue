@@ -1179,7 +1179,7 @@ const handleOpenAgentEditor = (event: CustomEvent) => {
 
 // 选中空间时请求该空间内全部智能体（含我共享的）
 watch(spaceSelection, (val) => {
-  if (val === 'all' || val === 'mine' || !val) {
+  if (!val || RESERVED_SCOPES.has(val)) {
     spaceAgentsList.value = []
     return
   }

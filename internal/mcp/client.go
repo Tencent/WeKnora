@@ -76,6 +76,8 @@ type mcpGoClient struct {
 	initialized  atomic.Bool
 	metadataMu   sync.RWMutex
 	instructions string
+	serverInfo   ServerInfo
+	initializeAt time.Time
 	toolSchemas  map[string]json.RawMessage
 	// newProbe builds an independent connection with the same outbound policy.
 	newProbe func() (*mcpGoClient, error)
@@ -502,6 +504,13 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 	c.initialized.Store(true)
 	c.metadataMu.Lock()
 	c.instructions = result.Instructions
+	c.serverInfo = ServerInfo{
+		Name:        result.ServerInfo.Name,
+		Version:     result.ServerInfo.Version,
+		Title:       result.ServerInfo.Title,
+		Description: result.ServerInfo.Description,
+	}
+	c.initializeAt = time.Now()
 	c.metadataMu.Unlock()
 	serviceName := secutils.SanitizeForLog(c.service.Name)
 	logger.Debugf(
@@ -602,6 +611,23 @@ func (c *mcpGoClient) ServerInstructions() string {
 	c.metadataMu.RLock()
 	defer c.metadataMu.RUnlock()
 	return c.instructions
+}
+
+// ServerInfo returns the server identity reported by the last initialize, so
+// a caller can tell whether a saved directory came from the same server build.
+func (c *mcpGoClient) ServerInfo() ServerInfo {
+	c.metadataMu.RLock()
+	defer c.metadataMu.RUnlock()
+	return c.serverInfo
+}
+
+// InitializedAt returns when the last initialize completed. A connection is
+// reused for as long as it stays open, so its server identity and
+// instructions are only as recent as this time.
+func (c *mcpGoClient) InitializedAt() time.Time {
+	c.metadataMu.RLock()
+	defer c.metadataMu.RUnlock()
+	return c.initializeAt
 }
 
 // ListTools retrieves the list of available tools
@@ -815,7 +841,7 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 			schema, cached = c.toolSchemas[name]
 			c.metadataMu.RUnlock()
 			if !cached {
-				return nil, fmt.Errorf("tool %q not found in MCP directory", name)
+				return nil, toolNotInDirectoryError(name)
 			}
 		}
 		// Raw directory reads bypass the SDK's tool cache. Reuse its annotation

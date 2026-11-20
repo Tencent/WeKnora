@@ -206,7 +206,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed, type ComponentPublicInstance } from 'vue';
+import { ref, watch, nextTick, computed, onBeforeUnmount, type ComponentPublicInstance } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import SettingDrawer from '@/components/settings/SettingDrawer.vue';
@@ -228,6 +228,8 @@ type TagRow = {
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
 
 const TAG_PAGE_SIZE = 50;
+const TAG_SEARCH_DEBOUNCE_MS = 300;
+const TAG_DELETE_REFRESH_DELAY_MS = 800;
 
 const props = defineProps<{
   visible: boolean;
@@ -255,6 +257,15 @@ const hasMore = ref(false);
 const total = ref(0);
 const searchQuery = ref('');
 let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+let disposed = false;
+// 知识库归属与抽屉会话分开：关闭后写成功仍要通知同一知识库的父列表。
+let contextEpoch = 0;
+let drawerEpoch = 0;
+let requestEpoch = 0;
+let resettingSearch = false;
+let createEpoch = 0;
+let editEpoch = 0;
+const deleteRefreshTimers = new Set<ReturnType<typeof setTimeout>>();
 
 const creatingTag = ref(false);
 const creatingTagLoading = ref(false);
@@ -285,39 +296,61 @@ const onEditKeydown = (ctx: { e?: KeyboardEvent } | undefined, cancel: () => voi
   }
 };
 
-const resetLocalState = () => {
-  cancelCreateTag();
-  cancelEditTag();
-  searchQuery.value = '';
+const isCurrentContext = (epoch: number) => !disposed && contextEpoch === epoch;
+const isCurrentDrawer = (epoch: number) =>
+  !disposed && props.visible && !!props.kbId && drawerEpoch === epoch;
+
+const cancelSearchDebounce = () => {
+  if (searchDebounce !== null) {
+    clearTimeout(searchDebounce);
+    searchDebounce = null;
+  }
+};
+
+const invalidateTagRequests = () => {
+  requestEpoch += 1;
+  cancelSearchDebounce();
+  loading.value = false;
+  loadingMore.value = false;
+};
+
+const resetTagList = () => {
+  tags.value = [];
+  total.value = 0;
+  hasMore.value = false;
+  page.value = 1;
+};
+
+const clearDeleteRefreshTimers = () => {
+  for (const timer of deleteRefreshTimers) clearTimeout(timer);
+  deleteRefreshTimers.clear();
 };
 
 const loadTags = async (reset = false) => {
-  if (!props.kbId) {
-    tags.value = [];
-    total.value = 0;
-    hasMore.value = false;
-    page.value = 1;
-    return;
-  }
+  if (!isCurrentDrawer(drawerEpoch)) return;
   if (reset) {
-    page.value = 1;
-    tags.value = [];
-    total.value = 0;
-    hasMore.value = false;
-  } else if (loading.value || loadingMore.value) {
+    invalidateTagRequests();
+    resetTagList();
+  } else if (loading.value || loadingMore.value || searchDebounce !== null || !hasMore.value) {
     return;
   }
 
-  const currentPage = page.value || 1;
+  const currentPage = page.value;
+  const kbId = props.kbId;
+  const keyword = searchQuery.value || undefined;
+  const drawer = drawerEpoch;
+  const request = ++requestEpoch;
+  const isCurrent = () => isCurrentDrawer(drawer) && requestEpoch === request;
   loading.value = currentPage === 1;
   loadingMore.value = currentPage > 1;
 
   try {
-    const res: any = await listKnowledgeTags(props.kbId, {
+    const res: any = await listKnowledgeTags(kbId, {
       page: currentPage,
       page_size: TAG_PAGE_SIZE,
-      keyword: searchQuery.value || undefined,
+      keyword,
     });
+    if (!isCurrent()) return;
     const pageData = (res?.data || {}) as { data?: TagRow[]; total?: number };
     const pageTags = (pageData.data || []).map((tag) => ({
       ...tag,
@@ -336,125 +369,201 @@ const loadTags = async (reset = false) => {
       page.value = currentPage + 1;
     }
   } catch (error) {
-    console.error('Failed to load tags', error);
+    if (isCurrent()) console.error('Failed to load tags', error);
   } finally {
-    loading.value = false;
-    loadingMore.value = false;
+    // 旧分页或旧关键词的收尾不能提前结束新请求的加载状态。
+    if (isCurrent()) {
+      loading.value = false;
+      loadingMore.value = false;
+    }
   }
 };
 
+const cancelCreateTag = () => {
+  createEpoch += 1;
+  creatingTag.value = false;
+  creatingTagLoading.value = false;
+  newTagName.value = '';
+};
+
+const cancelEditTag = () => {
+  editEpoch += 1;
+  editingTagId.value = null;
+  editingTagName.value = '';
+  editingTagSubmitting.value = false;
+};
+
+// 服务端写入已成功时保留父列表通知；抽屉自身只刷新当前会话的查询。
+const refreshAfterTagChange = (context: number, payload?: { deletedTagId?: string }) => {
+  if (!isCurrentContext(context)) return;
+  emit('changed', payload);
+  if (isCurrentContext(context) && isCurrentDrawer(drawerEpoch)) void loadTags(true);
+};
+
 const startCreateTag = () => {
-  if (!props.kbId || creatingTag.value) return;
+  if (!isCurrentDrawer(drawerEpoch) || creatingTag.value) return;
   cancelEditTag();
   creatingTag.value = true;
+  const drawer = drawerEpoch;
+  const form = ++createEpoch;
   nextTick(() => {
+    if (!isCurrentDrawer(drawer) || createEpoch !== form || !creatingTag.value) return;
     newTagInputRef.value?.focus?.();
     newTagInputRef.value?.select?.();
   });
 };
 
-const cancelCreateTag = () => {
-  creatingTag.value = false;
-  newTagName.value = '';
-};
-
 const submitCreateTag = async () => {
-  if (!props.kbId) return;
+  if (!isCurrentDrawer(drawerEpoch) || !creatingTag.value || creatingTagLoading.value) return;
   const name = newTagName.value.trim();
   if (!name) {
     MessagePlugin.warning(t('knowledgeBase.tagNameRequired'));
     return;
   }
+  const kbId = props.kbId;
+  const context = contextEpoch;
+  const drawer = drawerEpoch;
+  const operation = ++createEpoch;
+  const isCurrent = () => isCurrentDrawer(drawer) && createEpoch === operation;
   creatingTagLoading.value = true;
   try {
-    await createKnowledgeBaseTag(props.kbId, { name });
-    MessagePlugin.success(t('knowledgeBase.tagCreateSuccess'));
-    cancelCreateTag();
-    await loadTags(true);
-    emit('changed');
+    await createKnowledgeBaseTag(kbId, { name });
+    if (!isCurrentContext(context)) return;
+    if (isCurrent()) {
+      MessagePlugin.success(t('knowledgeBase.tagCreateSuccess'));
+      cancelCreateTag();
+    }
+    refreshAfterTagChange(context);
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'));
+    if (isCurrent()) MessagePlugin.error(error?.message || t('common.operationFailed'));
   } finally {
-    creatingTagLoading.value = false;
+    if (isCurrent()) creatingTagLoading.value = false;
   }
 };
 
 const startEditTag = (tag: TagRow) => {
+  if (!isCurrentDrawer(drawerEpoch)) return;
   cancelCreateTag();
+  cancelEditTag();
   editingTagId.value = tag.id;
   editingTagName.value = tag.name;
+  const drawer = drawerEpoch;
+  const form = editEpoch;
   nextTick(() => {
+    if (!isCurrentDrawer(drawer) || editEpoch !== form || editingTagId.value !== tag.id) return;
     editingTagInputRefs.get(tag.id)?.focus?.();
     editingTagInputRefs.get(tag.id)?.select?.();
   });
 };
 
-const cancelEditTag = () => {
-  editingTagId.value = null;
-  editingTagName.value = '';
-};
-
 const submitEditTag = async () => {
-  if (!props.kbId || !editingTagId.value) return;
+  if (!isCurrentDrawer(drawerEpoch) || !editingTagId.value || editingTagSubmitting.value) return;
   const name = editingTagName.value.trim();
   if (!name) {
     MessagePlugin.warning(t('knowledgeBase.tagNameRequired'));
     return;
   }
-  const current = tags.value.find((tag) => tag.id === editingTagId.value);
+  const tagId = editingTagId.value;
+  const current = tags.value.find((tag) => tag.id === tagId);
   if (current && name === current.name) {
     cancelEditTag();
     return;
   }
+  const kbId = props.kbId;
+  const context = contextEpoch;
+  const drawer = drawerEpoch;
+  const operation = ++editEpoch;
+  const isCurrent = () => isCurrentDrawer(drawer) && editEpoch === operation;
   editingTagSubmitting.value = true;
   try {
-    await updateKnowledgeBaseTag(props.kbId, editingTagId.value, { name });
-    MessagePlugin.success(t('knowledgeBase.tagEditSuccess'));
-    cancelEditTag();
-    await loadTags(true);
-    emit('changed');
+    await updateKnowledgeBaseTag(kbId, tagId, { name });
+    if (!isCurrentContext(context)) return;
+    if (isCurrent()) {
+      MessagePlugin.success(t('knowledgeBase.tagEditSuccess'));
+      cancelEditTag();
+    }
+    refreshAfterTagChange(context);
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'));
+    if (isCurrent()) MessagePlugin.error(error?.message || t('common.operationFailed'));
   } finally {
-    editingTagSubmitting.value = false;
+    if (isCurrent()) editingTagSubmitting.value = false;
   }
 };
 
 const deleteTag = async (tag: TagRow) => {
-  if (!props.kbId) return;
+  if (!isCurrentDrawer(drawerEpoch)) return;
+  const kbId = props.kbId;
+  const context = contextEpoch;
+  const drawer = drawerEpoch;
+  const tagId = tag.id;
+  const seqId = tag.seq_id;
   cancelCreateTag();
   cancelEditTag();
   try {
-    await deleteKnowledgeBaseTag(props.kbId, tag.seq_id, { force: true });
-    MessagePlugin.success(t('knowledgeBase.tagDeleteSuccess'));
-    await loadTags(true);
-    emit('changed', { deletedTagId: tag.id });
-    void (async () => {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      emit('changed', { deletedTagId: tag.id });
-    })();
+    await deleteKnowledgeBaseTag(kbId, seqId, { force: true });
+    if (!isCurrentContext(context)) return;
+    if (isCurrentDrawer(drawer)) MessagePlugin.success(t('knowledgeBase.tagDeleteSuccess'));
+    refreshAfterTagChange(context, { deletedTagId: tagId });
+    if (!isCurrentContext(context)) return;
+    // 删除会异步清理关联条目。关闭抽屉仍需补刷新，切知识库或卸载则取消。
+    const timer = setTimeout(() => {
+      deleteRefreshTimers.delete(timer);
+      if (isCurrentContext(context)) emit('changed', { deletedTagId: tagId });
+    }, TAG_DELETE_REFRESH_DELAY_MS);
+    deleteRefreshTimers.add(timer);
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'));
+    if (isCurrentDrawer(drawer)) MessagePlugin.error(error?.message || t('common.operationFailed'));
   }
 };
 
 watch(
-  () => props.visible,
-  (open) => {
-    if (open && props.kbId) {
-      void loadTags(true);
-    } else if (!open) {
-      resetLocalState();
+  () => [props.visible, props.kbId, props.isFaq] as const,
+  ([open, kbId], previous) => {
+    if (kbId !== previous?.[1]) {
+      contextEpoch += 1;
+      clearDeleteRefreshTimers();
+    }
+    drawerEpoch += 1;
+    invalidateTagRequests();
+    resetTagList();
+    cancelCreateTag();
+    cancelEditTag();
+    resettingSearch = true;
+    searchQuery.value = '';
+    resettingSearch = false;
+    if (open && kbId) {
+      const drawer = drawerEpoch;
+      const request = requestEpoch;
+      // 同一轮 props 更新可能同时改变可见性和知识库，只为最后的会话发首屏请求。
+      void nextTick(() => {
+        if (isCurrentDrawer(drawer) && requestEpoch === request) void loadTags(true);
+      });
     }
   },
+  { immediate: true, flush: 'sync' },
 );
 
-watch(searchQuery, (newVal, oldVal) => {
-  if (newVal === oldVal || !props.visible || !props.kbId) return;
-  if (searchDebounce) clearTimeout(searchDebounce);
+watch(searchQuery, () => {
+  if (resettingSearch) return;
+  invalidateTagRequests();
+  resetTagList();
+  if (!isCurrentDrawer(drawerEpoch)) return;
+  // 输入变化就作废旧结果，不能等防抖结束才隔离在途请求和旧分页。
+  loading.value = true;
+  const drawer = drawerEpoch;
+  const request = requestEpoch;
   searchDebounce = setTimeout(() => {
-    void loadTags(true);
-  }, 300);
+    searchDebounce = null;
+    if (isCurrentDrawer(drawer) && requestEpoch === request) void loadTags(true);
+  }, TAG_SEARCH_DEBOUNCE_MS);
+}, { flush: 'sync' });
+
+onBeforeUnmount(() => {
+  disposed = true;
+  contextEpoch += 1;
+  drawerEpoch += 1;
+  invalidateTagRequests();
+  clearDeleteRefreshTimers();
 });
 </script>
 

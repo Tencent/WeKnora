@@ -22,7 +22,8 @@ const (
 	// compression bomb rather than document content.
 	maxZipEntryBytes = 64 << 20
 
-	// maxZipImagesTotalBytes caps the images extracted from one package. Every
+	// maxZipImagesTotalBytes is the default cap for images extracted from one
+	// package, configurable via WEKNORA_MINERU_MAX_IMAGE_BYTES. Every
 	// image is held in memory at once, so the total is what actually decides the
 	// footprint - bounding each entry alone does not bound a package holding
 	// thousands of small ones.

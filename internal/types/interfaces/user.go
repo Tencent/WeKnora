@@ -17,7 +17,10 @@ type UserService interface {
 	// LoginWithOIDC exchanges the callback code, auto-provisions users if needed, and completes login.
 	// provisioning is the default tenant mode for a newly auto-created user
 	// (resolved by the caller from auth.default_tenant_mode).
-	LoginWithOIDC(ctx context.Context, code, redirectURI string, provisioning types.TenantProvisioningMode) (*types.OIDCCallbackResponse, error)
+	LoginWithOIDC(
+		ctx context.Context, code, redirectURI string,
+		provisioning types.TenantProvisioningMode, codeVerifier string,
+	) (*types.OIDCCallbackResponse, error)
 	// GetUserByID gets a user by ID
 	GetUserByID(ctx context.Context, id string) (*types.User, error)
 	// GetUsersByIDs batch-fetches users by id, returning a map keyed by
@@ -88,11 +91,12 @@ type UserService interface {
 	// Disabling also revokes all of that user's outstanding tokens. The
 	// repository enforces self-disable and last-system-admin guards.
 	SetUserActive(ctx context.Context, userID, actorID string, active bool) (*types.User, error)
-	// ListAllUsers lists every platform user (across tenants) newest-first.
+	// ListAllUsers lists every platform user (across tenants) newest-first,
+	// optionally filtered by a case-insensitive username/email substring query.
 	// Returns the page plus a has_more flag so the system-admin user-list UI
 	// can paginate without a second count query. The handler enforces the
 	// SystemAdmin gate, so the service does not duplicate it here.
-	ListAllUsers(ctx context.Context, offset, limit int) ([]*types.User, bool, error)
+	ListAllUsers(ctx context.Context, query string, offset, limit int) ([]*types.User, bool, error)
 	// ListSystemAdmins lists users with IsSystemAdmin=true.
 	// Returns the page of admins plus the total count (for pagination UI);
 	// callers pass offset/limit to page through results. Used by the
@@ -136,8 +140,8 @@ type UserRepository interface {
 	SetUserActive(ctx context.Context, userID, actorID string, active bool) (*types.User, error)
 	// DeleteUser deletes a user
 	DeleteUser(ctx context.Context, id string) error
-	// ListUsers lists users with pagination
-	ListUsers(ctx context.Context, offset, limit int) ([]*types.User, error)
+	// ListUsers lists users with pagination and optional username/email filter
+	ListUsers(ctx context.Context, query string, offset, limit int) ([]*types.User, error)
 	// ListSystemAdmins lists users where is_system_admin = true.
 	// Walks the partial-friendly idx_users_is_system_admin index. Returns
 	// the slice plus the total count for pagination metadata. Used by

@@ -17,8 +17,37 @@ func (r *memoryRepository) withSubject(ctx context.Context, scope interfaces.Mem
 			Clauses(forUpdateClause()).First(&subject).Error; err != nil {
 			return err
 		}
+		if scope.Generation != nil && *scope.Generation != subject.ExtractionState.Generation {
+			return types.ErrMemoryGenerationChanged
+		}
 		return fn(tx, &subject)
 	})
+}
+
+// withSubjectMutation keeps the generation check and every statement in a
+// mutation on the same transaction/connection. A transaction-bound repository
+// also makes nested lifecycle calls use savepoints instead of a second connection.
+func (r *memoryRepository) withSubjectMutation(
+	ctx context.Context, scope interfaces.MemoryScope, fn func(*memoryRepository) error,
+) error {
+	if scope.Generation == nil {
+		return fn(r)
+	}
+	return r.withSubject(ctx, scope, func(tx *gorm.DB, _ *types.MemorySubject) error {
+		return fn(&memoryRepository{db: tx})
+	})
+}
+
+func subjectMutation[T any](
+	ctx context.Context, r *memoryRepository, scope interfaces.MemoryScope, fn func(*memoryRepository) (T, error),
+) (T, error) {
+	var result T
+	err := r.withSubjectMutation(ctx, scope, func(txRepo *memoryRepository) error {
+		var err error
+		result, err = fn(txRepo)
+		return err
+	})
+	return result, err
 }
 
 func saveExtractionState(tx *gorm.DB, subject *types.MemorySubject) error {

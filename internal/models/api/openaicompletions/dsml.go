@@ -26,13 +26,19 @@ import (
 // the stream and recovers the calls from it.
 
 // dsmlMarkers are the openings of a DSML tag, with the full-width bar the
-// model emits and the ASCII bar some gateways normalise it to.
-var dsmlMarkers = []string{"<｜DSML｜", "<|DSML|"}
+// model emits and the ASCII bar some gateways normalise it to. deepseek-flash
+// repeats the bar on both sides, so the doubled widths are listed as well.
+var dsmlMarkers = []string{"<｜DSML｜", "<|DSML|", "<｜｜DSML", "<||DSML"}
 
 // dsmlIndexBase keeps recovered calls clear of the vendor's own indices.
 const dsmlIndexBase = 1 << 20
 
-const dsmlBar = `\s*[｜|]\s*`
+// dsmlBar is one or two bars: deepseek-flash doubles them.
+const dsmlBar = `(?:\s*[｜|]){1,2}\s*`
+
+// dsmlEnvelope is the tag that wraps the calls; deepseek-flash shortens it
+// from function_calls to calls.
+const dsmlEnvelope = `(?:function_calls|calls)`
 
 var (
 	dsmlInvokeRe = regexp.MustCompile(
@@ -42,8 +48,8 @@ var (
 		`(?s)<` + dsmlBar + `DSML` + dsmlBar + `parameter\s+name\s*=\s*"([^"]+)"` +
 			`(?:\s+string\s*=\s*"(true|false)")?\s*>(.*?)</` + dsmlBar + `DSML` + dsmlBar + `parameter\s*>`)
 	dsmlBlockRe = regexp.MustCompile(
-		`(?s)^<` + dsmlBar + `DSML` + dsmlBar + `function_calls\s*>(.*?)</` + dsmlBar + `DSML` + dsmlBar +
-			`function_calls\s*>\s*$`)
+		`(?s)^<` + dsmlBar + `DSML` + dsmlBar + dsmlEnvelope + `\s*>(.*?)</` + dsmlBar + `DSML` + dsmlBar +
+			dsmlEnvelope + `\s*>\s*$`)
 )
 
 // dsmlFilter is fed the streamed content. Everything before the first DSML

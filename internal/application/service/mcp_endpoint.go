@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -72,6 +73,14 @@ func HashMCPEndpointToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// mcpEndpointNameTooLong reports whether the name is longer than the column
+// that stores it. The limit is counted in characters, not bytes, because
+// mcpEndpointMaxNameLen mirrors a varchar(255) column: counting bytes rejected
+// a Chinese name at 86 characters, which the column would have accepted.
+func mcpEndpointNameTooLong(name string) bool {
+	return utf8.RuneCountInString(name) > mcpEndpointMaxNameLen
+}
+
 func mcpEndpointTokenHint(token string) string {
 	if len(token) <= mcpEndpointTokenHintLen {
 		return token
@@ -89,7 +98,7 @@ func (s *mcpEndpointService) Create(
 	if name == "" {
 		return nil, "", apperrors.NewBadRequestError("name is required")
 	}
-	if len(name) > mcpEndpointMaxNameLen {
+	if mcpEndpointNameTooLong(name) {
 		return nil, "", apperrors.NewBadRequestError("name is too long")
 	}
 	tools := types.NormalizeMCPEndpointTools(ep.Tools)
@@ -153,7 +162,7 @@ func (s *mcpEndpointService) Update(
 		if name == "" {
 			return nil, apperrors.NewBadRequestError("name is required")
 		}
-		if len(name) > mcpEndpointMaxNameLen {
+		if mcpEndpointNameTooLong(name) {
 			return nil, apperrors.NewBadRequestError("name is too long")
 		}
 		ep.Name = name

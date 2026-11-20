@@ -208,6 +208,9 @@ func RegisterMCPServiceRoutes(
 		agentTool.POST("/tool-approvals/:pending_id", g.Viewer(), handler.ResolveToolApproval)
 		// Answer any user-answerable prompt (ask_user, tool approval); same gating.
 		agentTool.POST("/prompts/:prompt_id", g.Viewer(), handler.ResolveAgentPrompt)
+		// Secure credential forms are answered only here, never through
+		// /prompts: the body carries values that must not reach the prompt row.
+		agentTool.POST("/secure-forms/:prompt_id", g.Viewer(), handler.SubmitSecureForm)
 		// Resume an agent run paused on an in-conversation MCP OAuth prompt.
 		// Same tenant-member (Viewer+) gating rationale as tool-approvals.
 		agentTool.POST("/mcp-oauth-resolutions/:pending_id", g.Viewer(), oauthHandler.ResolveMCPOAuth)

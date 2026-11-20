@@ -22,8 +22,9 @@ import (
 // SyncTaskExecutor executes tasks synchronously (in a goroutine) without Redis.
 // Used in Lite mode as a drop-in replacement for *asynq.Client.
 type SyncTaskExecutor struct {
-	mu       sync.RWMutex
-	handlers map[string]func(context.Context, *asynq.Task) error
+	mu         sync.RWMutex
+	handlers   map[string]func(context.Context, *asynq.Task) error
+	pendingIDs map[string]struct{}
 	// onFinalFailure mirrors the asynq dead-letter callback: it runs once a
 	// task exhausts its retries, so a document whose task gave up is marked
 	// failed instead of spinning until the housekeeping sweep.
@@ -53,6 +54,8 @@ func (e *SyncTaskExecutor) SetFinalFailureHook(fn func(context.Context, *asynq.T
 
 // syncTaskOptions is the subset of asynq options the executor honours.
 type syncTaskOptions struct {
+	taskID   string
+	queue    string
 	delay    time.Duration
 	maxRetry int
 	timeout  time.Duration
@@ -66,10 +69,14 @@ type syncTaskOptions struct {
 // timeout: Lite has always run those unbounded (large imports on a laptop),
 // and the document pipeline sets its own timeouts explicitly.
 func resolveSyncTaskOptions(task *asynq.Task, opts []asynq.Option) syncTaskOptions {
-	resolved := syncTaskOptions{maxRetry: 25} // asynq default
+	resolved := syncTaskOptions{maxRetry: 25, queue: "default"} // asynq default
 	all := append(append([]asynq.Option{}, asynqTaskOptions(task)...), opts...)
 	for _, opt := range all {
 		switch opt.Type() {
+		case asynq.TaskIDOpt:
+			resolved.taskID, _ = opt.Value().(string)
+		case asynq.QueueOpt:
+			resolved.queue, _ = opt.Value().(string)
 		case asynq.ProcessInOpt:
 			if d, ok := opt.Value().(time.Duration); ok {
 				resolved.delay = d
@@ -133,7 +140,7 @@ func (o syncTaskOptions) attemptContext(ctx context.Context) (context.Context, c
 
 // Enqueue satisfies interfaces.TaskEnqueuer.
 // Instead of queuing to Redis, it dispatches the task to a goroutine.
-// Supports ProcessIn / ProcessAt (delay), MaxRetry, Timeout and Deadline for
+// Supports ProcessIn / ProcessAt (delay), MaxRetry, Timeout, Deadline and TaskID for
 // parity with asynq, whether they were given here or to asynq.NewTask.
 func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
 	e.mu.RLock()
@@ -149,6 +156,23 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 	maxRetry := options.maxRetry
 
 	taskID := uuid.New().String()
+	idKey := ""
+	if options.taskID != "" {
+		taskID = options.taskID
+		// Task IDs stay reserved through delays and retries, matching Redis
+		// queue acceptance. Queue scoping allows the same ID in another pool.
+		idKey = options.queue + "\x00" + taskID
+		e.mu.Lock()
+		if _, exists := e.pendingIDs[idKey]; exists {
+			e.mu.Unlock()
+			return nil, asynq.ErrTaskIDConflict
+		}
+		if e.pendingIDs == nil {
+			e.pendingIDs = make(map[string]struct{})
+		}
+		e.pendingIDs[idKey] = struct{}{}
+		e.mu.Unlock()
+	}
 	info := &asynq.TaskInfo{
 		ID:    taskID,
 		Queue: "sync",
@@ -156,6 +180,13 @@ func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 	}
 
 	go func() {
+		if idKey != "" {
+			defer func() {
+				e.mu.Lock()
+				delete(e.pendingIDs, idKey)
+				e.mu.Unlock()
+			}()
+		}
 		if options.delay > 0 {
 			time.Sleep(options.delay)
 		}

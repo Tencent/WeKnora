@@ -138,6 +138,24 @@ func TestGetWebSearchProviderTypesIncludesSerply(t *testing.T) {
 	}
 }
 
+func TestGetWebSearchProviderTypesIncludesSearchAPI(t *testing.T) {
+	var searchAPI *WebSearchProviderTypeInfo
+	providerTypes := GetWebSearchProviderTypes()
+	for i := range providerTypes {
+		if providerTypes[i].ID == string(WebSearchProviderTypeSearchAPI) {
+			searchAPI = &providerTypes[i]
+			break
+		}
+	}
+	if searchAPI == nil {
+		t.Fatal("SearchApi provider type not found")
+	}
+	if !searchAPI.RequiresAPIKey || !searchAPI.SupportsProxy ||
+		searchAPI.RequiresEngineID || searchAPI.RequiresBaseURL {
+		t.Fatalf("unexpected SearchApi metadata: %+v", searchAPI)
+	}
+}
+
 func TestGetWebSearchProviderTypesIncludesFirecrawl(t *testing.T) {
 	var firecrawl *WebSearchProviderTypeInfo
 	providerTypes := GetWebSearchProviderTypes()

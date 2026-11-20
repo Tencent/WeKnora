@@ -99,11 +99,11 @@ ab "$B" close >/dev/null; sleep 1
 assert_eq "B browser gone after close" 0 "$(main_count "$B")"
 assert_contains "B seat still held after close" "$B" "$(dx 'wk-display list')"
 
-# Headless fallback: a session that never claimed a seat has no DISPLAY env,
-# so its browser runs headless regardless of what X servers exist for other
-# sessions.
+# Explicit headless: with --headed false the session claims no seat and has
+# no DISPLAY env, so its browser runs headless regardless of what X servers
+# exist for other sessions.
 hl() { docker exec -e WEKNORA_SESSION_ID="$H" -e WEKNORA_BROWSER_ROOT="$(root "$H")" "$C" agent-browser "$@" 2>&1; }
-hl open "$URL" >/dev/null
+hl --headed false open "$URL" >/dev/null
 OUT="$(hl snapshot)"
 assert_contains "headless snapshot serves the page" "Directory listing" "$OUT"
 finish

@@ -320,4 +320,35 @@ t_sid_of_maps_seat_back_to_session() {
   teardown_seats
 }
 t_sid_of_maps_seat_back_to_session
+
+t_watched_reports_a_viewer_on_the_sessions_seat() {
+  setup_seats
+  "$DISP" claim sid-a >/dev/null
+  "$DISP" claim sid-b >/dev/null
+  "$DISP" watched sid-a; assert_eq "no viewer yet" 1 "$?"
+  viewer=$(watch_seat 1)
+  wait_watched 1
+  "$DISP" watched sid-a; assert_eq "viewer on its seat" 0 "$?"
+  "$DISP" watched sid-b; assert_eq "another seat's viewer does not count" 1 "$?"
+  "$DISP" watched sid-none; assert_eq "no seat, not watched" 1 "$?"
+  "$DISP" watched '../x' 2>/dev/null; assert_eq "bad id rejected" 2 "$?"
+  kill "$viewer" 2>/dev/null
+  teardown_seats
+}
+t_watched_reports_a_viewer_on_the_sessions_seat
+
+t_claim_records_the_sessions_browser_root() {
+  setup_seats
+  WEKNORA_BROWSER_ROOT=/var/lib/x/sid-a.browser "$DISP" claim sid-a >/dev/null
+  assert_eq "root recorded by claim" /var/lib/x/sid-a.browser "$("$DISP" browser-root sid-a)"
+  env -u WEKNORA_BROWSER_ROOT "$DISP" claim sid-a >/dev/null
+  assert_eq "a claim without a root keeps the record" /var/lib/x/sid-a.browser "$("$DISP" browser-root sid-a)"
+  WEKNORA_BROWSER_ROOT=relative/root "$DISP" claim sid-b >/dev/null
+  "$DISP" browser-root sid-b >/dev/null 2>&1; assert_eq "a relative root is not recorded" 1 "$?"
+  "$DISP" release sid-a >/dev/null
+  "$DISP" browser-root sid-a >/dev/null 2>&1; assert_eq "release drops the record" 1 "$?"
+  "$DISP" browser-root '../x' 2>/dev/null; assert_eq "bad id rejected" 2 "$?"
+  teardown_seats
+}
+t_claim_records_the_sessions_browser_root
 finish

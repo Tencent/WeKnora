@@ -26,6 +26,17 @@ type PipelineRequest struct {
 	// every search target. Set by the knowledge-search API.
 	DisableVectorMatch   bool `json:"disable_vector_match,omitempty"`
 	DisableKeywordsMatch bool `json:"disable_keywords_match,omitempty"`
+	// ParentSlotAggregation collapses hits that share a ParentChunkID into one
+	// top-k slot, so sibling children of the same parent cannot crowd out other
+	// pages. Set by the knowledge-search API; off by default.
+	ParentSlotAggregation bool `json:"parent_slot_aggregation,omitempty"`
+
+	// QueryImage is set when the caller submits an image to search by
+	// similarity instead of by text. Vector recall then embeds the image with
+	// the KB's image-capable embedding model; Query text still feeds keyword
+	// recall and rerank. Runtime only — never persisted or echoed.
+	QueryImage          []byte `json:"-"`
+	QueryImageMediaType string `json:"-"`
 
 	// Rerank parameters
 	RerankModelID   string  `json:"rerank_model_id"`
@@ -143,6 +154,14 @@ const (
 	RetrievalStageFilterTopK = "filter_top_k"
 )
 
+// DataAnalysisFailure records that automated SQL data analysis on a retrieved
+// tabular document was attempted and failed, so the answer prompt can warn the
+// model not to manually calculate exact aggregates from partial text excerpts.
+type DataAnalysisFailure struct {
+	FileName string
+	Reason   string
+}
+
 // RetrievalTruncation records that the passages in the model context are a
 // subset of this turn's ranked candidates.
 //
@@ -217,6 +236,9 @@ type PipelineState struct {
 	UsedMemories UsedMemories `json:"-"`
 	// RerankDiagnostics records what the rerank stage did this turn.
 	RerankDiagnostics *RerankDiagnostics `json:"-"`
+	// DataAnalysisFailure is non-nil when DATA_ANALYSIS attempted to load or
+	// query a tabular document and failed.
+	DataAnalysisFailure *DataAnalysisFailure `json:"-"`
 }
 
 // PipelineContext holds runtime context for the current pipeline execution.
@@ -318,6 +340,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			VectorDatabase:           c.VectorDatabase,
 			DisableVectorMatch:       c.DisableVectorMatch,
 			DisableKeywordsMatch:     c.DisableKeywordsMatch,
+			ParentSlotAggregation:    c.ParentSlotAggregation,
 			RerankModelID:            c.RerankModelID,
 			RerankTopK:               c.RerankTopK,
 			RerankThreshold:          c.RerankThreshold,

@@ -20,6 +20,7 @@ case "$1" in
     3) echo "sess-3"; exit 0 ;;
     *) exit 1 ;;
   esac ;;
+  browser-root) [ -n "${RECORDED_ROOT:-}" ] && { echo "$RECORDED_ROOT"; exit 0; }; exit 1 ;;
   *) exit 0 ;;
 esac
 EOF
@@ -27,7 +28,7 @@ EOF
   # A recording agent-browser: proof we reached the session browser.
   cat > "$TMP/bin/agent-browser" <<'EOF'
 #!/bin/sh
-echo "agentbrowser sid=$WEKNORA_SESSION_ID root=$WEKNORA_BROWSER_ROOT args:$*" >> "$AB_LOG"
+echo "agentbrowser sid=$WEKNORA_SESSION_ID root=$WEKNORA_BROWSER_ROOT click=${WK_DESKTOP_CLICK:-} args:$*" >> "$AB_LOG"
 EOF
   chmod 0755 "$TMP/bin/agent-browser"
   export WK_CHROME_SHIM="$TMP/bin/chrome-wk" WK_DISPLAY="$TMP/bin/wk-display" \
@@ -45,6 +46,7 @@ t_a_seat_with_a_session_opens_the_session_browser() {
   assert_contains "reached the session browser" "sid=sess-3" "$(cat "$AB_LOG")"
   assert_contains "url forwarded" "https://x.example" "$(cat "$AB_LOG")"
   assert_contains "headed so the window lands on the seat" "--headed" "$(cat "$AB_LOG")"
+  assert_contains "marked as a desktop click" "click=1" "$(cat "$AB_LOG")"
   teardown
 }
 
@@ -104,7 +106,38 @@ EOF
   teardown
 }
 
+t_the_recorded_root_wins_over_the_guess() {
+  setup_wk_chrome
+  rm -rf "$WK_SESSIONS_ROOT"   # the guess would fall back to the single-session root
+  RECORDED_ROOT="$TMP/recorded/sess-3.browser" DISPLAY=:3 "$WKCHROME" https://x.example
+  assert_contains "the root the session's claim recorded" \
+    "root=$TMP/recorded/sess-3.browser" "$(cat "$AB_LOG")"
+  teardown
+}
+
+t_a_failed_click_tells_the_human() {
+  setup_wk_chrome
+  cat > "$TMP/bin/agent-browser" <<'EOF'
+#!/bin/sh
+exit 70
+EOF
+  cat > "$TMP/bin/notify" <<'EOF'
+#!/bin/sh
+echo "notify DISPLAY=$DISPLAY $*" >> "$NOTIFY_LOG"
+EOF
+  chmod 0755 "$TMP/bin/agent-browser" "$TMP/bin/notify"
+  export WK_NOTIFY="$TMP/bin/notify" NOTIFY_LOG="$TMP/notify.log"
+  DISPLAY=:3 "$WKCHROME" https://x.example; rc=$?
+  sleep 0.3
+  assert_eq "the failure code surfaces" 70 "$rc"
+  assert_contains "a notice appears on the seat" "notify DISPLAY=:3" "$(cat "$NOTIFY_LOG" 2>/dev/null)"
+  unset WK_NOTIFY NOTIFY_LOG
+  teardown
+}
+
 t_a_seat_with_a_session_opens_the_session_browser
+t_the_recorded_root_wins_over_the_guess
+t_a_failed_click_tells_the_human
 t_no_seat_falls_back_to_chrome_wk
 t_seat_zero_falls_back_to_chrome_wk
 t_free_seat_falls_back_to_chrome_wk

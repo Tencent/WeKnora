@@ -38,3 +38,15 @@ func TestBackgroundWorkRoutesRegisterWithoutWildcardConflict(t *testing.T) {
 	require.True(t, found["POST /api/v1/sessions/:session_id/background-work/:work_id/cancel"])
 	require.False(t, found["GET /api/v1/sessions/:session_id/background-work"])
 }
+
+// 静态段 /transcriptions 与 POST 树里的 :session_id 通配符共存。
+func TestVoiceTranscriptionRouteRegistersBesideSessionWildcard(t *testing.T) {
+	var engine *gin.Engine
+	require.NotPanics(t, func() { engine = registerRoutesForTest(t) })
+	found := map[string]bool{}
+	for _, route := range engine.Routes() {
+		found[route.Method+" "+route.Path] = true
+	}
+	require.True(t, found["POST /api/v1/sessions/transcriptions"])
+	require.True(t, found["POST /api/v1/sessions/:session_id/stop"])
+}

@@ -4,6 +4,6 @@ export function getApiBaseUrl(): string {
   // this · axios hits `/api/v1/...` at LocalHub root · gets 404 "Cannot
   // POST". Strip trailing slash so axios doesn't produce `/app/weknora//api/v1/...`.
   // See: plugins/weknora/patches/api-base-baseurl.patch
-  const base = (import.meta.env.BASE_URL || '/').replace(/\/+$/, '');
+  const base = (import.meta.env?.BASE_URL || '/').replace(/\/+$/, '');
   return base;
 }

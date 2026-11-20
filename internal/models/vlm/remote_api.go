@@ -26,7 +26,7 @@ const (
 	// tokens, so a dense scanned page can stop at finish_reason=length; raise
 	// it via VLM_MAX_TOKENS.
 	defaultMaxToks = 5000
-	defaultTemp    = float32(0.1)
+	defaultTemp    = 0.1
 )
 
 // vlmHTTPTimeout returns the HTTP client timeout for VLM requests, read from

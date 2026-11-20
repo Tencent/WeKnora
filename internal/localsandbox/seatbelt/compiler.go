@@ -96,6 +96,12 @@ func compileSeatbelt(p core.Policy) (seatbeltProgram, error) {
 				`(deny file-write* (require-all (subpath (param %q)) (regex #"/\.[Gg][Ii][Tt](/|$)")))`,
 				rootParam))
 		}
+		if root.ProtectBareGitDirs {
+			denies = append(denies, fmt.Sprintf(
+				`(deny file-write* (require-all (subpath (param %q)) `+
+					`(regex #"\.[Gg][Ii][Tt]/([Hh][Oo][Oo][Kk][Ss]|[Cc][Oo][Nn][Ff][Ii][Gg])(/|$)")))`,
+				rootParam))
+		}
 	}
 
 	for i, private := range p.PrivateRoots {
@@ -105,6 +111,15 @@ func compileSeatbelt(p core.Policy) (seatbeltProgram, error) {
 		// denying writes here would revoke the workspace along with them.
 		privateDenies = append(privateDenies,
 			fmt.Sprintf("(deny file-read* (subpath (param %q)))", param))
+	}
+
+	for i, file := range p.WritableFiles {
+		param := fmt.Sprintf("WRITABLE_FILE_%d", i)
+		params = append(params, fmt.Sprintf("-D%s=%s", param, file))
+		// literal only: the directory around the file stays closed, so an
+		// atomic save through a sibling temp file is refused.
+		writeAllows = append(writeAllows, fmt.Sprintf("(allow file-write* (literal (param %q)))", param))
+		readAllows = append(readAllows, fmt.Sprintf("(allow file-read* (literal (param %q)))", param))
 	}
 
 	for i, root := range p.ReadableRoots {
