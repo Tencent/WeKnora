@@ -331,9 +331,9 @@ func apiKeyKBCapabilitiesForAccess(required types.OrgMemberRole, c *gin.Context)
 	return []types.APIKeyCapability{types.APIKeyCapabilityIngest}
 }
 
-func routePolicyHasCapability(policy APIKeyRoutePolicy, cap types.APIKeyCapability) bool {
+func routePolicyHasCapability(policy APIKeyRoutePolicy, capability types.APIKeyCapability) bool {
 	for _, existing := range policy.Capabilities {
-		if existing == cap {
+		if existing == capability {
 			return true
 		}
 	}
