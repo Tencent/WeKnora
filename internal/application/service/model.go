@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
@@ -33,6 +34,7 @@ type modelService struct {
 	ollamaService *ollama.OllamaService
 	pooler        embedding.EmbedderPooler
 	tenantService interfaces.TenantService
+	tokenUsage    *repository.ModelTokenUsageRepository
 }
 
 // NewModelService creates a new model service instance
@@ -42,6 +44,7 @@ func NewModelService(repo interfaces.ModelRepository,
 	ollamaService *ollama.OllamaService,
 	pooler embedding.EmbedderPooler,
 	tenantService interfaces.TenantService,
+	tokenUsage *repository.ModelTokenUsageRepository,
 ) interfaces.ModelService {
 	return &modelService{
 		repo:          repo,
@@ -50,6 +53,7 @@ func NewModelService(repo interfaces.ModelRepository,
 		ollamaService: ollamaService,
 		pooler:        pooler,
 		tenantService: tenantService,
+		tokenUsage:    tokenUsage,
 	}
 }
 
@@ -728,7 +732,11 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	chatModel, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), s.ollamaService)
+	config := chat.ConfigFromModel(model, appID, appSecret)
+	if s.tokenUsage != nil {
+		config.RecordUsage = s.tokenUsage.Record
+	}
+	chatModel, err := chat.NewChat(config, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,

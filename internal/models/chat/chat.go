@@ -90,7 +90,8 @@ type ChatConfig struct {
 	AppID         string
 	AppSecret     string // 加密值，由工厂函数调用方传入，在使用前已解密
 	// Spec carries per-row catalog overrides (protocol, compat, levels).
-	Spec *types.ModelSpecOverride
+	Spec        *types.ModelSpecOverride
+	RecordUsage func(context.Context, types.ModelTokenUsage) error
 }
 
 // ConfigFromModel 根据 types.Model 构造 ChatConfig。
@@ -128,6 +129,9 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 		c, err = NewRemoteChat(config)
 	default:
 		return nil, fmt.Errorf("unsupported chat model source: %s", config.Source)
+	}
+	if err == nil && config.RecordUsage != nil {
+		c = &usageChat{inner: c, record: config.RecordUsage}
 	}
 	c, err = wrapChatDebug(c, err)
 	c, err = wrapChatLangfuse(c, err)
