@@ -219,6 +219,8 @@ curl "$BASE/api/v1/knowledgebase/kb-1/wiki/pages?page=1" -H "Authorization: Bear
 
 用途：创建页面。请求体（`types.WikiPage`）：`slug`、`title`、`content`、`folder_id`、`page_type` 等（均可选，slug 缺省自动生成）。
 
+`source_refs` 可选，每项为 knowledge ID 或 `id|title`。服务端会逐项校验文档存在且属于当前知识库，并用服务端记录的标题重建为 `id|title`（客户端提供的 title 后缀不采信）；重复项去重，不存在、跨知识库或格式非法的条目返回 400，不会写入悬空引用。页面来源通常由 wiki 摄取流程或 Agent 的 wiki 写入工具维护，手工创建时才需要传该字段。
+
 响应：201 `WikiPage`
 
 ```bash
@@ -249,7 +251,21 @@ curl $BASE/api/v1/knowledgebase/kb-1/wiki/pages/overview -H "Authorization: Bear
 
 ### PUT /api/v1/knowledgebase/:kb_id/wiki/pages/*slug
 
-用途：更新页面（请求体同创建）。旧版本会先整份快照进 `wiki_page_revisions`，`version` 递增，`last_edit_source` 记为 `user`（Agent 工具写入时为 `agent`）。
+用途：局部更新页面。请求体为 `WikiPageUpdateRequest`，**只接受以下字段**，未传的字段保持原值：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `title` | string | 标题 |
+| `content` | string | 正文 |
+| `summary` | string | 摘要 |
+| `page_type` | string | 页面类型，非法值返回 400 |
+| `status` | string | 状态，非法值返回 400 |
+| `aliases` | string[] | 别名 |
+| `version` | int | 可选乐观锁：> 0 且与当前版本不符时返回 409，并带 `current_version` |
+
+传入上述之外的字段会返回 400，**不会静默忽略**。`source_refs`、`chunk_refs`、`in_links`、`out_links`、`page_metadata` 等由 wiki 摄取/校验流程维护，不能通过 PUT 修改；如需关联来源，请使用 Agent 的 wiki 写入工具或重新解析来源文档。
+
+旧版本会先整份快照进 `wiki_page_revisions`；仅当用户可见字段（title / content / summary / page_type / status / aliases）实际变化时 `version` 才递增，`last_edit_source` 记为 `user`（Agent 工具写入时为 `agent`）。纯元数据写入不递增版本。
 
 响应：200 `WikiPage`
 
