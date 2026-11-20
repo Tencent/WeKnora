@@ -38,6 +38,25 @@ func (r *manualChunkRepo) DeleteChunks(ctx context.Context, tenantID uint64, ids
 	return r.ChunkRepository.DeleteChunks(ctx, tenantID, ids)
 }
 
+// SplitChunkRows records the suffix row and delegates to the real
+// transactional shift+insert.
+func (r *manualChunkRepo) SplitChunkRows(
+	ctx context.Context, tenantID uint64, knowledgeID string, fromIndex int, tail *types.Chunk,
+) error {
+	r.created = append(r.created, tail)
+	return r.ChunkRepository.SplitChunkRows(ctx, tenantID, knowledgeID, fromIndex, tail)
+}
+
+// MergeChunkRows records the absorbed ids and delegates to the real
+// transactional delete+compact.
+func (r *manualChunkRepo) MergeChunkRows(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+	absorbedIDs []string, compactFrom int, delta int,
+) error {
+	r.deletedIDs = append(r.deletedIDs, absorbedIDs...)
+	return r.ChunkRepository.MergeChunkRows(ctx, tenantID, knowledgeID, absorbedIDs, compactFrom, delta)
+}
+
 func (r *manualChunkRepo) SaveChunkRevision(
 	ctx context.Context, chunk *types.Chunk, revision *types.ChunkRevision, expected int,
 ) error {
@@ -278,5 +297,107 @@ func requireRowUpdate(
 	if err := repo.db.Model(&types.Chunk{}).Where("id = ?", id).
 		Update("content", content).Error; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// --- chunk_index invariants (review on #5685) ---
+
+// chunkIndexOf reads the persisted chunk_index of one row.
+func chunkIndexOf(t *testing.T, repo *manualChunkRepo, id string) int {
+	t.Helper()
+	var row types.Chunk
+	if err := repo.db.Where("id = ?", id).First(&row).Error; err != nil {
+		t.Fatalf("load chunk %s: %v", id, err)
+	}
+	return row.ChunkIndex
+}
+
+// A manual chunk must append after the document's existing chunks instead
+// of colliding with the first one at index 0.
+func TestCreateManualChunkAppendsAfterExistingChunks(t *testing.T) {
+	svc, repo := newManualChunkServiceWithRepo(t,
+		manualTextChunk("a", 0, 0, 10),
+		manualTextChunk("b", 1, 10, 20),
+	)
+	created, err := svc.CreateManualChunk(manualChunkCtx(), "knowledge", "appended", nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.ChunkIndex != 2 {
+		t.Fatalf("manual chunk index = %d, want 2 (append after existing)", created.ChunkIndex)
+	}
+	if got := chunkIndexOf(t, repo, created.ID); got != 2 {
+		t.Fatalf("persisted index = %d, want 2", got)
+	}
+}
+
+// Splitting must shift every following chunk down so chunk_index stays
+// unique and contiguous; otherwise a later merge rejects the pair.
+func TestSplitChunkShiftsFollowingChunks(t *testing.T) {
+	svc, repo := newManualChunkServiceWithRepo(t,
+		manualTextChunk("src", 0, 0, 10),
+		manualTextChunk("next", 1, 20, 30),
+	)
+	requireRowUpdate(t, svc, repo, "chunk-src", "first half"+sepNL+"second half")
+	expected := 0
+	pair, err := svc.SplitChunk(manualChunkCtx(), "chunk-src", 10, &expected, nil)
+	if err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	if pair[1].ChunkIndex != 1 {
+		t.Fatalf("suffix index = %d, want 1", pair[1].ChunkIndex)
+	}
+	if got := chunkIndexOf(t, repo, "chunk-next"); got != 2 {
+		t.Fatalf("following chunk index = %d, want 2 after the shift", got)
+	}
+}
+
+// Merging must compact the chunks after the absorbed range so the next
+// pair is still adjacent.
+func TestMergeChunksCompactsFollowingIndexes(t *testing.T) {
+	svc, repo := newManualChunkServiceWithRepo(t,
+		manualTextChunk("a", 0, 0, 10),
+		manualTextChunk("b", 1, 10, 20),
+		manualTextChunk("c", 2, 20, 30),
+	)
+	if _, err := svc.MergeChunks(manualChunkCtx(), "knowledge",
+		[]string{"chunk-a", "chunk-b"}, nil); err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if got := chunkIndexOf(t, repo, "chunk-c"); got != 1 {
+		t.Fatalf("following chunk index = %d, want 1 after compaction", got)
+	}
+	// The compacted pair must still be mergeable.
+	if _, err := svc.MergeChunks(manualChunkCtx(), "knowledge",
+		[]string{"chunk-a", "chunk-c"}, nil); err != nil {
+		t.Fatalf("second merge after compaction: %v", err)
+	}
+}
+
+// Absorbed chunks must take their revision snapshots with them so a merge
+// never leaves orphan revisions behind.
+func TestMergeChunksDeletesAbsorbedRevisions(t *testing.T) {
+	svc, repo := newManualChunkServiceWithRepo(t,
+		manualTextChunk("a", 0, 0, 10),
+		manualTextChunk("b", 1, 10, 20),
+	)
+	if err := repo.db.Create(&types.ChunkRevision{
+		ID: "rev-b-0", TenantID: 1, KnowledgeBaseID: "kb",
+		KnowledgeID: "knowledge", ChunkID: "chunk-b", Revision: 0,
+		Content: "b body", IsEnabled: true, EditSource: "user",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.MergeChunks(manualChunkCtx(), "knowledge",
+		[]string{"chunk-a", "chunk-b"}, nil); err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	var count int64
+	if err := repo.db.Model(&types.ChunkRevision{}).
+		Where("chunk_id = ?", "chunk-b").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("absorbed chunk left %d orphan revisions", count)
 	}
 }

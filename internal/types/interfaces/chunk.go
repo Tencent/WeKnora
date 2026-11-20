@@ -109,6 +109,21 @@ type ChunkRepository interface {
 	DeleteChunk(ctx context.Context, tenantID uint64, id string) error
 	// DeleteChunks deletes chunks by IDs in batch
 	DeleteChunks(ctx context.Context, tenantID uint64, ids []string) error
+	// NextChunkIndex returns the chunk_index a newly appended text chunk
+	// should take: one past the highest index stored for the knowledge.
+	NextChunkIndex(ctx context.Context, tenantID uint64, knowledgeID string) (int, error)
+	// SplitChunkRows shifts the chunks after the split point and inserts the
+	// suffix row in one transaction so a failure never leaves a gap or a
+	// duplicate chunk_index behind.
+	SplitChunkRows(
+		ctx context.Context, tenantID uint64, knowledgeID string, fromIndex int, tail *types.Chunk,
+	) error
+	// MergeChunkRows deletes the absorbed rows with their revision snapshots
+	// and compacts the following chunk_index values in one transaction.
+	MergeChunkRows(
+		ctx context.Context, tenantID uint64, knowledgeID string,
+		absorbedIDs []string, compactFrom int, delta int,
+	) error
 	// DeleteChunksByKnowledgeID deletes chunks by knowledge id
 	DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list

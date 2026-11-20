@@ -43,6 +43,15 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 		// 更新分块信息 — KB owner OR Admin+，且对父 KB 有 write 权限
 		chunks.PUT("/:knowledge_id/:id", g.OwnedChunkKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.UpdateChunk)
 		chunks.POST("/:knowledge_id/:id/revert", g.OwnedChunkKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.RevertChunk)
+		// 手工新增分块 — KB owner OR Admin+，且对父 KB 有 write 权限
+		chunks.POST("/:knowledge_id", g.OwnedChunkKBOrAdmin(),
+			g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.CreateChunk)
+		// 合并相邻分块 — 同上
+		chunks.POST("/:knowledge_id/merge", g.OwnedChunkKBOrAdmin(),
+			g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.MergeChunks)
+		// 拆分分块 — 同上
+		chunks.POST("/:knowledge_id/:id/split", g.OwnedChunkKBOrAdmin(),
+			g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.SplitChunk)
 		// 删除单个生成的问题（通过分块 id） — 与其它 chunk mutation 一致：
 		// KB owner OR Admin+。早期这里因为链路 (chunk_id -> knowledge_id ->
 		// kb -> creator_id) 还没接通，被临时降级成 Contributor，导致一个

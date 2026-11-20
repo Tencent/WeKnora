@@ -630,13 +630,19 @@ func (h *ChunkHandler) MergeChunks(c *gin.Context) {
 // @Router       /chunks/{knowledge_id}/{id}/split [post]
 func (h *ChunkHandler) SplitChunk(c *gin.Context) {
 	ctx := c.Request.Context()
-	chunkID := c.Param("id")
+	// The chunk must belong to the :knowledge_id in the path; without this
+	// check a caller could split a chunk of another document by id alone.
+	chunk, _, err := h.fetchChunkAndVerifyOwnership(c)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
 	var req SplitChunkRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	pair, err := h.service.SplitChunk(ctx, chunkID, req.SplitAt, req.ExpectedRevision, req.IsEnabled)
+	pair, err := h.service.SplitChunk(ctx, chunk.ID, req.SplitAt, req.ExpectedRevision, req.IsEnabled)
 	if err != nil {
 		if stderrors.Is(err, service.ErrChunkRevisionConflict) {
 			_ = c.Error(errors.NewConflictError("Chunk was modified by another user; refresh and retry"))

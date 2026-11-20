@@ -55,11 +55,16 @@ func (s *chunkService) CreateManualChunk(
 	if isEnabled != nil {
 		enabled = *isEnabled
 	}
+	nextIndex, err := s.chunkRepository.NextChunkIndex(ctx, knowledge.TenantID, knowledge.ID)
+	if err != nil {
+		return nil, err
+	}
 	actorID, _ := types.UserIDFromContext(ctx)
 	chunk := &types.Chunk{
 		ID: uuid.NewString(), TenantID: knowledge.TenantID,
 		KnowledgeID: knowledge.ID, KnowledgeBaseID: knowledge.KnowledgeBaseID,
-		Content: trimmed, SourceContent: trimmed, ContentRevision: 0,
+		ChunkIndex: nextIndex,
+		Content:    trimmed, SourceContent: trimmed, ContentRevision: 0,
 		ChunkType: types.ChunkTypeText, IsEnabled: enabled,
 		IndexStatus: "processing", LastEditorID: actorID, UpdatedAt: time.Now(),
 	}
@@ -187,7 +192,13 @@ func (s *chunkService) MergeChunks(
 	if err := s.deleteChunkIndexes(ctx, chunks[1:]); err != nil {
 		logger.Warnf(ctx, "Merged chunk %s saved but absorbed index cleanup failed: %v", survivor.ID, err)
 	}
-	if err := s.chunkRepository.DeleteChunks(ctx, survivor.TenantID, absorbedIDs); err != nil {
+	// Absorbed rows are contiguous right after the survivor, so the rows that
+	// follow them shift down by the absorbed count to keep chunk_index
+	// contiguous; a later merge of the next pair depends on that.
+	compactFrom := survivor.ChunkIndex + 1 + len(absorbedIDs)
+	if err := s.chunkRepository.MergeChunkRows(
+		ctx, survivor.TenantID, survivor.KnowledgeID, absorbedIDs, compactFrom, -len(absorbedIDs),
+	); err != nil {
 		return nil, err
 	}
 	if err := s.syncEditedChunkIndex(ctx, survivor); err != nil {
@@ -260,7 +271,11 @@ func (s *chunkService) SplitChunk(
 	if err := s.chunkRepository.SaveChunkRevision(ctx, chunk, snapshot, oldRevision); err != nil {
 		return nil, err
 	}
-	if err := s.chunkRepository.CreateChunks(ctx, []*types.Chunk{tail}); err != nil {
+	// Make room for the suffix: every chunk after the split point moves one
+	// slot down so chunk_index stays contiguous and unique.
+	if err := s.chunkRepository.SplitChunkRows(
+		ctx, chunk.TenantID, chunk.KnowledgeID, tail.ChunkIndex, tail,
+	); err != nil {
 		return nil, err
 	}
 	for _, half := range []*types.Chunk{chunk, tail} {

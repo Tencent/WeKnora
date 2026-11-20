@@ -672,6 +672,77 @@ func (r *chunkRepository) DeleteChunks(ctx context.Context, tenantID uint64, ids
 	return nil
 }
 
+// NextChunkIndex returns the chunk_index a newly appended text chunk should
+// take: one past the highest index currently stored for the knowledge.
+func (r *chunkRepository) NextChunkIndex(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) (int, error) {
+	var next int
+	err := r.db.WithContext(ctx).Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_id = ? AND chunk_type = ?",
+			tenantID, knowledgeID, types.ChunkTypeText).
+		Select("COALESCE(MAX(chunk_index), -1) + 1").Scan(&next).Error
+	return next, err
+}
+
+// SplitChunkRows shifts every text chunk at or after fromIndex one slot down
+// and inserts the suffix row in the same transaction, so a manual split
+// never leaves a duplicate or a gap in the document's chunk_index sequence.
+func (r *chunkRepository) SplitChunkRows(
+	ctx context.Context, tenantID uint64, knowledgeID string, fromIndex int, tail *types.Chunk,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := shiftChunkIndexesTx(tx, tenantID, knowledgeID, fromIndex, 1); err != nil {
+			return err
+		}
+		return tx.Create(tail).Error
+	})
+}
+
+// MergeChunkRows deletes the absorbed rows together with their revision
+// snapshots and compacts the following chunk_index values in one
+// transaction, so a merge never leaves orphan revisions or index gaps.
+func (r *chunkRepository) MergeChunkRows(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+	absorbedIDs []string, compactFrom int, delta int,
+) error {
+	if len(absorbedIDs) == 0 {
+		return nil
+	}
+	const batchSize = 5000
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for i := 0; i < len(absorbedIDs); i += batchSize {
+			end := i + batchSize
+			if end > len(absorbedIDs) {
+				end = len(absorbedIDs)
+			}
+			batch := absorbedIDs[i:end]
+			if err := tx.Where("tenant_id = ? AND chunk_id IN ?", tenantID, batch).
+				Delete(&types.ChunkRevision{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("tenant_id = ? AND id IN ?", tenantID, batch).
+				Delete(&types.Chunk{}).Error; err != nil {
+				return err
+			}
+		}
+		return shiftChunkIndexesTx(tx, tenantID, knowledgeID, compactFrom, delta)
+	})
+}
+
+// shiftChunkIndexesTx moves every text chunk at or after fromIndex by delta.
+func shiftChunkIndexesTx(
+	tx *gorm.DB, tenantID uint64, knowledgeID string, fromIndex int, delta int,
+) error {
+	if delta == 0 {
+		return nil
+	}
+	return tx.Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_id = ? AND chunk_type = ? AND chunk_index >= ?",
+			tenantID, knowledgeID, types.ChunkTypeText, fromIndex).
+		UpdateColumn("chunk_index", gorm.Expr("chunk_index + ?", delta)).Error
+}
+
 // DeleteChunksByKnowledgeID soft-deletes all active chunks for a knowledge ID.
 // The rows remain available for recovery until a later successful replacement
 // proves that a newer chunk with the same document position is now active.
