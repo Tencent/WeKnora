@@ -1201,6 +1201,10 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			}
 		}
 
+		if err := s.cleanupOriginals(ctx, tenantID, kbID, knowledgeList); err != nil {
+			return err
+		}
+
 		// Collect image URLs before chunks are deleted
 		chunkImageInfos, imgErr := s.chunkRepo.ListImageInfoByKnowledgeIDs(ctx, tenantID, knowledgeIDs)
 		if imgErr != nil {
@@ -1221,15 +1225,10 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			}
 		}
 
-		// Delete physical files, extracted images, and adjust storage
-		logger.Infof(ctx, "Deleting physical files and extracted images")
+		// Delete extracted images and adjust storage. Originals were already verified.
+		logger.Infof(ctx, "Deleting extracted images")
 		storageAdjust := int64(0)
 		for _, knowledge := range knowledgeList {
-			if knowledge.FilePath != "" {
-				if err := s.fileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
-					logger.Warnf(ctx, "Failed to delete file %s: %v", knowledge.FilePath, err)
-				}
-			}
 			storageAdjust -= knowledge.StorageSize
 		}
 		deleteExtractedImages(ctx, s.fileSvc, knowledgeResourceOwners(s.resourceCatalog, knowledgeIDs...), imageURLs)
