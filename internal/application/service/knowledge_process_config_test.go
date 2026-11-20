@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,6 +24,36 @@ func testKBWithGraphEnabled(enabled bool) *types.KnowledgeBase {
 	}
 }
 
+func TestResolveProcessConfig_TokenLimitOverrideRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, TokenLimit: 128}}
+	for _, tc := range []struct {
+		name string
+		json string
+		want int
+	}{
+		{name: "omitted inherits", json: `{"chunking_config":{"chunk_size":256}}`, want: 128},
+		{name: "null inherits", json: `{"chunking_config":{"chunk_size":256,"token_limit":null}}`, want: 128},
+		{name: "zero disables", json: `{"chunking_config":{"chunk_size":256,"token_limit":0}}`, want: 0},
+		{name: "positive overrides", json: `{"chunking_config":{"chunk_size":256,"token_limit":64}}`, want: 64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var overrides types.KnowledgeProcessOverrides
+			require.NoError(t, json.Unmarshal([]byte(tc.json), &overrides))
+			effective := ResolveProcessConfig(kb, &overrides)
+			require.Equal(t, tc.want, effective.ChunkingConfig.TokenLimit)
+			require.Equal(t, 256, effective.ChunkingConfig.ChunkSize)
+
+			knowledge := &types.Knowledge{}
+			require.NoError(t, knowledge.SetProcessOverrides(&overrides))
+			saved, err := knowledge.ProcessOverrides()
+			require.NoError(t, err)
+			require.Equal(t, effective.ChunkingConfig, ResolveProcessConfig(kb, saved).ChunkingConfig)
+		})
+	}
+}
+
 func TestResolveProcessConfig_OverridesChunkSize(t *testing.T) {
 	t.Parallel()
 
@@ -30,7 +61,7 @@ func TestResolveProcessConfig_OverridesChunkSize(t *testing.T) {
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50},
 	}
 	overrides := &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 2048},
+		ChunkingConfig: &types.ChunkingConfigOverride{ChunkingConfig: types.ChunkingConfig{ChunkSize: 2048}},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
 	require.Equal(t, 2048, eff.ChunkingConfig.ChunkSize)
@@ -45,7 +76,9 @@ func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
 	}
 	effOff := ResolveProcessConfig(kbOn, &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 512, EnableParentChild: false},
+		ChunkingConfig: &types.ChunkingConfigOverride{
+			ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: false},
+		},
 	})
 	require.False(t, effOff.ChunkingConfig.EnableParentChild)
 
@@ -54,7 +87,9 @@ func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: false},
 	}
 	effOn := ResolveProcessConfig(kbOff, &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
+		ChunkingConfig: &types.ChunkingConfigOverride{
+			ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
+		},
 	})
 	require.True(t, effOn.ChunkingConfig.EnableParentChild)
 }
@@ -142,7 +177,9 @@ func TestBuildSplitterConfigFromChunking_UsesEffectiveChunkingConfig(t *testing.
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50, Strategy: "token"},
 	}
 	overrides := &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 1500, ChunkOverlap: 120, Strategy: "character"},
+		ChunkingConfig: &types.ChunkingConfigOverride{
+			ChunkingConfig: types.ChunkingConfig{ChunkSize: 1500, ChunkOverlap: 120, Strategy: "character"},
+		},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
 	cfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
@@ -328,7 +365,7 @@ func TestResolveProcessConfig_PreservesKnowledgeBasePromptInstructions(t *testin
 		ExtractConfig: &types.ExtractConfig{Enabled: true, CustomInstructions: "contract entities"},
 	}
 	overrides := &types.KnowledgeProcessOverrides{
-		ChunkingConfig:           &types.ChunkingConfig{ChunkSize: 256},
+		ChunkingConfig:           &types.ChunkingConfigOverride{ChunkingConfig: types.ChunkingConfig{ChunkSize: 256}},
 		VLMConfig:                &types.VLMConfig{Enabled: true, ModelID: "vlm-2"},
 		QuestionGenerationConfig: &types.QuestionGenerationConfig{Enabled: true, QuestionCount: 5},
 		ExtractConfig:            &types.ExtractConfig{Enabled: true},

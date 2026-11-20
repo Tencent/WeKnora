@@ -5,7 +5,7 @@ type KnowledgeProcessOverrides struct {
 	// SummaryEnabled defaults to true when omitted for backward compatibility.
 	SummaryEnabled           *bool                     `json:"summary_enabled,omitempty"`
 	ParserEngineRules        []ParserEngineRule        `json:"parser_engine_rules,omitempty"`
-	ChunkingConfig           *ChunkingConfig           `json:"chunking_config,omitempty"`
+	ChunkingConfig           *ChunkingConfigOverride   `json:"chunking_config,omitempty"`
 	EnableMultimodel         *bool                     `json:"enable_multimodel,omitempty"`
 	VLMConfig                *VLMConfig                `json:"vlm_config,omitempty"`
 	ASRConfig                *ASRConfig                `json:"asr_config,omitempty"`
@@ -35,6 +35,13 @@ type KnowledgeProcessOverrides struct {
 	// (e.g. pdf_force_scanned=true). Merged with workspace-level overrides in the
 	// parse pipeline; per-upload values take priority on conflict.
 	ParserEngineOverrides map[string]string `json:"parser_engine_overrides,omitempty"`
+}
+
+// ChunkingConfigOverride keeps the per-upload token budget optional: nil
+// inherits the knowledge base's budget and zero disables it for the document.
+type ChunkingConfigOverride struct {
+	ChunkingConfig
+	TokenLimit *int `json:"token_limit,omitempty" minimum:"0" maximum:"100000" extensions:"x-agent"`
 }
 
 // EffectiveProcessConfig is the merged view used by the parse pipeline.

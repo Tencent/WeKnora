@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -12,12 +13,14 @@ func boolPtr(v bool) *bool {
 
 func TestKnowledgeProcessOverridesRoundtrip(t *testing.T) {
 	k := &Knowledge{}
-	overrides := &KnowledgeProcessOverrides{
-		EnableMultimodel:      boolPtr(true),
-		ChunkingConfig:        &ChunkingConfig{ChunkSize: 1024},
-		ParserEngineOverrides: map[string]string{"pdf_force_scanned": "true"},
-	}
-	require.NoError(t, k.SetProcessOverrides(overrides))
+	var overrides KnowledgeProcessOverrides
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"enable_multimodel": true,
+		"chunking_config": {"chunk_size": 1024, "token_limit": 0},
+		"parser_engine_overrides": {"pdf_force_scanned": "true"}
+	}`), &overrides))
+	require.NoError(t, k.SetProcessOverrides(&overrides))
+	require.Contains(t, string(k.Metadata), `"token_limit":0`)
 	got, err := k.ProcessOverrides()
 	require.NoError(t, err)
 	require.NotNil(t, got)
