@@ -17,6 +17,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/output"
 )
 
@@ -93,6 +94,9 @@ func EmitBatch(outcomes []BatchOutcome, fopts *FormatOptions, w io.Writer, resul
 			} else if resultFn != nil {
 				items[i].Result = resultFn(o.ID)
 			}
+		}
+		if fopts.JQ != "" {
+			return mapJQError(format.WriteJSONFiltered(w, output.NewBatchEnvelope(items, globalProfile), nil, fopts.JQ))
 		}
 		return output.WriteBatchEnvelope(w, items, fopts.TTY, globalProfile)
 	}

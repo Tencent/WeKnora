@@ -18,6 +18,11 @@ type BatchItem struct {
 // (data array, not error envelope) so agents can iterate detail per id.
 // profile is the resolved profile name for the invocation; empty string omits the field.
 func WriteBatchEnvelope(w io.Writer, items []BatchItem, indent bool, profile string) error {
+	return writeJSON(w, NewBatchEnvelope(items, profile), indent)
+}
+
+// NewBatchEnvelope builds the canonical batch verdict and per-item counts.
+func NewBatchEnvelope(items []BatchItem, profile string) Envelope {
 	if items == nil {
 		items = []BatchItem{}
 	}
@@ -29,7 +34,7 @@ func WriteBatchEnvelope(w io.Writer, items []BatchItem, indent bool, profile str
 			failures++
 		}
 	}
-	env := Envelope{
+	return Envelope{
 		OK:     failures == 0,
 		Status: batchStatus(successes, failures),
 		Data:   items,
@@ -40,7 +45,6 @@ func WriteBatchEnvelope(w io.Writer, items []BatchItem, indent bool, profile str
 		},
 		Profile: profile,
 	}
-	return writeJSON(w, env, indent)
 }
 
 // batchStatus maps the (successes, failures) counts to the tri-state envelope
