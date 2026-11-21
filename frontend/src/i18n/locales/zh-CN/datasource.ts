@@ -137,6 +137,15 @@ export default {
     }
   },
   mcpSettings: {
+    qcc: {
+      quickAdd: '快捷添加 MCP 服务',
+      title: '企查查 · 企业数据',
+      description: '通过 OAuth 授权企查查账号，接入企业信息与历史数据。',
+      permissions: '可用工具和数据以账号权限为准，每位用户分别授权。',
+      manage: '管理连接',
+      add: '使用 OAuth 连接',
+      usage: '用于查询企业信息、风险、知识产权、经营与历史数据。按需发现有权使用的工具，读取定义后再调用；企业名称存在歧义时，先请用户确认主体。',
+    },
     addUsageInstructions: '添加使用说明',
     noUsageInstructions: '尚未填写使用说明',
     title: 'MCP 服务管理',

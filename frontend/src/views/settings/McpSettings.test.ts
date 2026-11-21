@@ -269,3 +269,59 @@ test('a service link opens that service and drops the query', async () => {
     assert.deepEqual(missing.warnings, ['mcpSettings.toasts.linkedServiceMissing'])
   } finally { missing.close() }
 })
+
+test('QCC preset opens an OAuth draft without creating or changing a service', async () => {
+  const f = await fixture()
+  try {
+    f.vm.handleQccPreset()
+    assert.equal(f.vm.dialogVisible, true)
+    assert.equal(f.vm.dialogMode, 'add')
+    assert.equal(f.vm.currentService.id, '')
+    assert.equal(f.vm.currentService.url, 'https://agent.qcc.com/mcp/company/stream')
+    assert.equal(f.vm.currentService.transport_type, 'http-streamable')
+    assert.deepEqual({ ...f.vm.currentService.auth_config }, { auth_type: 'oauth' })
+    assert.equal(f.vm.currentService.headers, undefined)
+    assert.equal(f.calls.length, 0)
+    f.vm.handleAdd()
+    assert.equal(f.vm.currentService, null)
+  } finally { f.close() }
+})
+
+test('QCC preset reopens the exact existing endpoint without replacing its auth', async () => {
+  const f = await fixture()
+  try {
+    Object.assign(f.service, {
+      name: 'My company connector', url: 'https://agent.qcc.com/mcp/company/stream',
+      auth_config: { auth_type: 'api_key' }, enabled: false,
+    })
+    f.vm.handleQccPreset()
+    assert.equal(f.vm.dialogMode, 'edit')
+    assert.equal(f.vm.currentService.id, 'one')
+    assert.equal(f.vm.currentService.auth_config.auth_type, 'api_key')
+    assert.equal(f.vm.currentService.enabled, false)
+    assert.equal(f.calls.length, 0)
+  } finally { f.close() }
+})
+
+test('QCC preset does not match another URL by name or prefix', async () => {
+  const f = await fixture()
+  try {
+    for (const url of ['https://example.com/mcp', 'https://agent.qcc.com/mcp/company/stream-other']) {
+      Object.assign(f.service, { name: '企查查 · 企业数据', url })
+      f.vm.handleQccPreset()
+      assert.equal(f.vm.dialogMode, 'add')
+      assert.equal(f.vm.currentService.id, '')
+      assert.equal(f.vm.currentService.url, 'https://agent.qcc.com/mcp/company/stream')
+    }
+  } finally { f.close() }
+})
+
+test('QCC preset cannot be opened by a non-admin', async () => {
+  const f = await fixture(undefined, false)
+  try {
+    f.vm.handleQccPreset()
+    assert.equal(f.vm.dialogVisible, false)
+    assert.equal(f.vm.currentService, null)
+    assert.equal(f.calls.length, 0)
+  } finally { f.close() }
+})
