@@ -185,6 +185,15 @@ const handleQccPreset = () => {
     url: qccEndpoint,
     auth_type: 'oauth',
   })
+  // QCC publishes authorization metadata at the origin, not the MCP path.
+  // Avoid SDK fallback to guessed /register and /token endpoints.
+  if (currentService.value) {
+    currentService.value.auth_config = {
+      auth_type: 'oauth',
+      auth_server_metadata_url: 'https://agent.qcc.com/.well-known/oauth-authorization-server',
+      scopes: ['mcp:tools'],
+    }
+  }
 }
 const filteredServices = computed(() => services.value.filter((service) =>
   matchesResourceQuery({ name: service.name, description: serviceUsage(service) }, query.value),

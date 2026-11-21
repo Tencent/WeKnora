@@ -279,7 +279,11 @@ test('QCC preset opens an OAuth draft without creating or changing a service', a
     assert.equal(f.vm.currentService.id, '')
     assert.equal(f.vm.currentService.url, 'https://agent.qcc.com/mcp/company/stream')
     assert.equal(f.vm.currentService.transport_type, 'http-streamable')
-    assert.deepEqual({ ...f.vm.currentService.auth_config }, { auth_type: 'oauth' })
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.currentService.auth_config)), {
+      auth_type: 'oauth',
+      auth_server_metadata_url: 'https://agent.qcc.com/.well-known/oauth-authorization-server',
+      scopes: ['mcp:tools'],
+    })
     assert.equal(f.vm.currentService.headers, undefined)
     assert.equal(f.calls.length, 0)
     f.vm.handleAdd()
