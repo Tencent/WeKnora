@@ -27,16 +27,21 @@ const EmbedVisitorHeader = "X-Embed-Visitor"
 // LIKE '<prefix>%' selects every API-key session in the tenant.
 const SessionOwnerAPITenantKeyPrefix = "api_tenant_key:"
 
+// SessionOwnerAPIPlatformPrefix prefixes sessions.user_id for rows created by a
+// platform API key. The full owner id is "api_platform:<keyID>".
+const SessionOwnerAPIPlatformPrefix = PrincipalAPIPlatform + ":"
+
 // SessionOwnerAPIExternalUserPrefix prefixes sessions.user_id for rows created
 // by a tenant API key whose request resolved an external-user identity. The
 // remainder is "<tenantID>:<externalUserID>".
 const SessionOwnerAPIExternalUserPrefix = PrincipalAPIExternalUser + ":"
 
 // IsAPISessionOwnerID reports whether a stored session owner was produced by
-// a tenant API-key request, with or without an external-user identity.
+// an API-key request (tenant key, platform key, or external user).
 func IsAPISessionOwnerID(ownerID string) bool {
 	ownerID = strings.TrimSpace(ownerID)
 	return strings.HasPrefix(ownerID, SessionOwnerAPITenantKeyPrefix) ||
+		strings.HasPrefix(ownerID, SessionOwnerAPIPlatformPrefix) ||
 		strings.HasPrefix(ownerID, SessionOwnerAPIExternalUserPrefix)
 }
 
@@ -201,7 +206,7 @@ func MCPOAuthPrincipalFromContext(ctx context.Context) Principal {
 func SessionOwnerIDFromContext(ctx context.Context) string {
 	if p, ok := PrincipalFromContext(ctx); ok {
 		switch p.Type {
-		case PrincipalAPIExternalUser, PrincipalEmbedSession, PrincipalMCPEndpoint:
+		case PrincipalAPIExternalUser, PrincipalEmbedSession, PrincipalMCPEndpoint, PrincipalAPIPlatform:
 			return p.StorageID()
 		case PrincipalAPITenant:
 			if scope, ok := TenantAPIKeyScopeFromContext(ctx); ok && scope.KeyID > 0 {
