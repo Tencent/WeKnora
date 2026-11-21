@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
 import { after, test } from 'node:test'
 
 import { WeknoraApiError, WeknoraClient } from '../dist/client.js'
@@ -139,4 +140,19 @@ test('caller cancellation aborts an in-flight call', async () => {
 test('an unreachable backend reports a transport failure', async () => {
   const client = new WeknoraClient(resolveConfig({ baseUrl: 'http://127.0.0.1:1/api/v1', requestTimeoutMs: 1000 }))
   await assert.rejects(client.listKnowledgeBases(never), WeknoraApiError)
+})
+
+test('error snippets never split astral characters at the response budget', async () => {
+  const server = createServer((_request, response) => {
+    response.writeHead(502)
+    response.end(`${'x'.repeat(299)}𝑄 trailing text`)
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  after(() => new Promise(resolve => server.close(resolve)))
+  const client = new WeknoraClient(resolveConfig({ baseUrl: `http://127.0.0.1:${server.address().port}` }))
+  await assert.rejects(client.listKnowledgeBases(never), error => {
+    assert.equal(error.message.isWellFormed(), true, 'error snippet must contain no unpaired surrogates')
+    assert.ok(error.message.endsWith(`${'x'.repeat(299)}…`))
+    return true
+  })
 })

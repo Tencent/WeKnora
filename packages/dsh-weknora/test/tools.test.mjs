@@ -359,3 +359,12 @@ test('handle mode keeps internal resource handles instead of public URLs', async
   const hit = value.results.find(result => result.knowledge_id === 'doc-architecture')
   assert.ok(hit.content.includes(`![系统架构](${ARCH_HANDLE})`))
 })
+
+test('rendering repairs malformed document titles from the backend', async () => {
+  const { byName } = await toolset()
+  const document = byName.get('weknora_read_document')
+  const { value } = await call(document, { knowledge_id: 'doc-retrieval-pipeline' })
+  const rendered = document.output.render({}, { ...value, title: 'Code \ud835 title \udc00 𝑄' })[0].text
+  assert.equal(rendered.isWellFormed(), true, 'rendered document title must contain no unpaired surrogates')
+  assert.match(rendered, /Code � title � 𝑄/)
+})

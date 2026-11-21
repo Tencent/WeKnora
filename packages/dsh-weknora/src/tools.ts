@@ -3,7 +3,7 @@
 import type { ChunkRecord, DocumentRecord, SearchResult, WeknoraClient } from './client.ts'
 import type { ResolvedConfig } from './config.ts'
 import type { JsonSchemaNode, TextContentBlock, ToolDefinition } from './harness.ts'
-import { clip, describeScope, formatScore } from './render.ts'
+import { clip, describeScope, formatScore, wellFormed } from './render.ts'
 
 /** A retrieval hit projected onto the fields the model and follow-up calls need. */
 interface SearchHit {
@@ -59,7 +59,7 @@ interface AskValue {
   references: { knowledge_id: string, document: string, chunk_index: number, content: string }[]
 }
 
-const text = (value: string): TextContentBlock[] => [{ type: 'text', text: value }]
+const text = (value: string): TextContentBlock[] => [{ type: 'text', text: wellFormed(value) }]
 
 const STRING_ARRAY: JsonSchemaNode = { type: 'array', items: { type: 'string' } }
 
