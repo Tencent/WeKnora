@@ -238,6 +238,9 @@ const localConfig = reactive<RetrievalConfig & { chunk_feedback: ChunkFeedbackCo
   chunk_feedback: { ...defaultFeedback },
 })
 let initialConfig: RetrievalConfig = { ...defaultConfig }
+// 服务端原本有没有 chunk_feedback：没有时，未动过的默认值不参与保存，
+// 保持 PUT 内容与读回的配置一致（后端缺省即默认策略，功能开着）。
+let serverHadFeedback = false
 const SAVE_DEBOUNCE_MS = 500
 const INITIALIZATION_DELAY_MS = 100
 let initializationTimer: number | null = null
@@ -265,6 +268,7 @@ const loadConfig = async () => {
     const response = await getTenantRetrievalConfig()
     if (!isCurrentView() || !response.data) return
     const cfg = response.data
+    serverHadFeedback = cfg.chunk_feedback != null
     Object.assign(localConfig, {
       embedding_top_k: cfg.embedding_top_k || defaultConfig.embedding_top_k,
       vector_threshold: cfg.vector_threshold || defaultConfig.vector_threshold,
@@ -299,9 +303,17 @@ const saveConfig = async () => {
   saveRequested = false
   if (!hasConfigChanged()) return
 
-  const submittedConfig = {
-    ...localConfig,
-    chunk_feedback: { ...localConfig.chunk_feedback },
+  // 只在服务端原本就有、或用户改过反馈设置时才提交 chunk_feedback；
+  // 否则不写默认值，PUT 内容保持与读回的配置一致。
+  const feedbackTouched =
+    serverHadFeedback || JSON.stringify(localConfig.chunk_feedback) !== JSON.stringify(defaultFeedback)
+  // 提交快照按提交时刻取：请求期间的新编辑不能算进已保存的快照里。
+  const submittedFeedback = { ...localConfig.chunk_feedback }
+  const submittedConfig: RetrievalConfig = { ...localConfig }
+  if (feedbackTouched) {
+    submittedConfig.chunk_feedback = { ...submittedFeedback }
+  } else {
+    delete submittedConfig.chunk_feedback
   }
   isSaving = true
   let request: ReturnType<typeof updateTenantRetrievalConfig> | undefined
@@ -312,7 +324,11 @@ const saveConfig = async () => {
     if (!isCurrentView()) return
     if (!response.data) throw new Error('Missing retrieval configuration in save response')
     // 只能确认本次提交的快照，不能把请求期间的新编辑也标记为已保存。
-    initialConfig = { ...submittedConfig, chunk_feedback: { ...submittedConfig.chunk_feedback } }
+    // 先铺 localConfig 只为保留原有键顺序（hasConfigChanged 用 JSON.stringify 比较，
+    // 键顺序变了也会判为已改动）；值全部以本次提交的快照为准。
+    // 服务端有没有该字段由 serverHadFeedback 单独记。
+    initialConfig = { ...localConfig, ...submittedConfig, chunk_feedback: submittedFeedback }
+    if (feedbackTouched) serverHadFeedback = true
     if (!hasConfigChanged()) MessagePlugin.success(t('retrievalSettings.toasts.saveSuccess'))
   } catch (error: any) {
     if (!isCurrentView()) return
