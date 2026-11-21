@@ -141,6 +141,25 @@ def _mhtml_with_8bit_utf8_headers() -> bytes:
 
 
 class MHTMLParserTest(unittest.TestCase):
+    def test_malformed_image_location_keeps_content_id_image(self):
+        archive = email.message_from_bytes(_minimal_mhtml_bytes())
+        image = next(
+            part for part in archive.walk() if part.get_content_type() == "image/png"
+        )
+        image.replace_header("Content-Location", "http://[broken/attachment.png")
+        image["Content-ID"] = "<tiny-image>"
+
+        document = MHTMLParser(file_name="article.mhtml", file_type="mhtml").parse(
+            archive.as_bytes()
+        )
+
+        self.assertIn("Hello MHTML world", document.content)
+        self.assertEqual(len(document.images), 1)
+        image_path, data = next(iter(document.images.items()))
+        self.assertTrue(image_path.endswith(".png"))
+        self.assertIn(f"![tiny]({image_path})", document.content)
+        self.assertEqual(base64.b64decode(data), image.get_payload(decode=True))
+
     def test_parse_selects_main_html_and_filters_noise(self):
         document = MHTMLParser(
             file_name="article.mhtml", file_type="mhtml"
