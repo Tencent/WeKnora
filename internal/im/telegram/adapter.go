@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 
 	"github.com/gin-gonic/gin"
 
@@ -219,30 +220,65 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 	chatID := resolveChatID(incoming)
 	text := im.FormatIMDisplayContent(reply.Content, im.StreamDisplayFinal)
 
+	for _, part := range splitMessageText(text) {
+		if err := a.sendMessage(ctx, chatID, incoming.ThreadID, part); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// maxMessageUnits is the Bot API limit on the text of sendMessage and
+// editMessageText: "1-4096 characters after entities parsing". It is counted
+// here in UTF-16 code units, the unit of the API's entity offsets; a text never
+// has fewer of them than code points, so a part fits under either reading. The
+// text before parsing is never shorter than after.
+const maxMessageUnits = 4096
+
+// splitMessageText cuts text into parts of at most maxMessageUnits, at a rune
+// boundary and at a line break when one falls in the second half of a part.
+// The parts joined together are the text again.
+func splitMessageText(text string) []string {
+	var parts []string
+	for {
+		cut, units := 0, 0
+		for i, r := range text {
+			if units += utf16.RuneLen(r); units > maxMessageUnits {
+				cut = i
+				break
+			}
+		}
+		if cut == 0 {
+			return append(parts, text)
+		}
+		if newline := strings.LastIndexByte(text[:cut], '\n'); newline >= cut/2 {
+			cut = newline + 1
+		}
+		parts = append(parts, text[:cut])
+		text = text[cut:]
+	}
+}
+
+// sendMessage sends one message. A part of a split answer can end inside a
+// Markdown entity, which Telegram rejects, so it is retried as plain text.
+func (a *Adapter) sendMessage(ctx context.Context, chatID, threadID, text string) error {
 	body := map[string]interface{}{
 		"chat_id":    chatID,
 		"text":       text,
 		"parse_mode": "Markdown",
 	}
-	if incoming.ThreadID != "" {
-		if tid, err := strconv.Atoi(incoming.ThreadID); err == nil {
+	if threadID != "" {
+		if tid, err := strconv.Atoi(threadID); err == nil {
 			body["message_thread_id"] = tid
 		}
 	}
-	return a.callAPI(ctx, "sendMessage", body)
-}
-
-func (a *Adapter) sendMessage(ctx context.Context, chatID, text, replyToMessageID string) error {
-	body := map[string]interface{}{
-		"chat_id":    chatID,
-		"text":       text,
-		"parse_mode": "Markdown",
+	err := a.callAPI(ctx, "sendMessage", body)
+	if err != nil {
+		logger.Warnf(ctx, "[Telegram] Markdown send failed, retrying plain: %v", err)
+		delete(body, "parse_mode")
+		err = a.callAPI(ctx, "sendMessage", body)
 	}
-	if replyToMessageID != "" {
-		body["reply_to_message_id"] = replyToMessageID
-	}
-
-	return a.callAPI(ctx, "sendMessage", body)
+	return err
 }
 
 func (a *Adapter) editMessage(ctx context.Context, chatID, messageID, text, parseMode string) error {
@@ -443,10 +479,21 @@ func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessa
 	msgID := state.msgID
 	state.mu.Unlock()
 
-	if err := a.editMessage(ctx, chatID, msgID, finalContent, "Markdown"); err != nil {
+	// The placeholder holds the first part of an answer over the message
+	// limit; the rest follows as new messages.
+	parts := splitMessageText(finalContent)
+	if err := a.editMessage(ctx, chatID, msgID, parts[0], "Markdown"); err != nil {
 		logger.Warnf(ctx, "[Telegram] Markdown finalize failed, retrying plain: %v", err)
-		if retryErr := a.editMessage(ctx, chatID, msgID, finalContent, ""); retryErr != nil {
+		if retryErr := a.editMessage(ctx, chatID, msgID, parts[0], ""); retryErr != nil {
 			logger.Warnf(ctx, "[Telegram] Failed to finalize stream: %v", retryErr)
+		}
+	}
+	for _, part := range parts[1:] {
+		if strings.TrimSpace(part) == "" {
+			continue // Telegram rejects a message with no text
+		}
+		if err := a.sendMessage(ctx, chatID, incoming.ThreadID, part); err != nil {
+			return fmt.Errorf("telegram finalize stream: %w", err)
 		}
 	}
 	return nil
