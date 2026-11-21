@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,7 +28,8 @@ import (
 )
 
 const (
-	defaultWSEndpoint = "wss://openws.work.weixin.qq.com"
+	defaultWSEndpoint     = "wss://openws.work.weixin.qq.com"
+	weComImageReplyNotice = "已生成图文回复，请查看下方消息。"
 
 	cmdSubscribe     = "aibot_subscribe"
 	cmdPing          = "ping"
@@ -51,6 +53,8 @@ const (
 	// — every other channel operation in the process.
 	writeTimeout = 10 * time.Second
 )
+
+var markdownHTTPImagePattern = regexp.MustCompile(`(?i)!\[[^\]\r\n]*\]\(\s*https?://`)
 
 // wsFrame is the JSON frame exchanged over the WeCom bot WebSocket.
 type wsFrame struct {
@@ -121,6 +125,15 @@ type streamReplyBody struct {
 		Finish  bool   `json:"finish"`
 		Content string `json:"content"`
 	} `json:"stream"`
+}
+
+// markdownReplyBody is a complete Markdown reply. WeCom's long-connection
+// protocol supports images in Markdown, but not msg_item attachments.
+type markdownReplyBody struct {
+	MsgType  string `json:"msgtype"`
+	Markdown struct {
+		Content string `json:"content"`
+	} `json:"markdown"`
 }
 
 // MessageHandler is called when an IM message is received via long connection.
@@ -224,12 +237,8 @@ func (c *LongConnClient) Stop() {
 // SendReply sends a text reply through the WebSocket connection.
 // This is used by the IM service to reply to messages in long connection mode.
 func (c *LongConnClient) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
-	var reqID string
-	if incoming.Extra != nil {
-		reqID = incoming.Extra["req_id"]
-	}
-	if reqID == "" {
-		return fmt.Errorf("missing req_id in incoming message extra")
+	if markdownHTTPImagePattern.MatchString(reply.Content) {
+		return c.sendMarkdownReply(incoming, reply.Content)
 	}
 
 	// Generate a unique stream ID for this reply
@@ -240,18 +249,33 @@ func (c *LongConnClient) SendReply(ctx context.Context, incoming *im.IncomingMes
 	body.Stream.Finish = true
 	body.Stream.Content = reply.Content
 
+	return c.sendReplyBody(incoming, body)
+}
+
+func (c *LongConnClient) sendMarkdownReply(incoming *im.IncomingMessage, content string) error {
+	body := markdownReplyBody{MsgType: "markdown"}
+	body.Markdown.Content = content
+	return c.sendReplyBody(incoming, body)
+}
+
+func (c *LongConnClient) sendReplyBody(incoming *im.IncomingMessage, body any) error {
+	var reqID string
+	if incoming.Extra != nil {
+		reqID = incoming.Extra["req_id"]
+	}
+	if reqID == "" {
+		return fmt.Errorf("missing req_id in incoming message extra")
+	}
+
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal reply body: %w", err)
 	}
-
-	frame := wsFrame{
+	return c.writeJSON(wsFrame{
 		Cmd:     cmdResponse,
 		Headers: map[string]string{"req_id": reqID},
 		Body:    bodyBytes,
-	}
-
-	return c.writeJSON(frame)
+	})
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -298,6 +322,15 @@ func (c *LongConnClient) UpdateStreamContent(ctx context.Context, incoming *im.I
 
 // FinalizeStream replaces the display with answer-only content before the stream ends.
 func (c *LongConnClient) FinalizeStream(ctx context.Context, incoming *im.IncomingMessage, streamID string, finalContent string) error {
+	if markdownHTTPImagePattern.MatchString(finalContent) {
+		// WeCom does not reliably render Markdown images in a stream. Finish
+		// the original bubble with non-empty text, then send the full answer
+		// as a separate Markdown message.
+		if err := c.UpdateStreamContent(ctx, incoming, streamID, weComImageReplyNotice); err != nil {
+			return err
+		}
+		return c.sendMarkdownReply(incoming, finalContent)
+	}
 	return c.UpdateStreamContent(ctx, incoming, streamID, finalContent)
 }
 

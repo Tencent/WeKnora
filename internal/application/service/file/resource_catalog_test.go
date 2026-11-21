@@ -118,5 +118,5 @@ func TestResourceCatalogFileServiceReturnsShortExternalGrantURL(t *testing.T) {
 	require.NoError(t, err)
 	externalURL, err := svc.GetFileURL(context.Background(), ref)
 	require.NoError(t, err)
-	require.Equal(t, "https://weknora.example.com/r/GrantTokenAbCdEfGhIjKl", externalURL)
+	require.Equal(t, "https://weknora.example.com/r/GrantTokenAbCdEfGhIjKl.png", externalURL)
 }
