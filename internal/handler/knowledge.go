@@ -357,6 +357,13 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", maxSizeMB)))
 		return
 	}
+	// Legacy-codepage (GBK) multipart filenames from curl-on-Windows builds
+	// would otherwise reach storage unfiltered and the resource-registry
+	// INSERT fails with "invalid byte sequence for encoding UTF8" (issue
+	// #4268). Normalize the header in place so every later consumer —
+	// validation, the stored resource's original name, the title — sees the
+	// rescued UTF-8 name; valid UTF-8 names pass through byte-for-byte.
+	file.Filename = secutils.NormalizeMultipartFilename(file.Filename)
 
 	// Get custom filename if provided (for folder uploads with path)
 	customFileName := c.PostForm("fileName")
