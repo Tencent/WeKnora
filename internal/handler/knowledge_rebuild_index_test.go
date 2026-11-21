@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -45,11 +46,11 @@ func rebuildIndexTestHandler(kg *rebuildIndexKnowledge, q *rebuildIndexEnqueuer)
 	}
 }
 
-func serveRebuildIndex(t *testing.T, h *KnowledgeHandler) (int, map[string]any) {
+func serveRebuildIndex(t *testing.T, h *KnowledgeHandler, reqBody ...string) (int, map[string]any) {
 	t.Helper()
 	r := documentHandlerRouter()
 	r.POST("/:id/rebuild-index", h.RebuildKnowledgeBaseIndex)
-	w := mutationRequest(r, http.MethodPost, "/kb/rebuild-index", "")
+	w := mutationRequest(r, http.MethodPost, "/kb/rebuild-index", strings.Join(reqBody, ""))
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	return w.Code, body
@@ -85,7 +86,9 @@ func TestRebuildKnowledgeBaseIndexEnqueuesAllDocuments(t *testing.T) {
 	require.Equal(t, float64(3), data["document_count"])
 	require.Len(t, data["task_ids"].([]any), 1)
 
+	require.Equal(t, types.RebuildIndexModeReparse, data["mode"])
 	require.Len(t, q.tasks, 1)
+	require.Equal(t, types.TypeKnowledgeListReparse, q.tasks[0].Type(), "no body keeps the reparse behaviour")
 	payload := decodeReparsePayload(t, q.tasks[0])
 	require.Equal(t, "kb", payload.KnowledgeBaseID)
 	require.Equal(t, uint64(7), payload.TenantID)
@@ -130,4 +133,47 @@ func TestRebuildKnowledgeBaseIndexRejectsEmptyKB(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, code)
 	require.Empty(t, q.tasks)
+}
+
+func TestRebuildKnowledgeBaseIndexReembedModeEnqueuesReembedTasks(t *testing.T) {
+	kg := &rebuildIndexKnowledge{rows: rebuildIndexDocs(250)}
+	q := &rebuildIndexEnqueuer{}
+	code, body := serveRebuildIndex(t, rebuildIndexTestHandler(kg, q), `{"mode":"reembed"}`)
+
+	require.Equal(t, http.StatusOK, code, body)
+	data := body["data"].(map[string]any)
+	require.Equal(t, types.RebuildIndexModeReembed, data["mode"])
+	require.Len(t, q.tasks, 2, "same per-task cap as reparse")
+	for _, task := range q.tasks {
+		require.Equal(t, types.TypeKnowledgeListReembed, task.Type())
+	}
+	var payload types.KnowledgeListReembedPayload
+	require.NoError(t, json.Unmarshal(q.tasks[1].Payload(), &payload))
+	require.Equal(t, "kb", payload.KnowledgeBaseID)
+	require.Equal(t, uint64(7), payload.TenantID)
+	require.Len(t, payload.KnowledgeIDs, 50)
+}
+
+func TestRebuildKnowledgeBaseIndexReparseBodies(t *testing.T) {
+	// "{}" is what the KB settings modal sends.
+	for _, reqBody := range []string{`{}`, `{"mode":"reparse"}`} {
+		kg := &rebuildIndexKnowledge{rows: rebuildIndexDocs(1)}
+		q := &rebuildIndexEnqueuer{}
+		code, body := serveRebuildIndex(t, rebuildIndexTestHandler(kg, q), reqBody)
+
+		require.Equal(t, http.StatusOK, code, body)
+		require.Len(t, q.tasks, 1, reqBody)
+		require.Equal(t, types.TypeKnowledgeListReparse, q.tasks[0].Type(), reqBody)
+	}
+}
+
+func TestRebuildKnowledgeBaseIndexRejectsUnknownMode(t *testing.T) {
+	for _, reqBody := range []string{`{"mode":"rebuild"}`, `{"mode":`} {
+		kg := &rebuildIndexKnowledge{rows: rebuildIndexDocs(1)}
+		q := &rebuildIndexEnqueuer{}
+		code, _ := serveRebuildIndex(t, rebuildIndexTestHandler(kg, q), reqBody)
+
+		require.Equal(t, http.StatusBadRequest, code, reqBody)
+		require.Empty(t, q.tasks, reqBody)
+	}
 }

@@ -18,8 +18,9 @@ import (
 // never per-chunk string interpolation.
 //
 // Targets the cross-dim <base>_* pattern: a chunk's embedding dimension is
-// not known here, and the same chunk_id is unique across the store's dim
-// indices + the keyword-only index.
+// not known here. All documents of a chunk (its text and its generated
+// questions) share its chunk_id, so the terms filter reaches each of them
+// in whichever of the store's indices holds it.
 func (r *Repository) BatchUpdateChunkEnabledStatus(ctx context.Context, chunkStatusMap map[string]bool) error {
 	if len(chunkStatusMap) == 0 {
 		return nil

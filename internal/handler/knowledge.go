@@ -291,6 +291,48 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 	return info.ID, nil
 }
 
+// enqueueKnowledgeListReembed enqueues an async re-embed task for the given
+// knowledge IDs and returns the asynq task ID.
+func (h *KnowledgeHandler) enqueueKnowledgeListReembed(
+	ctx context.Context, tenantID uint64, kbID string, ids []string,
+) (string, error) {
+	payload := types.KnowledgeListReembedPayload{
+		KnowledgeBaseID: kbID,
+		TenantID:        tenantID,
+		KnowledgeIDs:    ids,
+		Initiator:       types.TaskInitiatorFromContext(ctx),
+	}
+	langfuse.InjectTracing(ctx, &payload)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal payload: %w", err)
+	}
+	task := asynq.NewTask(types.TypeKnowledgeListReembed, payloadBytes,
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(time.Hour))
+	info, err := h.asynqClient.Enqueue(task)
+	if err != nil {
+		return "", fmt.Errorf("enqueue task: %w", err)
+	}
+	return info.ID, nil
+}
+
+// rebuildIndexMode reads the optional rebuild-index body. An empty body keeps
+// the reparse behaviour existing callers rely on.
+func rebuildIndexMode(c *gin.Context) (string, error) {
+	var req RebuildIndexRequest
+	if err := c.ShouldBindJSON(&req); err != nil && !goerrors.Is(err, io.EOF) {
+		return "", errors.NewBadRequestError("invalid request body")
+	}
+	switch mode := strings.TrimSpace(req.Mode); mode {
+	case "", types.RebuildIndexModeReparse:
+		return types.RebuildIndexModeReparse, nil
+	case types.RebuildIndexModeReembed:
+		return mode, nil
+	default:
+		return "", errors.NewBadRequestError("mode must be reparse or reembed")
+	}
+}
+
 // CreateKnowledgeFromFile godoc
 // @Summary      从文件创建知识
 // @Description  上传文件并创建知识条目
@@ -3440,13 +3482,24 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 	})
 }
 
+// RebuildIndexRequest is the optional body of
+// POST /knowledge-bases/{id}/rebuild-index.
+type RebuildIndexRequest struct {
+	// Mode is "reparse" (the default) or "reembed".
+	Mode string `json:"mode" enums:"reparse,reembed"`
+}
+
 // RebuildKnowledgeBaseIndex godoc
 // @Summary      重建整个知识库的索引
 // @Description  索引策略变更后，把知识库下全部文档提交重新解析。前端知识库设置弹窗
 // @Description  (KnowledgeBaseEditorModal) 在保存新策略后调用此接口，此前该路由在后端缺失，调用返回 404。
+// @Description  mode=reembed rebuilds the index entries from the stored chunks and generated
+// @Description  questions instead, calling only the embedding model (no re-parse, no LLM or VLM calls).
 // @Tags         知识管理
+// @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "知识库ID"
+// @Param        id       path      string               true   "知识库ID"
+// @Param        request  body      RebuildIndexRequest  false  "Rebuild mode, defaults to reparse"
 // @Success      200  {object}  handler.DataResponse  "任务已提交"
 // @Failure      400  {object}  errors.AppError       "请求参数错误"
 // @Failure      403  {object}  errors.AppError       "权限不足"
@@ -3472,6 +3525,11 @@ func (h *KnowledgeHandler) RebuildKnowledgeBaseIndex(c *gin.Context) {
 		return
 	}
 	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		_ = c.Error(err)
+		return
+	}
+	mode, err := rebuildIndexMode(c)
+	if err != nil {
 		_ = c.Error(err)
 		return
 	}
@@ -3510,7 +3568,12 @@ func (h *KnowledgeHandler) RebuildKnowledgeBaseIndex(c *gin.Context) {
 		if end > len(ids) {
 			end = len(ids)
 		}
-		taskID, err := h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, kbID, ids[start:end], nil)
+		var taskID string
+		if mode == types.RebuildIndexModeReembed {
+			taskID, err = h.enqueueKnowledgeListReembed(ctx, effectiveTenantID, kbID, ids[start:end])
+		} else {
+			taskID, err = h.enqueueKnowledgeListReparse(ctx, effectiveTenantID, kbID, ids[start:end], nil)
+		}
 		if err != nil {
 			logger.Errorf(ctx, "failed to enqueue rebuild-index task, kb_id: %s, err: %v",
 				secutils.SanitizeForLog(kbID), err)
@@ -3520,8 +3583,8 @@ func (h *KnowledgeHandler) RebuildKnowledgeBaseIndex(c *gin.Context) {
 		taskIDs = append(taskIDs, taskID)
 	}
 
-	logger.Infof(ctx, "Rebuild index tasks enqueued: kb_id: %s, documents: %d, tasks: %d",
-		secutils.SanitizeForLog(kbID), len(ids), len(taskIDs))
+	logger.Infof(ctx, "Rebuild index tasks enqueued: kb_id: %s, mode: %s, documents: %d, tasks: %d",
+		secutils.SanitizeForLog(kbID), mode, len(ids), len(taskIDs))
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -3529,6 +3592,7 @@ func (h *KnowledgeHandler) RebuildKnowledgeBaseIndex(c *gin.Context) {
 		"data": gin.H{
 			"document_count": len(ids),
 			"task_ids":       taskIDs,
+			"mode":           mode,
 		},
 	})
 }

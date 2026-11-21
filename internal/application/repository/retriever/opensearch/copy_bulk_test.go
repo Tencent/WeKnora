@@ -2,6 +2,8 @@ package opensearch
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -48,18 +50,23 @@ func TestCopyIndices_EmptyMapping_NoOp(t *testing.T) {
 // BatchSave's lookup key), and emits one reindex audit event.
 func TestCopyIndices_ScanThenBatchSave(t *testing.T) {
 	var (
-		mu        sync.Mutex
-		bulkBody  string
-		searchCnt int
+		mu         sync.Mutex
+		bulkBody   string
+		searchBody string
+		searchCnt  int
 	)
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodHead:
 			w.WriteHeader(http.StatusOK) // alias exists → ensureReady no-op
 		case strings.Contains(r.URL.Path, "_search"):
+			b, _ := io.ReadAll(r.Body)
 			mu.Lock()
 			searchCnt++
 			first := searchCnt == 1
+			if first {
+				searchBody = string(b)
+			}
 			mu.Unlock()
 			if first {
 				_, _ = w.Write([]byte(`{"hits":{"hits":[
@@ -95,6 +102,10 @@ func TestCopyIndices_ScanThenBatchSave(t *testing.T) {
 	defer mu.Unlock()
 	if bulkBody == "" {
 		t.Fatal("no bulk request captured")
+	}
+	// The scan reads only the knowledge entries being copied, not the whole KB.
+	if !strings.Contains(searchBody, `"terms":{"knowledge_id":["srcKnow"]}`) {
+		t.Errorf("scan query missing knowledge_id filter\n%s", searchBody)
 	}
 	// Target IDs present, source IDs gone from the written doc.
 	for _, want := range []string{`"chunk_id":"tgtChunk"`, `"knowledge_id":"tgtKnow"`, `"knowledge_base_id":"kbDst"`, `"source_id":"tgtChunk"`} {
@@ -190,4 +201,76 @@ func TestInspectByQueryResponse(t *testing.T) {
 			t.Errorf("error should surface bounded type: %v", err)
 		}
 	})
+}
+
+// TestCopyIndices_KeepsPerDocumentEnabledFlag verifies that documents of one
+// chunk keep their own is_enabled when copied: a disabled chunk text must not
+// be re-enabled by its generated question that happens to be scanned last.
+func TestCopyIndices_KeepsPerDocumentEnabledFlag(t *testing.T) {
+	var (
+		mu        sync.Mutex
+		bulkBody  string
+		searchCnt int
+	)
+	repo, ts := newTestRepo(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodHead:
+			w.WriteHeader(http.StatusOK)
+		case strings.Contains(r.URL.Path, "_search"):
+			mu.Lock()
+			searchCnt++
+			first := searchCnt == 1
+			mu.Unlock()
+			if !first {
+				_, _ = w.Write([]byte(`{"hits":{"hits":[]}}`))
+				return
+			}
+			_, _ = fmt.Fprintf(w, `{"hits":{"hits":[%s,%s]}}`,
+				copyHit("src", false), copyHit("src-q1", true))
+		case strings.HasSuffix(r.URL.Path, "/_bulk"):
+			b, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			bulkBody = string(b)
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"errors":false,"items":[]}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	})
+	defer ts.Close()
+
+	err := repo.CopyIndices(context.Background(), "kbSrc",
+		map[string]string{"k": "kTgt"}, map[string]string{"src": "tgt"}, "kbDst", 3, "manual")
+	if err != nil {
+		t.Fatalf("CopyIndices: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	enabledBySource := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(bulkBody), "\n") {
+		var doc struct {
+			SourceID  *string `json:"source_id"`
+			IsEnabled bool    `json:"is_enabled"`
+		}
+		if err := json.Unmarshal([]byte(line), &doc); err != nil {
+			t.Fatalf("parse bulk line: %v", err)
+		}
+		if doc.SourceID != nil {
+			enabledBySource[*doc.SourceID] = doc.IsEnabled
+		}
+	}
+	if enabled, ok := enabledBySource["tgt"]; !ok || enabled {
+		t.Errorf("copied chunk text is_enabled = %v (present %v), want false", enabled, ok)
+	}
+	if enabled, ok := enabledBySource["tgt-q1"]; !ok || !enabled {
+		t.Errorf("copied question is_enabled = %v (present %v), want true", enabled, ok)
+	}
+}
+
+// copyHit renders one search hit of chunk "src" in knowledge base kbSrc.
+func copyHit(sourceID string, enabled bool) string {
+	return fmt.Sprintf(`{"_source":{"content":"c","source_id":%q,"source_type":1,"chunk_id":"src",`+
+		`"knowledge_id":"k","knowledge_base_id":"kbSrc","is_enabled":%t,"embedding":[0.1,0.2,0.3]}}`,
+		sourceID, enabled)
 }

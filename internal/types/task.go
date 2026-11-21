@@ -82,7 +82,7 @@ var queueDefinitions = []QueueDefinition{
 	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{TypeDataSourceSync}},
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
-		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
+		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeListReembed, TypeKnowledgeMove,
 	}},
 	{Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1, TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize}},
 }
@@ -242,6 +242,7 @@ const (
 	TypeKBDelete                 = "kb:delete"                  // 知识库删除任务
 	TypeKnowledgeListDelete      = "knowledge:list_delete"      // 批量删除知识任务
 	TypeKnowledgeListReparse     = "knowledge:list_reparse"     // 批量重解析知识任务
+	TypeKnowledgeListReembed     = "knowledge:list_reembed"     // re-embed stored chunks of a knowledge list
 	TypeKnowledgeMove            = "knowledge:move"             // 知识移动任务
 	TypeDataTableSummary         = "datatable:summary"          // 表格摘要任务
 	TypeImageMultimodal          = "image:multimodal"           // 图片多模态处理任务（OCR + VLM Caption）
@@ -460,6 +461,27 @@ type KnowledgeListReparsePayload struct {
 	ProcessConfig   *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 	Initiator       TaskInitiator              `json:"initiator,omitempty"`
 }
+
+// KnowledgeListReembedPayload is the payload of TypeKnowledgeListReembed. It
+// is a separate task type rather than a mode of the reparse task so that a
+// worker that predates it cannot pick it up and run a full reparse instead.
+type KnowledgeListReembedPayload struct {
+	TracingContext
+	KnowledgeBaseID string        `json:"knowledge_base_id"`
+	TenantID        uint64        `json:"tenant_id"`
+	KnowledgeIDs    []string      `json:"knowledge_ids"`
+	Initiator       TaskInitiator `json:"initiator,omitempty"`
+}
+
+// Modes of POST /knowledge-bases/{id}/rebuild-index.
+const (
+	// RebuildIndexModeReparse re-parses every document, producing chunks,
+	// generated questions, summaries, OCR text and captions again. Default.
+	RebuildIndexModeReparse = "reparse"
+	// RebuildIndexModeReembed rebuilds the index entries from the chunks and
+	// generated questions already stored, calling only the embedding model.
+	RebuildIndexModeReembed = "reembed"
+)
 
 // KnowledgeMovePayload represents the knowledge move task payload
 type KnowledgeMovePayload struct {
