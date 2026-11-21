@@ -1485,6 +1485,8 @@ export default {
     channelWechat: '微信',
     channelWecom: '企業微信',
     channelFeishu: '飛書',
+    channelFeishuLinks: '飛書連結',
+    channelLarkLinks: 'Lark 連結',
     channelFeishuDrive: '飛書雲盤',
     channelLarkDrive: 'Lark 雲盤',
     channelDingtalk: '釘釘',
