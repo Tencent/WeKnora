@@ -75,6 +75,7 @@ type SessionService interface {
 	) (*types.RetrievalResult, error)
 	// AgentQA performs agent-based question answering with conversation history and streaming support.
 	AgentQA(ctx context.Context, req *types.QARequest, eventBus *event.EventBus) error
+	AuthorizeRestrictedAgentDocuments(ctx context.Context, tenantID uint64, ids []string) error
 }
 
 // SessionRepository defines the session repository interface

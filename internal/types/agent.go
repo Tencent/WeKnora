@@ -100,6 +100,7 @@ const UnlimitedMaxIterations = -1
 // AgentConfig represents the full agent configuration (used at tenant level and runtime)
 // This includes all configuration parameters for agent execution
 type AgentConfig struct {
+	DocumentScoped bool `json:"-"` // Explicit documents verified for a library-scoped integration call.
 	// MaxIterations caps ReAct rounds. Zero is unset (filled with a default);
 	// a negative value is unlimited — the loop runs until the model stops,
 	// the user cancels, or another guard fires. See UnlimitedMaxIterations.

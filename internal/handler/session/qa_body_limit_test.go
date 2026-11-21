@@ -26,7 +26,7 @@ func parseQARequestWithBody(t *testing.T, body string) error {
 	c.Params = gin.Params{{Key: "session_id", Value: "session-1"}}
 
 	h := &Handler{}
-	_, _, err := h.parseQARequest(c, "KnowledgeQA")
+	_, _, err := h.parseQARequest(c, qaModeNormal)
 	return err
 }
 

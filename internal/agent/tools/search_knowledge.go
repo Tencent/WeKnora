@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -37,6 +38,8 @@ const (
 // logs the stack and the knowledge base is reported as failed, exactly like a
 // search that returned an error; the panic value itself is never surfaced.
 var errSearchPanicked = errors.New("knowledge base search failed with an internal error")
+
+var errSearchDocumentScope = errors.New("knowledge search did not honor the current document scope")
 
 var searchKnowledgeTool = BaseTool{
 	name: ToolSearchKnowledge,
@@ -252,8 +255,12 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		"[Tool][SearchKnowledge] query=%q mode=%s limit=%d top_k=%d targets=%d kbs=%d",
 		query, mode, limit, topK, len(searchTargets), len(kbIDs))
 
-	allResults, searchFailures, searchCalls, embedFallbacks := t.concurrentSearchByTargets(ctx, query, mode,
-		kbModes, searchTargets, kbList, topK, vectorThreshold, keywordThreshold, kbTypeMap)
+	allResults, searchFailures, searchCalls, embedFallbacks, scopeViolation := t.concurrentSearchByTargets(
+		ctx, query, mode, kbModes, searchTargets, kbList, topK, vectorThreshold, keywordThreshold, kbTypeMap,
+	)
+	if scopeViolation {
+		return &types.ToolResult{Success: false, Error: errSearchDocumentScope.Error()}, errSearchDocumentScope
+	}
 	// A hybrid search that ran keyword-only is reported like any other mode
 	// fallback, so an empty result is not read as "no semantic match".
 	for kbID, reason := range embedFallbacks {
@@ -591,7 +598,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	topK int,
 	vectorThreshold, keywordThreshold float64,
 	kbTypeMap map[string]string,
-) (_ []*searchResultWithMeta, failures []string, calls int, embedFallbacks map[string]string) {
+) (_ []*searchResultWithMeta, failures []string, calls int, embedFallbacks map[string]string, scopeViolation bool) {
 	// Filter out non-searchable KBs (wiki-only / graph-only). Feeding a
 	// wiki-only KB into HybridSearch causes spurious "model ID cannot be
 	// empty" errors because such KBs have no EmbeddingModelID configured.
@@ -623,7 +630,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 			st.KnowledgeBaseID)
 	}
 	if len(filteredTargets) == 0 {
-		return nil, nil, 0, nil
+		return nil, nil, 0, nil, false
 	}
 	searchTargets = filteredTargets
 
@@ -645,6 +652,9 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	fail := func(kbIDs []string, err error) {
 		mu.Lock()
 		defer mu.Unlock()
+		if errors.Is(err, errSearchDocumentScope) {
+			scopeViolation = true
+		}
 		failures = append(failures, fmt.Sprintf("%v: %v", kbIDs, err))
 	}
 	attempt := func() {
@@ -741,7 +751,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 			fullKBIDsByMode := make(map[string][]string)
 			var knowledgeTargets []*types.SearchTarget
 			for _, st := range targets {
-				if st.Type == types.SearchTargetTypeKnowledgeBase && len(st.TagIDs) == 0 {
+				if searchTargetIsWholeKB(st) {
 					m, _ := groupModeFor(st.KnowledgeBaseID)
 					fullKBIDsByMode[m] = append(fullKBIDsByMode[m], st.KnowledgeBaseID)
 				} else {
@@ -792,6 +802,10 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						fail([]string{st.KnowledgeBaseID}, errSearchPanicked)
 					})
 					attempt()
+					if len(st.KnowledgeIDs) == 0 && len(st.TagIDs) == 0 {
+						fail([]string{st.KnowledgeBaseID}, errSearchDocumentScope)
+						return
+					}
 					usedMode, _ := groupModeFor(st.KnowledgeBaseID)
 					stVectorThreshold, stKeywordThreshold := st.RecallThresholds(vectorThreshold, keywordThreshold)
 					kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, st.KnowledgeBaseID, types.SearchParams{
@@ -816,6 +830,16 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						fail([]string{st.KnowledgeBaseID}, err)
 						return
 					}
+					// Do not send a retriever's out-of-scope hit to reranking or the model.
+					if len(st.KnowledgeIDs) > 0 {
+						for _, row := range kbResults {
+							if row == nil || row.KnowledgeBaseID != st.KnowledgeBaseID ||
+								!slices.Contains(st.KnowledgeIDs, row.KnowledgeID) {
+								fail([]string{st.KnowledgeBaseID}, errSearchDocumentScope)
+								return
+							}
+						}
+					}
 					collect(kbResults, usedMode)
 				}()
 			}
@@ -823,7 +847,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 		}(modelKey, targets)
 	}
 	wg.Wait()
-	return allResults, failures, calls, embedFallbacks
+	return allResults, failures, calls, embedFallbacks, scopeViolation
 }
 
 // rerankResults scores all search results (including FAQ entries) with the

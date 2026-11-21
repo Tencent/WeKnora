@@ -307,10 +307,13 @@ func (h *Handler) setupStreamHandler(
 	assistantMessage *types.Message,
 	eventBus *event.EventBus,
 ) *AgentStreamHandler {
+	collector, checkpointer, lookup := h.artifactCollector, h.workspaceCheckpointer, h.sandboxIDLookup
+	if assistantMessage.ExecutionContext.DocumentScopeAPIKeyID != 0 {
+		collector, checkpointer, lookup = nil, nil, nil
+	}
 	streamHandler := NewAgentStreamHandler(
 		ctx, sessionID, assistantMessageID, requestID, tenantID, receivedAt,
-		assistantMessage, h.streamManager, eventBus, h.artifactCollector,
-		h.workspaceCheckpointer, h.sandboxIDLookup,
+		assistantMessage, h.streamManager, eventBus, collector, checkpointer, lookup,
 	)
 	streamHandler.Subscribe()
 	return streamHandler
