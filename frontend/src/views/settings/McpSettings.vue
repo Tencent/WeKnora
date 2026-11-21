@@ -12,6 +12,16 @@
     </div>
 
     <template v-else>
+      <section v-if="authStore.hasRole('admin')" class="qcc-preset" :aria-label="t('mcpSettings.qcc.quickAdd')">
+        <div class="qcc-preset__details">
+          <h3>{{ t('mcpSettings.qcc.title') }} <span class="qcc-preset__badge">OAuth</span></h3>
+          <p>{{ t('mcpSettings.qcc.description') }}</p>
+          <small>{{ t('mcpSettings.qcc.permissions') }}</small>
+        </div>
+        <t-button variant="outline" @click="handleQccPreset">
+          {{ t(existingQccService ? 'mcpSettings.qcc.manage' : 'mcpSettings.qcc.add') }}
+        </t-button>
+      </section>
       <Teleport to="#toolbox-toolbar" defer>
         <t-input v-if="services.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
           :aria-label="$t('menu.search')" clearable>
@@ -158,6 +168,33 @@ const dialogInitialStep = ref<0 | 1>(0)
 const togglingIds = ref(new Set<string>())
 const serviceUsage = (service: MCPService) => service.usage_instructions?.trim() || service.description?.trim() || ''
 const query = ref('')
+const qccEndpoint = 'https://agent.qcc.com/mcp/company/stream'
+// Match the complete endpoint, never a service name or a URL prefix. Existing
+// credentials, transport and authorization mode are left for the user to review.
+const existingQccService = computed(() => services.value.find((service) => service.url === qccEndpoint))
+const handleQccPreset = () => {
+  if (!authStore.hasRole('admin')) return
+  if (existingQccService.value) {
+    handleEdit(existingQccService.value)
+    return
+  }
+  openServiceDraft({
+    name: t('mcpSettings.qcc.title'),
+    usage_instructions: t('mcpSettings.qcc.usage'),
+    transport_type: 'http-streamable',
+    url: qccEndpoint,
+    auth_type: 'oauth',
+  })
+  // QCC publishes authorization metadata at the origin, not the MCP path.
+  // Avoid SDK fallback to guessed /register and /token endpoints.
+  if (currentService.value) {
+    currentService.value.auth_config = {
+      auth_type: 'oauth',
+      auth_server_metadata_url: 'https://agent.qcc.com/.well-known/oauth-authorization-server',
+      scopes: ['mcp:tools'],
+    }
+  }
+}
 const filteredServices = computed(() => services.value.filter((service) =>
   matchesResourceQuery({ name: service.name, description: serviceUsage(service) }, query.value),
 ))
@@ -320,6 +357,43 @@ defineExpose({ openAdd: handleAdd })
 @import (reference) '@/components/css/provider-card.less';
 
 @import (reference) '@/components/css/settings-section.less';
+
+.qcc-preset {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  margin-bottom: 20px;
+  border: 1px solid var(--td-component-border);
+  border-radius: 8px;
+  background: var(--td-bg-color-container);
+}
+.qcc-preset__details {
+  min-width: 0;
+  h3 {
+    margin: 0 0 8px;
+    font-size: 16px;
+  }
+  p {
+    margin: 0 0 6px;
+    color: var(--td-text-color-secondary);
+  }
+  small {
+    color: var(--td-text-color-secondary);
+  }
+}
+.qcc-preset__badge {
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--td-brand-color);
+}
+@media (max-width: 600px) {
+  .qcc-preset {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
 
 .mcp-settings {
   width: 100%;

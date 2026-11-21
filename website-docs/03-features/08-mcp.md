@@ -85,6 +85,16 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 相关接入材料由 [ctcbyzx](https://github.com/ctcbyzx/baizhi-cloud-browser) 维护；
 接入问题可到[反馈入口](https://github.com/ctcbyzx/baizhi-cloud-browser/issues)报告。
 
+
+### 企查查 OAuth 快捷连接
+
+管理员可在「工具箱 → MCP 服务」点击「企查查 · 企业数据」卡片的「使用 OAuth 连接」，打开已填好的配置抽屉。预设使用单一入口 `https://agent.qcc.com/mcp/company/stream`、Streamable HTTP 和 OAuth；无需填写 API Key 或客户端密钥。先确认配置，再使用现有「去授权」流程保存并授权。相同 URL 的服务已存在时，卡片打开原服务，不替换其已有认证方式或凭据。
+
+每位用户分别授权自己的企查查账号。可用目录和数据取决于服务方准入及账号权限，预设不保证固定工具数量，也不自动启用所有工具。授权后同步目录，并按现有 MCP 工具策略在 Agent 中使用；WeKnora 复用原生按需发现链路，不预加载全部 schema，不创建五个独立服务。需要历史数据时，先按需发现可用的历史工具，再读取定义和调用。
+
+本预设只简化配置，不代表已完成真实服务兼容性验收。部署方仍应验证其可访问的 OAuth 回调地址，以及授权、刷新、恢复、解绑和主体隔离。
+
+
 ## 供外部客户端调用
 
 在「设置 → 发布集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，并按需指定 `ask` 使用的默认 Agent（留空时使用内置快速问答）和每分钟调用上限（默认 60 次）。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面给出 Cursor 可用的 `mcpServers` JSON、VS Code 专用的 `servers` JSON、Claude Code 的一行命令，以及 STDIO 备用配置。将 VS Code 选项卡中的 JSON 写入工作区的 `.vscode/mcp.json`；若已有配置，请将对应条目合并到现有 `servers` 对象中，保留其他服务。该配置使用 `type: "http"`、端点 URL 和 `Authorization` 请求头，无需桥接进程。Claude Desktop 需在自定义连接器中填写可访问的 HTTPS 地址，并在可用时选择「无需登录」和 Request headers；该请求头功能为有限开放的测试版，并非所有组织都可用。

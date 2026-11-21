@@ -137,6 +137,15 @@ export default {
     }
   },
   mcpSettings: {
+    qcc: {
+      quickAdd: 'MCP 서비스 빠른 추가',
+      title: 'QCC · 기업 데이터',
+      description: 'OAuth로 QCC 계정을 인증하여 기업 정보와 과거 데이터에 연결합니다.',
+      permissions: '사용 가능한 도구와 데이터는 계정 권한에 따라 다릅니다. 사용자마다 별도로 인증합니다.',
+      manage: '연결 관리',
+      add: 'OAuth로 연결',
+      usage: '기업 정보, 위험, 지식재산, 경영 및 과거 데이터를 조회합니다. 허용된 도구를 필요할 때 검색하고 정의를 읽은 후 호출합니다. 기업명이 모호하면 사용자에게 대상을 확인합니다.',
+    },
     addUsageInstructions: '사용 안내 추가',
     noUsageInstructions: '아직 사용 안내가 없습니다',
     title: 'MCP 서비스 관리',

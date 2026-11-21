@@ -1,5 +1,14 @@
 export default {
   mcpSettings: {
+    qcc: {
+      quickAdd: 'Quick add MCP service',
+      title: 'QCC · Company Data',
+      description: 'Connect company information and historical data with your QCC account using OAuth.',
+      permissions: 'Available tools and data depend on your account permissions. Each user authorizes separately.',
+      manage: 'Manage connection',
+      add: 'Connect with OAuth',
+      usage: 'Use QCC for company information, risk, intellectual property, business and historical data. Discover permitted tools on demand and read their schemas before calling them. Resolve ambiguous company names with the user before querying a specific entity.',
+    },
     addUsageInstructions: 'Add usage instructions',
     noUsageInstructions: 'No usage instructions yet',
     title: 'MCP Services',
