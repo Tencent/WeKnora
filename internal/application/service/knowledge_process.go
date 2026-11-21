@@ -4481,7 +4481,10 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	var sourceIndex *sourceloc.Index
 	if convertResult != nil {
-		sourceIndex = buildSourceIndex(parsedMarkdown, sourceBlocks, convertResult.MarkdownContent, storedImages)
+		sourceIndex = buildSourceIndex(
+			parsedMarkdown, sourceBlocks, convertResult.MarkdownContent, storedImages,
+			convertResult.ImageLocators,
+		)
 	}
 
 	// Step 3: Split into chunks using Go chunker. Line endings and inline

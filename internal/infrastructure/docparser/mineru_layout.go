@@ -133,14 +133,21 @@ func minerUContentListFromZip(zipData []byte) []byte {
 	return nil
 }
 
+// minerUHasViewablePages reports whether the upload itself has pages a viewer
+// can show. An office file has none: MinerU's pages belong to the intermediate
+// PDF it made from the upload.
+func minerUHasViewablePages(fileType string) bool {
+	ft := strings.ToLower(strings.TrimPrefix(fileType, "."))
+	return ft == "pdf" || IsImageFormat(ft)
+}
+
 // minerUSourceBlocks aligns MinerU's layout blocks against its markdown so
 // each paragraph, table and figure points back at its page and region. Only
 // PDFs and images have pages a viewer can show; for office files MinerU's
 // pages belong to an intermediate PDF, so those are left to the structure
 // aligner.
 func minerUSourceBlocks(markdown string, contentList []byte, fileType string) []types.SourceBlock {
-	ft := strings.ToLower(strings.TrimPrefix(fileType, "."))
-	if ft != "pdf" && !IsImageFormat(ft) {
+	if !minerUHasViewablePages(fileType) {
 		return nil
 	}
 	raw := bytes.TrimSpace(contentList)
@@ -197,6 +204,9 @@ type minerUMiddleBlock struct {
 	Index   *int            `json:"index"`
 	BBox    []float64       `json:"bbox"`
 	Content json.RawMessage `json:"content"`
+	// ImagePath is the image file an image_body or chart_body child was
+	// rendered from. Only those children carry it.
+	ImagePath string `json:"image_path"`
 }
 
 type minerUMiddle struct {
@@ -231,6 +241,75 @@ func minerUMiddleSourceBlocks(markdown string, raw []byte) []types.SourceBlock {
 		}
 	}
 	return sourceloc.Align(markdown, units)
+}
+
+// minerUImageLocators maps every image the layout rendered to the page and
+// region it came from, keyed by the image path the markdown references.
+//
+// An image block produces no unit of its own (its text is empty, only its
+// caption has any), so its page reaches ingestion through this map instead of
+// through source blocks. That matters for a page carrying many figures under
+// one caption: inheriting the page of the text above them collapses every one
+// of them onto that page number.
+func minerUImageLocators(contentList []byte, fileType string) map[string]types.SourceLocator {
+	if !minerUHasViewablePages(fileType) {
+		return nil
+	}
+	raw := bytes.TrimSpace(contentList)
+	if len(raw) == 0 || raw[0] != '{' {
+		return nil
+	}
+	var doc minerUMiddle
+	if json.Unmarshal(raw, &doc) != nil || doc.Schema != "docvortex.middle" || doc.Version != "2.0" {
+		return nil
+	}
+	out := make(map[string]types.SourceLocator)
+	for _, page := range doc.Pages {
+		if page.PageIdx == nil || *page.PageIdx < 0 {
+			continue
+		}
+		for _, block := range page.Blocks {
+			if block.Index == nil || (block.Type != "image" && block.Type != "chart") {
+				continue
+			}
+			var children []minerUMiddleBlock
+			if json.Unmarshal(block.Content, &children) != nil {
+				continue
+			}
+			for i, child := range children {
+				if child.ImagePath == "" {
+					continue
+				}
+				// One file rendered twice keeps the first page it was drawn on.
+				if _, seen := out[child.ImagePath]; seen {
+					continue
+				}
+				loc := types.SourceLocator{
+					Type: types.SourceLocatorPDF,
+					Page: *page.PageIdx + 1,
+					// Same child reference the text units use, so an image and
+					// its caption stay traceable to one block.
+					SourceID: fmt.Sprintf("mineru:2:%d:%d/%d", *page.PageIdx, *block.Index, i),
+					// The page and the region are the layout's own, not an
+					// inheritance from neighbouring text: a viewer drops a
+					// locator whose mapping it cannot trust.
+					Mapping: "exact",
+				}
+				box := child.BBox
+				if len(box) == 0 {
+					box = block.BBox
+				}
+				if normalizedMinerUBox(box) {
+					loc.BBox = append([]float64(nil), box...)
+				}
+				out[child.ImagePath] = loc
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func minerUMiddleUnits(block minerUMiddleBlock, page int, ref string, parentBox []float64) []sourceloc.Unit {

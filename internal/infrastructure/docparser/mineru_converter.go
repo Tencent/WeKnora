@@ -148,6 +148,7 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
 		SourceBlocks:    minerUSourceBlocks(mdContent, contentList, req.FileType),
+		ImageLocators:   minerUImageLocators(contentList, req.FileType),
 	}, nil
 }
 
@@ -175,6 +176,7 @@ func (c *MinerUReader) readV1(
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
 		SourceBlocks:    minerUSourceBlocks(mdContent, contentList, req.FileType),
+		ImageLocators:   minerUImageLocators(contentList, req.FileType),
 	}, nil
 }
 

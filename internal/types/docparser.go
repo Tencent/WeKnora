@@ -33,6 +33,13 @@ type ReadResult struct {
 	// the original file. Optional: engines that know no positions leave it
 	// empty.
 	SourceBlocks []SourceBlock
+	// ImageLocators place an extracted image where the parser rendered it,
+	// keyed by the image reference as MarkdownContent writes it. A layout
+	// parser that reports an image as its own block fills this: without it
+	// ingestion has no anchor for an image and can only inherit the page of
+	// the text above it, which is wrong for a page carrying many figures
+	// under one caption.
+	ImageLocators map[string]SourceLocator
 }
 
 // ImageRef represents an image reference extracted from the document.
