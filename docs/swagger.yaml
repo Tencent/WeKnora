@@ -1661,6 +1661,12 @@ definitions:
         description: |-
           MaxAccessLevel is the highest level a member may pick; empty means
           AssistantAccessConfirm.
+      max_iterations:
+        description: |-
+          MaxIterations caps the assistant's ReAct rounds. Zero or a negative
+          value uses DefaultAssistantMaxIterations; values above
+          MaxAssistantMaxIterations are bounded to that ceiling.
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.AttrInject:
     enum:

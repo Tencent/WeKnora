@@ -554,6 +554,16 @@ func (s *sessionService) buildAgentConfig(
 		ParallelToolCalls: true,
 	}
 	applyRequestReasoningEffort(req.ReasoningEffort, &agentConfig.Thinking, &agentConfig.ReasoningEffort)
+	// The built-in assistant is a long-running ReAct loop over the whole
+	// operation catalog. Its YAML default is unlimited; the workspace setting
+	// gives members a finite safety cap that a single turn cannot override.
+	if types.GrantsOperationCatalog(customAgent) {
+		assistantConfig := types.AssistantConfig{}
+		if tenantInfo != nil && tenantInfo.AssistantConfig != nil {
+			assistantConfig = *tenantInfo.AssistantConfig
+		}
+		agentConfig.MaxIterations = assistantConfig.EffectiveMaxIterations()
+	}
 	// An unset MCP mode means "all" at runtime, but the share scope and the
 	// agent UI both present it as none. A shared run must not hand receivers
 	// every MCP service (with the owner's credentials) that its owner believes
