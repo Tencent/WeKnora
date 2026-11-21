@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 func TestPaddleOCRVLCloudTimeoutConfig(t *testing.T) {
@@ -159,4 +161,65 @@ func TestWeKnoraCloudPollStopsAtConfiguredTimeout(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The submit POST carries the whole file in one multipart body, so the
+// configured budget must bound it too; the old fixed 60s client ceiling
+// failed every scan larger than ~100MB (#5589).
+func TestPaddleOCRVLCloudSubmitHonorsConfiguredTimeout(t *testing.T) {
+	allowLoopbackSSRF(t)
+
+	t.Run("slow submit aborts at the configured timeout", func(t *testing.T) {
+		t.Setenv("WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT", "200ms")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			time.Sleep(2 * time.Second) // slower than the configured budget
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"code":0,"data":{"jobId":"job-1"}}`)
+		}))
+		defer server.Close()
+
+		reader := NewPaddleOCRVLCloudReader(nil)
+		reader.baseURL = server.URL
+
+		// Watchdog: with the old hardcoded 60s client the call would still
+		// be waiting when this fires.
+		done := make(chan error, 1)
+		start := time.Now()
+		go func() {
+			_, submitErr := reader.submitJob(context.Background(), &types.ReadRequest{
+				FileName: "big.pdf",
+				FileType: ".pdf",
+			}, []byte("%PDF-1.7 big scan"))
+			done <- submitErr
+		}()
+
+		select {
+		case err := <-done:
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "HTTP request")
+			assert.Contains(t, err.Error(), "Client.Timeout exceeded")
+			assert.Less(t, time.Since(start), 5*time.Second)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("submit ignored WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT")
+		}
+	})
+
+	t.Run("fast submit succeeds within the configured timeout", func(t *testing.T) {
+		t.Setenv("WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT", "10s")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"code":0,"data":{"jobId":"job-42"}}`)
+		}))
+		defer server.Close()
+
+		reader := NewPaddleOCRVLCloudReader(nil)
+		reader.baseURL = server.URL
+
+		jobID, err := reader.submitJob(context.Background(), &types.ReadRequest{
+			FileName: "small.pdf",
+			FileType: ".pdf",
+		}, []byte("%PDF-1.7"))
+		require.NoError(t, err)
+		assert.Equal(t, "job-42", jobID)
+	})
 }

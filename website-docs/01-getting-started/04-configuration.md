@@ -332,7 +332,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `WEKNORA_MINERU_TIMEOUT` | 1000s | 自建 MinerU 单次解析超时（V1 API 为整个解析任务，旧版为 `/file_parse` 请求），格式与默认值规则同上；超大 PDF 同样需要外层超时留余量 |
 | `WEKNORA_MINERU_CLOUD_TIMEOUT` | 30m | MinerU 云端（mineru.net）每个批次/分片轮询解析结果的最长时间，格式与默认值规则同上 |
 | `WEKNORA_MINERU_MAX_IMAGE_BYTES` | 536870912（512 MiB） | MinerU Cloud / 自建 V1 每个结果 ZIP 中引用图片的解压总字节上限（正整数）；空值、无效值、溢出或非正数使用默认值。大型扫描 PDF 可设为 `2147483648`（2 GiB），图片全部驻留内存，需为并发解析预留内存；下载 1 GiB、单条目 64 MiB 上限仍生效。修改后重新创建 app 容器 |
-| `WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT` | 600s | PaddleOCR-VL 云端（AI Studio）轮询解析结果的最长时间，格式与默认值规则同上 |
+| `WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT` | 600s | PaddleOCR-VL 云端（AI Studio）提交与轮询解析结果的最长时间，格式与默认值规则同上 |
 | `WEKNORA_WEKNORACLOUD_TIMEOUT` | 20m | WeKnoraCloud 托管 docreader 轮询任务结果的最长时间，格式与默认值规则同上；应小于 `WEKNORA_DOCREADER_CALL_TIMEOUT` |
 
 沙箱后端、网络策略、脚本开关与个人环境变量使用空间配置/API 管理，见[技能与沙箱](../03-features/22-skills-sandbox.md)。长期记忆与自动标签均默认关闭，分别使用租户 memory_config 和知识库 auto_tag_config，不用全局环境变量替代各空间配置。
