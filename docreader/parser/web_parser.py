@@ -188,7 +188,11 @@ class StdWebParser(BaseParser):
             logger.error("URL blocked by SSRF guard before navigation: %s", reason)
             return _ScrapeResult(
                 html="", visible_text="", page_title="",
-                error=f"URL blocked by SSRF guard: {reason}",
+                error=(
+                    f"URL blocked by SSRF guard: {reason}. "
+                    "DocReader uses its own SSRF_WHITELIST and SSRF_WHITELIST_EXTRA "
+                    "environment variables. The app's ssrf.whitelist setting applies only to the app."
+                ),
             )
         try:
             async with SSRFProxy(self.proxy) as proxy, async_playwright() as p:
