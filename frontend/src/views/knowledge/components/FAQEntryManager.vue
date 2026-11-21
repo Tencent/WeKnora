@@ -1089,6 +1089,7 @@ const cardListRef = ref<HTMLElement | null>(null)
 const hasMore = ref(true)
 const pageSize = 20
 let currentPage = 1
+let loadRequestSeq = 0
 const entrySearchKeyword = ref('')
 let entrySearchDebounce: number | null = null
 
@@ -1498,10 +1499,12 @@ const editorRules: FormRules<FAQEntryPayload> = {
 
 const loadEntries = async (append = false) => {
   if (!props.kbId) return
+  const seq = ++loadRequestSeq
   if (append) {
     loadingMore.value = true
   } else {
     loading.value = true
+    loadingMore.value = false
     currentPage = 1
     entries.value = []
     selectedRowKeys.value = []
@@ -1517,6 +1520,7 @@ const loadEntries = async (append = false) => {
         page: 1,
         page_size: 1,
       })
+      if (seq !== loadRequestSeq) return
       const totalData = (totalRes.data || {}) as { total: number }
       overallFAQTotal.value = totalData.total || 0
     }
@@ -1527,6 +1531,7 @@ const loadEntries = async (append = false) => {
       tag_ids: selectedTagIds.value.length > 0 ? selectedTagIds.value.join(',') : undefined,
       keyword: entrySearchKeyword.value ? entrySearchKeyword.value.trim() : undefined,
     })
+    if (seq !== loadRequestSeq) return
     const pageData = (res.data || {}) as {
       data: FAQEntry[]
       total: number
@@ -1553,16 +1558,20 @@ const loadEntries = async (append = false) => {
     await nextTick()
     arrangeCards()
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'))
+    if (seq === loadRequestSeq) {
+      MessagePlugin.error(error?.message || t('common.operationFailed'))
+    }
   } finally {
-    loading.value = false
-    loadingMore.value = false
+    if (seq === loadRequestSeq) {
+      loading.value = false
+      loadingMore.value = false
 
-    // 检查是否需要继续加载以填满可视区域
-    // 延迟执行以确保 arrangeCards 的 requestAnimationFrame 完成
-    setTimeout(() => {
-      checkAndLoadMore()
-    }, 350)
+      // 检查是否需要继续加载以填满可视区域
+      // 延迟执行以确保 arrangeCards 的 requestAnimationFrame 完成
+      setTimeout(() => {
+        checkAndLoadMore()
+      }, 350)
+    }
   }
 }
 
