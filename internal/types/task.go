@@ -30,6 +30,11 @@ const (
 // rolling deployment. New code uses the business-semantic constant.
 const (
 	QueueDefault = "default"
+	// QueueDocumentDispatch carries the small per-knowledge-base admission
+	// tasks that release document processing work into QueueDefault. Keeping
+	// dispatch separate prevents the dispatcher itself from waiting behind a
+	// large document backlog.
+	QueueDocumentDispatch = "document_dispatch"
 	// QueueChatAttachment carries session-scoped chat attachment parsing. It
 	// lives in the core pool but with a higher weight than QueueDefault so
 	// interactive chat uploads are not starved by knowledge-base batch imports.
@@ -61,6 +66,9 @@ type QueueDefinition struct {
 }
 
 var queueDefinitions = []QueueDefinition{
+	{Name: QueueDocumentDispatch, Pool: WorkerPoolCore, Weight: 2, SharedWeight: 2, TaskTypes: []string{
+		TypeDocumentDispatch,
+	}},
 	{Name: QueueDefault, Pool: WorkerPoolCore, Weight: 1, SharedWeight: 3, TaskTypes: []string{
 		TypeDocumentProcess, TypeManualProcess,
 	}},
@@ -234,6 +242,7 @@ type WorkerServerStat struct {
 const (
 	TypeChunkExtract             = "chunk:extract"
 	TypeDocumentProcess          = "document:process"           // 文档处理任务
+	TypeDocumentDispatch         = "document:dispatch"          // 按知识库公平释放文档处理任务
 	TypeFAQImport                = "faq:import"                 // FAQ导入任务（包含dry run模式）
 	TypeQuestionGeneration       = "question:generation"        // 问题生成任务
 	TypeSummaryGeneration        = "summary:generation"         // 摘要生成任务
@@ -320,6 +329,9 @@ type DocumentProcessPayload struct {
 	// retried spans overwrite the previous attempt's row rather than
 	// fan out into a new attempt for every retry.
 	Attempt int `json:"attempt,omitempty"`
+	// PendingOpID links a dispatched task back to its durable per-KB queue
+	// entry. Zero means the task was submitted through the legacy direct path.
+	PendingOpID int64 `json:"pending_op_id,omitempty"`
 }
 
 // FAQImportPayload represents the FAQ import task payload (including dry run mode)

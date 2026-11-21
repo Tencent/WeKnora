@@ -377,3 +377,45 @@ func TestRecoverPendingWikiTasks_RecreatesOneTriggerPerLaneAndKB(t *testing.T) {
 	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&remaining).Error)
 	assert.Equal(t, int64(4), remaining)
 }
+
+func TestRecoverPendingDocumentTasks_RecreatesOneTriggerPerKB(t *testing.T) {
+	db := setupResetPendingDB(t)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledge_bases (id, tenant_id, deleted_at)
+		 VALUES (?, ?, NULL), (?, ?, ?)`,
+		"kb-doc-a", 7, "kb-doc-deleted", 9, time.Now(),
+	).Error)
+	rows := []struct {
+		tenantID uint64
+		kbID     string
+		dedup    string
+	}{
+		{7, "kb-doc-a", "doc-1"},
+		{7, "kb-doc-a", "doc-2"},
+		{9, "kb-doc-deleted", "doc-deleted"},
+		{10, "kb-doc-missing", "doc-missing"},
+	}
+	for _, row := range rows {
+		require.NoError(t, db.Exec(
+			`INSERT INTO task_pending_ops
+			 (tenant_id, task_type, scope, scope_id, op, dedup_key, payload)
+			 VALUES (?, ?, ?, ?, 'process', ?, '{}')`,
+			row.tenantID, types.TypeDocumentProcess, types.TaskScopeKnowledgeBase, row.kbID, row.dedup,
+		).Error)
+	}
+
+	recorder := &recordingTaskEnqueuer{}
+	recoverPendingDocumentTasks(db, recorder)
+	require.Len(t, recorder.tasks, 1)
+	assert.Equal(t, types.TypeDocumentDispatch, recorder.tasks[0].Type())
+	var payload service.DocumentDispatchPayload
+	require.NoError(t, json.Unmarshal(recorder.tasks[0].Payload(), &payload))
+	assert.Equal(t, uint64(7), payload.TenantID)
+	assert.Equal(t, "kb-doc-a", payload.KnowledgeBaseID)
+
+	var remaining int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).
+		Where("task_type = ?", types.TypeDocumentProcess).
+		Count(&remaining).Error)
+	assert.Equal(t, int64(2), remaining)
+}
