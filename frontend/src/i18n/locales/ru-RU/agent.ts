@@ -1758,6 +1758,10 @@ export default {
     copy: 'Копировать',
     addToKnowledgeBase: 'Добавить в базу знаний',
     artifactDrawer: {
+      saveToKnowledge: 'Добавить файл',
+      knowledgeDestination: 'Целевая база знаний',
+      noWritableKnowledgeBases: 'Нет баз знаний с правами на запись.',
+      knowledgeLoadFailed: 'Не удалось загрузить базы знаний. Попробуйте ещё раз.',
       buttonTitle: 'Просмотреть файлы, сгенерированные в этом ответе',
       title: 'Сгенерированные файлы',
       empty: 'В этом раунде не создано файлов для скачивания.',

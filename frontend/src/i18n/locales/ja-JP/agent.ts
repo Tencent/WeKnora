@@ -680,6 +680,10 @@ export default {
     copy: 'コピー',
     addToKnowledgeBase: 'ナレッジベースに追加',
     artifactDrawer: {
+      saveToKnowledge: 'ファイルを追加',
+      knowledgeDestination: '追加先のナレッジベース',
+      noWritableKnowledgeBases: '書き込み可能なナレッジベースがありません。',
+      knowledgeLoadFailed: 'ナレッジベースを読み込めませんでした。もう一度お試しください。',
       buttonTitle: 'この回答で生成されたファイルを表示',
       title: '生成されたファイル',
       empty: '今回のやり取りでダウンロード可能なファイルは生成されませんでした。',

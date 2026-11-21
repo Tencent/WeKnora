@@ -1,3 +1,6 @@
+import type { ParserEngineInfo } from '@/api/system';
+import type { ParserEngineRule } from '@/types/knowledgeProcess';
+
 const DEFAULT_VALID_TYPES = new Set([
   "pdf",
   "txt",
@@ -37,4 +40,22 @@ export function shouldRejectKnowledgeFileType(
   const type = filename.substring(filename.lastIndexOf(".") + 1).toLowerCase();
 
   return !allowed.has(type);
+}
+
+export function supportedKnowledgeUploadTypes(
+  engines: ParserEngineInfo[],
+  rules: ParserEngineRule[] = [],
+): Set<string> {
+  const engineByType = new Map<string, string>();
+  for (const rule of rules) {
+    for (const type of rule.file_types) engineByType.set(type, rule.engine);
+  }
+  const availableNames = new Set(engines.filter(engine => engine.Available !== false).map(engine => engine.Name));
+  const supported = new Set<string>();
+  for (const engine of engines) {
+    for (const type of engine.FileTypes || []) {
+      if (availableNames.has(engineByType.get(type) || engine.Name)) supported.add(type);
+    }
+  }
+  return supported;
 }

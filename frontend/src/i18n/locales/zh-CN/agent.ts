@@ -1758,6 +1758,10 @@ export default {
     copy: '复制',
     addToKnowledgeBase: '添加到知识库',
     artifactDrawer: {
+      saveToKnowledge: '添加文件',
+      knowledgeDestination: '目标知识库',
+      noWritableKnowledgeBases: '没有可写入的知识库。',
+      knowledgeLoadFailed: '无法加载知识库，请重试。',
       buttonTitle: '查看本次生成的文件',
       title: '生成的文件',
       empty: '本次未生成可下载的文件',
