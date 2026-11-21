@@ -63,7 +63,7 @@ func TestVLMLangfuseRecordsBothPredictionMethods(t *testing.T) {
 			inner := &tracingTestVLM{err: failure}
 			wrapped, err := wrapVLMLangfuse(inner, nil)
 			require.NoError(t, err)
-			wrapped, err = wrapVLMConcurrency(wrapped, 0, nil)
+			wrapped, err = wrapVLMConcurrency(wrapped, 0, 0, 0, nil)
 			require.NoError(t, err)
 			var result string
 			if opts == nil {
