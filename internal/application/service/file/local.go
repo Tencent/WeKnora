@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -111,7 +112,11 @@ func (s *localFileService) SaveFile(ctx context.Context,
 func (s *localFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
 	logger.Infof(ctx, "Getting file: %s", filePath)
 
-	candidate := s.normalizePathForBase(filePath)
+	normalized, err := normalizeLocalFilePath(filePath)
+	if err != nil {
+		return nil, err
+	}
+	candidate := s.normalizePathForBase(normalized)
 	resolved, err := secutils.SafePathUnderBase(s.baseDir, candidate)
 	if err != nil {
 		logger.Errorf(ctx, "Path traversal denied for GetFile: %v", err)
@@ -137,7 +142,11 @@ func (s *localFileService) GetFile(ctx context.Context, filePath string) (io.Rea
 func (s *localFileService) DeleteFile(ctx context.Context, filePath string) error {
 	logger.Infof(ctx, "Deleting file: %s", filePath)
 
-	candidate := s.normalizePathForBase(filePath)
+	normalized, err := normalizeLocalFilePath(filePath)
+	if err != nil {
+		return fmt.Errorf("invalid file path: %w", err)
+	}
+	candidate := s.normalizePathForBase(normalized)
 	resolved, err := secutils.SafePathUnderBase(s.baseDir, candidate)
 	if err != nil {
 		logger.Errorf(ctx, "Path traversal denied for DeleteFile: %v", err)
@@ -161,12 +170,13 @@ func (s *localFileService) DeleteFile(ctx context.Context, filePath string) erro
 func (s *localFileService) CopyFile(ctx context.Context,
 	srcPath string, tenantID uint64, knowledgeID string,
 ) (string, error) {
-	// Only local paths are accepted. A provider scheme other than local://
-	// (e.g. s3://, minio://) means a cross-backend copy, which this service
-	// does not support. Legacy bare/absolute paths have no scheme and pass.
-	if i := strings.Index(srcPath, "://"); i >= 0 && srcPath[:i+3] != localScheme {
+	// Only local paths are accepted. Provider URIs are normalized first so
+	// legacy single-slash paths such as s3:/bucket/key are rejected as remote.
+	normalizedSrcPath, err := normalizeLocalFilePath(srcPath)
+	if err != nil {
 		return "", fmt.Errorf("local file service cannot copy %q: %w", srcPath, ErrCrossBackendCopy)
 	}
+	srcPath = normalizedSrcPath
 
 	// Validate and resolve the source path under baseDir (same guard as GetFile).
 	srcCandidate := s.normalizePathForBase(srcPath)
@@ -309,6 +319,17 @@ func trimStorageScope(path string) string {
 		return rest[i+1:]
 	}
 	return ""
+}
+
+// normalizeLocalFilePath removes storage-backend scopes, restores old provider
+// URIs cleaned to a single slash, and rejects paths owned by a remote provider.
+func normalizeLocalFilePath(filePath string) (string, error) {
+	filePath = trimStorageScope(strings.TrimSpace(filePath))
+	filePath = types.NormalizeStorageProviderPath(filePath)
+	if scheme, _, ok := strings.Cut(filePath, "://"); ok && scheme != "local" {
+		return "", fmt.Errorf("local file service cannot handle non-local provider scheme %q in path %q", scheme, filePath)
+	}
+	return filePath, nil
 }
 
 // normalizePathForBase keeps backward compatibility for legacy file paths:
