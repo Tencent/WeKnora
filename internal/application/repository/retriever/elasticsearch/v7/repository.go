@@ -605,6 +605,9 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 func (e *elasticsearchRepository) Retrieve(ctx context.Context,
 	params typesLocal.RetrieveParams,
 ) ([]*typesLocal.RetrieveResult, error) {
+	if err := params.ValidateScope(); err != nil {
+		return nil, err
+	}
 	log := logger.GetLogger(ctx)
 	log.Debugf("[ElasticsearchV7] Processing retrieval request of type: %s", params.RetrieverType)
 

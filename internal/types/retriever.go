@@ -1,5 +1,7 @@
 package types
 
+import "errors"
+
 // RetrieverEngineType represents the type of retriever engine
 type RetrieverEngineType string
 
@@ -68,6 +70,21 @@ type RetrieveParams struct {
 	AdditionalParams map[string]interface{}
 	// Retriever type
 	RetrieverType RetrieverType // Retriever type
+}
+
+// ErrRetrieveScopeRequired is returned when a retrieval request carries no
+// knowledge-base and no knowledge scope. Engines scope queries by
+// knowledge_base_id / knowledge_id only (there is no tenant dimension in the
+// vector stores), so an empty scope would scan every knowledge base in the
+// store. Fail closed instead.
+var ErrRetrieveScopeRequired = errors.New("retrieval requires a non-empty knowledge base or knowledge scope")
+
+// ValidateScope reports whether the request carries a retrieval scope.
+func (p RetrieveParams) ValidateScope() error {
+	if len(p.KnowledgeBaseIDs) == 0 && len(p.KnowledgeIDs) == 0 {
+		return ErrRetrieveScopeRequired
+	}
+	return nil
 }
 
 // RetrieverEngineParams represents the parameters for retriever engine

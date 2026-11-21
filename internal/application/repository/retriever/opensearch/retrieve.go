@@ -31,6 +31,9 @@ func (r *Repository) Retrieve(
 	ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
+	if err := params.ValidateScope(); err != nil {
+		return nil, err
+	}
 	dim, multiIndex := resolveDim(params)
 
 	switch params.RetrieverType {

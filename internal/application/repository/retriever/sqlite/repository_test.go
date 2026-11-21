@@ -197,9 +197,10 @@ func TestRetrieveReturnsVectorQueryError(t *testing.T) {
 	require.NoError(t, repository.db.Exec("DROP TABLE "+vecTableName(2)).Error)
 
 	results, err := repository.Retrieve(context.Background(), types.RetrieveParams{
-		Embedding:     []float32{1, 0},
-		TopK:          1,
-		RetrieverType: types.VectorRetrieverType,
+		Embedding:        []float32{1, 0},
+		KnowledgeBaseIDs: []string{"kb-target"},
+		TopK:             1,
+		RetrieverType:    types.VectorRetrieverType,
 	})
 	require.Error(t, err)
 	assert.Nil(t, results)
@@ -211,11 +212,39 @@ func TestRetrieveReturnsKeywordQueryError(t *testing.T) {
 	require.NoError(t, repository.db.Exec("DROP TABLE IF EXISTS lite_embeddings_fts").Error)
 
 	results, err := repository.Retrieve(context.Background(), types.RetrieveParams{
-		Query:         "missing fts table",
-		TopK:          1,
-		RetrieverType: types.KeywordsRetrieverType,
+		Query:            "missing fts table",
+		KnowledgeBaseIDs: []string{"kb-target"},
+		TopK:             1,
+		RetrieverType:    types.KeywordsRetrieverType,
 	})
 	require.Error(t, err)
 	assert.Nil(t, results)
 	assert.Contains(t, err.Error(), "FTS5 query failed")
+}
+
+// A saved row that the old "no filter" behavior would have matched: nil
+// results prove the query never reached SQLite.
+func TestRetrieveRejectsEmptyScopeWithoutTouchingTheStore(t *testing.T) {
+	repository := newSQLiteRetrieverTestRepository(t)
+	saveSQLiteTestVector(t, repository,
+		sqliteTestIndex("chunk", "kb-target", "knowledge-target", "tag-target", true),
+		[]float32{1, 0},
+	)
+
+	for _, retrieverType := range []types.RetrieverType{
+		types.VectorRetrieverType,
+		types.KeywordsRetrieverType,
+	} {
+		t.Run(string(retrieverType), func(t *testing.T) {
+			results, err := repository.Retrieve(context.Background(), types.RetrieveParams{
+				Query:         "chunk",
+				Embedding:     []float32{1, 0},
+				TopK:          5,
+				RetrieverType: retrieverType,
+			})
+
+			require.ErrorIs(t, err, types.ErrRetrieveScopeRequired)
+			require.Nil(t, results)
+		})
+	}
 }
