@@ -231,7 +231,7 @@ PPT 系列**没有独立解析器**，由 `MarkitdownParser` 处理，这两个�
 `PipelineParser.create(MarkdownTableFormatter, MarkdownImageBase64)`：
 
 - **`MarkdownTableFormatter`**：编码自动检测（`endecode.decode_bytes`：utf-8 → gb18030 → gb2312 → gbk → big5 → ascii → latin-1）后规范化表格——统一 `| cell |` 间距与对齐标记，`normalize_spurious_table_prefixes` 修 MarkItDown 产出的假空行/分隔行前缀，并给无表头的 Word 表格补 `| --- |` GFM 分隔行。
-- **`MarkdownImageBase64`**：把 `![alt](data:image/xxx;base64,...)` 内嵌图抽出为 `images/<uuid>.<ext>` 引用 + `Document.images` 数据（MIME 子类型支持 `x-emf` 这类带连字符的格式）。无法解码的图片（如 base64 后紧跟中文图片标题）会被跳过并记录日志，不会导致整篇文档解析失败。
+- **`MarkdownImageBase64`**：把 `![alt](data:image/xxx;base64,...)` 内嵌图抽出为 `images/<uuid>.<ext>` 引用 + `Document.images` 数据（MIME 子类型支持 `x-emf` 这类带连字符的格式）。`x-wmf` / `wmf` / `x-emf` / `emf` 先经 `pptx_media.rasterize_media_bytes` 转成 PNG 再存储；转不出来的元文件会被跳过并记录日志，避免下游把 `application/octet-stream` 归档成永久失败的多模态任务。无法解码的图片（如 base64 后紧跟中文图片标题）同样被跳过，不会导致整篇文档解析失败。
 
 该解析器也是 MarkitdownParser / WebParser 流水线的公共后处理阶段。
 
