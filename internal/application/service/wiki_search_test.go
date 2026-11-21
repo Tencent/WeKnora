@@ -60,7 +60,7 @@ func setupWikiSearchService(
 	t *testing.T,
 	kbs map[string]*types.KnowledgeBase,
 	share interfaces.KBShareService,
-) (context.Context, interfaces.WikiPageService, interfaces.WikiPageRepository) {
+) (context.Context, interfaces.WikiPageService, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	require.NoError(t, err)
@@ -68,11 +68,11 @@ func setupWikiSearchService(
 	repo := repository.NewWikiPageRepository(db)
 	svc := NewWikiPageService(repo, nil, &wikiSearchKBService{byID: kbs}, nil, nil, share)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
-	return ctx, svc, repo
+	return ctx, svc, db
 }
 
 func TestSearchPagesAcross_RanksAcrossEnabledKBs(t *testing.T) {
-	ctx, svc, repo := setupWikiSearchService(t, map[string]*types.KnowledgeBase{
+	ctx, svc, db := setupWikiSearchService(t, map[string]*types.KnowledgeBase{
 		"kb-a": makeWikiSearchKB("kb-a", 1),
 		"kb-b": makeWikiSearchKB("kb-b", 1),
 	}, nil)
@@ -89,8 +89,8 @@ func TestSearchPagesAcross_RanksAcrossEnabledKBs(t *testing.T) {
 		Status: types.WikiPageStatusPublished, Content: "mentions 王新", Version: 1,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
-	require.NoError(t, repo.Create(ctx, titleHit))
-	require.NoError(t, repo.Create(ctx, contentHit))
+	require.NoError(t, db.Create(titleHit).Error)
+	require.NoError(t, db.Create(contentHit).Error)
 
 	pages, err := svc.SearchPagesAcross(ctx, []string{"kb-a", "kb-b"}, "王新", 10)
 	require.NoError(t, err)
@@ -155,7 +155,7 @@ func TestSearchPagesAcross_ForeignTenantNonWikiWithoutShareIsNotFound(t *testing
 }
 
 func TestSearchPagesAcross_ForeignTenantWithShareOK(t *testing.T) {
-	ctx, svc, repo := setupWikiSearchService(t, map[string]*types.KnowledgeBase{
+	ctx, svc, db := setupWikiSearchService(t, map[string]*types.KnowledgeBase{
 		"kb-foreign": makeWikiSearchKB("kb-foreign", 99),
 	}, &wikiSearchShareService{
 		allowed: map[string]map[uint64]bool{"kb-foreign": {1: true}},
@@ -167,7 +167,7 @@ func TestSearchPagesAcross_ForeignTenantWithShareOK(t *testing.T) {
 		Status: types.WikiPageStatusPublished, Content: "body", Version: 1,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
-	require.NoError(t, repo.Create(ctx, page))
+	require.NoError(t, db.Create(page).Error)
 
 	pages, err := svc.SearchPagesAcross(ctx, []string{"kb-foreign"}, "共享", 10)
 	require.NoError(t, err)

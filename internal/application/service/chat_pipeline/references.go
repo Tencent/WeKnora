@@ -26,7 +26,11 @@ func prepareMessagesWithModelContext(
 	if len(messages) > 0 {
 		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + registry.ProtocolPrompt()
 	}
-	if len(chatManage.MergeResult) == 0 || len(messages) == 0 {
+	if len(messages) == 0 {
+		return messages, registry
+	}
+	if len(chatManage.MergeResult) == 0 {
+		appendDataAnalysisFailureNote(messages, chatManage.DataAnalysisFailure)
 		return messages, registry
 	}
 
@@ -110,7 +114,27 @@ func prepareMessagesWithModelContext(
 		ids := chatManage.ContextImageChunkIDs[:count]
 		messages[last].Content += registry.ImageSourcesNote(ids, len(chatManage.Images))
 	}
+	appendDataAnalysisFailureNote(messages, chatManage.DataAnalysisFailure)
 	return messages, registry
+}
+
+func appendDataAnalysisFailureNote(messages []chat.Message, failure *types.DataAnalysisFailure) {
+	if failure == nil || len(messages) == 0 {
+		return
+	}
+	last := len(messages) - 1
+	target := strings.TrimSpace(failure.FileName)
+	if target == "" {
+		target = "the tabular document"
+	}
+	reason := strings.TrimSpace(failure.Reason)
+	if reason == "" {
+		reason = "SQL data analysis failed"
+	}
+	messages[last].Content += "\n\n[Data Analysis Notice: Automated SQL data analysis on \"" + target +
+		"\" failed (" + reason + "). Do not manually calculate or fabricate exact totals, aggregations, " +
+		"or percentage shares from partial text excerpts; if answering the user's question requires exact " +
+		"statistics over this table, explicitly state that structured data analysis failed.]"
 }
 
 func isPipelineWebReference(result *types.SearchResult) bool {
