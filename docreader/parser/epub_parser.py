@@ -294,6 +294,17 @@ class EPUBParser(BaseParser):
                 string=lambda text: isinstance(text, Comment)
             ):
                 comment.extract()
+            # markdownify understands HTML img, but drops SVG image elements.
+            # Preserve their resource references through the same archive-local
+            # resolver as ordinary images. SVG2 href takes priority over XLink.
+            for image in soup.select("svg image"):
+                if image.find_parent(["defs", "symbol", "clippath", "mask", "pattern"]):
+                    continue
+                source = image.get("href", image.get("xlink:href", ""))
+                if source.strip():
+                    image.replace_with(
+                        soup.new_tag("img", src=source, alt=image.get("aria-label", ""))
+                    )
             self._strip_internal_links(soup)
             if image_aliases:
                 self._rewrite_image_sources(soup, image_aliases, base_path)
