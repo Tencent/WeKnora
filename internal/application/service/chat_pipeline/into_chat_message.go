@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html"
 	"strings"
@@ -355,8 +356,47 @@ func getEnrichedPassageForChat(ctx context.Context, result *types.SearchResult) 
 		return result.Content
 	}
 
-	// 处理图片信息并与内容合并
-	return enrichContentWithImageInfo(ctx, result.Content, result.ImageInfo)
+	content, imageInfo := result.Content, result.ImageInfo
+	if types.IsImageChildChunkType(result.ChunkType) {
+		// Standalone image hits can carry only OCR/caption text, without the
+		// Markdown image present in their parent. Expose their own addresses,
+		// but keep ordinary text passages from inheriting orphan thumbnails.
+		imageInfo = searchutil.ClearImageInfoTextMatchingBody(imageInfo, content, result.ChunkType)
+		content = appendImageChunkLinks(content, imageInfo)
+	}
+	return enrichContentWithImageInfo(ctx, content, imageInfo)
+}
+
+func appendImageChunkLinks(content, imageInfo string) string {
+	var infos []types.ImageInfo
+	if err := json.Unmarshal([]byte(imageInfo), &infos); err != nil {
+		return content
+	}
+	present := searchutil.ImageURLsInContent(content)
+	for _, info := range infos {
+		if present[info.URL] || present[info.OriginalURL] {
+			continue
+		}
+		url := info.URL
+		if url == "" {
+			url = info.OriginalURL
+		}
+		if strings.TrimSpace(url) == "" {
+			continue
+		}
+		if content != "" {
+			content += "\n\n"
+		}
+		// Add only the link here; the shared chat enricher adds metadata once.
+		content += searchutil.BuildImageInfoMarkdownWithURL(url, &types.ImageInfo{})
+		if info.URL != "" {
+			present[info.URL] = true
+		}
+		if info.OriginalURL != "" {
+			present[info.OriginalURL] = true
+		}
+	}
+	return content
 }
 
 // enrichContentWithImageInfo delegates to the shared searchutil implementation.
