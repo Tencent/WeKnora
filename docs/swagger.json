@@ -28707,6 +28707,9 @@
         "github_com_Tencent_WeKnora_internal_types.Chunk": {
             "type": "object",
             "properties": {
+                "approval_rate": {
+                    "type": "number"
+                },
                 "chunk_index": {
                     "description": "Index position of the chunk in the original document",
                     "type": "integer",
@@ -28746,6 +28749,9 @@
                             "$ref": "#/definitions/gorm.DeletedAt"
                         }
                     ]
+                },
+                "dislike_count": {
+                    "type": "integer"
                 },
                 "end_at": {
                     "description": "Ending character position in the original text",
@@ -28800,9 +28806,16 @@
                     "description": "LastEditorID records the actor that produced the current revision.",
                     "type": "string"
                 },
+                "like_count": {
+                    "description": "LikeCount and DislikeCount are cumulative user ratings attributed from\nanswers that cited this chunk. ApprovalRate is likes/(likes+dislikes)\nand is nil when the chunk has no ratings.",
+                    "type": "integer"
+                },
                 "metadata": {
                     "description": "Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据",
                     "type": "object"
+                },
+                "needs_optimization": {
+                    "type": "boolean"
                 },
                 "next_chunk_id": {
                     "description": "Next chunk ID",
@@ -28815,6 +28828,10 @@
                 "pre_chunk_id": {
                     "description": "Previous chunk ID",
                     "type": "string"
+                },
+                "recall_weight": {
+                    "description": "RecallWeight multiplies this chunk's retrieval score. 0 means \"unset\"\nand is treated as 1 so rows written before the column existed do not\ndrop out of search. NeedsOptimization marks a very low approval rate.",
+                    "type": "number"
                 },
                 "relation_chunks": {
                     "description": "关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk",
@@ -28854,6 +28871,35 @@
                 "updated_at": {
                     "description": "Chunk last update time",
                     "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.ChunkFeedbackConfig": {
+            "type": "object",
+            "properties": {
+                "boost_threshold": {
+                    "type": "number"
+                },
+                "boost_weight": {
+                    "type": "number"
+                },
+                "degrade_threshold": {
+                    "type": "number"
+                },
+                "degrade_weight": {
+                    "type": "number"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "min_samples": {
+                    "type": "integer"
+                },
+                "needs_optimization_threshold": {
+                    "type": "number"
+                },
+                "neutral_weight": {
+                    "type": "number"
                 }
             }
         },
@@ -33384,6 +33430,14 @@
                         }
                     ]
                 },
+                "feedback": {
+                    "description": "Feedback is the calling user's like/dislike on this assistant message.\nIt is filled when history is loaded and is never stored on the row.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MessageFeedbackState"
+                        }
+                    ]
+                },
                 "id": {
                     "description": "Unique identifier for the message",
                     "type": "string",
@@ -33573,6 +33627,20 @@
                 "total_chunks": {
                     "description": "Total parsed chunks",
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.MessageFeedbackState": {
+            "type": "object",
+            "properties": {
+                "chunk_count": {
+                    "type": "integer"
+                },
+                "rating": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
                 }
             }
         },
@@ -35185,6 +35253,14 @@
         "github_com_Tencent_WeKnora_internal_types.RetrievalConfig": {
             "type": "object",
             "properties": {
+                "chunk_feedback": {
+                    "description": "ChunkFeedback is the approval-rate policy that adjusts chunk recall\nweight. Nil means DefaultChunkFeedbackConfig (the feature is on).",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkFeedbackConfig"
+                        }
+                    ]
+                },
                 "embedding_top_k": {
                     "description": "EmbeddingTopK is the maximum number of chunks returned by vector search (default: 50)",
                     "type": "integer"
@@ -39172,6 +39248,9 @@
         "internal_handler.AgentChunkDetail": {
             "type": "object",
             "properties": {
+                "approval_rate": {
+                    "type": "number"
+                },
                 "chunk_index": {
                     "description": "Index position of the chunk in the original document",
                     "type": "integer",
@@ -39211,6 +39290,9 @@
                             "$ref": "#/definitions/gorm.DeletedAt"
                         }
                     ]
+                },
+                "dislike_count": {
+                    "type": "integer"
                 },
                 "end_at": {
                     "description": "Ending character position in the original text",
@@ -39265,9 +39347,16 @@
                     "description": "LastEditorID records the actor that produced the current revision.",
                     "type": "string"
                 },
+                "like_count": {
+                    "description": "LikeCount and DislikeCount are cumulative user ratings attributed from\nanswers that cited this chunk. ApprovalRate is likes/(likes+dislikes)\nand is nil when the chunk has no ratings.",
+                    "type": "integer"
+                },
                 "metadata": {
                     "description": "Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据",
                     "type": "object"
+                },
+                "needs_optimization": {
+                    "type": "boolean"
                 },
                 "next_chunk_id": {
                     "description": "Next chunk ID",
@@ -39280,6 +39369,10 @@
                 "pre_chunk_id": {
                     "description": "Previous chunk ID",
                     "type": "string"
+                },
+                "recall_weight": {
+                    "description": "RecallWeight multiplies this chunk's retrieval score. 0 means \"unset\"\nand is treated as 1 so rows written before the column existed do not\ndrop out of search. NeedsOptimization marks a very low approval rate.",
+                    "type": "number"
                 },
                 "relation_chunks": {
                     "description": "关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk",
