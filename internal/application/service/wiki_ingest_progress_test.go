@@ -38,9 +38,12 @@ type progressChunks struct {
 	chunks []*types.Chunk
 }
 
-func (p progressChunks) ListChunksByKnowledgeIDAndTypes(context.Context, uint64, string, []types.ChunkType) ([]*types.Chunk, error) {
+func (p progressChunks) ListChunksByKnowledgeIDAndTypes(
+	context.Context, uint64, string, []types.ChunkType,
+) ([]*types.Chunk, error) {
 	return p.chunks, nil
 }
+
 func (p progressChunks) ListChunksByParentIDs(context.Context, uint64, []string) ([]*types.Chunk, error) {
 	return nil, nil
 }
@@ -53,18 +56,33 @@ func TestWikiMappedInputAndTaxonomySurviveWorkerRestart(t *testing.T) {
 	svc.knowledgeSvc = &wikiKnowledgeLookupStub{lookup: func(context.Context, string) (*types.Knowledge, error) {
 		return &types.Knowledge{ID: op.KnowledgeID, Title: "新疆", ParseStatus: types.ParseStatusFinalizing}, nil
 	}}
-	svc.chunkRepo = progressChunks{chunks: []*types.Chunk{{ID: "chunk", Content: content, ChunkType: types.ChunkTypeText}}}
+	svc.chunkRepo = progressChunks{chunks: []*types.Chunk{
+		{ID: "chunk", Content: content, ChunkType: types.ChunkTypeText},
+	}}
 	key := wikiMappedInputKey(content+"\x00新疆", types.ResolveLanguageName(ctx, op.Language), model, batch)
-	mapped := &wikiMappedDocument{InputKey: key, Result: &docIngestResult{KnowledgeID: op.KnowledgeID, Pages: []wikiIngestPageRef{{Slug: "entity/xi-zang", Title: "西藏"}}}, Updates: []SlugUpdate{{Slug: "entity/xi-zang", KnowledgeID: op.KnowledgeID, Type: "entity"}}, FoldersReady: true, Folders: map[string]string{"entity/xi-zang": "folder"}}
+	mapped := &wikiMappedDocument{
+		InputKey: key,
+		Result: &docIngestResult{
+			KnowledgeID: op.KnowledgeID,
+			Pages:       []wikiIngestPageRef{{Slug: "entity/xi-zang", Title: "西藏"}},
+		},
+		Updates:      []SlugUpdate{{Slug: "entity/xi-zang", KnowledgeID: op.KnowledgeID, Type: "entity"}},
+		FoldersReady: true,
+		Folders:      map[string]string{"entity/xi-zang": "folder"},
+	}
 	require.NoError(t, svc.saveWikiMappedDocument(ctx, 1, &op, mapped))
 	op = reloadWikiExtractionCheckpoint(t, db, svc, op.dbID)
 	// The nil model would panic on any generation call. Restart must load the
 	// persisted map and directory plan without issuing extraction/summary calls.
-	result, updates, err := svc.mapOneDocument(ctx, model, WikiIngestPayload{TenantID: 1, KnowledgeBaseID: "kb"}, op, batch)
+	result, updates, err := svc.mapOneDocument(
+		ctx, model, WikiIngestPayload{TenantID: 1, KnowledgeBaseID: "kb"}, op, batch)
 	require.NoError(t, err)
 	require.Equal(t, mapped.Result.Pages, result.Pages)
 	require.Equal(t, mapped.Updates, updates)
-	folders, err := svc.planResumableWikiFolders(ctx, nil, &types.KnowledgeBase{ID: "kb", TenantID: 1}, map[string][]SlugUpdate{"entity/xi-zang": updates}, "Chinese", []WikiPendingOp{op})
+	folders, err := svc.planResumableWikiFolders(
+		ctx, nil, &types.KnowledgeBase{ID: "kb", TenantID: 1},
+		map[string][]SlugUpdate{"entity/xi-zang": updates}, "Chinese", []WikiPendingOp{op},
+	)
 	require.NoError(t, err)
 	require.Equal(t, mapped.Folders, folders)
 	require.NotEqual(t, key, wikiMappedInputKey(content+"修改", "Chinese", model, batch))
@@ -89,13 +107,18 @@ func (m *progressEditor) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatO
 }
 
 func TestWikiRetryReuses947PagesAndOnlyWritesFailedPage(t *testing.T) {
-	batch := &WikiBatchContext{OperationKeys: map[string]string{"article": "34080:source"}, SlugTitleMany: func(context.Context, []string) map[string]string { return nil }}
+	batch := &WikiBatchContext{
+		OperationKeys: map[string]string{"article": "34080:source"},
+		SlugTitleMany: func(context.Context, []string) map[string]string { return nil },
+	}
 	model := &progressEditor{}
 	pages := &retractionVisibilityPages{}
 	svc := &wikiIngestService{wikiService: pages, knowledgeSvc: liveKnowledgeStub{}}
 	ctx := context.Background()
 	for i := 0; i < 947; i++ {
-		page := &types.WikiPage{Slug: fmt.Sprintf("entity/done-%d", i), Content: "已经完成的正文", SourceRefs: types.StringArray{"article"}}
+		page := &types.WikiPage{
+			Slug: fmt.Sprintf("entity/done-%d", i), Content: "已经完成的正文", SourceRefs: types.StringArray{"article"},
+		}
 		updates := []SlugUpdate{{Slug: page.Slug, Type: "entity", KnowledgeID: "article"}}
 		require.NoError(t, recordWikiPageOperations(page, updates, batch))
 		pages.page = page
@@ -104,9 +127,14 @@ func TestWikiRetryReuses947PagesAndOnlyWritesFailedPage(t *testing.T) {
 	}
 	require.Zero(t, model.calls)
 	require.Nil(t, pages.written)
-	page := &types.WikiPage{Slug: "entity/xi-zang", Title: "西藏", Content: "原有其他来源内容", SourceRefs: types.StringArray{"other"}}
+	page := &types.WikiPage{
+		Slug: "entity/xi-zang", Title: "西藏", Content: "原有其他来源内容", SourceRefs: types.StringArray{"other"},
+	}
 	pages.page = page
-	updates := []SlugUpdate{{Slug: page.Slug, Type: "entity", KnowledgeID: "article", SourceRef: "article", Item: extractedItem{Name: "西藏", Slug: page.Slug, Details: "西藏的相关历史记述。"}}}
+	updates := []SlugUpdate{{
+		Slug: page.Slug, Type: "entity", KnowledgeID: "article", SourceRef: "article",
+		Item: extractedItem{Name: "西藏", Slug: page.Slug, Details: "西藏的相关历史记述。"},
+	}}
 	_, _, _, _, err := svc.reduceSlugUpdates(ctx, model, "kb", page.Slug, updates, 1, batch, nil)
 	require.ErrorContains(t, err, "empty wiki rewrite")
 	require.Nil(t, pages.written)
@@ -157,13 +185,17 @@ func TestWikiLegacyCheckpointUpgradeKeepsSavedBlocks(t *testing.T) {
 		MaxTokens          int
 	}{1, model.GetModelID(), model.GetModelName(), recipe, layout, wikiLLMMaxTokens})
 	require.NoError(t, err)
-	op.Extraction = &wikiExtractionProgress{Version: 1, Fingerprint: wikiExtractionDigest(raw), Total: 1, Segments: map[string]json.RawMessage{layout[0]: json.RawMessage(`{"entities":[],"concepts":[]}`)}}
+	op.Extraction = &wikiExtractionProgress{
+		Version: 1, Fingerprint: wikiExtractionDigest(raw), Total: 1,
+		Segments: map[string]json.RawMessage{layout[0]: json.RawMessage(`{"entities":[],"concepts":[]}`)},
+	}
 	payload, err := json.Marshal(op)
 	require.NoError(t, err)
 	require.NoError(t, db.Model(&types.TaskPendingOp{}).Where("id = ?", op.dbID).Update("payload", payload).Error)
 	op = reloadWikiExtractionCheckpoint(t, db, svc, op.dbID)
 	calls := 0
-	run, err := svc.resumableWikiExtraction(ctx, model, &op, 1, recipe, func(context.Context, string) (combinedExtraction, error) { calls++; return combinedExtraction{}, nil })
+	run, err := svc.resumableWikiExtraction(ctx, model, &op, 1, recipe,
+		func(context.Context, string) (combinedExtraction, error) { calls++; return combinedExtraction{}, nil })
 	require.NoError(t, err)
 	_, err = run(ctx, "原文")
 	require.NoError(t, err)
@@ -194,6 +226,7 @@ func TestWikiPageConflictRetryPersistsCompletionReceipt(t *testing.T) {
 	require.Equal(t, 2, store.count("entity/alpha"))
 	_, _, _, _, err = svc.reduceSlugUpdates(ctx, model, "kb-row-guard", "entity/alpha", updates, 7, batch, nil)
 	require.NoError(t, err)
-	require.Len(t, model.captured("wiki_page_modify:entity/alpha"), 2, "retry context must preserve the durable operation receipt")
+	require.Len(t, model.captured("wiki_page_modify:entity/alpha"), 2,
+		"retry context must preserve the durable operation receipt")
 	require.Equal(t, 2, store.count("entity/alpha"))
 }

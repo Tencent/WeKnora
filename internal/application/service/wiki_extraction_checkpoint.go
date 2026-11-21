@@ -141,7 +141,10 @@ func (s *wikiIngestService) resumableWikiExtraction(
 			segments[k] = v
 		}
 		segments[key] = data
-		next := &wikiExtractionProgress{Version: 2, Fingerprint: fingerprint, Total: progress.Total, Segments: segments, PreviousSlugs: progress.PreviousSlugs, Mapped: progress.Mapped}
+		next := &wikiExtractionProgress{
+			Version: 2, Fingerprint: fingerprint, Total: progress.Total, Segments: segments,
+			PreviousSlugs: progress.PreviousSlugs, Mapped: progress.Mapped,
+		}
 		nextOp := *op
 		nextOp.Extraction = next
 		payload, err := json.Marshal(nextOp)

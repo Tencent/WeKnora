@@ -22,14 +22,18 @@ type wikiMappedDocument struct {
 }
 
 func wikiMappedInputKey(content, lang string, model chat.Chat, batch *WikiBatchContext) string {
-	data, _ := json.Marshal([]string{content, lang, model.GetModelID(), model.GetModelName(),
-		string(batch.ExtractionGranularity.Normalize()), batch.ExtractionInstructions, batch.ContentInstructions})
+	data, _ := json.Marshal([]string{
+		content, lang, model.GetModelID(), model.GetModelName(),
+		string(batch.ExtractionGranularity.Normalize()), batch.ExtractionInstructions, batch.ContentInstructions,
+	})
 	return wikiExtractionDigest(data)
 }
 
 // Persist stages using the same CAS and mutex as extraction blocks. This also
 // prevents a late worker from restoring progress after its row was replaced.
-func (s *wikiIngestService) saveWikiMappedDocument(ctx context.Context, tenantID uint64, op *WikiPendingOp, mapped *wikiMappedDocument) error {
+func (s *wikiIngestService) saveWikiMappedDocument(
+	ctx context.Context, tenantID uint64, op *WikiPendingOp, mapped *wikiMappedDocument,
+) error {
 	if op.Extraction == nil {
 		op.Extraction = &wikiExtractionProgress{}
 	}
@@ -40,8 +44,10 @@ func (s *wikiIngestService) saveWikiMappedDocument(ctx context.Context, tenantID
 	if len(before) == 0 {
 		before = op.dbPayload
 	}
-	next := &wikiExtractionProgress{Version: progress.Version, Fingerprint: progress.Fingerprint,
-		Total: progress.Total, Segments: progress.Segments, PreviousSlugs: progress.PreviousSlugs, Mapped: mapped}
+	next := &wikiExtractionProgress{
+		Version: progress.Version, Fingerprint: progress.Fingerprint,
+		Total: progress.Total, Segments: progress.Segments, PreviousSlugs: progress.PreviousSlugs, Mapped: mapped,
+	}
 	copyOp := *op
 	copyOp.Extraction = next
 	after, err := json.Marshal(copyOp)
@@ -69,7 +75,8 @@ func (s *wikiIngestService) saveWikiMappedDocument(ctx context.Context, tenantID
 }
 
 func (s *wikiIngestService) planResumableWikiFolders(ctx context.Context, model chat.Chat, kb *types.KnowledgeBase,
-	updates map[string][]SlugUpdate, lang string, ops []WikiPendingOp) (map[string]string, error) {
+	updates map[string][]SlugUpdate, lang string, ops []WikiPendingOp,
+) (map[string]string, error) {
 	result := make(map[string]string)
 	if len(updates) == 0 {
 		return result, nil

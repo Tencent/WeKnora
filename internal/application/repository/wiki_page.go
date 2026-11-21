@@ -387,10 +387,19 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 		prefix := req.SourceKnowledgeID + "|"
 		prefixLen := len([]rune(prefix))
 		if r.wikiDialect() == "sqlite" {
-			query = query.Where("EXISTS (SELECT 1 FROM json_each(CAST(source_refs AS TEXT)) AS ref WHERE ref.value = ? OR substr(ref.value,1,?) = ?)", req.SourceKnowledgeID, prefixLen, prefix)
+			query = query.Where(
+				"EXISTS (SELECT 1 FROM json_each(CAST(source_refs AS TEXT)) AS ref "+
+					"WHERE ref.value = ? OR substr(ref.value,1,?) = ?)",
+				req.SourceKnowledgeID, prefixLen, prefix,
+			)
 		} else {
 			needle, _ := json.Marshal([]string{req.SourceKnowledgeID})
-			query = query.Where("(source_refs @> ?::jsonb OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(source_refs::jsonb) AS ref(value) WHERE left(ref.value,?) = ?))", string(needle), prefixLen, prefix)
+			query = query.Where(
+				"(source_refs @> ?::jsonb OR EXISTS (SELECT 1 "+
+					"FROM jsonb_array_elements_text(source_refs::jsonb) AS ref(value) "+
+					"WHERE left(ref.value,?) = ?))",
+				string(needle), prefixLen, prefix,
+			)
 		}
 	}
 

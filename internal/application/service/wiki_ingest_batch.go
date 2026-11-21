@@ -1847,7 +1847,8 @@ func (s *wikiIngestService) mapOneDocument(
 		MapStats:    mapStats,
 		WikiSpan:    wikiSpan,
 	}
-	if err := s.saveWikiMappedDocument(ctx, payload.TenantID, &op, &wikiMappedDocument{InputKey: mapInputKey, Result: result, Updates: updates}); err != nil {
+	mappedDoc := &wikiMappedDocument{InputKey: mapInputKey, Result: result, Updates: updates}
+	if err := s.saveWikiMappedDocument(ctx, payload.TenantID, &op, mappedDoc); err != nil {
 		return nil, nil, err
 	}
 	return result, updates, nil
@@ -2106,7 +2107,6 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 		}
 		if err = recordWikiPageOperations(page, updates, batchCtx); err != nil {
 			return false, affectedType, false, false, err
-
 		}
 		if exists {
 			// A summary rewrite can drop table rows too, and the refusal has

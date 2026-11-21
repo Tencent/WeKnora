@@ -650,7 +650,8 @@ func (c *WikiConfig) Scan(value interface{}) error {
 
 // WikiPageListRequest represents a request to list wiki pages with filtering
 type WikiPageListRequest struct {
-	SourceKnowledgeID string      `json:"source_knowledge_id,omitempty"` // filter by the source document, not graph proximity
+	// SourceKnowledgeID filters by the source document, not graph proximity.
+	SourceKnowledgeID string      `json:"source_knowledge_id,omitempty"`
 	KnowledgeBaseID   string      `json:"knowledge_base_id"`
 	PageType          string      `json:"page_type,omitempty"`      // filter by type
 	Status            string      `json:"status,omitempty"`         // filter by status

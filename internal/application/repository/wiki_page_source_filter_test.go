@@ -23,7 +23,13 @@ func TestWikiPageListSourceFilterPaginatesAllTerms(t *testing.T) {
 		page.SourceRefs = types.StringArray{ref}
 		require.NoError(t, db.Create(page).Error)
 	}
-	for i, extra := range []struct{ kb, source, status string }{{"other", source, "published"}, {"kb", source + "suffix", "published"}, {"kb", "another|" + source, "published"}, {"kb", source, "archived"}} {
+	extras := []struct{ kb, source, status string }{
+		{"other", source, "published"},
+		{"kb", source + "suffix", "published"},
+		{"kb", "another|" + source, "published"},
+		{"kb", source, "archived"},
+	}
+	for i, extra := range extras {
 		p := makeWikiPage(extra.kb, fmt.Sprintf("entity/extra-%d", i), "entity", extra.status)
 		p.SourceRefs = types.StringArray{extra.source}
 		require.NoError(t, db.Create(p).Error)
@@ -31,7 +37,10 @@ func TestWikiPageListSourceFilterPaginatesAllTerms(t *testing.T) {
 	found := make(map[string]bool)
 	lastID := ""
 	for page := 1; page <= 5; page++ {
-		rows, total, err := repo.List(context.Background(), &types.WikiPageListRequest{KnowledgeBaseID: "kb", SourceKnowledgeID: source, PageType: "entity,concept", Status: "published", Page: page, PageSize: 200, SortBy: "title", SortOrder: "asc"})
+		rows, total, err := repo.List(context.Background(), &types.WikiPageListRequest{
+			KnowledgeBaseID: "kb", SourceKnowledgeID: source, PageType: "entity,concept", Status: "published",
+			Page: page, PageSize: 200, SortBy: "title", SortOrder: "asc",
+		})
 		require.NoError(t, err)
 		require.EqualValues(t, 947, total)
 		for _, row := range rows {

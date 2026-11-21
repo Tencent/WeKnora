@@ -103,13 +103,14 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	recipe := map[string]string{
 		"Content": content, "Language": lang, "PreviousSlugs": prevSlugsText,
 		"Granularity": string(granularity), "GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
-		"CustomInstructions": batchCtx.ExtractionInstructions, "InstructionScope": "wiki_extraction", "PromptTemplate": agent.WikiCandidateSlugPrompt,
+		"CustomInstructions": batchCtx.ExtractionInstructions, "InstructionScope": "wiki_extraction",
+		"PromptTemplate": agent.WikiCandidateSlugPrompt,
 	}
 	extract := func(
 		ctx context.Context, segment string,
 	) (combinedExtraction, error) {
-
-		response, callErr := s.generateWithTemplateResult(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
+		prompt := agent.WikiCandidateSlugPrompt
+		response, callErr := s.generateWithTemplateResult(ctx, chatModel, prompt, map[string]string{
 			"Content": segment, "Language": lang, "PreviousSlugs": recipe["PreviousSlugs"],
 			"Granularity":         string(granularity),
 			"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
