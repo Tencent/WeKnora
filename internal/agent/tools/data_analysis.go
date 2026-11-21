@@ -900,7 +900,19 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 		}
 	}
 
-	if _, err := io.Copy(tmp, reader); err != nil {
+	// Check cancellation before the first read: a context that is already
+	// canceled must not issue any storage reads at all (#5662).
+	if err := ctx.Err(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return "", noop, fmt.Errorf("materialize knowledge '%s' canceled: %w", knowledge.ID, err)
+	}
+	// The storage reader may not honor context cancellation (a plain local
+	// file does not), so the copy wraps the destination writer with a
+	// cancellation check between reads: once the context is observable as
+	// canceled the copy stops issuing further reads, closes the temp
+	// file, and removes the partial file (#5662).
+	if _, err := io.Copy(contextAwareWriter{ctx: ctx, w: tmp}, reader); err != nil {
 		_ = tmp.Close()
 		cleanup()
 		return "", noop, fmt.Errorf("failed to copy knowledge '%s' to temp file: %w", knowledge.ID, err)
@@ -914,6 +926,22 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 		knowledge.ID, tmpPath, t.sessionID)
 
 	return tmpPath, cleanup, nil
+}
+
+// contextAwareWriter wraps an io.Writer with a between-reads context
+// check. io.Copy calls Write once per Read from the source, so a
+// canceled context is detected before the next storage read is
+// issued rather than after the whole file has been drained (#5662).
+type contextAwareWriter struct {
+	ctx context.Context
+	w   io.Writer
+}
+
+func (c contextAwareWriter) Write(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.w.Write(p)
 }
 
 // LoadFromKnowledgeID loads data from a Knowledge ID into a DuckDB table and returns the table schema
