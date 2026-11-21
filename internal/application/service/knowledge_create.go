@@ -105,11 +105,12 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	logger.Infof(ctx, "Checking if file exists, tenant ID: %d", tenantID)
 	checkParams := &types.KnowledgeCheckParams{
-		Type:     "file",
-		FileName: fileName,
-		FileType: getFileType(fileName),
-		FileSize: file.Size,
-		FileHash: hash,
+		Type:       "file",
+		FileName:   fileName,
+		FileType:   getFileType(fileName),
+		FileSize:   file.Size,
+		FileHash:   hash,
+		FolderPath: folderPath,
 	}
 	// Same-bytes files from different source identities are still distinct
 	// documents (GitLab README templates, copied Confluence pages). Scope the
