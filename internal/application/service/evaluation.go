@@ -332,20 +332,17 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 
 	// Create knowledge base from passages (sync: wait for indexing to complete before querying)
 	knowledge, err := e.knowledgeService.CreateKnowledgeFromPassageSync(ctx, knowledgeBaseID, passages, "")
-	if err != nil {
-		logger.Errorf(ctx, "Failed to create knowledge from passages: %v", err)
-		return err
-	}
-	logger.Infof(ctx, "Knowledge created and indexed successfully, ID: %s", knowledge.ID)
-
-	// Setup cleanup of temporary resources
+	// The KB already exists, and a failed synchronous call can still return its
+	// partially created knowledge. Register cleanup before checking the error.
 	defer func() {
-		logger.Infof(ctx, "Cleaning up resources - deleting knowledge: %s", knowledge.ID)
-		if err := deleteReferencedKnowledge(ctx,
-			e.knowledgeService,
-			knowledgeBaseID,
-			[]string{knowledge.ID}); err != nil {
-			logger.Errorf(ctx, "Failed to delete knowledge: %v, knowledge ID: %s", err, knowledge.ID)
+		if knowledge != nil {
+			logger.Infof(ctx, "Cleaning up resources - deleting knowledge: %s", knowledge.ID)
+			if err := deleteReferencedKnowledge(ctx,
+				e.knowledgeService,
+				knowledgeBaseID,
+				[]string{knowledge.ID}); err != nil {
+				logger.Errorf(ctx, "Failed to delete knowledge: %v, knowledge ID: %s", err, knowledge.ID)
+			}
 		}
 
 		logger.Infof(ctx, "Cleaning up resources - deleting knowledge base: %s", knowledgeBaseID)
@@ -357,6 +354,11 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 			)
 		}
 	}()
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create knowledge from passages: %v", err)
+		return err
+	}
+	logger.Infof(ctx, "Knowledge created and indexed successfully, ID: %s", knowledge.ID)
 
 	// Initialize parallel evaluation metrics
 	var finished int

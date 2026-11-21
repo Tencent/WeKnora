@@ -51,7 +51,7 @@
 
 ## docs 目录保留的工程资源
 
-1. **Swagger 生成包**：`internal/router/router.go` 导入 `github.com/Tencent/WeKnora/docs`；`Makefile` 的 `docs` 目标把输出写到该目录。`docs.go` 当前参与后端编译，`swagger_contract_test.go` 还读取 JSON/YAML。普通构建与 CI 未自动生成，暂时保留三份生成物及测试。未来可迁往独立生成包并更新导入、生成路径、测试和 lint 排除；若不提交生成物，必须先把固定版本的生成步骤接入所有构建、测试与发布入口。
+1. **Swagger 生成包**：`internal/router/router.go` 导入 `github.com/Tencent/WeKnora/docs`；`Makefile` 的 `docs` 目标将 `swagger.json` 与 `swagger.yaml` 生成到该目录，`docs/docs.go` 通过 `//go:embed swagger.json` 复用同一份规范（不再重复生成巨型内联 Go 字符串），并由 `docs/swagger_sync_test.go` 与 `docs/swagger_contract_test.go` 在 `go test ./docs/...` 中校验生成物同步与契约。
 2. **Lite 发布 README**：`scripts/package-lite.sh` 和 `.github/workflows/release-lite.yml` 复制 `docs/LITE.md` 到离线发布包；迁出时需保留适合离线阅读的 README，不能直接换成含站内相对链接的长篇页面。
 3. **图片**：多语言 README、Helm 等仍引用 `docs/images/`、`docs/assets/`，本次保留。新站自身图片位于 `public/`，不依赖旧目录。
 4. **历史实验**：保留 `poc/docker-sandbox/` 独立 Go 模块及运行说明；它不属于维护中的产品文档。旧手写正文（包括 API、Wiki 副本、路线图、审计和设计记录）已删除。

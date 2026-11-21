@@ -955,7 +955,14 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 	// Process passages
 	if syncMode {
 		logger.Info(ctx, "Processing passage synchronously")
-		s.processDocumentFromPassage(ctx, kb, knowledge, safePassages)
+		if err := s.processDocumentFromPassage(ctx, kb, knowledge, safePassages); err != nil {
+			recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
+				"knowledge", knowledge.ID, types.AuditOutcomeFailed, map[string]any{
+					"title": knowledge.Title, "source_type": "passage",
+					"processing_status": knowledge.ParseStatus, "failure_stage": "processing",
+				})
+			return knowledge, err
+		}
 		recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
 			"knowledge", knowledge.ID, types.AuditOutcomeSuccess, map[string]any{
 				"title": knowledge.Title, "source_type": "passage", "processing_status": knowledge.ParseStatus,

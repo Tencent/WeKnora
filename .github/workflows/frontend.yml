@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - "frontend/**"
+      - "docs/swagger.json"
       - "scripts/build_frontend_dist.sh"
       - "scripts/test_embed_nginx.py"
       - ".github/workflows/frontend.yml"
   pull_request:
     paths:
       - "frontend/**"
+      - "docs/swagger.json"
       - "scripts/build_frontend_dist.sh"
       - "scripts/test_embed_nginx.py"
       - ".github/workflows/frontend.yml"

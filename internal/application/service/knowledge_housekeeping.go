@@ -166,6 +166,9 @@ func (h *HousekeepingService) StopWithin(timeout time.Duration) {
 func (h *HousekeepingService) runSweep(ctx context.Context) {
 	threshold := h.staleThreshold()
 	cutoff := time.Now().Add(-threshold)
+	// Finalize rows can outlive every document's finalizing state, so they
+	// need their own scan rather than depending on Sweep A's candidates.
+	h.rearmWikiFinalizers(ctx, threshold)
 
 	// Sweep A: knowledge stuck in "pending", "processing", or "finalizing".
 	//
@@ -875,6 +878,39 @@ func (h *HousekeepingService) rearmWikiTriggers(
 	}
 	if rearmed > 0 {
 		logger.Infof(ctx, "[Housekeeping] re-armed wiki ingest trigger for %d knowledge base(s)", rearmed)
+	}
+}
+
+// rearmWikiFinalizers recovers durable convergence work whose trigger was
+// lost after ingest completed. The stable task ID coalesces active/scheduled
+// work across sweeps and replicas; the consumer retains its liveness guards.
+func (h *HousekeepingService) rearmWikiFinalizers(ctx context.Context, threshold time.Duration) {
+	if h.task == nil {
+		return
+	}
+	var scopes []struct {
+		TenantID uint64
+		ScopeID  string
+	}
+	err := h.db.WithContext(ctx).Model(&types.TaskPendingOp{}).
+		Select("task_pending_ops.tenant_id, task_pending_ops.scope_id").
+		Joins("JOIN knowledge_bases kb ON kb.id = task_pending_ops.scope_id "+
+			"AND kb.tenant_id = task_pending_ops.tenant_id AND kb.deleted_at IS NULL").
+		Joins("JOIN tenants t ON t.id = task_pending_ops.tenant_id AND t.deleted_at IS NULL").
+		Where("task_pending_ops.task_type = ? AND task_pending_ops.scope = ?", wikiFinalizeTaskType, wikiTaskScope).
+		Group("task_pending_ops.tenant_id, task_pending_ops.scope_id").
+		Having("MIN(task_pending_ops.enqueued_at) < ?", time.Now().Add(-threshold)).
+		Order("MIN(task_pending_ops.enqueued_at)").Scan(&scopes).Error
+	if err != nil {
+		logger.Warnf(ctx, "[Housekeeping] pending wiki finalize scan failed: %v", err)
+		return
+	}
+	svc := &wikiIngestService{task: h.task}
+	for _, scope := range scopes {
+		svc.scheduleFinalize(ctx, WikiIngestPayload{
+			TenantID: scope.TenantID, KnowledgeBaseID: scope.ScopeID,
+			Language: WikiPendingLanguage(ctx, h.db, scope.TenantID, scope.ScopeID),
+		})
 	}
 }
 
