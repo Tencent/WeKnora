@@ -314,6 +314,8 @@ type CustomAgentConfig struct {
 	WebFetchEnabled bool `yaml:"web_fetch_enabled" json:"web_fetch_enabled"`
 	// Max number of pages to fetch after rerank (default: 3)
 	WebFetchTopN int `yaml:"web_fetch_top_n" json:"web_fetch_top_n,omitempty"`
+	// RetrievalPolicy controls whether knowledge-base retrieval follows the classified intent or always runs.
+	RetrievalPolicy string `yaml:"retrieval_policy" json:"retrieval_policy,omitempty" extensions:"x-agent,x-agent-detail"`
 
 	// ===== Multi-turn Conversation Settings =====
 	// Whether multi-turn conversation is enabled
@@ -617,6 +619,9 @@ func (a *CustomAgent) EnsureDefaults() {
 	}
 	if a.Config.WebSearchMaxResults == 0 {
 		a.Config.WebSearchMaxResults = 5
+	}
+	if a.Config.RetrievalPolicy == "" {
+		a.Config.RetrievalPolicy = RetrievalPolicyIntentBased
 	}
 	if a.Config.HistoryTurns == 0 {
 		a.Config.HistoryTurns = 5

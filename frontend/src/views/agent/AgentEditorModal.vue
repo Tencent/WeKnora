@@ -1707,6 +1707,18 @@
         </div>
 
         <div class="settings-group">
+          <div class="setting-row">
+            <div class="setting-info">
+              <label>{{ $t('agent.editor.retrievalPolicy') }}</label>
+              <p class="desc">{{ $t('agentEditor.desc.retrievalPolicy') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-select v-model="formData.config.retrieval_policy" style="width: 240px;">
+                <t-option value="intent_based" :label="$t('agent.editor.retrievalPolicyIntentBased')" />
+                <t-option value="always_knowledge_base" :label="$t('agent.editor.retrievalPolicyAlwaysKnowledgeBase')" />
+              </t-select>
+            </div>
+          </div>
           <!-- 查询扩展（仅普通模式） -->
           <div v-if="!isAgentMode" class="setting-row">
             <div class="setting-info">
@@ -2979,6 +2991,7 @@ const defaultFormData = {
     // 让这个智能体单独不读记忆。
     memory_enabled: true,
     // 检索策略设置
+    retrieval_policy: "intent_based" as "intent_based" | "always_knowledge_base",
     embedding_top_k: 10,
     keyword_threshold: 0.3,
     vector_threshold: 0.5,
@@ -3506,6 +3519,7 @@ const applyAgentTypePreset = (preset: AgentTypePreset | null) => {
   if (Array.isArray(c.allowed_tools)) target.allowed_tools = normalizeLegacyToolNames(c.allowed_tools);
   if (typeof c.retain_retrieval_history === 'boolean') target.retain_retrieval_history = c.retain_retrieval_history;
   if (typeof c.faq_priority_enabled === 'boolean') target.faq_priority_enabled = c.faq_priority_enabled;
+  if (c.retrieval_policy === "intent_based" || c.retrieval_policy === "always_knowledge_base") target.retrieval_policy = c.retrieval_policy;
   if (typeof c.web_search_enabled === 'boolean') target.web_search_enabled = c.web_search_enabled;
   // supported_file_types 采用"强同步"语义：只有 data-analysis 需要限定 csv/xlsx，
   // 其余类型切过来时必须清空，否则会从上一个类型带过来残留。

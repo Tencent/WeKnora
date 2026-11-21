@@ -34,18 +34,22 @@ func TestChatManageNeedsRetrieval(t *testing.T) {
 		name             string
 		intent           QueryIntent
 		webSearchEnabled bool
+		retrievalPolicy string
 		want             bool
 	}{
 		{name: "knowledge base search", intent: IntentKBSearch, want: true},
 		{name: "summarize", intent: IntentSummarize, want: false},
 		{name: "web search enabled", intent: IntentWebSearch, webSearchEnabled: true, want: true},
 		{name: "web search disabled", intent: IntentWebSearch, webSearchEnabled: false, want: false},
+		{name: "always policy retrieves chitchat", intent: IntentChitchat, retrievalPolicy: RetrievalPolicyAlwaysKnowledgeBase, want: true},
+		{name: "always policy retrieves greeting", intent: IntentGreeting, retrievalPolicy: RetrievalPolicyAlwaysKnowledgeBase, want: true},
+		{name: "always policy retrieves summarize", intent: IntentSummarize, retrievalPolicy: RetrievalPolicyAlwaysKnowledgeBase, want: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			chat := &ChatManage{
-				PipelineRequest: PipelineRequest{WebSearchEnabled: tt.webSearchEnabled},
+				PipelineRequest: PipelineRequest{WebSearchEnabled: tt.webSearchEnabled, RetrievalPolicy: tt.retrievalPolicy},
 				PipelineState:   PipelineState{Intent: tt.intent},
 			}
 			if got := chat.NeedsRetrieval(); got != tt.want {
