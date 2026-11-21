@@ -250,6 +250,22 @@ export async function ensureEmbedMessageSuggestions(
   )
 }
 
+export async function submitEmbedMessageFeedback(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  messageId: string,
+  sessionSig: string,
+  visitorId: string,
+  data: { feedback_type: string; reason_code?: string; reason_text?: string },
+) {
+  return put<{ success: boolean; data: { feedback_type: string; reason_code?: string; reason_text?: string } }>(
+    `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/feedback`,
+    data,
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
+  )
+}
+
 export async function getEmbedMessageSuggestions(
   channelId: string,
   token: string,

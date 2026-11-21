@@ -12,6 +12,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/application/service/feedbackweight"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
@@ -283,6 +284,7 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 			}
 		}
 	}
+	ranked = t.applyFeedbackWeights(ctx, ranked)
 
 	// Results the rerank stage kept outside its top-k (pictorial images a
 	// text reranker could not judge) skip MMR and the limit, and follow the
@@ -345,6 +347,53 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		result.Output = emptySearchStatement(query, result.Data, len(kbIDs))
 	}
 	return result, nil
+}
+
+// applyFeedbackWeights scales reranked hits by each chunk's approval-rate
+// recall weight before MMR and the result limit, so degraded chunks are
+// less likely to be selected. A missing chunk service leaves scores alone.
+func (t *SearchKnowledgeTool) applyFeedbackWeights(
+	ctx context.Context, ranked []*searchResultWithMeta,
+) []*searchResultWithMeta {
+	if t == nil || t.chunkService == nil || len(ranked) == 0 {
+		return ranked
+	}
+	repo := t.chunkService.GetRepository()
+	if repo == nil {
+		return ranked
+	}
+	ids := make([]string, 0, len(ranked))
+	seen := map[string]struct{}{}
+	results := make([]*types.SearchResult, 0, len(ranked))
+	for _, row := range ranked {
+		if row == nil || row.SearchResult == nil || !types.AttributableKnowledgeRef(row.SearchResult) {
+			continue
+		}
+		results = append(results, row.SearchResult)
+		if _, ok := seen[row.ID]; ok {
+			continue
+		}
+		seen[row.ID] = struct{}{}
+		ids = append(ids, row.ID)
+	}
+	if len(ids) == 0 {
+		return ranked
+	}
+	chunks, err := repo.ListChunksByIDOnly(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "[Tool][SearchKnowledge] feedback weights unavailable: %v", err)
+		return ranked
+	}
+	if feedbackweight.Apply(results, feedbackweight.WeightsByID(chunks)) == 0 {
+		return ranked
+	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i] == nil || ranked[j] == nil || ranked[i].SearchResult == nil || ranked[j].SearchResult == nil {
+			return ranked[i] != nil && ranked[i].SearchResult != nil
+		}
+		return ranked[i].Score > ranked[j].Score
+	})
+	return ranked
 }
 
 // splitKeptOutsideTopK separates the results kept outside the rerank top-k

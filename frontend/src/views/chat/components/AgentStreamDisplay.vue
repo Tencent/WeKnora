@@ -547,6 +547,9 @@
                   :title="$t('agent.copy')" :aria-label="$t('agent.copy')">
                   <ChatActionIcon name="copy" />
                 </t-button>
+                <AnswerFeedback v-if="feedbackMessageId && sessionId" :session-id="sessionId" :message-id="feedbackMessageId"
+                  :feedback="session?.feedback" :embed-channel-id="embedChannelId" :embed-token="embedToken"
+                  :embed-session-sig="embedSessionSig" :embed-visitor-id="embedVisitorId" />
                 <t-button v-if="!embeddedMode" size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
                   :title="$t('agent.addToKnowledgeBase')">
                   <ChatActionIcon name="bookmark-add" />
@@ -810,6 +813,7 @@ import { isAssistantPageLink } from '@/utils/assistantPageLink';
 import AskUserCard from './AskUserCard.vue';
 import SecureFormCard from './SecureFormCard.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
+import AnswerFeedback from '@/components/chat/AnswerFeedback.vue';
 import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue';
 import HostApprovalCard from './HostApprovalCard.vue';
 import HostReviewRecord from './HostReviewRecord.vue';
@@ -1221,6 +1225,7 @@ interface SessionData {
   isAgentMode?: boolean;
   agentEventStream?: any[];
   knowledge_references?: any[];
+  feedback?: { feedback_type?: string; reason_code?: string; reason_text?: string } | null;
   [key: string]: unknown;
 }
 
@@ -1353,6 +1358,7 @@ const sessionIdForArtifacts = computed(() => props.sessionId ?? '');
 const messageIdForArtifacts = computed(() =>
   persistedAssistantId(props.session) || String(props.session?.request_id || ''),
 );
+const feedbackMessageId = computed(() => persistedAssistantId(props.session));
 // Set when the drawer is opened from an inline artifact card in the answer, so
 // it lands on that file's preview instead of the list.
 const artifactPreviewIndex = ref<number | null>(null);

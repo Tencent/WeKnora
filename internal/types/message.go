@@ -567,6 +567,9 @@ type Message struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	// Soft delete timestamp
 	DeletedAt gorm.DeletedAt `json:"deleted_at"            gorm:"index"`
+	// Feedback is the caller's current like/dislike on this assistant message.
+	// It is filled when messages are loaded and is never stored on the row.
+	Feedback *MessageFeedbackView `json:"feedback,omitempty" gorm:"-"`
 }
 
 // MessageExecutionContext is a message-level snapshot of the non-secret
