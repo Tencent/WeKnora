@@ -1294,6 +1294,17 @@ export default {
     rerankModelLabel: 'Rerank Model',
     rerankModelDescription: 'Select the model for reranking search results',
     rerankModelRequired: 'Please select a Rerank model. Search requires this model to rerank results.',
+    feedbackTab: 'Feedback weight',
+    feedbackDescription: 'Defaults: 80% and above boosts recall weight to 1.2, 50%–80% stays at 1, below 50% drops to 0.8, and below 30% is marked for cleanup.',
+    feedbackEnabled: 'Adjust recall weight from approval rate',
+    feedbackEnabledDescription: 'Likes and dislikes on answers change how likely the cited chunks are to be retrieved. Turning this off keeps the counts and still flags very low approval, but stops changing weights.',
+    feedbackBoostThreshold: 'Boost when approval reaches',
+    feedbackDegradeThreshold: 'Keep neutral when approval reaches',
+    feedbackNeedsOptimizationThreshold: 'Mark for cleanup below',
+    feedbackBoostWeight: 'Boosted weight',
+    feedbackNeutralWeight: 'Neutral weight',
+    feedbackDegradeWeight: 'Reduced weight',
+    feedbackMinSamples: 'Minimum ratings before adjusting',
     toasts: {
       saveSuccess: 'Retrieval configuration saved',
       saveFailed: 'Failed to save configuration: {message}'

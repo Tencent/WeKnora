@@ -61,6 +61,9 @@ type MessageHandler struct {
 	Prompts               interfaces.AgentPromptRepository
 	DelegatedPrompts      func(context.Context, string) (map[string][]*types.PendingPromptView, error)
 	CollaborationStatuses func(context.Context, string, []string) (map[string]json.RawMessage, error)
+	// AnswerFeedback attaches the caller's like/dislike when history is loaded.
+	// Nil leaves messages without a feedback field.
+	AnswerFeedback interfaces.AnswerFeedbackService
 }
 
 // NewMessageHandler creates a new message handler instance with the required service
@@ -75,9 +78,11 @@ func NewMessageHandler(
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	prompts interfaces.AgentPromptRepository,
+	answerFeedback interfaces.AnswerFeedbackService,
 ) *MessageHandler {
 	return &MessageHandler{
 		MessageService:  messageService,
+		AnswerFeedback:  answerFeedback,
 		FileService:     fileService,
 		StorageResolver: storageResolver,
 		Prompts:         prompts,
@@ -237,6 +242,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			sessionID, len(messages),
 		)
 		h.attachPendingPrompts(ctx, sessionID, messages)
+		h.attachAnswerFeedback(ctx, messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    rewriter.RewriteMessagesResponse(ctx, messages),
@@ -278,10 +284,41 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		sessionID, len(messages),
 	)
 	h.attachPendingPrompts(ctx, sessionID, messages)
+	h.attachAnswerFeedback(ctx, messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    rewriter.RewriteMessagesResponse(ctx, messages),
 	})
+}
+
+// attachAnswerFeedback echoes the caller's rating onto each assistant message
+// so the bubble can show the selected like or dislike after a reload.
+func (h *MessageHandler) attachAnswerFeedback(ctx context.Context, messages []*types.Message) {
+	if h.AnswerFeedback == nil || len(messages) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(messages))
+	for _, message := range messages {
+		if message != nil && message.Role == "assistant" && message.ID != "" {
+			ids = append(ids, message.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	states, err := h.AnswerFeedback.ListForMessages(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to load answer feedback: %v", err)
+		return
+	}
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		if state, ok := states[message.ID]; ok {
+			message.Feedback = state
+		}
+	}
 }
 
 // DeleteMessage godoc

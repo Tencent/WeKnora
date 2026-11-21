@@ -83,6 +83,12 @@ func (s *knowledgeBaseService) processSearchResultsAtRevisions(
 	for _, chunk := range allChunks {
 		candidateMap[chunk.ID] = chunk
 	}
+	// The rerank enrichment rebuild passes the already chosen rows and must
+	// keep their order. The first retrieval cut is where approval-rate weight
+	// changes which chunks survive MatchCount.
+	if expectedRevisions == nil {
+		applyChunkRecallWeights(ctx, candidates, candidateMap)
+	}
 	selected := make([]*types.IndexWithScore, 0, min(primaryLimit, len(candidates)))
 	selectedKnowledge := make(map[string]*types.Knowledge)
 	chunkMap := make(map[string]*types.Chunk)

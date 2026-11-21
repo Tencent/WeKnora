@@ -198,6 +198,17 @@ type Chunk struct {
 	// slide, sheet rows, ...) so citations can open the file at this chunk.
 	// Empty when the parser reported no positions.
 	SourceLocators SourceLocators `json:"source_locators,omitempty" gorm:"type:json"`
+	// LikeCount and DislikeCount are cumulative user ratings attributed from
+	// answers that cited this chunk. ApprovalRate is likes/(likes+dislikes)
+	// and is nil when the chunk has no ratings.
+	LikeCount    int      `json:"like_count" gorm:"not null;default:0"`
+	DislikeCount int      `json:"dislike_count" gorm:"not null;default:0"`
+	ApprovalRate *float64 `json:"approval_rate,omitempty"`
+	// RecallWeight multiplies this chunk's retrieval score. 0 means "unset"
+	// and is treated as 1 so rows written before the column existed do not
+	// drop out of search. NeedsOptimization marks a very low approval rate.
+	RecallWeight      float64 `json:"recall_weight" gorm:"not null;default:1"`
+	NeedsOptimization bool    `json:"needs_optimization" gorm:"not null;default:false"`
 }
 
 // ChunkRevision is an immutable snapshot of a superseded chunk revision.

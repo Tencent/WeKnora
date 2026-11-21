@@ -54,6 +54,19 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 	}
 }
 
+// RegisterChunkFeedbackRoutes registers the knowledge-base chunk feedback
+// stats, weight logs, and administrator reset.
+func RegisterChunkFeedbackRoutes(r *gin.RouterGroup, feedback *handler.AnswerFeedbackHandler, g *rbacGuards) {
+	if feedback == nil {
+		return
+	}
+	read := g.apiKeyGroup(r.Group("/knowledge-bases/:id/chunk-feedback"), apiKeyRetrieve(apiKeyFullAccess()))
+	read.GET("", g.Viewer(), g.KBAccessRead("id"), feedback.ListChunkFeedback)
+	read.GET("/:chunk_id", g.Viewer(), g.KBAccessRead("id"), feedback.GetChunkFeedback)
+	write := g.apiKeyGroup(r.Group("/knowledge-bases/:id/chunk-feedback"), apiKeyIngest(apiKeyFullAccess()))
+	write.POST("/:chunk_id/reset", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), feedback.ResetChunkFeedback)
+}
+
 // RegisterKnowledgeRoutes 注册知识相关的路由
 //
 // Per-KB ownership applies on the per-:id mutating routes (PR 5,

@@ -87,9 +87,14 @@
       outline-offset: 2px;
     }
   }
+
+  .answer-feedback__button.is-active {
+    color: var(--td-brand-color);
+  }
 }
 
 .answer-toolbar--persistent,
+.answer-toolbar:has(.answer-feedback.is-rated),
 .bot_msg:hover :deep(.answer-toolbar),
 .bot_msg:focus-within :deep(.answer-toolbar),
 .agent-stream-display:hover .answer-toolbar,

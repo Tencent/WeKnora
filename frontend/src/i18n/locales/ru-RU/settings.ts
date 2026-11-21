@@ -144,6 +144,17 @@ export default {
     rerankModelLabel: 'Модель Rerank',
     rerankModelDescription: 'Выберите модель для повторного ранжирования результатов поиска',
     rerankModelRequired: 'Пожалуйста, выберите модель Rerank. Функция поиска требует эту модель для ранжирования результатов.',
+    feedbackTab: 'Вес по отзывам',
+    feedbackDescription: 'По умолчанию: 80% и выше поднимает вес до 1.2, 50%–80% оставляет 1, ниже 50% снижает до 0.8, ниже 30% помечает фрагмент для правки.',
+    feedbackEnabled: 'Менять вес поиска по доле одобрения',
+    feedbackEnabledDescription: 'Оценки ответов меняют вероятность снова найти процитированные фрагменты. Если выключить, счётчики и пометка очень низкой оценки остаются, а вес не меняется.',
+    feedbackBoostThreshold: 'Поднимать, когда одобрение достигает',
+    feedbackDegradeThreshold: 'Не менять, когда одобрение достигает',
+    feedbackNeedsOptimizationThreshold: 'Помечать для правки ниже',
+    feedbackBoostWeight: 'Повышенный вес',
+    feedbackNeutralWeight: 'Нейтральный вес',
+    feedbackDegradeWeight: 'Пониженный вес',
+    feedbackMinSamples: 'Минимум оценок перед изменением',
     toasts: {
       saveSuccess: 'Конфигурация поиска сохранена',
       saveFailed: 'Не удалось сохранить конфигурацию: {message}'

@@ -517,7 +517,7 @@
                   :tool-call-id="edit.tool_call_id" />
               </div>
               <div v-if="answerFullyRendered && event.done && event.content && event.content.trim()"
-                class="answer-toolbar" :class="{ 'answer-toolbar--persistent': hasArtifacts || artifactsCollecting }">
+                class="answer-toolbar" :class="{ 'answer-toolbar--persistent': hasArtifacts || artifactsCollecting || ratingEcho }">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
                   <t-button size="small" variant="outline" shape="round" @click.stop="emitFork">
                     <ChatActionIcon name="git-branch" />
@@ -547,6 +547,8 @@
                   :title="$t('agent.copy')" :aria-label="$t('agent.copy')">
                   <ChatActionIcon name="copy" />
                 </t-button>
+                <AnswerFeedbackBar :session-id="sessionId" :message-id="feedbackMessageId"
+                  :feedback="answerFeedback" @saved="onFeedbackSaved" />
                 <t-button v-if="!embeddedMode" size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
                   :title="$t('agent.addToKnowledgeBase')">
                   <ChatActionIcon name="bookmark-add" />
@@ -810,6 +812,7 @@ import { isAssistantPageLink } from '@/utils/assistantPageLink';
 import AskUserCard from './AskUserCard.vue';
 import SecureFormCard from './SecureFormCard.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
+import AnswerFeedbackBar from './AnswerFeedbackBar.vue';
 import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue';
 import HostApprovalCard from './HostApprovalCard.vue';
 import HostReviewRecord from './HostReviewRecord.vue';
@@ -1353,6 +1356,20 @@ const sessionIdForArtifacts = computed(() => props.sessionId ?? '');
 const messageIdForArtifacts = computed(() =>
   persistedAssistantId(props.session) || String(props.session?.request_id || ''),
 );
+const feedbackMessageId = computed(() => persistedAssistantId(props.session) || '');
+const answerFeedback = computed(() => {
+  const raw = (props.session as { feedback?: { rating?: string; reason?: string } | null } | undefined)?.feedback;
+  return raw ?? null;
+});
+const ratingEcho = computed(() => {
+  const rating = answerFeedback.value?.rating;
+  return rating === 'like' || rating === 'dislike';
+});
+const onFeedbackSaved = (state: { rating: string; reason?: string }) => {
+  const session = props.session as { feedback?: { rating: string; reason?: string } | null } | undefined;
+  if (!session) return;
+  session.feedback = state.rating === 'none' ? null : state;
+};
 // Set when the drawer is opened from an inline artifact card in the answer, so
 // it lands on that file's preview instead of the list.
 const artifactPreviewIndex = ref<number | null>(null);

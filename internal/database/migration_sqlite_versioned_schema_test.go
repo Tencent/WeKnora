@@ -48,6 +48,10 @@ var versionedSQLiteTables = []string{
 	"session_sandbox_assignments",
 	"sandbox_user_machines",
 	"credential_vault_items",
+	"answer_chunk_links",
+	"answer_feedbacks",
+	"chunk_feedback_attributions",
+	"chunk_weight_logs",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
@@ -71,15 +75,18 @@ var versionedSQLiteColumns = map[string][]string{
 		"host_workspace_dir",       // 000029
 		"owner_auth_source",        // 000046
 	},
-	"session_sandbox_assignments": {"released_at", "cleanup_due_at"},    // 000047
-	"tenant_invitations":          {"token", "accepted_count"},          // 000054
-	"embed_channels":              {"allow_memory"},                     // 000060
-	"im_channels":                 {"locale"},                           // 000030
-	"chunks":                      {"source_locators"},                  // 000033
-	"mcp_oauth_tokens":            {"principal_type", "principal_id"},   // 000064
-	"mcp_tool_approvals":          {"enabled", "risk", "observed_risk"}, // 000091, 000126
-	"mcp_services":                {"usage_instructions"},               // 000092
-	"message_artifacts":           {"deleted_at"},                       // 000107
+	"session_sandbox_assignments": {"released_at", "cleanup_due_at"}, // 000047
+	"tenant_invitations":          {"token", "accepted_count"},       // 000054
+	"embed_channels":              {"allow_memory"},                  // 000060
+	"im_channels":                 {"locale"},                        // 000030
+	"chunks": {
+		"source_locators",                                                                     // 000033
+		"like_count", "dislike_count", "approval_rate", "recall_weight", "needs_optimization", // 000054
+	},
+	"mcp_oauth_tokens":   {"principal_type", "principal_id"},   // 000064
+	"mcp_tool_approvals": {"enabled", "risk", "observed_risk"}, // 000091, 000126
+	"mcp_services":       {"usage_instructions"},               // 000092
+	"message_artifacts":  {"deleted_at"},                       // 000107
 	"tenant_skills": {
 		"envs", "served", "catalog_id", "install_session_id", "install_message_id",
 	}, // 000028
@@ -89,7 +96,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 53
+const expectedSQLiteMigrationVersion = 54
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

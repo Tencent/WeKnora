@@ -144,6 +144,17 @@ export default {
     rerankModelLabel: 'Rerank 模型',
     rerankModelDescription: '選擇用於搜尋結果重排序的模型',
     rerankModelRequired: '請選擇 Rerank 模型，搜尋功能需要此模型對結果進行重排序',
+    feedbackTab: '回饋權重',
+    feedbackDescription: '預設：好評率達到 80% 將召回權重提升到 1.2，50%–80% 保持 1，低於 50% 降到 0.8，低於 30% 標記為待優化。',
+    feedbackEnabled: '按好評率調整召回權重',
+    feedbackEnabledDescription: '回答的讚踩會改變被引用片段再次被檢索到的可能性。關閉後仍統計讚踩並標記極低好評率，但不再改權重。',
+    feedbackBoostThreshold: '好評率達到該值時提升',
+    feedbackDegradeThreshold: '好評率達到該值時保持不變',
+    feedbackNeedsOptimizationThreshold: '低於該值標記待優化',
+    feedbackBoostWeight: '提升後的權重',
+    feedbackNeutralWeight: '保持不變的權重',
+    feedbackDegradeWeight: '降低後的權重',
+    feedbackMinSamples: '開始調整前的最少評價數',
     toasts: {
       saveSuccess: '檢索設定已儲存',
       saveFailed: '儲存設定失敗: {message}'

@@ -144,6 +144,17 @@ export default {
     rerankModelLabel: 'Rerank 모델',
     rerankModelDescription: '검색 결과 재정렬에 사용할 모델을 선택하세요',
     rerankModelRequired: 'Rerank 모델을 선택하세요. 검색 기능에 이 모델이 필요합니다.',
+    feedbackTab: '피드백 가중치',
+    feedbackDescription: '기본값: 호평률 80% 이상은 재호출 가중치를 1.2로 올리고, 50%–80%는 1을 유지하며, 50% 미만은 0.8로 낮추고, 30% 미만은 개선 필요로 표시합니다.',
+    feedbackEnabled: '호평률로 재호출 가중치 조정',
+    feedbackEnabledDescription: '답변 평가는 인용된 청크가 다시 검색될 가능성을 바꿉니다. 끄면 집계와 매우 낮은 호평률 표시는 유지되고 가중치는 바뀌지 않습니다.',
+    feedbackBoostThreshold: '이 호평률 이상이면 올리기',
+    feedbackDegradeThreshold: '이 호평률 이상이면 유지',
+    feedbackNeedsOptimizationThreshold: '이 값 미만이면 개선 필요',
+    feedbackBoostWeight: '올린 뒤 가중치',
+    feedbackNeutralWeight: '유지 가중치',
+    feedbackDegradeWeight: '낮춘 뒤 가중치',
+    feedbackMinSamples: '조정 전 최소 평가 수',
     toasts: {
       saveSuccess: '검색 설정이 저장되었습니다',
       saveFailed: '설정 저장 실패: {message}'
