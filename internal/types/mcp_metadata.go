@@ -23,6 +23,14 @@ var (
 	ErrMCPMetadataInvalidTools = errors.New("MCP directory contains empty or duplicate tool names")
 )
 
+// MCPServerInfo is the server identity an MCP initialize reported for a
+// directory, kept so a later connection can tell whether the server changed.
+type MCPServerInfo struct {
+	Name        string
+	Version     string
+	Description string
+}
+
 // MCPMetadata is a complete, explicitly synchronized directory. OAuth snapshots
 // are scoped to the authorizing principal; they must never become tenant-wide.
 type MCPMetadata struct {

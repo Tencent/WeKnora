@@ -211,6 +211,7 @@ func (s *knowledgeBaseService) enrichRerankedResults(
 		byChunkID[c.ChunkID] = c
 	}
 	rerankedByID := make(map[string]*types.SearchResult, len(reranked))
+	revisions := make(map[string]int, len(reranked))
 	primary := make([]*types.IndexWithScore, 0, len(reranked))
 	for _, r := range reranked {
 		c, ok := byChunkID[r.ID]
@@ -221,14 +222,15 @@ func (s *knowledgeBaseService) enrichRerankedResults(
 		scored.Score = r.Score
 		primary = append(primary, &scored)
 		rerankedByID[r.ID] = r
+		revisions[r.ID] = r.ContentRevision
 	}
 
-	enriched, err := s.processSearchResults(ctx, primary, len(primary), false)
+	enriched, err := s.processSearchResultsAtRevisions(ctx, primary, len(primary), false, revisions)
 	if err != nil {
 		return nil, err
 	}
 	for i, r := range enriched {
-		if rr, ok := rerankedByID[r.ID]; ok {
+		if rr, ok := rerankedByID[r.ID]; ok && rr.ContentRevision == r.ContentRevision {
 			enriched[i] = rr
 		}
 	}

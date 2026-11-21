@@ -1069,6 +1069,54 @@ func TestMessageScopedFilesOrgSharedKBRequiresChunkEvidence(t *testing.T) {
 	}
 }
 
+func TestMessageScopedFilesServesOrgSharedKBResourceFromCitationEvidence(t *testing.T) {
+	// Merge scoping keeps a citation source's image out of Content and
+	// ImageInfo; the pipeline records its handle on the persisted reference
+	// (#5069), and that record is the Viewer's retrieval evidence.
+	engine, requestedPath := newOrgSharedKBTestEngine(t, true,
+		types.References{{
+			KnowledgeID:     "knowledge-1",
+			KnowledgeBaseID: "kb-1",
+			Content:         "Hit body.",
+			EvidenceHandles: []string{"resource://ShArEdKbHaNdLe00000000"},
+		}},
+		[]*types.KnowledgeBase{{ID: "kb-1", TenantID: 10005}},
+	)
+
+	req := orgSharedKBFileRequest()
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "shared-kb-image" {
+		t.Fatalf("status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
+	if *requestedPath != "local://10005/images/quadrant.jpg" {
+		t.Fatalf("requested path = %q", *requestedPath)
+	}
+}
+
+func TestMessageScopedFilesCitationEvidenceRequiresExactHandle(t *testing.T) {
+	// Recorded evidence matches by canonical equality, so a handle recorded
+	// for a different image must not open this one.
+	engine, _ := newOrgSharedKBTestEngine(t, true,
+		types.References{{
+			KnowledgeID:     "knowledge-1",
+			KnowledgeBaseID: "kb-1",
+			Content:         "Hit body.",
+			EvidenceHandles: []string{"resource://OtHeRpIcTuReHaNd000000"},
+		}},
+		[]*types.KnowledgeBase{{ID: "kb-1", TenantID: 10005}},
+	)
+
+	req := orgSharedKBFileRequest()
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status=%d, want %d (evidence names another handle)", recorder.Code, http.StatusForbidden)
+	}
+}
+
 func TestMessageScopedFilesOrgSharedKBRequiresResourceTenantMatch(t *testing.T) {
 	// The referenced KB belongs to a third tenant, so the resource owner and
 	// the shared KB must not be conflated.

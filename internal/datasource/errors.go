@@ -27,6 +27,11 @@ var (
 	ErrSyncCanceled     = errors.New("sync operation was canceled")
 	ErrFetchFailed      = errors.New("failed to fetch items from source")
 	ErrResourceNotFound = errors.New("resource not found in source system")
+	// ErrItemIngestFailed is returned by StreamHandler.Emit when one item failed
+	// to ingest while the stream can still process other items. Connectors that
+	// implement ItemFailureIsolatingConnector keep the item unadvanced in their
+	// cursor and continue syncing remaining items and resources.
+	ErrItemIngestFailed = errors.New("item ingest failed")
 
 	// Knowledge base errors
 	ErrKnowledgeBaseNotFound = errors.New("knowledge base not found")

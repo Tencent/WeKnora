@@ -103,6 +103,10 @@ func (p *PluginDataAnalysis) OnEvent(
 	schema, err := tool.LoadFromKnowledge(ctx, knowledge)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get data schema: %v", err)
+		chatManage.DataAnalysisFailure = &types.DataAnalysisFailure{
+			FileName: knowledge.FileName,
+			Reason:   "failed to load tabular file for SQL analysis",
+		}
 		return next()
 	}
 
@@ -115,11 +119,17 @@ func (p *PluginDataAnalysis) OnEvent(
 	if err != nil {
 		// The analysis is optional for the answer, so the pipeline continues,
 		// but a failed plan is a real signal (bad SQL contract, model drift,
-		// broken data file) and must not disappear into a debug log.
+		// broken data file) and must not disappear into a debug log. Record the
+		// failure for the answer prompt so the model does not silently fall back
+		// to hand-calculating aggregates from partial text excerpts (#5627).
 		pipelineWarn(ctx, "DataAnalysis", "analysis_failed", map[string]interface{}{
 			"knowledge_id": knowledge.ID,
 			"error":        err.Error(),
 		})
+		chatManage.DataAnalysisFailure = &types.DataAnalysisFailure{
+			FileName: knowledge.FileName,
+			Reason:   "SQL query planning or execution failed",
+		}
 		return next()
 	}
 	if toolResult == nil {

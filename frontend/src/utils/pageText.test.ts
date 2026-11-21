@@ -35,7 +35,7 @@ test('missing or repeated text fails with what to do, naming the edit', () => {
   assert.throws(() => applyTextEdits('a b a', [
     { op: 'append', text: '!' },
     { op: 'replace', old_text: 'a', text: 'c' },
-  ]), (err: Error) => err instanceof PageFillError && /^edit 2: old_text "a" occurs 2 times/.test(err.message))
+  ]), (err: Error) => err instanceof PageFillError && /^edit 2: old_text "a" occurs more than once/.test(err.message))
   assert.throws(() => applyTextEdits(doc, [{ op: 'insert_after', text: 'x' }]), /insert_after needs anchor/)
   assert.throws(() => applyTextEdits(doc, [{ op: 'replace', old_text: '', text: 'x' }]), /replace needs old_text/)
 })

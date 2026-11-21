@@ -101,6 +101,15 @@ func (c *Client) expandWikiShortcuts(
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
+				if errors.Is(err, errWikiShortcutMissingOrigin) {
+					// The shortcut's own content is fetched through its obj_token;
+					// only the subtree needs the origin. Missing origin metadata is
+					// permanent, so reporting it as a document failure would keep
+					// every later sync red for content that is already stored.
+					logger.Warnf(ctx, "[Feishu] skip wiki shortcut child expansion: space=%s node=%s err=%v",
+						node.SpaceID, node.NodeToken, err)
+					continue
+				}
 				wrapped := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
 				failures = append(failures, WikiNodeListFailure{Node: node, Err: wrapped})
 				logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
@@ -118,6 +127,12 @@ func (c *Client) expandWikiShortcuts(
 	return nodes, nil
 }
 
+// errWikiShortcutMissingOrigin marks a shortcut the API returned without the
+// origin node or space needed to expand it. It is distinct from a listing
+// failure: the shortcut's own document is still fetched, and retrying cannot
+// create origin metadata the API did not return.
+var errWikiShortcutMissingOrigin = errors.New("wiki shortcut is missing its original node or space")
+
 func (c *Client) resolveWikiShortcut(ctx context.Context, node WikiNode, cache map[string]WikiNode) (WikiNode, error) {
 	visited := make(map[string]bool)
 	for node.NodeType == "shortcut" {
@@ -127,7 +142,7 @@ func (c *Client) resolveWikiShortcut(ctx context.Context, node WikiNode, cache m
 		}
 		visited[key] = true
 		if node.OriginNodeID == "" || node.OriginSpaceID == "" {
-			return WikiNode{}, fmt.Errorf("wiki shortcut %s is missing its original node or space", node.NodeToken)
+			return WikiNode{}, fmt.Errorf("%w: %s", errWikiShortcutMissingOrigin, node.NodeToken)
 		}
 		key = node.OriginSpaceID + ":" + node.OriginNodeID
 		original, ok := cache[key]
