@@ -25,6 +25,7 @@ import (
 
 // MCPServiceHandler handles MCP service related HTTP requests
 type MCPServiceHandler struct {
+	toolSessionPolicies    interfaces.MCPToolSessionPolicyService
 	mcpServiceService      interfaces.MCPServiceService
 	mcpToolApprovalService interfaces.MCPToolApprovalService
 	toolApprovalGate       *approval.Gate

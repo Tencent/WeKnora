@@ -34,6 +34,8 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	UserContextKey:             true,
 	UserIDContextKey:           true,
 	PrincipalContextKey:        true,
+	// IM tool restrictions must survive detached QA and tool work.
+	IMConversationContextKey: true,
 	// How the principal was authenticated. Background work that creates a
 	// session (SSE clone) must stamp the same source the request had.
 	PrincipalAuthSourceContextKey: true,

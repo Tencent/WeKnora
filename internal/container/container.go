@@ -187,6 +187,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewGraphSearchEvidenceRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
+	must(container.Provide(repository.NewMCPToolSessionPolicyRepository))
 	must(container.Provide(repository.NewAgentPromptRepository))
 	must(container.Provide(repository.NewAgentGrantRepository))
 	must(container.Provide(repository.NewCredentialVaultRepository))
@@ -313,6 +314,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewMessageSuggestionService))
 	must(container.Provide(service.NewMCPServiceService))
 	must(container.Provide(service.NewMCPToolApprovalService))
+	must(container.Provide(service.NewMCPToolSessionPolicyService))
 	must(container.Provide(service.NewCustomAgentService))
 	must(container.Provide(service.NewUserResourceFavoriteService))
 	must(container.Provide(service.NewWikiPageService))
@@ -382,8 +384,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(func(
 		cfg *config.Config, s interfaces.MCPToolApprovalService, broker *hitl.Broker,
 		grants interfaces.AgentGrantRepository,
+		sessionPolicies interfaces.MCPToolSessionPolicyRepository,
 	) *approval.Gate {
-		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, broker).WithGrants(grants)
+		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, broker).
+			WithGrants(grants).WithSessionPolicies(sessionPolicies)
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
@@ -721,9 +725,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		agents interfaces.AgentShareService,
 		grants interfaces.AgentGrantRepository,
 		secureForms *credential.Submitter,
+		sessionPolicies interfaces.MCPToolSessionPolicyService,
 	) *handler.MCPServiceHandler {
 		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents).
-			WithGrants(grants).WithSecureForms(secureForms)
+			WithGrants(grants).WithSecureForms(secureForms).WithToolSessionPolicies(sessionPolicies)
 	}))
 	must(container.Provide(handler.NewCredentialVaultHandler))
 	must(container.Invoke(func(agents interfaces.AgentService, handles *credential.HandleStore) {
