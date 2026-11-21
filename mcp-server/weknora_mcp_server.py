@@ -1041,11 +1041,8 @@ async def agent_chat(
     """Agentic pipeline chat: the agent autonomously calls tools (knowledge_search, web_search, SQL, etc.).
 
     REQUIRED: agent_id (name or UUID) — use list_agents to discover agents.
-    IMPORTANT: many agents have KBSelectionMode=none and NO built-in knowledge bases.
-    In that case you MUST pass knowledge_base_ids, otherwise the agent will fail
-    with 'no search targets available'. Use get_agent to inspect an agent's
-    kb_selection_mode and knowledge_bases before calling. If kb_selection_mode is
-    'none' or 'selected' with an empty list, always provide knowledge_base_ids.
+    Optional knowledge_base_ids (names or UUIDs) override or supplement the
+    agent's default knowledge bases. Omit them to use the agent's configured scope.
     """
     resolved_agent_id = await asyncio.to_thread(client.resolve_agent_id, agent_id)
     kb_ids = (
@@ -1053,45 +1050,6 @@ async def agent_chat(
         if knowledge_base_ids
         else None
     )
-    # Pre-check: if no KB IDs provided, inspect agent config to detect
-    # kb_selection_mode=none/selected-empty so we fail fast with a clear message
-    # instead of the cryptic backend error "no search targets available".
-    if not kb_ids:
-        try:
-            agent_info = await asyncio.to_thread(client.get_agent, resolved_agent_id)
-            cfg = (agent_info.get("data") or agent_info).get("config") or {}
-            mode = cfg.get("kb_selection_mode", "selected")
-            built_in_kbs = cfg.get("knowledge_bases") or []
-            needs_kbs = (mode == "none") or (
-                mode in ("selected", "") and not built_in_kbs
-            )
-            if needs_kbs:
-                all_kbs = _normalize_kb_entries(
-                    await asyncio.to_thread(client.list_knowledge_bases)
-                ) + _normalize_kb_entries(
-                    await asyncio.to_thread(client.list_shared_knowledge_bases)
-                )
-                seen_ids: set[str] = set()
-                unique_kbs: list[Dict] = []
-                for kb in all_kbs:
-                    kb_id = kb.get("id")
-                    if kb_id and kb_id not in seen_ids:
-                        seen_ids.add(kb_id)
-                        unique_kbs.append(kb)
-                kb_summary = ", ".join(
-                    f"{kb.get('name')} ({kb.get('id')})" for kb in unique_kbs[:10]
-                )
-                raise ValueError(
-                    f"Agent '{agent_id}' has kb_selection_mode='{mode}' with no built-in "
-                    f"knowledge bases. You must provide knowledge_base_ids. "
-                    f"Available knowledge bases: [{kb_summary}]"
-                )
-        except ValueError:
-            raise
-        except Exception as preflight_err:
-            logger.warning(
-                "agent_chat preflight KB check failed (non-fatal): %s", preflight_err
-            )
     fn = functools.partial(
         client.agent_chat,
         session_id,
