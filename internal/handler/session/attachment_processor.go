@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -52,6 +53,19 @@ func NewAttachmentProcessor(
 	}
 }
 
+// AttachmentProcessOptions carries the agent's model settings for content
+// extraction. The zero value disables transcription and VLM OCR.
+type AttachmentProcessOptions struct {
+	// ASRModelID enables audio transcription when set.
+	ASRModelID string
+	// VLMModelID and ScannedDocumentOCR enable the VLM OCR fallback for
+	// scanned / image-only documents, as for temporary chat attachments.
+	VLMModelID         string
+	ScannedDocumentOCR bool
+	// OCRMaxPages caps the pages sent to the VLM; <= 0 uses the default.
+	OCRMaxPages int
+}
+
 // ProcessAttachment validates, saves, and extracts content from a single uploaded file.
 // Content extraction is attempted for all supported types; errors are non-fatal (logged as warnings).
 func (p *AttachmentProcessor) ProcessAttachment(
@@ -60,7 +74,7 @@ func (p *AttachmentProcessor) ProcessAttachment(
 	fileName string,
 	fileSize int64,
 	tenantID uint64,
-	asrModelID string, // optional; enables audio transcription when set
+	opts AttachmentProcessOptions,
 ) (*types.MessageAttachment, error) {
 	logger.Infof(ctx, "processing attachment: fileName=%s, fileSize=%d", secutils.SanitizeForLog(fileName), fileSize)
 
@@ -102,7 +116,7 @@ func (p *AttachmentProcessor) ProcessAttachment(
 	if p.isTextFile(ext) {
 		p.processTextFile(ctx, data, attachment)
 	} else if docparser.IsAudioFormat(ext) {
-		if err := p.processAudioFile(ctx, data, baseName, attachment, asrModelID); err != nil {
+		if err := p.processAudioFile(ctx, data, baseName, attachment, opts.ASRModelID); err != nil {
 			logger.Warnf(ctx, "audio transcription failed: %v, keeping placeholder", err)
 			attachment.Content = fmt.Sprintf("<error><message>Failed to transcribe audio file</message><details>%v</details></error>", err)
 		}
@@ -112,7 +126,7 @@ func (p *AttachmentProcessor) ProcessAttachment(
 			attachment.Content = fmt.Sprintf("<error><message>Failed to parse document</message><details>%v</details></error>", err)
 		}
 	} else {
-		if err := p.processWithDocumentReader(ctx, data, baseName, ext, attachment, tenantID); err != nil {
+		if err := p.processWithDocumentReader(ctx, data, baseName, ext, attachment, tenantID, opts); err != nil {
 			logger.Warnf(ctx, "DocumentReader failed: %v, keeping metadata only", err)
 			attachment.Content = fmt.Sprintf("<error><message>Failed to read document</message><details>%v</details></error>", err)
 		}
@@ -237,6 +251,7 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	fileType string,
 	attachment *types.MessageAttachment,
 	tenantID uint64,
+	opts AttachmentProcessOptions,
 ) error {
 	if p.documentReader == nil {
 		return fmt.Errorf("DocumentReader not configured")
@@ -277,6 +292,14 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 		return fmt.Errorf("document parsing failed: %w", err)
 	}
 
+	// Run OCR before ResolveAndStore, which may release the page image bytes.
+	ocrText := ""
+	if opts.ScannedDocumentOCR {
+		ocrText = service.OCRScannedAttachment(
+			ctx, p.modelService, opts.VLMModelID, result.MarkdownContent, result.ImageRefs, opts.OCRMaxPages,
+		)
+	}
+
 	// Resolve embedded image refs to storage URLs.
 	if len(result.ImageRefs) > 0 && p.imageResolver != nil {
 		updatedMarkdown, _, err := p.imageResolver.ResolveAndStore(ctx, result, p.fileService, tenantID)
@@ -287,7 +310,17 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 		}
 	}
 
-	p.applyLineTruncation(ctx, result.MarkdownContent, attachment)
+	content := result.MarkdownContent
+	if ocrText != "" {
+		logger.Infof(ctx, "scanned attachment OCR added %d runes", utf8.RuneCountInString(ocrText))
+		if strings.TrimSpace(content) == "" {
+			content = ocrText
+		} else {
+			content += "\n\n" + ocrText
+		}
+	}
+
+	p.applyLineTruncation(ctx, content, attachment)
 	return nil
 }
 
