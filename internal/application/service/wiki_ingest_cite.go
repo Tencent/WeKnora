@@ -63,21 +63,33 @@ type citationPipelineOutcome struct {
 }
 
 // extractCandidateSlugs runs Pass 0 of the chunk-cited pipeline: it scans the
-// full (reconstructed) document text and returns a lightweight skeleton of
-// every significant entity/concept. Unlike the legacy single-shot extraction,
-// this pass explicitly does NOT ask the LLM to paraphrase full facts per item;
+// (reconstructed) document text and returns a lightweight skeleton of every
+// significant entity/concept. Unlike the legacy single-shot extraction, this
+// pass explicitly does NOT ask the LLM to paraphrase full facts per item;
 // those will come from the chunk-citation pass instead.
 //
-// Returns (entities, concepts, slugItems, error). On LLM or parse failure it
-// returns an error — the caller can then fall back to the legacy extractor.
+// segments are the windows produced by splitWikiContent. Each one is
+// extracted independently (bounded by maxCitationBatchConcurrency), the
+// results are merged by slug, and dedup runs once on the merged list. A
+// failed segment is skipped so one bad answer does not lose the whole
+// document.
+//
+// Returns (entities, concepts, slugItems, failedSegments, error). It returns
+// an error only when every segment failed — the caller can then fall back to
+// the legacy extractor.
 func (s *wikiIngestService) extractCandidateSlugs(
 	ctx context.Context,
 	chatModel chat.Chat,
 	kbID string,
-	content, lang string,
+	segments []string,
+	lang string,
 	oldPageSlugs map[string]bool,
 	batchCtx *WikiBatchContext,
-) ([]extractedItem, []extractedItem, map[string]extractedItem, error) {
+) ([]extractedItem, []extractedItem, map[string]extractedItem, int, error) {
+	if len(segments) == 0 {
+		return nil, nil, nil, 0, fmt.Errorf("candidate slug extraction: no content")
+	}
+
 	var prevSlugsText string
 	if len(oldPageSlugs) > 0 {
 		var sb strings.Builder
@@ -93,27 +105,39 @@ func (s *wikiIngestService) extractCandidateSlugs(
 		prevSlugsText = "(none — this is a new document)"
 	}
 
-	granularity := batchCtx.ExtractionGranularity.Normalize()
-	raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
-		"Content":             content,
-		"Language":            lang,
-		"PreviousSlugs":       prevSlugsText,
-		"Granularity":         string(granularity),
-		"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
-		"CustomInstructions":  batchCtx.ExtractionInstructions,
-		"InstructionScope":    "wiki_extraction",
-	})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("candidate slug extraction failed: %w", err)
+	results := make([]*combinedExtraction, len(segments))
+	errs := make([]error, len(segments))
+	var g errgroup.Group
+	g.SetLimit(maxCitationBatchConcurrency)
+	for i, segment := range segments {
+		g.Go(func() error {
+			results[i], errs[i] = s.extractCandidateSlugsFromSegment(
+				ctx, chatModel, segment, lang, prevSlugsText, batchCtx,
+			)
+			return nil
+		})
 	}
+	_ = g.Wait()
 
-	raw = cleanLLMJSON(raw)
-
-	var result combinedExtraction
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to parse candidate slug JSON: %v\nRaw: %s", err, raw)
-		return nil, nil, nil, fmt.Errorf("parse candidate slug JSON: %w", err)
+	var merged []*combinedExtraction
+	failed := 0
+	var firstErr error
+	for i, r := range results {
+		if errs[i] != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = errs[i]
+			}
+			logger.Warnf(ctx, "wiki ingest: candidate slug extraction failed for segment %d/%d: %v",
+				i+1, len(segments), errs[i])
+			continue
+		}
+		merged = append(merged, r)
 	}
+	if len(merged) == 0 {
+		return nil, nil, nil, failed, firstErr
+	}
+	result := mergeCombinedExtractions(merged)
 
 	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
 		ctx, chatModel, kbID, result.Entities, result.Concepts, batchCtx,
@@ -131,7 +155,107 @@ func (s *wikiIngestService) extractCandidateSlugs(
 		}
 	}
 
-	return result.Entities, result.Concepts, slugItems, nil
+	return result.Entities, result.Concepts, slugItems, failed, nil
+}
+
+// extractCandidateSlugsFromSegment runs WikiCandidateSlugPrompt on one
+// content segment and parses the answer. No dedup — that runs once on the
+// merged result of all segments.
+func (s *wikiIngestService) extractCandidateSlugsFromSegment(
+	ctx context.Context,
+	chatModel chat.Chat,
+	segment, lang, prevSlugsText string,
+	batchCtx *WikiBatchContext,
+) (*combinedExtraction, error) {
+	granularity := batchCtx.ExtractionGranularity.Normalize()
+	raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
+		"Content":             segment,
+		"Language":            lang,
+		"PreviousSlugs":       prevSlugsText,
+		"Granularity":         string(granularity),
+		"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
+		"CustomInstructions":  batchCtx.ExtractionInstructions,
+		"InstructionScope":    "wiki_extraction",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("candidate slug extraction failed: %w", err)
+	}
+
+	raw = cleanLLMJSON(raw)
+
+	var result combinedExtraction
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to parse candidate slug JSON: %v\nRaw: %s", err, raw)
+		return nil, fmt.Errorf("parse candidate slug JSON: %w", err)
+	}
+	return &result, nil
+}
+
+// mergeCombinedExtractions folds per-segment extractions into one, in
+// segment order. Items sharing a slug (the overlap between windows, or an
+// entity mentioned in several parts of the document) collapse into the
+// first occurrence: aliases are unioned and empty description/details are
+// filled from later occurrences. Items without a slug are kept as-is.
+func mergeCombinedExtractions(parts []*combinedExtraction) combinedExtraction {
+	var out combinedExtraction
+	entityIdx := make(map[string]int)
+	conceptIdx := make(map[string]int)
+	for _, p := range parts {
+		if p == nil {
+			continue
+		}
+		out.Entities = mergeExtractedItems(out.Entities, entityIdx, p.Entities)
+		out.Concepts = mergeExtractedItems(out.Concepts, conceptIdx, p.Concepts)
+	}
+	return out
+}
+
+func mergeExtractedItems(dst []extractedItem, idx map[string]int, items []extractedItem) []extractedItem {
+	for _, item := range items {
+		if item.Slug == "" {
+			dst = append(dst, item)
+			continue
+		}
+		i, ok := idx[item.Slug]
+		if !ok {
+			idx[item.Slug] = len(dst)
+			item.Aliases = unionAliases(nil, item.Aliases)
+			dst = append(dst, item)
+			continue
+		}
+		existing := &dst[i]
+		if existing.Name == "" {
+			existing.Name = item.Name
+		}
+		if existing.Description == "" {
+			existing.Description = item.Description
+		}
+		if existing.Details == "" {
+			existing.Details = item.Details
+		}
+		if item.Name != "" && !strings.EqualFold(item.Name, existing.Name) {
+			existing.Aliases = unionAliases(existing.Aliases, []string{item.Name})
+		}
+		existing.Aliases = unionAliases(existing.Aliases, item.Aliases)
+	}
+	return dst
+}
+
+func unionAliases(dst, add []string) []string {
+	seen := make(map[string]bool, len(dst)+len(add))
+	for _, a := range dst {
+		seen[strings.ToLower(a)] = true
+	}
+	for _, a := range add {
+		a = strings.TrimSpace(a)
+		key := strings.ToLower(a)
+		if a == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		dst = append(dst, a)
+	}
+	return dst
 }
 
 // chunkBatch groups chunks that will be sent in a single WikiChunkCitationPrompt call.
