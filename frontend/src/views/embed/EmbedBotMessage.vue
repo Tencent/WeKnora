@@ -17,6 +17,11 @@
       <div v-if="hasActualContent" class="content-wrapper">
         <div class="ai-markdown-template markdown-content" v-stable-html="renderedHTML" />
       </div>
+      <div v-if="feedbackMessageId && sessionId && session?.is_completed !== false" class="embed-answer-feedback">
+        <AnswerFeedback :session-id="sessionId" :message-id="feedbackMessageId" :feedback="session?.feedback"
+          :embed-channel-id="embedChannelId" :embed-token="embedToken" :embed-session-sig="embedSessionSig"
+          :embed-visitor-id="embedVisitorId" />
+      </div>
     </div>
     <Teleport to="body">
       <div v-if="citationFloat.visible" class="embed-citation-float"
@@ -61,6 +66,8 @@ import {
 import { useEmbedCitationPopover } from '@/composables/useEmbedCitationPopover'
 import { useTypewriter } from '@/composables/useTypewriter'
 import { vStableHtml } from '@/directives/stableHtml'
+import { persistedAssistantId } from '@/utils/steerStreamFork'
+import AnswerFeedback from '@/components/chat/AnswerFeedback.vue'
 
 const RagPipelineProgress = defineAsyncComponent(
   () => import('@/views/chat/components/RagPipelineProgress.vue'),
@@ -92,6 +99,7 @@ type EmbedSession = {
   is_completed?: boolean
   agentEventStream?: Array<Record<string, unknown>>
   knowledge_references?: Array<{ chunk_type?: string; knowledge_id?: string; knowledge_title?: string }>
+  feedback?: { feedback_type?: string; reason_code?: string; reason_text?: string } | null
 }
 
 const props = withDefaults(
@@ -120,6 +128,7 @@ const props = withDefaults(
 )
 
 const parentMd = ref<HTMLElement | null>(null)
+const feedbackMessageId = computed(() => persistedAssistantId(props.session as never))
 
 const embedChannelIdRef = computed(() => props.embedChannelId)
 const embedTokenRef = computed(() => props.embedToken)
@@ -275,5 +284,10 @@ onMounted(() => {
   &__error {
     color: var(--td-error-color);
   }
+}
+
+.embed-answer-feedback {
+  display: flex;
+  margin-top: 8px;
 }
 </style>

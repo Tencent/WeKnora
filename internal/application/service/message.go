@@ -32,6 +32,9 @@ type messageService struct {
 	modelService   interfaces.ModelService         // Service for model operations (rerank model)
 	suggestionRepo interfaces.MessageSuggestionRepository
 	historyRedis   *redis.Client
+	// answerChunks records the knowledge chunks a completed assistant reply
+	// cited. Nil when feedback is not wired.
+	answerChunks AnswerChunkRecorder
 }
 
 // NewMessageService creates a new message service instance with the required repositories
@@ -103,6 +106,7 @@ func (s *messageService) CreateMessage(ctx context.Context, message *types.Messa
 	}
 
 	logger.Infof(ctx, "Message created successfully, ID: %s", createdMessage.ID)
+	s.recordAnswerChunks(ctx, createdMessage)
 	return createdMessage, nil
 }
 
@@ -268,7 +272,20 @@ func (s *messageService) UpdateMessage(ctx context.Context, message *types.Messa
 	}
 
 	logger.Info(ctx, "Message updated successfully")
+	s.recordAnswerChunks(ctx, message)
 	return nil
+}
+
+func (s *messageService) recordAnswerChunks(ctx context.Context, message *types.Message) {
+	if s.answerChunks == nil || message == nil || !message.IsCompleted || message.Role != "assistant" {
+		return
+	}
+	if len(message.KnowledgeReferences) == 0 {
+		return
+	}
+	if err := s.answerChunks.RecordAnswerChunks(ctx, message); err != nil {
+		logger.Warnf(ctx, "record answer chunks for message %s: %v", message.ID, err)
+	}
 }
 
 // UpdateMessageImages updates only the images JSONB column for a message.

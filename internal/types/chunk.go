@@ -185,6 +185,23 @@ type Chunk struct {
 	ContentHash string `json:"content_hash"             gorm:"type:varchar(64)"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
+	// LikeCount is the cumulative likes attributed to this chunk.
+	LikeCount int64 `json:"like_count" gorm:"column:like_count;not null;default:0"`
+	// DislikeCount is the cumulative dislikes attributed to this chunk.
+	DislikeCount int64 `json:"dislike_count" gorm:"column:dislike_count;not null;default:0"`
+	// PositiveRate is likes/(likes+dislikes). Nil when the chunk has no
+	// feedback after the latest reset.
+	PositiveRate *float64 `json:"positive_rate" gorm:"column:positive_rate"`
+	// RecallWeight scales post-rerank scores. 1 is neutral. Zero is treated
+	// as neutral by retrieval so rows created before the default lands do
+	// not drop out of recall.
+	RecallWeight float64 `json:"recall_weight" gorm:"column:recall_weight;not null;default:1"`
+	// NeedsOptimization marks a chunk whose approval rate is below the
+	// configured floor after enough votes to trust the rate.
+	NeedsOptimization bool `json:"needs_optimization" gorm:"column:needs_optimization;not null;default:false"`
+	// FeedbackResetAt drops votes cast at or before this time from the
+	// chunk's counts. Citation links are kept.
+	FeedbackResetAt *time.Time `json:"feedback_reset_at,omitempty" gorm:"column:feedback_reset_at"`
 	// Chunk creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Chunk last update time

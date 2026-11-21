@@ -11,6 +11,7 @@ import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
 import {
   downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile,
   updateDocumentChunk, listChunkRevisions, revertDocumentChunk, updateKnowledgeMetadata,
+  getKnowledgeDetailsCon, getChunkFeedback, listChunkWeightLogs, resetChunkFeedback,
   updateKnowledgeSummary, regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions, getKnowledgeDetails,
   KNOWLEDGE_CHUNK_PAGE_SIZE,
 } from "@/api/knowledge-base/index";
@@ -648,6 +649,9 @@ watch(() => props.details?.id, () => {
   chunkPage.value = 1;
   loadedChunkPage.value = 1;
   pendingChunkPage = null;
+  feedbackFilter.value = 'all';
+  filteredChunkRows.value = null;
+  feedbackDetailVisible.value = false;
 });
 watch(() => props.details?.chunkLoading, (val) => {
   if (val === false && pendingChunkPage !== null) {
@@ -738,8 +742,27 @@ const mergedContent = computed(() => {
 });
 
 // 计算处理后的分块数据，避免在模板中频繁调用方法和 JSON.parse
+const feedbackFilter = ref('all');
+const filteredChunkRows = ref<any[] | null>(null);
+const filteredTotal = ref(0);
+const feedbackDetailVisible = ref(false);
+const feedbackDetailLoading = ref(false);
+const feedbackDetail = ref<any>(null);
+const feedbackLogs = ref<any[]>([]);
+const feedbackChunkId = ref('');
+const resettingFeedback = ref(false);
+
+const chunkSource = computed(() => {
+  if (feedbackFilter.value !== 'all' && viewMode.value === 'chunks') return filteredChunkRows.value || [];
+  return props.details?.md || [];
+});
+const chunkListTotal = computed(() => {
+  if (viewMode.value === 'chunks' && feedbackFilter.value !== 'all') return filteredTotal.value;
+  return props.details?.total || 0;
+});
+
 const processedChunks = computed(() => {
-  return (props.details?.md || []).map((item: any, index: number) => {
+  return chunkSource.value.map((item: any, index: number) => {
     return {
       original: item,
       processedContent: processMarkdown(item.content),
@@ -750,6 +773,98 @@ const processedChunks = computed(() => {
     };
   });
 });
+
+const feedbackFilterOptions = computed(() => [
+  { label: t('knowledgeBase.feedback.filterAll'), value: 'all' },
+  { label: t('knowledgeBase.feedback.filterLow'), value: 'low' },
+  { label: t('knowledgeBase.feedback.filterNeedsOptimization'), value: 'needs' },
+]);
+
+const feedbackQuery = () => {
+  if (feedbackFilter.value === 'low') return 'max_positive_rate=0.5';
+  if (feedbackFilter.value === 'needs') return 'needs_optimization=true';
+  return '';
+};
+
+const formatApproval = (rate: number | null | undefined) => {
+  if (rate === null || rate === undefined || Number.isNaN(Number(rate))) return '—';
+  return `${Math.round(Number(rate) * 100)}%`;
+};
+
+const chunkFeedbackSummary = (chunk: any) => {
+  const likes = Number(chunk?.like_count || 0);
+  const dislikes = Number(chunk?.dislike_count || 0);
+  if (!likes && !dislikes && !chunk?.needs_optimization) return '';
+  const weight = Number(chunk?.recall_weight) > 0 ? Number(chunk.recall_weight) : 1;
+  return [
+    t('knowledgeBase.feedback.likes', { count: likes }),
+    t('knowledgeBase.feedback.dislikes', { count: dislikes }),
+    t('knowledgeBase.feedback.approvalRate', { rate: formatApproval(chunk?.positive_rate) }),
+    t('knowledgeBase.feedback.recallWeight', { weight: weight.toFixed(2) }),
+  ].join(' · ');
+};
+
+const loadFilteredChunks = async (page: number) => {
+  if (!props.details?.id || feedbackFilter.value === 'all') {
+    filteredChunkRows.value = null;
+    return;
+  }
+  const result: any = await getKnowledgeDetailsCon(props.details.id, page, feedbackQuery());
+  if (result?.success) {
+    filteredChunkRows.value = result.data || [];
+    filteredTotal.value = result.total || 0;
+  } else {
+    MessagePlugin.error(result?.message || t('knowledgeBase.chunkLoadFailed'));
+  }
+};
+
+const onFeedbackFilterChange = async () => {
+  chunkPage.value = 1;
+  loadedChunkPage.value = 1;
+  if (feedbackFilter.value === 'all') {
+    filteredChunkRows.value = null;
+    emit('getDoc', 1);
+    return;
+  }
+  await loadFilteredChunks(1);
+};
+
+const openChunkFeedback = async (chunk: any) => {
+  if (!props.details?.id || !chunk?.id) return;
+  feedbackChunkId.value = chunk.id;
+  feedbackDetailVisible.value = true;
+  feedbackDetailLoading.value = true;
+  feedbackDetail.value = null;
+  feedbackLogs.value = [];
+  try {
+    const [stats, logs]: any[] = await Promise.all([
+      getChunkFeedback(props.details.id, chunk.id),
+      listChunkWeightLogs(props.details.id, chunk.id),
+    ]);
+    feedbackDetail.value = stats?.data || null;
+    feedbackLogs.value = logs?.data || [];
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  } finally {
+    feedbackDetailLoading.value = false;
+  }
+};
+
+const confirmResetChunkFeedback = async () => {
+  if (!props.details?.id || !feedbackChunkId.value) return;
+  resettingFeedback.value = true;
+  try {
+    await resetChunkFeedback(props.details.id, feedbackChunkId.value);
+    MessagePlugin.success(t('knowledgeBase.feedback.resetDone'));
+    await openChunkFeedback({ id: feedbackChunkId.value });
+    if (feedbackFilter.value === 'all') emit('getDoc', chunkPage.value || 1);
+    else await loadFilteredChunks(chunkPage.value || 1);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.error'));
+  } finally {
+    resettingFeedback.value = false;
+  }
+};
 
 const canPreview = (): boolean => {
   if (props.details?.type !== 'file') return false;
@@ -1580,6 +1695,13 @@ const downloadFile = () => {
     });
 };
 const handleChunkPageChange = (pageInfo: { current: number }) => {
+  if (viewMode.value === 'chunks' && feedbackFilter.value !== 'all') {
+    if (pageInfo.current === chunkPage.value && filteredChunkRows.value) return;
+    chunkPage.value = pageInfo.current;
+    loadedChunkPage.value = pageInfo.current;
+    loadFilteredChunks(pageInfo.current);
+    return;
+  }
   if (props.details?.chunkLoading || pageInfo.current === loadedChunkPage.value) return;
   pendingChunkPage = pageInfo.current;
   emit('getDoc', pageInfo.current);
@@ -1881,7 +2003,11 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
 
           <!-- 分块视图 -->
           <div v-else-if="viewMode === 'chunks'">
-            <div v-if="isChunkPageTransition" class="chunk-page-loading">
+            <div class="chunk-feedback-filter">
+              <t-select v-model="feedbackFilter" size="small" :options="feedbackFilterOptions"
+                @change="onFeedbackFilterChange" />
+            </div>
+            <div v-if="isChunkPageTransition && feedbackFilter === 'all'" class="chunk-page-loading">
               <t-loading size="small" />
               <span>{{ $t('common.loading') }}</span>
             </div>
@@ -1894,8 +2020,14 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
                   <div class="chunk-heading">
                     <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ (loadedChunkPage - 1) * CHUNK_PAGE_SIZE + index + 1 }}</span>
                     <span class="chunk-meta">{{ chunk.meta }}</span>
+                    <span v-if="chunk.original.needs_optimization" class="chunk-feedback-flag">{{ $t('knowledgeBase.feedback.needsOptimization') }}</span>
+                    <span v-if="chunkFeedbackSummary(chunk.original)" class="chunk-feedback-summary">{{ chunkFeedbackSummary(chunk.original) }}</span>
                   </div>
                   <div class="chunk-header-right">
+                    <t-button class="icon-action-btn" size="small" variant="text" shape="square"
+                      :title="$t('knowledgeBase.feedback.detail')" @click="openChunkFeedback(chunk.original)">
+                      <template #icon><t-icon name="thumb-up" size="15px" /></template>
+                    </t-button>
                     <t-tooltip v-if="chunk.original.index_status === 'failed' && canEditContent"
                       :content="$t('knowledgeBase.retryIndex')" placement="top">
                       <t-button class="icon-action-btn" size="small" theme="danger" variant="text" shape="square"
@@ -2144,9 +2276,9 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
           </div>
 
           <!-- 文档预览视图 -->
-          <div v-if="(viewMode === 'merged' || viewMode === 'chunks') && details.total > CHUNK_PAGE_SIZE"
+          <div v-if="(viewMode === 'merged' || viewMode === 'chunks') && chunkListTotal > CHUNK_PAGE_SIZE"
             class="chunk-pagination">
-            <t-pagination v-model="chunkPage" :total="details.total" :page-size="CHUNK_PAGE_SIZE" size="small"
+            <t-pagination v-model="chunkPage" :total="chunkListTotal" :page-size="CHUNK_PAGE_SIZE" size="small"
               show-jumper show-page-number :show-page-size="false" :disabled="details.chunkLoading"
               @change="handleChunkPageChange" />
           </div>
@@ -2159,6 +2291,44 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
       </div>
 
     </t-drawer>
+    <t-dialog v-model:visible="feedbackDetailVisible" :header="$t('knowledgeBase.feedback.detail')" :footer="false"
+      width="560px" attach="body">
+      <div v-if="feedbackDetailLoading" class="chunk-popup-state">
+        <t-loading size="small" />
+      </div>
+      <div v-else-if="feedbackDetail" class="chunk-feedback-detail">
+        <p>
+          {{ $t('knowledgeBase.feedback.likes', { count: feedbackDetail.like_count || 0 }) }}
+          · {{ $t('knowledgeBase.feedback.dislikes', { count: feedbackDetail.dislike_count || 0 }) }}
+          · {{ $t('knowledgeBase.feedback.approvalRate', { rate: formatApproval(feedbackDetail.positive_rate) }) }}
+          · {{ $t('knowledgeBase.feedback.recallWeight', { weight: (feedbackDetail.recall_weight || 1).toFixed(2) }) }}
+          <span v-if="feedbackDetail.needs_optimization" class="chunk-feedback-flag">{{ $t('knowledgeBase.feedback.needsOptimization') }}</span>
+        </p>
+        <h5>{{ $t('knowledgeBase.feedback.sessions') }} ({{ feedbackDetail.associated_session_count || 0 }})</h5>
+        <p v-if="!(feedbackDetail.sessions || []).length">{{ $t('knowledgeBase.feedback.emptySessions') }}</p>
+        <ul v-else>
+          <li v-for="item in feedbackDetail.sessions" :key="item.session_id">{{ item.session_id }}</li>
+        </ul>
+        <h5>{{ $t('knowledgeBase.feedback.reasons') }}</h5>
+        <p v-if="!(feedbackDetail.reason_stats || []).length">{{ $t('knowledgeBase.feedback.emptyReasons') }}</p>
+        <ul v-else>
+          <li v-for="reason in feedbackDetail.reason_stats" :key="reason.reason_code">{{ reason.reason_code }} · {{ reason.count }}</li>
+        </ul>
+        <p v-for="text in feedbackDetail.recent_reasons || []" :key="text">{{ text }}</p>
+        <h5>{{ $t('knowledgeBase.feedback.weightLogs') }}</h5>
+        <p v-if="!feedbackLogs.length">{{ $t('knowledgeBase.feedback.emptyLogs') }}</p>
+        <ul v-else>
+          <li v-for="log in feedbackLogs" :key="log.id">{{ log.old_weight }} → {{ log.new_weight }} · {{ log.reason || log.source }}</li>
+        </ul>
+        <t-popconfirm v-if="canEditContent" :content="$t('knowledgeBase.feedback.resetConfirm')"
+          @confirm="confirmResetChunkFeedback">
+          <t-button size="small" theme="danger" variant="outline" :loading="resettingFeedback">
+            {{ $t('knowledgeBase.feedback.reset') }}
+          </t-button>
+        </t-popconfirm>
+      </div>
+      <p v-else>{{ $t('knowledgeBase.feedback.noFeedback') }}</p>
+    </t-dialog>
   </div>
 </template>
 <style scoped lang="less">
@@ -2776,6 +2946,38 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
 
   &.chunk-item--disabled {
     background: var(--td-bg-color-secondarycontainer);
+  }
+}
+
+.chunk-feedback-filter {
+  margin-bottom: 12px;
+  max-width: 240px;
+}
+
+.chunk-feedback-summary {
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+}
+
+.chunk-feedback-flag {
+  color: var(--td-error-color);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chunk-feedback-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+
+  h5 {
+    margin: 8px 0 0;
+  }
+
+  ul {
+    margin: 0;
+    padding-left: 18px;
   }
 }
 

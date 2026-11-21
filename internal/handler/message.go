@@ -61,6 +61,8 @@ type MessageHandler struct {
 	Prompts               interfaces.AgentPromptRepository
 	DelegatedPrompts      func(context.Context, string) (map[string][]*types.PendingPromptView, error)
 	CollaborationStatuses func(context.Context, string, []string) (map[string]json.RawMessage, error)
+	// feedback echoes the caller's like/dislike when messages are loaded.
+	feedback interfaces.MessageFeedbackService
 }
 
 // NewMessageHandler creates a new message handler instance with the required service
@@ -237,6 +239,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			sessionID, len(messages),
 		)
 		h.attachPendingPrompts(ctx, sessionID, messages)
+		h.attachFeedback(c, messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    rewriter.RewriteMessagesResponse(ctx, messages),
@@ -278,6 +281,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		sessionID, len(messages),
 	)
 	h.attachPendingPrompts(ctx, sessionID, messages)
+	h.attachFeedback(c, messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    rewriter.RewriteMessagesResponse(ctx, messages),

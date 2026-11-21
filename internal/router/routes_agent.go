@@ -261,6 +261,7 @@ func RegisterEmbedPublicRoutes(
 		embed.POST("/sessions/:session_id/stop", embedHandler.EmbedStopSession)
 		embed.GET("/sessions/:session_id/messages/:message_id/suggestions", embedHandler.EmbedGetMessageSuggestions)
 		embed.POST("/sessions/:session_id/messages/:message_id/suggestions", embedHandler.EmbedEnsureMessageSuggestions)
+		embed.PUT("/sessions/:session_id/messages/:message_id/feedback", embedHandler.EmbedSubmitMessageFeedback)
 		embed.POST("/sessions/:session_id/suggestion-events", embedHandler.EmbedRecordSuggestionEvent)
 		embed.POST("/sessions/:session_id/events", embedHandler.EmbedRelayWebhookEvent)
 		embed.POST("/sessions/:session_id/mcp-oauth-resolutions/:pending_id", embedHandler.EmbedResolveMCPOAuth)
