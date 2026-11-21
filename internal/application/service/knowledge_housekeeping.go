@@ -203,7 +203,10 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	}
 
 	stuck, heartbeat := h.filterByLastSpanActivity(ctx, candidates, cutoff)
-	spanSkipped := len(candidates) - len(stuck)
+	spanSkipped := 0
+	if heartbeat != nil {
+		spanSkipped = len(candidates) - len(stuck)
+	}
 
 	// Second-stage gate: a row can have a stale span heartbeat yet still
 	// be perfectly healthy when its enrichment subtasks (summary /
@@ -472,11 +475,10 @@ func (h *HousekeepingService) filterByLastSpanActivity(
 		Group("knowledge_id").
 		Find(&beats).Error
 	if err != nil {
-		// On query failure, fail safe — assume nothing has a
-		// heartbeat (so all candidates are "stuck"). This matches
-		// the previous-version behaviour and never under-recovers.
-		logger.Warnf(ctx, "[Housekeeping] span heartbeat query failed: %v (will fail safe and recover all candidates)", err)
-		return candidates, nil
+		// An unreadable heartbeat is not evidence of a stalled task. Defer
+		// recovery until the next sweep can establish liveness.
+		logger.Warnf(ctx, "[Housekeeping] span heartbeat query failed: %v (deferring candidate recovery)", err)
+		return nil, nil
 	}
 	heartbeat := make(map[string]time.Time, len(beats))
 	for _, b := range beats {
@@ -498,10 +500,7 @@ func (h *HousekeepingService) filterByLastSpanActivity(
 
 // recoverStalled fails each stuck row with a message naming where it stalled
 // and when it last made progress, and closes its open spans so the timeline
-// points at that spot instead of spinning. heartbeat is nil when the span
-// heartbeat query failed; the message then gives no time rather than the
-// row's updated_at, which can predate the last span write. Returns rows
-// recovered.
+// points at that spot instead of spinning. Returns rows recovered.
 func (h *HousekeepingService) recoverStalled(
 	ctx context.Context, stuck []types.Knowledge, heartbeat map[string]time.Time, threshold time.Duration,
 ) int64 {
