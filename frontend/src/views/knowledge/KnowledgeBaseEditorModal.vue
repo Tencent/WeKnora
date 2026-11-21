@@ -1538,6 +1538,44 @@ const validateForm = (): boolean => {
     return false
   }
 
+  // 验证知识图谱配置（如果启用实体关系提取）
+  if (formData.value.nodeExtractConfig?.enabled) {
+    const extract = formData.value.nodeExtractConfig
+    if (!extract.tags || extract.tags.length === 0 || extract.tags.some((tag: string) => !tag || !tag.trim())) {
+      MessagePlugin.warning(t('graphSettings.tagsRequired'))
+      currentSection.value = 'graph'
+      return false
+    }
+
+    if (!extract.text || !extract.text.trim()) {
+      MessagePlugin.warning(t('graphSettings.sampleTextRequired'))
+      currentSection.value = 'graph'
+      return false
+    }
+
+    if (!extract.nodes || extract.nodes.length === 0) {
+      MessagePlugin.warning(t('graphSettings.nodesRequired'))
+      currentSection.value = 'graph'
+      return false
+    }
+
+    const nodeNames = new Set<string>()
+    for (const node of extract.nodes) {
+      const name = (node.name || '').trim()
+      if (!name) {
+        MessagePlugin.warning(t('graphSettings.nodeNameRequired'))
+        currentSection.value = 'graph'
+        return false
+      }
+      if (nodeNames.has(name)) {
+        MessagePlugin.warning(t('graphSettings.duplicateNodeName', { name }))
+        currentSection.value = 'graph'
+        return false
+      }
+      nodeNames.add(name)
+    }
+  }
+
   if (formData.value.type === 'faq' && !formData.value.faqConfig?.indexMode) {
     MessagePlugin.warning(t('knowledgeEditor.messages.indexModeRequired'))
     currentSection.value = 'faq'

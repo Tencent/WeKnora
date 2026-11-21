@@ -1309,7 +1309,7 @@ export default {
     tagsPlaceholder: 'Enter relationship types, e.g., works_at, colleague, friend',
     generateRandomTags: 'Generate Random Tags',
     sampleTextLabel: 'Sample Text',
-    sampleTextDescription: 'Sample text for testing entity-relationship extraction',
+    sampleTextDescription: 'Sample text used to define entity-relationship extraction rules (required when extraction is enabled)',
     sampleTextPlaceholder: 'Enter text containing entities and relationships...',
     customInstructionsLabel: 'Additional Extraction Instructions',
     customInstructionsDescription: 'Add domain scope, entity filtering, or attribute guidance while the system retains the structured output contract',
@@ -1349,7 +1349,12 @@ export default {
     checkingAvailability: 'Checking knowledge graph availability…',
     checkAvailabilityFailed: 'Unable to check knowledge graph availability. Please retry.',
     disabledWarning: 'Knowledge graph database is not enabled, entity-relationship extraction will not be available',
-    howToEnable: 'How to enable knowledge graph?'
+    howToEnable: 'How to enable knowledge graph?',
+    tagsRequired: 'Please add at least one relationship type',
+    sampleTextRequired: 'Please enter sample text for entity-relationship extraction',
+    nodesRequired: 'Please add at least one entity',
+    nodeNameRequired: 'Entity name cannot be empty',
+    duplicateNodeName: 'Duplicate entity name: {name}'
   },
   credential: {
     configured: 'Configured',
