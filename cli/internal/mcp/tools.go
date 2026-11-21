@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
@@ -70,6 +72,23 @@ func successResult(payload any) *mcpsdk.CallToolResult {
 	}
 }
 
+func mustOutputSchema[T any]() *jsonschema.Schema {
+	schema, err := jsonschema.For[T](&jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+		// RawMessage may contain any JSON value, rather than the byte array its
+		// underlying Go type suggests. Metadata maps may also be nil on the wire.
+		reflect.TypeFor[json.RawMessage](): {},
+		reflect.TypeFor[map[string]string](): {
+			Types:                []string{"null", "object"},
+			AdditionalProperties: &jsonschema.Schema{Type: "string"},
+		},
+	}})
+	if err != nil {
+		var output T
+		panic(fmt.Sprintf("infer MCP output schema for %T: %v", output, err))
+	}
+	return schema
+}
+
 func marshalToString(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
@@ -127,14 +146,6 @@ type sessionAskService interface {
 // is a deliberate API expansion - the agent-callable surface is the
 // reason this CLI ships an MCP server, not its CLI command list, so this
 // list must be maintained by hand.
-//
-// TODO: add OutputSchema to each mcpsdk.Tool registration so agents can
-// type-check responses without structural probing. Currently omitted
-// because the Out type is `any` on all handlers (required to suppress
-// the SDK's auto-marshal which clobbers our manually-populated
-// StructuredContent). When go-sdk exposes a typed OutputSchema field
-// independent of the handler Out type, populate it from the
-// corresponding *Output struct.
 func registerTools(server *mcpsdk.Server, svc ServiceClient) {
 	addKBList(server, svc)
 	addKBView(server, svc)
@@ -158,8 +169,11 @@ type kbListOutput struct {
 
 func addKBList(server *mcpsdk.Server, svc knowledgeBaseService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name:        "kb_list",
-		Description: "List all knowledge bases visible to the active WeKnora tenant. No arguments. Returns items[]: each item carries id, name, description, knowledge_count, is_pinned, updated_at - useful for selecting a kb_id to pass to other tools.",
+		Name:         "kb_list",
+		OutputSchema: mustOutputSchema[kbListOutput](),
+		Description: "List all knowledge bases visible to the active WeKnora tenant. No arguments. " +
+			"Returns items[]: each item carries id, name, description, knowledge_count, is_pinned, " +
+			"updated_at - useful for selecting a kb_id to pass to other tools.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "List Knowledge Bases",
 			DestructiveHint: bptr(false),
@@ -187,8 +201,10 @@ type kbViewInput struct {
 
 func addKBView(server *mcpsdk.Server, svc knowledgeBaseService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name:        "kb_view",
-		Description: "Fetch a knowledge base by ID. Returns the full record including chunking config, embedding/summary model IDs, knowledge_count, and chunk_count.",
+		Name:         "kb_view",
+		OutputSchema: mustOutputSchema[sdk.KnowledgeBase](),
+		Description: "Fetch a knowledge base by ID. Returns the full record including chunking config, " +
+			"embedding/summary model IDs, knowledge_count, and chunk_count.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "View Knowledge Base",
 			DestructiveHint: bptr(false),
@@ -232,8 +248,12 @@ type docListOutput struct {
 
 func addDocList(server *mcpsdk.Server, svc knowledgeService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name:        "doc_list",
-		Description: "List documents in a knowledge base, with pagination and optional filters (parse-status, keyword, file_type, source, tag_id, start_time/end_time on updated_at). Returns items[] with id, file_name, title, parse_status, size, updated_at - plus the page/total metadata.",
+		Name:         "doc_list",
+		OutputSchema: mustOutputSchema[docListOutput](),
+		Description: "List documents in a knowledge base, with pagination and optional filters " +
+			"(parse-status, keyword, file_type, source, tag_id, start_time/end_time on updated_at). " +
+			"Returns items[] with id, file_name, title, parse_status, size, updated_at - plus the " +
+			"page/total metadata.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "List Documents",
 			DestructiveHint: bptr(false),
@@ -296,8 +316,10 @@ type docViewInput struct {
 
 func addDocView(server *mcpsdk.Server, svc knowledgeService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name:        "doc_view",
-		Description: "Fetch a single document by ID. Returns the Knowledge record (file_name, title, type, parse_status, size, embedding_model_id, source URL if any, etc.).",
+		Name:         "doc_view",
+		OutputSchema: mustOutputSchema[sdk.Knowledge](),
+		Description: "Fetch a single document by ID. Returns the Knowledge record (file_name, title, " +
+			"type, parse_status, size, embedding_model_id, source URL if any, etc.).",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "View Document",
 			DestructiveHint: bptr(false),
@@ -342,7 +364,8 @@ const maxDocDownloadBytes = 1 << 20
 
 func addDocDownload(server *mcpsdk.Server, svc knowledgeService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name: "doc_download",
+		Name:         "doc_download",
+		OutputSchema: mustOutputSchema[docDownloadOutput](),
 		Description: "Download a document's raw bytes by ID. Capped at 1 MiB per call - for larger documents, " +
 			"use search_chunks to find the relevant excerpts. is_base64 reports whether content was " +
 			"base64-encoded (invalid UTF-8 or presence of NUL byte in the first 512 bytes).",
@@ -395,16 +418,17 @@ type searchChunksOutput struct {
 }
 
 func addSearchChunks(server *mcpsdk.Server, svc knowledgeService) {
-	// Out = any: SDK output schema would derive from searchChunksOutput,
-	// which embeds *sdk.SearchResult - and SearchResult.Metadata is a
-	// nilable map[string]any that violates the auto-generated
-	// type=object constraint when empty. Skipping derivation by using
-	// `any` keeps the structured JSON shape identical while bypassing
-	// the over-eager validator. Same pattern applied to chat / session_ask
-	// below.
+	// Out = any keeps the SDK from replacing our manually populated
+	// StructuredContent. The explicit OutputSchema describes the payload,
+	// including nullable SearchResult.Metadata, without changing the shared
+	// success and error envelope handling. Same pattern applied to chat and
+	// session_ask below.
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name:        "search_chunks",
-		Description: "Hybrid (vector + keyword) retrieval against a knowledge base. Returns the top chunks ranked by RRF; use this before chat to ground an answer in cited context. Results include knowledge_id, content, score - feed back into chat as context or display directly.",
+		Name:         "search_chunks",
+		OutputSchema: mustOutputSchema[searchChunksOutput](),
+		Description: "Hybrid (vector + keyword) retrieval against a knowledge base. Returns the top " +
+			"chunks ranked by RRF; use this before chat to ground an answer in cited context. Results " +
+			"include knowledge_id, content, score - feed back into chat as context or display directly.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "Search Knowledge Chunks",
 			DestructiveHint: bptr(false),
@@ -465,8 +489,12 @@ type chatOutput struct {
 
 func addChat(server *mcpsdk.Server, svc chatService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name:        "chat",
-		Description: "Run a RAG answer against a knowledge base. Returns a bounded answer-event projection by default; reference=true adds indexed citations and verbose=true adds reasoning, tool, and lifecycle events. MCP tools/call is buffered rather than streaming. Pass session_id to continue a conversation.",
+		Name:         "chat",
+		OutputSchema: mustOutputSchema[chatOutput](),
+		Description: "Run a RAG answer against a knowledge base. Returns a bounded answer-event " +
+			"projection by default; reference=true adds indexed citations and verbose=true adds " +
+			"reasoning, tool, and lifecycle events. MCP tools/call is buffered rather than streaming. " +
+			"Pass session_id to continue a conversation.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "Chat with KB (Streaming RAG)",
 			DestructiveHint: bptr(false),
@@ -533,8 +561,10 @@ type agentListOutput struct {
 
 func addAgentList(server *mcpsdk.Server, svc agentService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name:        "agent_list",
-		Description: "List the tenant's custom agents. Returns items[] with id, name, description, is_builtin - use to discover an agent_id before session_ask.",
+		Name:         "agent_list",
+		OutputSchema: mustOutputSchema[agentListOutput](),
+		Description: "List the tenant's custom agents. Returns items[] with id, name, description, " +
+			"is_builtin - use to discover an agent_id before session_ask.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "List Custom Agents",
 			DestructiveHint: bptr(false),
@@ -573,8 +603,11 @@ type sessionAskOutput struct {
 
 func addSessionAsk(server *mcpsdk.Server, svc sessionAskService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name:        "session_ask",
-		Description: "Run a query through a custom agent. Returns a bounded answer-event projection by default; reference=true adds indexed citations and verbose=true adds reasoning, tool, and lifecycle events. MCP tools/call is buffered rather than streaming.",
+		Name:         "session_ask",
+		OutputSchema: mustOutputSchema[sessionAskOutput](),
+		Description: "Run a query through a custom agent. Returns a bounded answer-event projection " +
+			"by default; reference=true adds indexed citations and verbose=true adds reasoning, tool, " +
+			"and lifecycle events. MCP tools/call is buffered rather than streaming.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "Ask a Custom Agent (session ask --agent)",
 			DestructiveHint: bptr(false),
@@ -652,8 +685,11 @@ const (
 
 func addChunkList(server *mcpsdk.Server, svc chunkListService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name:        "chunk_list",
-		Description: "List chunks of a knowledge document for RAG retrieval debug. Returns at most `limit` chunks starting from ChunkIndex 0; if total chunks exceed limit, truncated_at_limit=true signals the agent to fall back to the CLI for paginated retrieval.",
+		Name:         "chunk_list",
+		OutputSchema: mustOutputSchema[chunkListOutput](),
+		Description: "List chunks of a knowledge document for RAG retrieval debug. Returns at most " +
+			"`limit` chunks starting from ChunkIndex 0; if total chunks exceed limit, " +
+			"truncated_at_limit=true signals the agent to fall back to the CLI for paginated retrieval.",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "List Knowledge Chunks",
 			DestructiveHint: bptr(false),
