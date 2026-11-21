@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -9,9 +10,11 @@ import (
 
 	"github.com/Tencent/WeKnora/docreader/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-func getMaxMessageSize() int {
+func getMaxFileSize() int {
 	if sizeStr := os.Getenv("MAX_FILE_SIZE_MB"); sizeStr != "" {
 		if size, err := strconv.Atoi(sizeStr); err == nil && size > 0 {
 			return size * 1024 * 1024
@@ -45,7 +48,9 @@ func NewClient(addr string) (*Client, error) {
 func NewClientWithAuth(addr string, authConfig *AuthConfig) (*Client, error) {
 	Logger.Printf("INFO: Creating new DocReader client connecting to %s", addr)
 
-	maxMsgSize := getMaxMessageSize()
+	// Reserve the same bounded envelope allowance as the App and Python server.
+	// The raw file cap is checked separately in Read and ReadStream.
+	maxMsgSize := getMaxFileSize() + (1 << 20)
 
 	if authConfig == nil {
 		authConfig = &AuthConfig{}
@@ -70,6 +75,35 @@ func NewClientWithAuth(addr string, authConfig *AuthConfig) (*Client, error) {
 		DocReaderClient: proto.NewDocReaderClient(conn),
 		debug:           false,
 	}, nil
+}
+
+func validateFileContentSize(req *proto.ReadRequest) error {
+	maxFileSize := getMaxFileSize()
+	if size := len(req.GetFileContent()); size > maxFileSize {
+		return status.Errorf(codes.ResourceExhausted,
+			"docreader file content size %d exceeds maximum %d", size, maxFileSize)
+	}
+	return nil
+}
+
+// Read enforces the raw-file limit independently of protobuf framing.
+func (c *Client) Read(
+	ctx context.Context, req *proto.ReadRequest, opts ...grpc.CallOption,
+) (*proto.ReadResponse, error) {
+	if err := validateFileContentSize(req); err != nil {
+		return nil, err
+	}
+	return c.DocReaderClient.Read(ctx, req, opts...)
+}
+
+// ReadStream applies the same file budget as Read, including on older servers.
+func (c *Client) ReadStream(
+	ctx context.Context, req *proto.ReadRequest, opts ...grpc.CallOption,
+) (grpc.ServerStreamingClient[proto.ReadStreamResponse], error) {
+	if err := validateFileContentSize(req); err != nil {
+		return nil, err
+	}
+	return c.DocReaderClient.ReadStream(ctx, req, opts...)
 }
 
 func (c *Client) Close() error {

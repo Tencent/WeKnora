@@ -61,22 +61,39 @@ func preparePendingOp(op *types.TaskPendingOp) error {
 // row first determines the order, and the deletion path's subsequent scope
 // scrub removes any insert that committed before it.
 func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
-	ctx context.Context,
-	op *types.TaskPendingOp,
+	ctx context.Context, op *types.TaskPendingOp,
 ) (bool, error) {
-	if err := preparePendingOp(op); err != nil {
-		return false, err
+	return r.EnqueueBatchIfKnowledgeBaseActive(ctx, []*types.TaskPendingOp{op})
+}
+
+// EnqueueBatchIfKnowledgeBaseActive keeps the liveness check and all inserts
+// in one transaction. Bounded statements avoid SQLite/Postgres parameter
+// limits without leaving a partially persisted convergence batch on failure.
+func (r *taskPendingOpsRepository) EnqueueBatchIfKnowledgeBaseActive(
+	ctx context.Context, ops []*types.TaskPendingOp,
+) (bool, error) {
+	if len(ops) == 0 {
+		return false, nil
 	}
-	if op.Scope != types.TaskScopeKnowledgeBase {
-		return false, errors.New("task pending ops: guarded enqueue requires knowledge_base scope")
+	for _, op := range ops {
+		if err := preparePendingOp(op); err != nil {
+			return false, err
+		}
+		if op.EnqueuedAt.IsZero() {
+			op.EnqueuedAt = time.Now()
+		}
+		if op.Scope != types.TaskScopeKnowledgeBase {
+			return false, errors.New("task pending ops: guarded enqueue requires knowledge_base scope")
+		}
+		if op.TenantID != ops[0].TenantID || op.ScopeID != ops[0].ScopeID || op.TaskType != ops[0].TaskType {
+			return false, errors.New("task pending ops: batch must belong to one tenant and queue lane")
+		}
 	}
 	accepted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Model(&types.KnowledgeBase{}).
-			Select("id").
-			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
-		dialector := tx.Dialector
-		if dialector.Name() == "postgres" {
+		query := tx.Model(&types.KnowledgeBase{}).Select("id").
+			Where("id = ? AND tenant_id = ?", ops[0].ScopeID, ops[0].TenantID)
+		if tx.Name() == "postgres" {
 			query = query.Clauses(clause.Locking{Strength: "SHARE"})
 		}
 		var kb types.KnowledgeBase
@@ -86,17 +103,17 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 			}
 			return err
 		}
-		active, err := tenantActiveWithinTx(tx, op.TenantID)
+		active, err := tenantActiveWithinTx(tx, ops[0].TenantID)
 		if err != nil || !active {
 			return err
 		}
-		if err := tx.Create(op).Error; err != nil {
+		if err := tx.CreateInBatches(ops, 100).Error; err != nil {
 			return err
 		}
 		accepted = true
 		return nil
 	})
-	return accepted, err
+	return accepted && err == nil, err
 }
 
 // tenantActiveWithinTx reports whether the tenant row exists and is not
@@ -263,6 +280,23 @@ func (r *taskPendingOpsRepository) ClaimBatch(
 	limit int,
 	staleBefore time.Time,
 ) ([]*types.TaskPendingOp, error) {
+	return r.claimBatch(ctx, taskType, scope, scopeID, limit, staleBefore, "")
+}
+
+// ClaimKnowledge uses the same anchor locks as automatic batches so a manual
+// request cannot race an in-flight sibling operation for the same document.
+func (r *taskPendingOpsRepository) ClaimKnowledge(
+	ctx context.Context, taskType, scope, scopeID, knowledgeID string, staleBefore time.Time,
+) ([]*types.TaskPendingOp, error) {
+	if knowledgeID == "" {
+		return nil, errors.New("task pending ops: knowledge_id is required")
+	}
+	return r.claimBatch(ctx, taskType, scope, scopeID, 1, staleBefore, knowledgeID)
+}
+
+func (r *taskPendingOpsRepository) claimBatch(
+	ctx context.Context, taskType, scope, scopeID string, limit int, staleBefore time.Time, knowledgeID string,
+) ([]*types.TaskPendingOp, error) {
 	if limit <= 0 {
 		limit = 1
 	}
@@ -294,6 +328,7 @@ WHERE id IN (
 		SELECT id, ROW_NUMBER() OVER (PARTITION BY dedup_key ORDER BY fail_count ASC, id ASC) AS rn
 		FROM task_pending_ops
 		WHERE task_type = ? AND scope = ? AND scope_id = ?
+			AND (? = '' OR dedup_key = ?)
 			AND (claimed_at IS NULL OR claimed_at < ?)
 			AND dedup_key NOT IN (
 				SELECT dedup_key FROM task_pending_ops
@@ -306,7 +341,7 @@ ORDER BY fail_count ASC, id ASC
 LIMIT ?
 FOR UPDATE SKIP LOCKED`
 			if err := tx.Raw(anchorSQL,
-				taskType, scope, scopeID, staleBefore,
+				taskType, scope, scopeID, knowledgeID, knowledgeID, staleBefore,
 				taskType, scope, scopeID, staleBefore,
 				limit).
 				Scan(&keys).Error; err != nil {
@@ -319,6 +354,7 @@ FOR UPDATE SKIP LOCKED`
 				Where("claimed_at IS NOT NULL AND claimed_at >= ?", staleBefore)
 			if err := tx.Model(&types.TaskPendingOp{}).
 				Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+				Where("? = '' OR dedup_key = ?", knowledgeID, knowledgeID).
 				Where("(claimed_at IS NULL OR claimed_at < ?)", staleBefore).
 				Where("dedup_key NOT IN (?)", freshKeys).
 				Group("dedup_key").

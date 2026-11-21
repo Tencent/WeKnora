@@ -4,10 +4,13 @@ import * as vue from 'vue'
 import * as sorting from '../../utils/resourceSorting.ts'
 import { change, fixture, flush } from '../../test-utils/vueFixture.ts'
 
-function setup(t: TestContext) {
+function setup(t: TestContext, initialScope = 'all') {
   const f = fixture(t)
   const fetchAgentsForList = t.mock.fn(async (_params: unknown, _force: boolean) => ({
     data: [{ id: 'agent', name: 'Updated agent' }], disabled_own_agent_ids: [],
+  }))
+  const listOrganizationSharedAgents = t.mock.fn(async (_orgId: string) => ({
+    success: true, data: [{ agent: { id: 'shared-agent' } }],
   }))
   const page = f.component(new URL('./AgentList.vue', import.meta.url), {
     'vue-router': { useRoute: () => ({ query: {} }), useRouter: () => ({}) },
@@ -23,16 +26,50 @@ function setup(t: TestContext) {
     '@/stores/menu': { useMenuStore: () => ({}) },
     '@/components/settings/useConfirmDelete': { useConfirmDelete: () => ({}) },
     '@/composables/useTenantModelReadiness': { useTenantModelReadiness: () => ({ loaded: vue.ref(true), isReadyForAgent: vue.ref(true) }) },
-    '@/composables/useListUrlState': { useListUrlState: () => ({ scope: vue.ref('all'), creator: vue.ref('all'), query: vue.ref('') }) },
+    '@/composables/useListUrlState': { useListUrlState: () => ({ scope: vue.ref(initialScope), creator: vue.ref('all'), query: vue.ref('') }) },
     '@/composables/useResourcePins': { useResourcePins: () => ({ favorites: vue.ref([]), recents: vue.ref([]) }) },
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/stores/assistant': { useAssistantStore: () => ({ pageAccess: true }) },
-    '@/api/agent': {}, '@/api/chat/index': {}, '@/api/organization': {},
+    '@/api/agent': {}, '@/api/chat/index': {}, '@/api/organization': { listOrganizationSharedAgents },
     '@/config/contextualGuides': { markContextualGuideDone() {} }, '@/config/settingsRoute': {},
     '@/utils/resourceListSearch': {}, '@/utils/card-list-badge': {}, '@/utils/resourceSorting': sorting,
   })
-  return { ...f, ...page, fetchAgentsForList }
+  return { ...f, ...page, fetchAgentsForList, listOrganizationSharedAgents }
 }
+
+test('reserved scopes do not request organization agents on mount or selection changes', async t => {
+  for (const scope of ['all', 'mine', 'shared', 'favorites', 'recents', '']) {
+    await t.test(scope || 'empty', async t => {
+      const f = setup(t, scope)
+      await flush()
+      assert.equal(f.listOrganizationSharedAgents.mock.callCount(), 0)
+      for (const selection of ['all', 'favorites', 'recents', 'shared', 'mine', '']) {
+        f.vm.spaceSelection = selection
+        await flush()
+        assert.equal(f.listOrganizationSharedAgents.mock.callCount(), 0)
+      }
+    })
+  }
+})
+
+test('organization scopes still load agents and clear them when switching to recents', async t => {
+  const f = setup(t, 'organization-one')
+  await flush()
+  assert.equal(f.listOrganizationSharedAgents.mock.callCount(), 1)
+  assert.equal(f.listOrganizationSharedAgents.mock.calls[0].arguments[0], 'organization-one')
+  assert.equal(f.vm.spaceAgentsList.length, 1)
+
+  f.vm.spaceSelection = 'recents'
+  await flush()
+  assert.equal(f.listOrganizationSharedAgents.mock.callCount(), 1)
+  assert.equal(f.vm.spaceAgentsList.length, 0)
+
+  f.vm.spaceSelection = 'organization-two'
+  await flush()
+  assert.equal(f.listOrganizationSharedAgents.mock.callCount(), 2)
+  assert.equal(f.listOrganizationSharedAgents.mock.calls[1].arguments[0], 'organization-two')
+  assert.equal(f.vm.spaceAgentsList.length, 1)
+})
 
 test('refreshes the mounted agent list once per burst, ignoring other areas and unmounted pages', async t => {
   const f = setup(t)

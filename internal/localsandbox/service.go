@@ -2,14 +2,12 @@ package localsandbox
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -73,12 +71,12 @@ type RunRequest struct {
 	// pass only the keys this command needs (skill credentials, PATH tweaks).
 	// Do not copy os.Environ() into it.
 	Env map[string]string
-	// ReviewCommand is the command as the model wrote it, before stdin or skill
-	// wrapping. Approval reads it; empty means Command.
-	ReviewCommand string
-	// Approver asks the user. Nil means nobody can be asked, so every
-	// question is answered no.
+	// Spec is what approval reads. An empty Spec.Command means Command.
+	Spec ReviewSpec
+	// Approver asks the user (ModeAsk). Nil means nobody can be asked.
 	Approver Approver
+	// Reviewer is the review model (ModeAuto). Nil means auto refuses.
+	Reviewer Approver
 }
 
 // RunResult is the captured outcome of one Run.
@@ -100,10 +98,7 @@ func (s *Service) workspaceFor(
 		logger.Warnf(ctx, "[LocalSandbox] resolve workspace session=%s: %v", sessionID, err)
 		return Workspace{}, Policy{}, err
 	}
-	mode := ModeAuto
-	if s.modes != nil {
-		mode = s.modes.ModeForSession(ctx, sessionID)
-	}
+	mode := s.ModeForSession(ctx, sessionID)
 	// Strict enforcement boundary. Normalizing user input is the caller's job
 	// (see ParseApprovalMode); by the time a mode reaches here, honouring it
 	// or refusing are the only honest options — substituting a different
@@ -135,16 +130,22 @@ func (s *Service) workspaceFor(
 }
 
 // GuardForSession returns the path guard the trusted file tools must use.
-// It derives from the same Policy the backend compiles, which is what keeps
-// the two enforcement paths in agreement.
+// extra adds grants for this call only, such as a file write just approved.
 func (s *Service) GuardForSession(
-	ctx context.Context, sessionID string,
+	ctx context.Context, sessionID string, extra ...Grant,
 ) (*PathGuard, Workspace, error) {
 	ws, policy, err := s.workspaceFor(ctx, sessionID)
 	if err != nil {
 		return nil, Workspace{}, err
 	}
-	logger.Debugf(ctx, "[LocalSandbox] guard session=%s root=%s", sessionID, ws.Root)
+	for _, g := range extra {
+		relaxed, err := s.builder.Relax(policy, g)
+		if err != nil {
+			return nil, Workspace{}, err
+		}
+		policy = relaxed
+	}
+	logger.Debugf(ctx, "[LocalSandbox] guard session=%s root=%s extra=%d", sessionID, ws.Root, len(extra))
 	return NewPathGuard(policy), ws, nil
 }
 
@@ -160,7 +161,7 @@ func (s *Service) ReleaseSession(sessionID string) {
 
 // Run executes one shell command inside the session's workspace. Approval
 // waits happen outside the root lock so parallel tool calls are not stalled
-// behind a user who has not answered yet.
+// behind an approver that has not answered yet.
 func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	if err := s.ensureBackend(ctx); err != nil {
 		return nil, err
@@ -175,225 +176,19 @@ func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 			req.SessionID, req.WorkDir, err)
 		return nil, err
 	}
-	review := req.ReviewCommand
-	if review == "" {
-		review = req.Command
+	if req.Spec.Command == "" {
+		req.Spec.Command = req.Command
 	}
-	policy, refused := s.approveDelete(ctx, req, policy, review, cwd)
-	if refused != nil {
-		return refused, nil
+	turn := s.newTurn(ctx, req, ws)
+	policy, refused, err := s.approveDelete(ctx, turn, policy, cwd)
+	if err != nil || refused != nil {
+		return refused, err
 	}
 	res, err := s.runPolicy(ctx, ws.Root, policy, req)
 	if err != nil || !res.Denial.IsDenied() {
 		return res, err
 	}
-	return s.escalate(ctx, ws.Root, policy, cwd, review, req, res)
-}
-
-var errNoApprover = errors.New("nobody can approve it in this session")
-
-// approveDelete asks before a delete runs. A delete outside the policy also
-// needs its directory, so the same card asks for both and the command runs
-// once with that access instead of failing first and asking again.
-func (s *Service) approveDelete(
-	ctx context.Context, req RunRequest, policy Policy, review, cwd string,
-) (Policy, *RunResult) {
-	segments := DeleteSegments(review, s.builder.HomeDir())
-	if len(segments) == 0 {
-		return policy, nil
-	}
-	dangerous := false
-	opaque := false
-	rules := make([]DeleteRule, 0, len(segments))
-	for _, segment := range segments {
-		dangerous = dangerous || segment.Dangerous
-		opaque = opaque || segment.Opaque
-		rules = append(rules, segment.Rule)
-	}
-	// The session remembers the shape of each delete, like a Codex prefix
-	// rule, so the model may name other files or reorder options. Every
-	// delete in the command must be covered. An opaque command hides a
-	// delete no rule can name, so it is asked every time. Rules ignore
-	// operands, so a delete that reaches past cwd or empties it is too.
-	rememberable := !dangerous && !opaque && DeletesStayBelow(review, cwd, s.builder.HomeDir())
-	proposed, needsDir := s.deleteGrant(policy, review, cwd)
-	if rememberable && !needsDir && s.sessions.rulesCover(req.SessionID, cwd, rules) {
-		return policy, nil
-	}
-	reason := ReasonDelete
-	if dangerous {
-		reason = ReasonDangerous
-	}
-	approval := ApprovalRequest{
-		SessionID:    req.SessionID,
-		Command:      review,
-		Cwd:          cwd,
-		Reason:       reason,
-		AllowSession: rememberable,
-	}
-	if rememberable {
-		approval.SessionRules = ruleLabels(rules)
-	}
-	if needsDir {
-		approval.Proposed = &proposed
-	}
-	d, err := s.ask(ctx, req.Approver, approval)
-	if err != nil || !d.Approved {
-		return policy, &RunResult{Exit: ExitStatus{Code: 1}, Notice: refusalNotice("delete command", d, err)}
-	}
-	if needsDir {
-		// A delete needs write access, so the card's read-only choice is ignored.
-		relaxed, err := s.builder.Relax(policy, proposed)
-		if err != nil {
-			return policy, &RunResult{
-				Exit:   ExitStatus{Code: 1},
-				Notice: fmt.Sprintf("[sandbox] could not widen the sandbox for %s: %v", proposed.Path, err),
-			}
-		}
-		policy = relaxed
-		logger.Infof(ctx, "[LocalSandbox] delete runs with grant session=%s path=%s session_scope=%t",
-			req.SessionID, proposed.Path, d.Session)
-	}
-	if d.Session && rememberable {
-		for _, rule := range rules {
-			s.sessions.approveRule(req.SessionID, cwd, rule)
-		}
-		if needsDir {
-			s.sessions.addGrant(req.SessionID, proposed)
-		}
-	}
-	return policy, nil
-}
-
-// deleteGrant is the directory a delete needs when it removes something the
-// policy cannot write. Removing an entry writes its parent, so the proposal is
-// a target's parent directory; a grant on a directory being removed would
-// leave its own rmdir blocked. Only the first grantable directory is offered;
-// a second one is still asked after the run, like any other denial.
-func (s *Service) deleteGrant(policy Policy, review, cwd string) (Grant, bool) {
-	guard := NewPathGuard(policy)
-	for _, target := range DeleteTargets(review, s.builder.HomeDir()) {
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(cwd, target)
-		}
-		target = filepath.Clean(target)
-		if _, err := guard.CheckWrite(target); err == nil {
-			continue
-		}
-		parent := Denial{Reason: DenialPolicy, Path: filepath.Dir(target)}
-		if g, ok := s.builder.ProposeGrant(policy, parent, cwd); ok {
-			return g, true
-		}
-	}
-	return Grant{}, false
-}
-
-func ruleLabels(rules []DeleteRule) []string {
-	labels := make([]string, 0, len(rules))
-	for _, rule := range rules {
-		if label := rule.String(); label != "" && !slices.Contains(labels, label) {
-			labels = append(labels, label)
-		}
-	}
-	return labels
-}
-
-// maxEscalations is how many distinct directories one command may ask to
-// widen. The first denial asks, the retry asks once more if it hits a
-// different directory, and a further denial is returned as-is.
-const maxEscalations = 2
-
-func (s *Service) escalate(
-	ctx context.Context, lockRoot string, policy Policy, cwd, review string, req RunRequest, res *RunResult,
-) (*RunResult, error) {
-	for range maxEscalations {
-		proposed, ok := s.builder.ProposeGrant(policy, res.Denial, cwd)
-		if !ok {
-			res.Notice = blockedNotice(res.Denial)
-			return res, nil
-		}
-		d, err := s.ask(ctx, req.Approver, ApprovalRequest{
-			SessionID:       req.SessionID,
-			Command:         review,
-			Cwd:             cwd,
-			Reason:          ReasonDenied,
-			Proposed:        &proposed,
-			DenialSnippet:   res.Denial.Snippet,
-			FirstAttemptRan: true,
-			AllowSession:    true,
-		})
-		if err != nil || !d.Approved {
-			res.Notice = blockedNotice(res.Denial) + "\n" + refusalNotice("access request", d, err)
-			return res, nil
-		}
-		grant := narrowGrant(proposed, d.Grant)
-		relaxed, err := s.builder.Relax(policy, grant)
-		if err != nil {
-			res.Notice = fmt.Sprintf("[sandbox] could not widen the sandbox for %s: %v", grant.Path, err)
-			return res, nil
-		}
-		if d.Session {
-			s.sessions.addGrant(req.SessionID, grant)
-		}
-		logger.Infof(ctx, "[LocalSandbox] re-running with grant session=%s path=%s access=%s session_scope=%t",
-			req.SessionID, grant.Path, grant.Access, d.Session)
-		next, err := s.runPolicy(ctx, lockRoot, relaxed, req)
-		if err != nil {
-			return nil, err
-		}
-		if !next.Denial.IsDenied() {
-			return next, nil
-		}
-		policy = relaxed
-		res = next
-	}
-	res.Notice = blockedNotice(res.Denial)
-	return res, nil
-}
-
-func (s *Service) ask(ctx context.Context, approver Approver, req ApprovalRequest) (ApprovalDecision, error) {
-	if approver == nil {
-		return ApprovalDecision{}, errNoApprover
-	}
-	logger.Infof(ctx, "[LocalSandbox] approval requested session=%s reason=%s command=%q",
-		req.SessionID, req.Reason, previewCommand(req.Command))
-	d, err := approver.Approve(ctx, req)
-	if err != nil {
-		logger.Warnf(ctx, "[LocalSandbox] approval failed session=%s reason=%s: %v", req.SessionID, req.Reason, err)
-		return ApprovalDecision{}, err
-	}
-	logger.Infof(ctx, "[LocalSandbox] approval answered session=%s reason=%s approved=%t session_scope=%t",
-		req.SessionID, req.Reason, d.Approved, d.Session)
-	return d, nil
-}
-
-// narrowGrant applies the user's choice. Only write to read is honoured; the
-// path always stays the one proposed.
-func narrowGrant(proposed Grant, chosen *Grant) Grant {
-	if chosen != nil && chosen.Access == AccessRead {
-		proposed.Access = AccessRead
-	}
-	return proposed
-}
-
-func blockedNotice(d Denial) string {
-	if d.Path != "" {
-		return fmt.Sprintf("[sandbox] blocked: %s is outside what this session may access", d.Path)
-	}
-	return "[sandbox] blocked by the workspace sandbox"
-}
-
-func refusalNotice(what string, d ApprovalDecision, err error) string {
-	switch {
-	case errors.Is(err, errNoApprover):
-		return fmt.Sprintf("[sandbox] this %s needs the user's approval, and %v", what, err)
-	case err != nil:
-		return fmt.Sprintf("[sandbox] the approval request for this %s failed: %v", what, err)
-	case d.Reason != "":
-		return fmt.Sprintf("[sandbox] the user denied this %s: %q. Do not retry it another way.", what, d.Reason)
-	default:
-		return fmt.Sprintf("[sandbox] the user denied this %s. Do not retry it another way.", what)
-	}
+	return s.escalate(ctx, turn, ws.Root, policy, cwd, res)
 }
 
 // RunWithPolicy runs one command under a policy the caller built. Skill
@@ -424,6 +219,12 @@ func (s *Service) ensureBackend(ctx context.Context) error {
 func (s *Service) runPolicy(ctx context.Context, lockRoot string, policy Policy, req RunRequest) (*RunResult, error) {
 	unlock := s.LockRoot(lockRoot)
 	defer unlock()
+
+	// The approval that let this run may have been given just before the
+	// user stopped the turn; the lock wait is the last point to notice.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	cwd, err := commandCwd(policy, req.WorkDir)
 	if err != nil {
@@ -535,7 +336,13 @@ func previewCommand(command string) string {
 	if len(command) <= commandLogLimit {
 		return command
 	}
-	return command[:commandLogLimit] + "…"
+	// Back up to a rune start so a multibyte character (a CJK file name or
+	// argument) is not split into invalid UTF-8 in the log line.
+	cut := commandLogLimit
+	for cut > 0 && !utf8.RuneStart(command[cut]) {
+		cut--
+	}
+	return command[:cut] + "…"
 }
 
 func drain(proc Process) (string, string) {

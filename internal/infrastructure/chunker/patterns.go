@@ -21,7 +21,9 @@ const (
 
 // MarkdownHeadingPattern matches an ATX-style Markdown heading at line start.
 // Capture groups: (1) hashes, (2) heading text.
-var MarkdownHeadingPattern = regexp.MustCompile(`(?m)^(#{1,6})\s+(.+?)\s*#*\s*$`)
+// Closing hashes are delimiters only after a space or tab; otherwise they
+// belong to the title (for example, C# and F#).
+var MarkdownHeadingPattern = regexp.MustCompile(`(?m)^(#{1,6})\s+(.+?)(?:[ \t]+#+)?\s*$`)
 
 // FormFeedPattern matches the form-feed control character used by some PDF
 // converters as a page break marker.

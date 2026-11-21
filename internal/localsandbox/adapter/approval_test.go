@@ -44,7 +44,7 @@ func TestExecShellCommandRefusesDeleteWithoutApprover(t *testing.T) {
 	res, err := a.ExecShellCommand(ctx, "s1", "wrapped", "", 0, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, res.ExitCode)
-	require.Contains(t, res.Stderr, "needs the user's approval")
+	require.Contains(t, res.Stderr, "needs approval")
 }
 
 func TestApproverBridgeNarrowsOnlyTheProposedPath(t *testing.T) {
@@ -55,7 +55,7 @@ func TestApproverBridgeNarrowsOnlyTheProposedPath(t *testing.T) {
 	proposed := localsandbox.Grant{Path: "/Users/dev/other", Access: localsandbox.AccessWrite}
 
 	d, err := bridge.Approve(context.Background(), localsandbox.ApprovalRequest{
-		SessionID: "s1", Command: "touch x", Reason: localsandbox.ReasonDenied,
+		SessionID: "s1", Spec: localsandbox.ReviewSpec{Command: "touch x"}, Reason: localsandbox.ReasonDenied,
 		Proposed: &proposed, FirstAttemptRan: true, AllowSession: true,
 	})
 	require.NoError(t, err)
@@ -66,6 +66,7 @@ func TestApproverBridgeNarrowsOnlyTheProposedPath(t *testing.T) {
 	require.Equal(t, "sandbox_denied", req.Reason)
 	require.Equal(t, proposed.Path, req.GrantPath)
 	require.Equal(t, "write", req.GrantAccess)
+	require.Equal(t, "directory", req.GrantKind)
 	require.True(t, req.FirstAttemptRan)
 }
 
@@ -74,7 +75,7 @@ func TestApproverBridgePassesSessionRules(t *testing.T) {
 	bridge := approverBridge{inner: inner}
 
 	_, err := bridge.Approve(context.Background(), localsandbox.ApprovalRequest{
-		SessionID: "s1", Command: "rm -rf build", Reason: localsandbox.ReasonDelete,
+		SessionID: "s1", Spec: localsandbox.ReviewSpec{Command: "rm -rf build"}, Reason: localsandbox.ReasonDelete,
 		AllowSession: true, SessionRules: []string{"rm -f -r"},
 	})
 	require.NoError(t, err)

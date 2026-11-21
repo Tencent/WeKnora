@@ -163,6 +163,13 @@ def _image_ref_from_streamed_data(ref_path: str, image_data: bytes) -> ImageRef:
     )
 
 
+def _validate_file_content_size(content: bytes) -> None:
+    if len(content) > CONFIG.grpc_max_file_size_mb:
+        raise ValueError(
+            f"File content size {len(content)} exceeds maximum {CONFIG.grpc_max_file_size_mb}"
+        )
+
+
 class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
     def __init__(self, preprocess_runner=None):
         super().__init__()
@@ -215,6 +222,7 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
         file_type = request.file_type or os.path.splitext(request.file_name)[1][1:]
         file_content = request.file_content
         track_request_size(len(file_content))
+        _validate_file_content_size(file_content)
         logger.info(
             "Read(File): file=%s, type=%s, size=%d bytes",
             request.file_name,
@@ -296,6 +304,7 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                     file_content = request.file_content
                     try:
                         track_request_size(len(file_content))
+                        _validate_file_content_size(file_content)
                         logger.info(
                             "Read(File stream): file=%s, type=%s, size=%d bytes",
                             request.file_name,
@@ -396,8 +405,8 @@ def main():
     server = grpc.server(
         RequestThreadPoolExecutor(max_workers=CONFIG.grpc_max_workers),
         options=[
-            ("grpc.max_send_message_length", CONFIG.grpc_max_file_size_mb),
-            ("grpc.max_receive_message_length", CONFIG.grpc_max_file_size_mb),
+            ("grpc.max_send_message_length", CONFIG.grpc_max_message_size_bytes),
+            ("grpc.max_receive_message_length", CONFIG.grpc_max_message_size_bytes),
         ],
         interceptors=interceptors,
     )

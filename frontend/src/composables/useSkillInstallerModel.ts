@@ -2,16 +2,12 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { getAgentById, updateAgent, type CustomAgent } from '@/api/agent'
+import { loadPreference } from './preferenceStorage'
 
 const INSTALLER_AGENT_ID = 'builtin-skill-installer'
-const LAST_CHAT_MODEL_KEY = 'weknora_last_chat_model_id'
 
 function readLastChatModelID(): string {
-  try {
-    return localStorage.getItem(LAST_CHAT_MODEL_KEY) || ''
-  } catch {
-    return ''
-  }
+  return loadPreference('last_chat_model') || ''
 }
 
 /** Each panel keeps its own draft while persisting to the same installer agent. */

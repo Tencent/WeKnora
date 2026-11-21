@@ -1039,7 +1039,7 @@ func (c *DockerRemoteClient) dockerFileOpFailure(
 			Message:  clean + " does not exist",
 		}
 	}
-	if c.containerVanished(ctx, id, op) {
+	if c.containerVanished(ctx, id, op) || execRuntimeGone(result) {
 		return &RemoteError{
 			Kind:     RemoteErrorKindNotFound,
 			Provider: SandboxTypeDocker,
@@ -1122,6 +1122,19 @@ func (c *DockerRemoteClient) containerVanished(ctx context.Context, id, op strin
 	default:
 		return false
 	}
+}
+
+// execRuntimeGone reports an exec that never reached the command because the
+// container runtime could not start it. Docker still inspects the container
+// as present, so the status check above does not fire, and the failure is
+// otherwise InvalidRequest (#4905).
+func execRuntimeGone(result *RemoteExecResult) bool {
+	if result == nil {
+		return false
+	}
+	text := strings.ToLower(result.Stdout + "\n" + result.Stderr)
+	return strings.Contains(text, "oci runtime exec failed") ||
+		strings.Contains(text, "no such container")
 }
 
 // MakeDir creates a directory (and its parents) inside the sandbox.

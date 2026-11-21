@@ -131,9 +131,65 @@ func (c *Connector) FetchAll(ctx context.Context, ds *types.DataSourceConfig, _ 
 
 type cursor struct {
 	Projects map[string]string `json:"projects"`
+	// Paths records the directory selection per project at the time the
+	// cursor was written. It lets an incremental sync tell a scope
+	// expansion apart from an unchanged selection when the project HEAD
+	// has not moved: files under newly added paths must be imported even
+	// though no commit changed. Absent for cursors written before this
+	// field existed; those are treated as unknown scope.
+	Paths map[string][]string `json:"paths"`
 }
 
-func (c *Connector) FetchIncremental(ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
+// addedPaths returns the roots of current that were not covered by the
+// previously recorded selection. A current root is covered when it equals
+// a recorded root or lies underneath one. When the previous selection is
+// unknown (legacy cursor without recorded paths), the whole current
+// selection is returned so the next sync re-imports it once; re-imported
+// items upsert by ExternalID, they do not duplicate.
+func addedPaths(prev []string, recorded bool, current []string) []string {
+	if !recorded {
+		return current
+	}
+	if len(prev) == 0 {
+		// Whole repository was selected before: everything is covered.
+		return nil
+	}
+	if len(current) == 0 {
+		// Selection widened to the whole repository.
+		return []string{""}
+	}
+	var added []string
+	for _, p := range current {
+		covered := false
+		for _, r := range prev {
+			if p == r || strings.HasPrefix(p, r+"/") {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			added = append(added, p)
+		}
+	}
+	return added
+}
+
+// pathCoveredByRoots reports whether file falls under one of roots, where an
+// empty root ("") represents the whole repository.
+func pathCoveredByRoots(file string, roots []string) bool {
+	for _, r := range roots {
+		if r == "" || file == r || strings.HasPrefix(file, r+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// FetchIncremental returns changed files since the previous sync cursor and
+// imports any newly selected directory roots for the configured projects.
+func (c *Connector) FetchIncremental(
+	ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
 	var err error
 	if c, err = c.configured(ds); err != nil {
 		return nil, nil, err
@@ -151,7 +207,10 @@ func (c *Connector) FetchIncremental(ctx context.Context, ds *types.DataSourceCo
 		}
 	}
 	var out []types.FetchedItem
-	next := cursor{Projects: map[string]string{}}
+	next := cursor{
+		Projects: map[string]string{},
+		Paths:    map[string][]string{},
+	}
 	for _, s := range cfg.Projects {
 		p, err := c.client.project(ctx, s.ProjectID)
 		if err != nil {
@@ -178,23 +237,41 @@ func (c *Connector) FetchIncremental(ctx context.Context, ds *types.DataSourceCo
 				}
 				out = append(out, item)
 			}
-		} else if previous != head {
-			diff, err := c.compareChanges(ctx, s.ProjectID, previous, head)
-			if err != nil {
-				return nil, nil, err
-			}
-			for _, d := range diff.Diffs {
-				if d.DeletedFile {
-					if c.inScope(d.OldPath, s.Paths) && isSupportedFile(d.OldPath) {
+		} else {
+			prevPaths, recorded := prev.Paths[s.ProjectID]
+			added := addedPaths(prevPaths, recorded, s.Paths)
+			if previous != head {
+				diff, err := c.compareChanges(ctx, s.ProjectID, previous, head)
+				if err != nil {
+					return nil, nil, err
+				}
+				for _, d := range diff.Diffs {
+					if d.DeletedFile {
+						if c.inScope(d.OldPath, s.Paths) && isSupportedFile(d.OldPath) {
+							out = append(out, c.deleted(p, ref, d.OldPath))
+						}
+						continue
+					}
+					if d.RenamedFile && c.inScope(d.OldPath, s.Paths) && isSupportedFile(d.OldPath) {
 						out = append(out, c.deleted(p, ref, d.OldPath))
 					}
-					continue
+					if c.inScope(d.NewPath, s.Paths) && isSupportedFile(d.NewPath) &&
+						!pathCoveredByRoots(d.NewPath, added) {
+						item, err := c.item(ctx, p, ref, d.NewPath)
+						if err != nil {
+							return nil, nil, err
+						}
+						out = append(out, item)
+					}
 				}
-				if d.RenamedFile && c.inScope(d.OldPath, s.Paths) && isSupportedFile(d.OldPath) {
-					out = append(out, c.deleted(p, ref, d.OldPath))
+			}
+			if len(added) > 0 {
+				files, err := c.files(ctx, s.ProjectID, ref, added)
+				if err != nil {
+					return nil, nil, err
 				}
-				if c.inScope(d.NewPath, s.Paths) && isSupportedFile(d.NewPath) {
-					item, err := c.item(ctx, p, ref, d.NewPath)
+				for _, f := range files {
+					item, err := c.item(ctx, p, ref, f)
 					if err != nil {
 						return nil, nil, err
 					}
@@ -203,9 +280,9 @@ func (c *Connector) FetchIncremental(ctx context.Context, ds *types.DataSourceCo
 			}
 		}
 		next.Projects[s.ProjectID] = head
+		next.Paths[s.ProjectID] = s.Paths
 	}
-	raw, _ := json.Marshal(next)
-	return out, &types.SyncCursor{LastSyncTime: time.Now().UTC(), ConnectorCursor: map[string]interface{}{"projects": next.Projects, "raw": string(raw)}}, nil
+	return out, gitLabCursor(next), nil
 }
 
 // FetchStream is the production sync path. It emits each supported repository
@@ -232,9 +309,15 @@ func (c *Connector) FetchStream(
 			prev.Projects = map[string]string{}
 		}
 	}
-	next := cursor{Projects: make(map[string]string, len(cfg.Projects))}
+	next := cursor{
+		Projects: make(map[string]string, len(cfg.Projects)),
+		Paths:    make(map[string][]string, len(cfg.Projects)),
+	}
 	for projectID, commit := range prev.Projects {
 		next.Projects[projectID] = commit
+	}
+	for projectID, paths := range prev.Paths {
+		next.Paths[projectID] = paths
 	}
 
 	for _, selection := range cfg.Projects {
@@ -252,17 +335,24 @@ func (c *Connector) FetchStream(
 		}
 
 		previous := prev.Projects[selection.ProjectID]
-		switch {
-		case previous == "":
+		if previous == "" {
 			err = c.streamFiles(ctx, project, ref, selection.Paths, h)
-		case previous != head:
-			err = c.streamChanges(ctx, project, ref, previous, head, selection.Paths, h)
+		} else {
+			prevPaths, recorded := prev.Paths[selection.ProjectID]
+			added := addedPaths(prevPaths, recorded, selection.Paths)
+			if previous != head {
+				err = c.streamChanges(ctx, project, ref, previous, head, selection.Paths, added, h)
+			}
+			if err == nil && len(added) > 0 {
+				err = c.streamFiles(ctx, project, ref, added, h)
+			}
 		}
 		if err != nil {
 			return nil, err
 		}
 
 		next.Projects[selection.ProjectID] = head
+		next.Paths[selection.ProjectID] = selection.Paths
 		checkpoint := gitLabCursor(next)
 		if err := h.Checkpoint(ctx, checkpoint); err != nil {
 			return nil, err
@@ -274,13 +364,18 @@ func (c *Connector) FetchStream(
 func gitLabCursor(value cursor) *types.SyncCursor {
 	raw, _ := json.Marshal(value)
 	return &types.SyncCursor{
-		LastSyncTime:    time.Now().UTC(),
-		ConnectorCursor: map[string]interface{}{"projects": value.Projects, "raw": string(raw)},
+		LastSyncTime: time.Now().UTC(),
+		ConnectorCursor: map[string]interface{}{
+			"projects": value.Projects,
+			"paths":    value.Paths,
+			"raw":      string(raw),
+		},
 	}
 }
 
 func (c *Connector) streamChanges(
-	ctx context.Context, project *project, ref, from, to string, roots []string, h datasource.StreamHandler,
+	ctx context.Context, project *project, ref, from, to string,
+	roots, skipRoots []string, h datasource.StreamHandler,
 ) error {
 	diff, err := c.compareChanges(ctx, fmt.Sprint(project.ID), from, to)
 	if err != nil {
@@ -300,7 +395,8 @@ func (c *Connector) streamChanges(
 				return err
 			}
 		}
-		if c.inScope(change.NewPath, roots) && isSupportedFile(change.NewPath) {
+		if c.inScope(change.NewPath, roots) && isSupportedFile(change.NewPath) &&
+			!pathCoveredByRoots(change.NewPath, skipRoots) {
 			item, err := c.item(ctx, project, ref, change.NewPath)
 			if err != nil {
 				return err

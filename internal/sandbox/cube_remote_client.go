@@ -613,9 +613,11 @@ func (c *CubeRemoteClient) desktopTemplateSpec() map[string]any {
 // two hand-kept copies of the spec would eventually disagree.
 func cubeStandardTemplateSpec(dns []string) map[string]any {
 	spec := map[string]any{
-		"image":             DefaultCubeTemplateImage,
-		"name":              StandardTemplateName,
-		"writableLayerSize": "1G",
+		"image": DefaultCubeTemplateImage,
+		"name":  StandardTemplateName,
+		// Cube has no volumes: the workspaces and installed dependencies of
+		// every session on the machine live on this layer.
+		"writableLayerSize": "64G",
 		"exposedPorts":      []uint16{CubeEnvdPort},
 		// Cube defaults to probing envd, but naming the probe keeps the reason
 		// this image must ship envd visible at the call site.
@@ -646,8 +648,9 @@ func cubeDesktopTemplateSpec(dns []string) map[string]any {
 	spec := map[string]any{
 		"image": DefaultCubeDesktopTemplateImage,
 		"name":  DesktopTemplateName,
-		// The standard 1G is too small once XFCE is installed.
-		"writableLayerSize": "8G",
+		// Cube has no volumes: the workspaces, installed dependencies and
+		// browser profiles of every session on the machine live on this layer.
+		"writableLayerSize": "64G",
 		"exposedPorts":      []uint16{CubeEnvdPort},
 		// The build probe still goes to envd: websockify is lazily started
 		// and is deliberately not running at template-build time.

@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/url"
 	"regexp"
@@ -59,9 +60,24 @@ var sensitiveFieldRegex = regexp.MustCompile(
 		`authorization[_-]?url|authorization[_-]?attempt|assertion)")\s*:\s*"[^"]*"`,
 )
 
-// sanitizeBody 清理敏感信息
+// dataURIRegex matches an inline data URI whose payload is base64. Request logs
+// are capped at 10KB, and an image upload still fills that cap with file bytes.
+var dataURIRegex = regexp.MustCompile(`(?i)\bdata:[^\s"'<>]{0,128};base64,[A-Za-z0-9+/=\r\n]*`)
+
+// sanitizeBody 清理敏感信息，并把 data URI 的 base64 载荷换成长度标记。
 func sanitizeBody(body string) string {
-	return sensitiveFieldRegex.ReplaceAllString(body, `$1:"***"`)
+	redacted := dataURIRegex.ReplaceAllStringFunc(body, redactDataURI)
+	return sensitiveFieldRegex.ReplaceAllString(redacted, `$1:"***"`)
+}
+
+func redactDataURI(match string) string {
+	marker := ";base64,"
+	idx := strings.Index(strings.ToLower(match), marker)
+	if idx < 0 {
+		return "data:[redacted]"
+	}
+	payloadLen := len(match) - idx - len(marker)
+	return fmt.Sprintf("%s;base64,[redacted %d chars]", match[:idx], payloadLen)
 }
 
 var sensitiveQueryFields = map[string]struct{}{
@@ -175,6 +191,17 @@ func RequestID() gin.HandlerFunc {
 	}
 }
 
+// skipsBodyLogging reports routes whose bodies carry credentials, page
+// content or screenshots. Their access metadata is still logged; their
+// bodies are never read or buffered. sanitizeBody is no substitute: it only
+// knows fixed key names, and a value containing \" ends its match early.
+func skipsBodyLogging(path string) bool {
+	return strings.HasPrefix(path, "/api/v1/local-browser/") ||
+		path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser") ||
+		strings.HasPrefix(path, "/api/v1/agent/secure-forms/") ||
+		path == "/api/v1/me/credential-vault" || strings.HasPrefix(path, "/api/v1/me/credential-vault/")
+}
+
 // Logger middleware logs request details with request ID, input and output
 func Logger() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -188,10 +215,7 @@ func Logger() gin.HandlerFunc {
 			return
 		}
 
-		// Browser traffic contains credentials, page content and screenshots.
-		// Keep access metadata, but never read or buffer these request/response bodies.
-		browserTraffic := strings.HasPrefix(path, "/api/v1/local-browser/") ||
-			path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser")
+		browserTraffic := skipsBodyLogging(path)
 		// 读取请求体（在Next之前读取，因为Next会消费body）
 		var requestBody string
 		if !browserTraffic && (c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") {

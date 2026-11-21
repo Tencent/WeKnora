@@ -229,6 +229,11 @@ func decodeResults(raw []byte) ([]result, error) {
 	if err := json.Unmarshal(trimmed, &decoded); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
+	// Missing or null results can be an error document returned with a 2xx
+	// status. Only an explicit array is a ranking, including an empty one.
+	if decoded.Results == nil {
+		return nil, fmt.Errorf("decode response: expected a results array")
+	}
 	return decoded.Results, nil
 }
 

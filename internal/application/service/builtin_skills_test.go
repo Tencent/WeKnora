@@ -15,20 +15,23 @@ func TestAgentBrowserSkillTextMatchesTheWrapper(t *testing.T) {
 	require.Equal(t, "agent-browser", parsed.Name)
 	require.LessOrEqual(t, len(parsed.Description), 600)
 	require.Contains(t, parsed.Description, "local_browser")
-	require.Contains(t, parsed.Description, "ask_user")
+	require.NotContains(t, parsed.Description, "ask_user",
+		"the browser is visible by default; the agent must not ask headed-vs-headless")
 	require.NotContains(t, parsed.Description, "<")
 
 	body := parsed.Instructions
 	for _, phrase := range []string{
 		"agent-browser open", "snapshot -i", "agent-browser close",
-		"agent-browser --help", "without skill_name", "--headed",
+		"agent-browser --help", "without skill_name",
 	} {
 		require.Contains(t, body, phrase)
 	}
-	require.Contains(t, body, "ask the user with `ask_user`",
-		"the skill must make the agent ask headed-vs-headless before the first browser command")
-	require.Contains(t, body, "headless",
-		"the skill must still name the fallback when the user does not care")
+	require.NotContains(t, body, "ask_user",
+		"the browser is visible by default; the agent must not ask headed-vs-headless")
+	require.NotContains(t, body, "--headed",
+		"the wrapper adds --headed itself; teaching the flag invites --headed false")
+	require.Contains(t, body, "Desktop tab",
+		"the skill must say where the visible browser window appears")
 	require.Contains(t, body, "skills get core",
 		"the skill is a discovery stub: it must point the model at the CLI's own guide")
 	require.NotContains(t, body, "wk-desk")

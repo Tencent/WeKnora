@@ -182,13 +182,13 @@ ev "screenshot into missing dir"; blk "$NEST"
 CLOSE="$(ab "$A" close 2>&1)"; RC=$?
 assert_eq "close exits 0" 0 "$RC"
 sleep 1
-assert_eq "a plain open never claims a seat, so close frees nothing" "" "$(seat_of "$A")"
+assert_eq "a plain open claims a seat and close keeps it" 1 "$(seat_of "$A" | grep -c '^[0-9][0-9]*$')"
 assert_eq "no browser main for A after close" 0 "$(main_count "$A")"
 ev "close"; blk "$CLOSE"
 ev "seat table after close"; blk "$(seat_map)"
 
 ab "$A" --help >/dev/null 2>&1
-ev "seat table after 'agent-browser --help' (a plain call claims nothing; seats go to --headed and the Desktop tab only)"; blk "$(seat_map)"
+ev "seat table after 'agent-browser --help' (a call that starts no browser claims nothing)"; blk "$(seat_map)"
 ab "$A" close >/dev/null 2>&1
 
 # ---------------------------------------------------------------- item 2

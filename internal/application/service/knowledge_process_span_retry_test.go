@@ -49,6 +49,7 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 	for _, tc := range []struct {
 		name                    string
 		missingReader           bool
+		missingResult           bool
 		parserError             string
 		getErr, readErr, rpcErr error
 		retryable               bool
@@ -61,6 +62,12 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 		},
 		{name: "file fetch fails", getErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
 		{name: "file read fails", readErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
+		{
+			name:          "reader returns no result",
+			missingResult: true,
+			retryable:     true,
+			code:          werrors.ErrCodeDocReaderParseFailed,
+		},
 		{name: "reader call fails", rpcErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
 		{
 			name: "CSV expansion budget exceeded", rpcErr: docparser.ErrCSVMarkdownTooLarge,
@@ -92,6 +99,9 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 					svc.documentReader = &spanRetryDocReader{
 						result: &types.ReadResult{Error: tc.parserError}, err: tc.rpcErr,
 					}
+				}
+				if tc.missingResult {
+					svc.documentReader = &spanRetryDocReader{}
 				}
 				result, err := svc.convert(ctx, types.DocumentProcessPayload{
 					FilePath: "doc.pdf", FileName: "doc.pdf", FileType: "pdf",

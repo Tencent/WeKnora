@@ -9,6 +9,8 @@
 #                  a viewer: exit 1 + stderr WEKNORA_NO_FREE_SCREEN, stdout empty.
 #   where <sid>    print the held seat N, refreshing that seat's idleness clock;
 #                  exit 1 (no output, no allocation) when none is held.
+#   watched <sid>  exit 0 when the session's seat has a VNC viewer, 1 otherwise.
+#   browser-root <sid>  print the browser root the session's last claim recorded.
 #   sid-of <N>     print the session id holding seat N; exit 1 when free.
 #   release <sid>  drop the seat record and kill every process on that screen.
 #   reap           reclaim idle seats, print how many were reclaimed.
@@ -27,6 +29,7 @@ cd /
 SEATS_DIR="${WK_SEATS_DIR:-/var/lib/weknora/browser/.seats}"
 RUN_DIR="${WK_RUN_DIR:-/run/desktop}"
 TOKENS_DIR="${WK_TOKENS_DIR:-$RUN_DIR/tokens.d}"
+ROOTS_DIR="${WK_BROWSER_ROOTS_DIR:-$RUN_DIR/browser-roots}"
 X_LOCK_DIR="${WK_X_LOCK_DIR:-/tmp}"
 X_SOCK_DIR="${WK_X_SOCK_DIR:-/tmp/.X11-unix}"
 SEAT_MAX="${WK_SEAT_MAX:-8}"
@@ -330,15 +333,41 @@ alloc_seat() { # global flock protects allocation and any idle-seat reaping
   )
 }
 
+# Every claim runs in a backend Exec that carries the session's
+# WEKNORA_BROWSER_ROOT. Recording it lets wk-chrome open that root instead of
+# guessing it from which directories happen to exist yet.
+record_browser_root() {
+  local root="${WEKNORA_BROWSER_ROOT:-}"
+  case "$root" in /*) ;; *) return 0 ;; esac
+  case "$root" in *$'\n'*) return 0 ;; esac
+  mkdir -p "$ROOTS_DIR" && chmod 0700 "$ROOTS_DIR" &&
+    printf '%s\n' "$root" > "$ROOTS_DIR/.$1.tmp" && mv -f "$ROOTS_DIR/.$1.tmp" "$ROOTS_DIR/$1"
+}
+
 cmd_claim() {
   valid_sid "${1:-}" || { echo "wk-display: bad session id" >&2; return 2; }
   local n
   n=$(alloc_seat "$1") || { echo WEKNORA_NO_FREE_SCREEN >&2; return 1; }
   cmd_up "$n" || return 1
+  record_browser_root "$1"
   echo "$n"
 }
 
+cmd_browser_root() {
+  valid_sid "${1:-}" || return 2
+  local root
+  root=$(cat "$ROOTS_DIR/$1" 2>/dev/null) && [ -n "$root" ] || return 1
+  echo "$root"
+}
+
 cmd_where() { valid_sid "${1:-}" || return 2; find_seat "$1"; }
+
+cmd_watched() {
+  valid_sid "${1:-}" || return 2
+  local n
+  n=$(find_seat "$1") || return 1
+  [ "$(viewers $((VNC_BASE + n)))" -gt 0 ]
+}
 
 cmd_sid_of() {
   valid_seat "${1:-}" || return 2
@@ -354,6 +383,7 @@ cmd_release() {
   mkdir -p "$SEATS_DIR"
   (
     exec 8>"$SEATS_DIR/.lock"; flock 8
+    rm -f -- "$ROOTS_DIR/$1"
     n=$(find_seat "$1") || { echo "no seat held by $1"; exit 0; }
     rm -f -- "$(seat_file "$n" "$1")"; kill_seat "$n"; echo "released seat $n"
   )
@@ -379,10 +409,12 @@ cmd_list() {
 case "${1:-list}" in
 claim)   shift; cmd_claim "$@" ;;
 where)   shift; cmd_where "$@" ;;
+watched) shift; cmd_watched "$@" ;;
+browser-root) shift; cmd_browser_root "$@" ;;
 sid-of)  shift; cmd_sid_of "$@" ;;
 release) shift; cmd_release "$@" ;;
 reap)    cmd_reap ;;
 up)      shift; cmd_up "$@" ;;
 list)    cmd_list ;;
-*) echo "usage: wk-display {claim <sid>|where <sid>|sid-of <N>|release <sid>|reap|up <N>|list}" >&2; exit 64 ;;
+*) echo "usage: wk-display {claim <sid>|where <sid>|watched <sid>|browser-root <sid>|sid-of <N>|release <sid>|reap|up <N>|list}" >&2; exit 64 ;;
 esac

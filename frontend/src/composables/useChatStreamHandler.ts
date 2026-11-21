@@ -1,5 +1,5 @@
 import { emitAssistantDataChange } from '@/utils/assistantDataChange'
-import { approvalEventFromRecord, clearComposerApproval, showComposerApproval } from '@/views/chat/components/hostApproval'
+import { approvalEventFromRecord, clearComposerApproval, isModelReview, showComposerApproval } from '@/views/chat/components/hostApproval'
 import { applyFinalArtifactContent } from '@/utils/finalArtifactContent'
 import { parseThinkBlocks } from '@/utils/thinkBlocks'
 import { markRaw, nextTick, type Ref } from 'vue'
@@ -116,6 +116,22 @@ export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
       timed_out: p.status === 'expired',
     }]
   }
+  if (p.kind === 'secure_form') {
+    return [{
+      type: 'agent_prompt_required',
+      pending_id: p.id,
+      kind: p.kind,
+      request,
+      tool_call_id: p.tool_call_id,
+      requested_at: requestedAt,
+      suspendable: true,
+      expires_at: p.expires_at,
+      ...state,
+      answered: resolved && Boolean(p.response) && !response.declined,
+      resolve_reason: response.declined ? 'declined' : state.resolve_reason,
+      timed_out: p.status === 'expired',
+    }]
+  }
   if (p.kind !== 'tool_approval') return []
   return [{
     type: 'tool_approval_required',
@@ -149,6 +165,22 @@ function askUserHistoryCard(toolCallId: string, data: ChatMessage): ChatMessage 
     resolved: true,
     answered: Boolean(data.answered),
     response: data.answer,
+    resolve_reason: data.reason,
+    timed_out: Boolean(data.timed_out),
+    canceled: Boolean(data.canceled),
+  }
+}
+
+/** The card of a secure form that finished, from the stored tool result. */
+function secureFormHistoryCard(toolCallId: string, data: ChatMessage): ChatMessage {
+  return {
+    type: 'agent_prompt_required',
+    pending_id: `history-${toolCallId}`,
+    kind: 'secure_form',
+    request: data.request,
+    tool_call_id: toolCallId,
+    resolved: true,
+    answered: Boolean(data.answered),
     resolve_reason: data.reason,
     timed_out: Boolean(data.timed_out),
     canceled: Boolean(data.canceled),
@@ -545,6 +577,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
               events.push(askUserHistoryCard(String(toolCall.id || ''), resultData))
               return
             }
+            if (resultData?.display_type === 'secure_form') {
+              events.push(secureFormHistoryCard(String(toolCall.id || ''), resultData))
+              return
+            }
             events.push({
               type: 'tool_call',
               tool_call_id: toolCall.id,
@@ -687,7 +723,15 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         const events = [...(item.agentEventStream as ChatMessage[])]
         promptCards.sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
         for (const card of promptCards) {
-          if (events.some(e => isPromptCard(e) && e.pending_id === card.pending_id)) continue
+          const existing = events.findIndex(e => isPromptCard(e) && e.pending_id === card.pending_id)
+          if (existing >= 0) {
+            // Step snapshots lack durable approval state. Keep their timeline
+            // position and metadata, but take the status and expiry from the prompt.
+            if (card.type === 'tool_approval_required' && !events[existing].suspendable) {
+              events[existing] = { ...events[existing], ...card }
+            }
+            continue
+          }
           // Replace ask_user's tool-result fallback with the authoritative row.
           const fallback = events.findIndex(e => e.pending_id === `history-${card.tool_call_id}` && !card.delegated_task)
           if (fallback >= 0) events.splice(fallback, 1)
@@ -1016,8 +1060,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           ...(message.agentEventStream as ChatMessage[]),
           approvalEvent,
         ]
-        message.pendingHostApproval = approvalEvent
-        showComposerApproval(approvalEvent)
+        // A model review is a record, not a question for the user.
+        if (!isModelReview(approvalEvent)) {
+          message.pendingHostApproval = approvalEvent
+          showComposerApproval(approvalEvent)
+        }
         break
       }
       case 'agent_prompt_required': {
@@ -1091,6 +1138,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           ev.timed_out = d.timed_out
           ev.canceled = d.canceled
           ev.resolve_scope = d.scope
+          ev.risk_level = d.risk_level
           message.agentEventStream = [...(message.agentEventStream as ChatMessage[])]
         }
         const pending = message.pendingHostApproval as { pending_id?: string } | undefined

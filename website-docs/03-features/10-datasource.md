@@ -135,7 +135,7 @@
   - `file` → drive 原文件下载（PDF/Word/图片等）；
   - `mindnote`/`slides` → **跳过**（无内容读取 API），并通过 `fetchTally` 统计输出 `discovered/fetched/failed/skipped_unsupported by_type` 摘要日志，解释"发现 13 篇为何只同步了 3 篇"（issue #2136）。
 - **增量逻辑**：Wiki 游标 `FeishuCursor.SpaceNodeTimes` 保存 `resourceID → nodeToken → 变更键`，由 `obj_edit_time`、`node_edit_time` 的较新值、目标路径指纹以及 docx 的有效解析模式组成，同时识别内容编辑和祖先目录改名/移动；文档源更新时间仍保留内容编辑时间。旧格式游标会刷新一次以升级格式。抓取失败的节点**不推进游标**（保留旧变更键，下次重试），避免瞬时导出失败导致文档被永久跳过。
-- **FetchStream / FetchFullStream**：增量按变更键跳过未修改文档；全量重新抓取全部文档，同时保留旧游标中的删除基线，只有完整列举后才确认删除。中途 checkpoint 保留尚未遍历的旧节点，抓取失败的节点会在后续同步重试。每处理 `FeishuStreamCheckpointInterval = 50` 个节点、或距上次 checkpoint 超过 `FeishuStreamCheckpointMaxInterval = 30s` 就落盘一次游标——后者兜底"少量文档但每篇导出都极慢（被限流）"导致 2 小时超时前从未 checkpoint 的场景。
+- **FetchStream / FetchFullStream**：增量按变更键跳过未修改文档；全量重新抓取全部文档，同时保留旧游标中的删除基线，只有完整列举后才确认删除。若用户直接勾选的单个 Wiki 节点或云盘子资源在源端被删除（Wiki `131005` / Drive `1061003`），会按已删资源对账其知识条目并继续同步其余勾选资源，不会中断整轮同步（权限不足等非 404 错误仍按失败中止并保留知识条目）。中途 checkpoint 保留尚未遍历的旧节点，抓取失败的节点会在后续同步重试。每处理 `FeishuStreamCheckpointInterval = 50` 个节点、或距上次 checkpoint 超过 `FeishuStreamCheckpointMaxInterval = 30s` 就落盘一次游标——后者兜底"少量文档但每篇导出都极慢（被限流）"导致 2 小时超时前从未 checkpoint 的场景。
 - **错误分类**（`feishuFailure`）：把原始错误归类为稳定 i18n code（`feishu_auth_or_permission` / `feishu_rate_limited` / `feishu_timeout` / `feishu_server_unavailable` / `feishu_api_error`(+code) / `sync_failed`），前端本地化展示；原始 status/body/log_id 只留在服务端日志。
 
 #### GitLab（`connector/gitlab/`）
@@ -205,7 +205,7 @@ Server/DC PAT 适用于 Confluence 7.9 及以上版本，可在个人设置的 P
   caption="Confluence Server/DC 数据源：使用个人访问令牌"
   hint="Server / Data Center 凭据表单：填写 PAT 后，用户名和密码可留空。截图使用本地模拟配置和示例令牌。" />
 
-- **范围**：资源列表是凭据可见的空间（扁平列表），至少选择一个空间；同步空间内全部已发布页面，不导入附件和博客文章。
+- **范围**：资源列表是凭据可见的空间（扁平列表），至少选择一个空间；同步空间内全部已发布页面，不导入博客文章；PDF/Office 附件可按下面的设置启用。
 - **内容**：取页面渲染后的 HTML 转为 Markdown（每页一个 `.md` 条目），正文为空时仅保留标题。条目 metadata 带 `space_key`、`space_name`、`page_id`，有作者时带 `creator`。
 - **增量**：按页面版本号比对，版本未变的页面跳过。实现了流式同步，每页入库后保存游标；全量同步的中途游标同时保留上次的页面基线，任务重试可续传，也能继续对账删除。
 - **删除保护**：所选空间不可访问、页面列表为空而上次有内容，或本次消失的页面不少于 20 个且占上次页面数 80% 以上时，整次同步报错，不执行删除。开启同步删除后，其余情况下消失的页面按删除处理。
@@ -214,6 +214,20 @@ Server/DC PAT 适用于 Confluence 7.9 及以上版本，可在个人设置的 P
 ```json
 {"credentials":{"edition":"cloud","base_url":"https://team.atlassian.net","username":"me@example.com","api_token":"<token>"},"resource_ids":["<space-id>"]}
 ```
+
+**可选附件同步**：在数据源配置的 `settings` 中设置 `"sync_attachments": true`（默认关闭；目前通过数据源 API 配置，没有新增 UI 开关）。连接器使用 [Server/DC 附件列表](https://developer.atlassian.com/server/confluence/rest/v951/api-group-attachments/) 或 [Cloud v2 附件列表](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-attachment/#api-pages-id-attachments-get)，将 `.pdf`、`.doc`、`.docx`、`.ppt`、`.pptx`、`.xls`、`.xlsx` 文件分别作为知识条目交给现有文件入库/解析流水线。其它扩展名不在此同步范围；内联图片继续沿用页面图片处理。
+
+- 单附件上限为 20 MiB，既检查声明大小，也限制实际读取字节数。文件 metadata 保留来源页面标题/URL、附件 ID/版本与更新时间。下载沿用现有 Confluence 同源及上下文路径边界；跨域下载重定向会明确失败，不放宽凭据转发规则。依赖跨域 CDN 重定向的 Cloud 文件目前不支持下载。
+- 附件独立于页面正文版本检查。页面不变但附件更新时，只重新导入变更附件；稳定子项 ID 保持来源身份，复用已有文件替换逻辑。入库确认不代表异步解析已完成，解析进度仍在文档任务中查看。
+- 下载或入库失败时记录失败并中断本轮，保留该附件的旧文件及已确认的先前进度。修复失败原因后重试；全量同步的重试也会从已确认附件继续。大小超限等持续失败需要先处理源文件。已同步文件被改名为不支持的扩展名时会报告失败并保留旧文件，避免误判为删除。
+- 完整附件列表中消失的文件，以及被确认删除页面的已知附件，均通过原有 `sync_deletions` 开关处理。分页失败时不推断删除；删除失败时不确认游标，后续重试仍会看到待删除项。关闭附件同步不删除已有文件，并保留其状态供重新开启时对账；页面删除仍受原有删除检测和保护阈值约束。
+
+非机密设置示例（合并到现有 `settings`，保留其它配置）：
+
+```json
+{"settings":{"sync_attachments":true}}
+```
+
 
 #### Yuque 语雀（`connector/yuque/`）
 
@@ -319,7 +333,7 @@ flowchart LR
   - 重复文件（`DuplicateKnowledgeError`）计为 Skipped，不算失败；
   - 每个条目自动带上 metadata：`external_id`、`source_resource_id`、`datasource_id` 以及连接器附加的 metadata。若源端提供时间，还保存 UTC RFC3339 格式的 `source_created_at` / `source_updated_at`；它们表示源文档时间，与 WeKnora 的 created_at/updated_at 分开。
 - **自动打标**：`resolveAutoTagIDs` 按数据源名称在目标 KB 中 FindOrCreate 一个标签，所有同步条目自动挂上，便于在 KB 中识别来源；打标失败不阻断同步。
-- **结果状态**：全部条目失败 → `failed`（`allFetchedItemsFailedError`）；RSS 部分 feed 失败（`PartialFetchError`）或流式路径存在失败文档 → `partial`；其余 → `success`。失败样本以 `SyncItemError` 形式最多保留 100 条。
+- **结果状态**：按条目独立跟踪游标的流式连接器（Feishu/Lark、Seafile、Nextcloud、Confluence）实现 `ItemFailureIsolatingConnector`，单个条目的入库失败会被隔离（不推进该条目游标以便后续重试，连续失败达到上限或配额超限等全局异常仍立即中止），不会阻塞同目录其余文件或新增目录；增量轮次若存在游标命中的未变更条目，残留的单条失败仍记为 `partial` 并保持定时同步活跃。全部条目失败且无未变更/非阻断条目 → `failed`（`allFetchedItemsFailedError`）；RSS 部分 feed 失败（`PartialFetchError`）或存在单条失败文档 → `partial`；其余 → `success`。失败样本以 `SyncItemError` 形式最多保留 100 条。
 - 抓取失败时若连接器返回了新游标（如 RSS），仍会持久化游标，避免瞬时故障后被迫全量重抓。
 
 ```mermaid
@@ -489,8 +503,9 @@ registry.Register(nextcloudConnector.NewConnector())                // nextcloud
 | `Resource` | 外部系统的可选资源：`ExternalID`、`Name`、`Type`、`URL`、`ParentID`、`HasChildren`、`ModifiedAt`、`Metadata` |
 | `FetchedItem` | 单个抓取到的文档：`ExternalID`、`Title`、`Content []byte`、`ContentType`、`FileName`、`URL`、`UpdatedAt`、`Metadata`、`IsDeleted`、`SourceResourceID` |
 | `SyncCursor` | 增量游标：`LastSyncTime` + `ConnectorCursor map[string]interface{}`（连接器自定义结构） |
-| `SyncResult` | 同步结果汇总 + `Errors []SyncItemError`（失败样本，上限 100 条，见 `maxSyncResultErrors`） |
+| `SyncResult` | 同步结果汇总 + `Errors []SyncItemError`（失败样本）+ `DeletedItems []SyncDeletedItem`（源端已删除样本，均以 `maxSyncResultErrors = 100` 为上限） |
 | `SyncItemError` | 面向用户的失败样本：稳定的 i18n `Code` + 插值 `Params` + 兜底 `Message`；原始 API 状态码/响应体只留在服务端日志 |
+| `SyncDeletedItem` | 源端已删除条目样本：`ExternalID`、`SourceResourceID`、`Title`，供同步历史抽屉展示及编辑资源树回显已失效勾选项 |
 | `DataSourceSyncPayload` | Asynq 任务载荷：`DataSourceID`、`TenantID`、`SyncLogID`、`ForceFull`、`Trigger`（`manual`/`schedule`） |
 
 ## 参考

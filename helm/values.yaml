@@ -172,6 +172,12 @@ app:
   #   mountPath: /etc/my-config
   #   readOnly: true
 
+  # -- Extra annotations for the app Pod template metadata (not the Deployment
+  # metadata). Rendered verbatim into spec.template.metadata.annotations. Use
+  # for platform-level sidecar injection or metrics auto-discovery.
+  podAnnotations: {}
+  #   example.com/sidecar-inject: 'true'
+
 # -----------------------------------------------------------------------------
 # Frontend (Web UI)
 # -----------------------------------------------------------------------------

@@ -413,6 +413,7 @@ func (h *AgentStreamHandler) resolveRememberedToolApproval(data event.ToolApprov
 		h.toolApprovals[i].TimedOut = data.TimedOut
 		h.toolApprovals[i].Canceled = data.Canceled
 		h.toolApprovals[i].Scope = data.Scope
+		h.toolApprovals[i].RiskLevel = data.RiskLevel
 		return
 	}
 }
@@ -431,6 +432,12 @@ func hostApprovalSnapshot(host *event.HostApprovalPayload) *types.HostApprovalSn
 		FirstAttemptRan: host.FirstAttemptRan,
 		AllowSession:    host.AllowSession,
 		SessionRules:    append([]string(nil), host.SessionRules...),
+		Reviewer:        host.Reviewer,
+		RiskLevel:       host.RiskLevel,
+		Tool:            host.Tool,
+		FilePath:        host.FilePath,
+		WriteMode:       host.WriteMode,
+		WriteBytes:      host.WriteBytes,
 	}
 }
 

@@ -65,9 +65,9 @@ const (
 	// NetworkUnrestricted applies no network restriction.
 	NetworkUnrestricted = core.NetworkUnrestricted
 
-	// ModeAsk reads the workspace but asks before every write or command.
+	// ModeAsk asks the user before deletes and before widening. Default.
 	ModeAsk = core.ModeAsk
-	// ModeAuto works freely inside the workspace. Default and currently shipped.
+	// ModeAuto lets a review model answer what ModeAsk asks the user.
 	ModeAuto = core.ModeAuto
 	// ModeFull runs without any sandbox. Not shipped.
 	ModeFull = core.ModeFull
@@ -117,9 +117,7 @@ func BuildCommandEnv(explicit map[string]string, extraPATH []string) map[string]
 	return core.BuildCommandEnv(explicit, extraPATH)
 }
 
-// ParseApprovalMode normalizes a stored preference. Unknown values become
-// Auto; known-but-unshipped modes are returned unchanged so Service can refuse
-// them instead of silently widening access.
+// ParseApprovalMode normalizes a stored preference. Unknown values become ModeAsk.
 func ParseApprovalMode(raw string) ApprovalMode { return core.ParseApprovalMode(raw) }
 
 // NewPathGuard returns a PathGuard for p.
@@ -154,9 +152,20 @@ func ClassifyCommand(command, homeDir string) CommandVerdict {
 	return core.ClassifyCommand(command, homeDir)
 }
 
+// ScriptPaths returns the script files command runs.
+func ScriptPaths(command, homeDir string) []string { return core.ScriptPaths(command, homeDir) }
+
 // DeleteSegments returns the apparent delete commands inside command.
 func DeleteSegments(command, homeDir string) []CommandSegment {
 	return core.DeleteSegments(command, homeDir)
+}
+
+// DeleteLocation is one path a visible delete writes.
+type DeleteLocation = core.DeleteLocation
+
+// DeleteLocations returns the paths a visible delete writes.
+func DeleteLocations(command, homeDir string) []DeleteLocation {
+	return core.DeleteLocations(command, homeDir)
 }
 
 // DeleteTargets returns the paths visible rm, rmdir and unlink commands remove.

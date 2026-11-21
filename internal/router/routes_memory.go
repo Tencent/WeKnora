@@ -6,14 +6,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler"
 )
 
-// RegisterMemoryRoutes registers the personal long-term memory endpoints.
-//
-// There is no admin surface here and no subject parameter anywhere in the
-// paths: the memory space is derived from the caller's principal, so these
-// routes can only ever read or write the caller's own memories. That is why
-// Viewer is the only role gate they need. An API key must be full-access,
-// since a memory space belongs to a person and a scoped integration key has
-// no business inheriting one.
+// RegisterMemoryRoutes 注册个人记忆接口和仅限 JWT 管理员的租户记忆管理接口。
+// 个人接口始终从 principal 派生主体；管理接口使用主体 UUID，且不声明 API Key 策略。
 func RegisterMemoryRoutes(r *gin.RouterGroup, memoryHandler *handler.MemoryHandler, g *rbacGuards) {
 	if memoryHandler == nil {
 		return
@@ -36,5 +30,14 @@ func RegisterMemoryRoutes(r *gin.RouterGroup, memoryHandler *handler.MemoryHandl
 		memoryGroup.DELETE("/documents/:id", memoryHandler.DeleteDocument)
 		memoryGroup.GET("/export", memoryHandler.Export)
 		memoryGroup.POST("/consolidate", memoryHandler.Consolidate)
+	}
+	adminGroup := r.Group("/admin/memory/subjects", g.Admin())
+	{
+		adminGroup.GET("", memoryHandler.AdminListSubjects)
+		adminGroup.GET("/:subject_id/items", memoryHandler.AdminListItems)
+		adminGroup.POST("/:subject_id/items/:id/confirm", memoryHandler.AdminConfirmItem)
+		adminGroup.POST("/:subject_id/items/:id/reject", memoryHandler.AdminRejectItem)
+		adminGroup.DELETE("/:subject_id/items", memoryHandler.AdminClear)
+		adminGroup.PUT("/:subject_id/settings", memoryHandler.AdminUpdateSettings)
 	}
 }

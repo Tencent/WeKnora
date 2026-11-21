@@ -49,13 +49,13 @@ func splitSentences(text string) []string {
 	return sentences
 }
 
-func splitIntoWords(sentences []string) []string {
-	// 正则匹配中英文段落（中文块、英文块、其他字符）
-	re := regexp.MustCompile(`([\p{Han}]+)|([a-zA-Z0-9_.,!?]+)|(\p{P})`)
+// 正则匹配中英文段落（中文块、英文块、其他字符）
+var wordTokenPattern = regexp.MustCompile(`([\p{Han}]+)|([a-zA-Z0-9_.,!?]+)|(\p{P})`)
 
+func splitIntoWords(sentences []string) []string {
 	var tokens []string
 	for _, text := range sentences {
-		matches := re.FindAllStringSubmatch(text, -1)
+		matches := wordTokenPattern.FindAllStringSubmatch(text, -1)
 
 		for _, groups := range matches {
 			chineseBlock := groups[1]
@@ -93,10 +93,18 @@ func SliceMap[T any, Y any](li []T, fn func(T) Y) []Y {
 	return res
 }
 
+// Hit counts how many elements of li appear in set. Each distinct element
+// is counted only at its first occurrence, so duplicated retrieved IDs do
+// not inflate precision/recall beyond full credit.
 func Hit[T comparable](li []T, set map[T]struct{}) int {
 	count := 0
+	counted := make(map[T]struct{}, len(set))
 	for _, v := range li {
 		if _, exist := set[v]; exist {
+			if _, seen := counted[v]; seen {
+				continue
+			}
+			counted[v] = struct{}{}
 			count++
 		}
 	}

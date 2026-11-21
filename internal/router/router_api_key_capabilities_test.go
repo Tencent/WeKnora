@@ -61,6 +61,15 @@ func TestPlatformControlPlaneRoutesDeclarePlatformCapabilities(t *testing.T) {
 		{http.MethodGet, "/api/v1/system/admin/settings", types.APIKeyCapabilitySystemSettingsRead},
 		{http.MethodPut, "/api/v1/system/admin/settings/:key", types.APIKeyCapabilitySystemSettingsManage},
 		{http.MethodGet, "/api/v1/system/admin/runtime/queues", types.APIKeyCapabilitySystemRuntimeRead},
+		{http.MethodGet, "/api/v1/system/admin/runtime/documents", types.APIKeyCapabilitySystemRuntimeRead},
+		{
+			http.MethodGet, "/api/v1/system/admin/runtime/documents/:knowledge_id",
+			types.APIKeyCapabilitySystemRuntimeRead,
+		},
+		{
+			http.MethodPost, "/api/v1/system/admin/runtime/documents/wiki-start",
+			types.APIKeyCapabilitySystemRuntimeManage,
+		},
 		{http.MethodPost, "/api/v1/system/admin/runtime/queues/:queue/tasks/:task_id/actions/:action", types.APIKeyCapabilitySystemRuntimeManage},
 		{http.MethodDelete, "/api/v1/system/admin/runtime/queues/:queue/archived", types.APIKeyCapabilitySystemRuntimeManage},
 	}

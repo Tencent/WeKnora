@@ -1616,6 +1616,41 @@
         }
       },
       {
+        "id": "anthropic/claude-opus-5.5",
+        "compat": {
+          "cache_control_format": "anthropic"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "anthropic/claude-sonnet-5.5",
+        "compat": {
+          "cache_control_format": "anthropic"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "anthropic/claude-haiku-5.5",
+        "compat": {
+          "cache_control_format": "anthropic"
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
         "id": "anthropic/claude-opus-5",
         "compat": {
           "cache_control_format": "anthropic"
@@ -2120,6 +2155,32 @@
         "type": "Embedding",
         "compat": {
           "dimensions_field": ""
+        }
+      }
+    ],
+    "runcrate": [
+      {
+        "id": "zai-org/GLM-5.3",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "zai-org/GLM-5.3-Flash",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "Qwen/Qwen3.8-Flash",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "openai/gpt-oss-120b",
+        "thinking_levels": {
+          "off": null
         }
       }
     ]

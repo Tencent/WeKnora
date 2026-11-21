@@ -12,12 +12,13 @@ import (
 type ApprovalMode string
 
 const (
-	// ModeAsk reads the workspace but asks before every write or command.
+	// ModeAsk runs in the workspace sandbox and asks the user before deletes
+	// and before the sandbox is widened. Default.
 	ModeAsk ApprovalMode = "ask"
-	// ModeAuto works freely inside the workspace and asks only when a command
-	// needs to reach outside it. Default.
+	// ModeAuto runs in the same sandbox as ModeAsk. A review model answers
+	// the questions ModeAsk would put to the user.
 	ModeAuto ApprovalMode = "auto"
-	// ModeFull runs without any sandbox.
+	// ModeFull runs without any sandbox. Not shipped.
 	ModeFull ApprovalMode = "full"
 )
 
@@ -31,37 +32,29 @@ func (m ApprovalMode) Known() bool {
 	}
 }
 
-// Shipped reports whether this build can serve m end to end.
-//
-// This is the single source of truth for "which modes exist today", and it
-// lives beside the enum rather than in whatever reads the preferences file.
-// ModeAsk compiles to a valid policy with nothing writable and relies on an
-// approval round-trip to widen it per command; ModeFull is the absence of a
-// policy. Neither path is wired yet, so only ModeAuto is served.
+// Shipped reports whether this build can serve m end to end. ModeFull is the
+// absence of a policy and has no unsandboxed path yet.
 func (m ApprovalMode) Shipped() bool {
-	return m == ModeAuto
+	return m == ModeAsk || m == ModeAuto
 }
 
-// ParseApprovalMode normalizes a stored preference.
-//
-// Unknown values fall back to ModeAuto so a typo cannot stop the agent.
-// Known-but-unshipped modes are returned unchanged: mapping ask→auto would
-// widen access, and Service refuses a mode it cannot honour.
+// ParseApprovalMode normalizes a stored preference. Unknown values fall back
+// to ModeAsk so a typo can only make the agent ask more, never hand approvals
+// to a model. Known-but-unshipped modes are returned unchanged so Service
+// refuses them instead of substituting another stance.
 func ParseApprovalMode(raw string) ApprovalMode {
 	mode := ApprovalMode(strings.ToLower(strings.TrimSpace(raw)))
 	if mode.Known() {
 		return mode
 	}
-	return ModeAuto
+	return ModeAsk
 }
 
 // ErrFullAccessHasNoPolicy signals that ModeFull is not a wide policy but the
 // absence of one. Callers must branch on it explicitly.
 var ErrFullAccessHasNoPolicy = errors.New("localsandbox: full access runs without a sandbox policy")
 
-// ErrApprovalModeNotShipped reports a mode this build cannot enforce. It is a
-// refusal, not a downgrade: ModeAsk is stricter than ModeAuto, so quietly
-// running the turn under auto would widen access past what was asked for.
+// ErrApprovalModeNotShipped reports a mode this build cannot enforce. It is a refusal, not a downgrade.
 var ErrApprovalModeNotShipped = errors.New("localsandbox: approval mode is not available in this build")
 
 // credentialDirNames are denied last, so they stay denied even when they sit
@@ -154,9 +147,8 @@ func (b *PolicyBuilder) Build(mode ApprovalMode, ws Workspace) (Policy, error) {
 	}
 
 	p := Policy{
-		// Auto-mode chat commands need outbound access for package installs,
-		// APIs, and skill tests. Ask mode keeps it denied below: a network
-		// denial is what routes a command to the approval prompt.
+		// Ask and auto share this sandbox. Chat commands need outbound access
+		// for package installs, APIs, and skill tests.
 		Network:       NetworkUnrestricted,
 		Cwd:           ws.Root,
 		ReadableRoots: b.readableRoots(ws),
@@ -165,7 +157,7 @@ func (b *PolicyBuilder) Build(mode ApprovalMode, ws Workspace) (Policy, error) {
 	}
 
 	switch mode {
-	case ModeAuto:
+	case ModeAsk, ModeAuto:
 		root := WritableRoot{Path: ws.Root}
 		if ws.ProtectGit {
 			// Losing .git to a hallucinated rm -rf is unrecoverable, and it is
@@ -176,13 +168,6 @@ func (b *PolicyBuilder) Build(mode ApprovalMode, ws Workspace) (Policy, error) {
 			root.ProtectGitDirs = true
 		}
 		p.WritableRoots = []WritableRoot{root}
-	case ModeAsk:
-		// Nothing is writable and nothing leaves the machine up front;
-		// approved commands are re-prepared through Relax. Cwd stays the
-		// workspace so the process has a home.
-		p.WritableRoots = nil
-		p.Network = NetworkDenied
-		p.Cwd = ws.Root
 	default:
 		return Policy{}, fmt.Errorf("localsandbox: unknown approval mode %q", mode)
 	}
@@ -363,10 +348,14 @@ const (
 	AccessWrite Access = "write"
 )
 
-// Grant is one approved escalation: a directory added to the policy.
+// Grant is one approved escalation: a directory, or with File a single file,
+// added to the policy.
 type Grant struct {
 	Path   string
 	Access Access
+	// File opens only Path, which must be a regular file or a file not yet
+	// created in an existing directory. Access is always AccessWrite.
+	File bool
 }
 
 // Relax derives a wider policy after the user approved an escalation. It never
@@ -376,6 +365,9 @@ type Grant struct {
 // retargeted; the next command must see the new target and refuse it when
 // that target is no longer grantable.
 func (b *PolicyBuilder) Relax(base Policy, g Grant) (Policy, error) {
+	if g.File {
+		return b.relaxFile(base, g)
+	}
 	path, err := resolveExistingPrefix(g.Path)
 	if err != nil {
 		return Policy{}, err
@@ -393,15 +385,48 @@ func (b *PolicyBuilder) Relax(base Policy, g Grant) (Policy, error) {
 	switch g.Access {
 	case AccessWrite:
 		out.WritableRoots = append(out.WritableRoots, WritableRoot{
-			Path:             path,
-			ReadOnlySubpaths: gitMetadataPaths(path),
-			ProtectGitDirs:   true,
+			Path:               path,
+			ReadOnlySubpaths:   gitMetadataPaths(path),
+			ProtectGitDirs:     true,
+			ProtectBareGitDirs: true,
 		})
 	case AccessRead:
 		out.ReadableRoots = append(out.ReadableRoots, path)
 	default:
 		return Policy{}, fmt.Errorf("localsandbox: unknown grant access %q", g.Access)
 	}
+	if err := out.Validate(); err != nil {
+		return Policy{}, err
+	}
+	return out, nil
+}
+
+// relaxFile opens one file. Like a directory grant it is resolved on every
+// call and checked against every hard denial.
+func (b *PolicyBuilder) relaxFile(base Policy, g Grant) (Policy, error) {
+	if g.Access != AccessWrite {
+		return Policy{}, fmt.Errorf("localsandbox: a file grant must be write, got %q", g.Access)
+	}
+	path, err := resolveExistingPrefix(g.Path)
+	if err != nil {
+		return Policy{}, err
+	}
+	// A file grant lets the sandbox unlink and recreate that path, so a
+	// command can turn it into a symlink. The approval named this path, never
+	// whatever it points to now. Proposals store the resolved path.
+	if !samePath(path, filepath.Clean(g.Path)) {
+		return Policy{}, fmt.Errorf("localsandbox: granted file %q now resolves to %q", g.Path, path)
+	}
+	if info, statErr := os.Lstat(path); statErr == nil && !info.Mode().IsRegular() {
+		return Policy{}, fmt.Errorf("localsandbox: %q is not a regular file", path)
+	}
+	if err := b.rejectGrantPath(base, path); err != nil {
+		return Policy{}, err
+	}
+	out := base
+	out.WritableRoots = append([]WritableRoot(nil), base.WritableRoots...)
+	out.ReadableRoots = append([]string(nil), base.ReadableRoots...)
+	out.WritableFiles = append(append([]string(nil), base.WritableFiles...), path)
 	if err := out.Validate(); err != nil {
 		return Policy{}, err
 	}
@@ -439,6 +464,31 @@ func gitMetadataPaths(root string) []string {
 		return paths
 	}
 	return append(paths, resolved)
+}
+
+// hasBareGitComponent reports whether any element of path names a repository
+// by the bare convention, repo.git.
+func hasBareGitComponent(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if strings.HasSuffix(strings.ToLower(part), ".git") {
+			return true
+		}
+	}
+	return false
+}
+
+// isBareGitMetadata reports hooks or config directly inside a repo.git
+// element, which git runs or obeys with the user's rights.
+func isBareGitMetadata(parts []string) bool {
+	for i := 0; i+1 < len(parts); i++ {
+		if !strings.HasSuffix(strings.ToLower(parts[i]), ".git") {
+			continue
+		}
+		if strings.EqualFold(parts[i+1], "hooks") || strings.EqualFold(parts[i+1], "config") {
+			return true
+		}
+	}
+	return false
 }
 
 // hasGitComponent reports whether any element of path is named .git. APFS

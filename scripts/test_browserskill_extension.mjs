@@ -74,6 +74,10 @@ try {
             await button.waitFor({state:'visible',timeout:5000});
           }
           await button.click({timeout:5000});
+          if (command === 'complete-login') {
+            const tabs = await worker.evaluate(async () => chrome.tabs.query({}));
+            for (const tab of tabs) if (tab.url === page.url()) preservedTabs.add(tab.id);
+          }
           clicked = true;
           break;
         }
@@ -81,6 +85,21 @@ try {
       }
       if (!clicked) throw new Error('Browser task overlay was not clickable');
       process.stdout.write(command+'-done\n');
+    }
+    if (command === 'resume-browser-control') {
+      let resumed = 0;
+      for (const page of browser.pages()) {
+        const button = page.locator('[data-slot="cooperation-toolbar"][data-mode="held"] .bsk-cooperation-primary');
+        if (!await button.count()) continue;
+        // Browser-side stop preserves every held task page, including those
+        // without login input. Record only pages showing that actual state.
+        const tabs = await worker.evaluate(async () => chrome.tabs.query({}));
+        for (const tab of tabs) if (tab.url === page.url()) preservedTabs.add(tab.id);
+        await button.click({timeout:5000});
+        resumed++;
+      }
+      if (!resumed) throw new Error('No held browser control to resume');
+      process.stdout.write('browser-control-resumed\n');
     }
     if (command === 'check-detached') {
       // getTargets().attached includes Playwright's own debugger. Probe only
@@ -150,11 +169,17 @@ try {
         if (!source) throw new Error('Fixture task page unavailable');
         // Extension API creation simulates a user-created tab: no navigation
         // source event, even though it is inside the Agent Window.
-        return chrome.tabs.create({windowId:source.windowId,url:source.url+'?user-tab=1',active:true});
+        const created = await chrome.tabs.create({windowId:source.windowId,url:source.url+'?user-tab=1',active:true});
+        return {id:created.id,sourceWindowId:source.windowId};
       }, [...initial.tabIds, ...preservedTabs]);
       const page = await createdPage;
       await page.waitForURL('**/*?user-tab=1');
       await page.locator('browser-skill-overlay').waitFor({state:'attached'});
+      const deadline = Date.now() + 5000;
+      while ((await worker.evaluate(id => chrome.tabs.get(id), tab.id)).windowId === tab.sourceWindowId) {
+        if (Date.now() >= deadline) throw new Error('Unrelated user tab was not routed out of the Agent Window');
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
       process.stdout.write(JSON.stringify({tab_id:tab.id})+'\n');
     }
     if (command.startsWith('close-fixture-window ')) {
@@ -165,14 +190,18 @@ try {
       }, id);
       process.stdout.write('fixture-window-closed\n');
     }
-    if (command.startsWith('move-fixture-tab-out ')) {
-      // Upstream refuses to borrow an unowned tab that already lives in the
-      // Agent Window; the user must move it to a regular window first.
+    if (command.startsWith('move-controlled-tab-out ')) {
+      // Moving a controlled tab releases its whole session and preserves pages.
       const id = Number(command.split(' ')[1]);
+      const released = await worker.evaluate(async tabId => {
+        const tab = await chrome.tabs.get(tabId);
+        return (await chrome.tabs.query({windowId:tab.windowId})).map(tab => tab.id);
+      }, id);
+      for (const tabId of released) preservedTabs.add(tabId);
       await worker.evaluate(async ({tabId, windowId}) => {
         await chrome.tabs.move(tabId, {windowId, index:-1});
       }, {tabId:id, windowId:originalWindow.windowId});
-      process.stdout.write('fixture-tab-moved\n');
+      process.stdout.write('controlled-tab-moved\n');
     }
     if (command.startsWith('remove-fixture-tab ')) {
       const id = Number(command.split(' ')[1]);

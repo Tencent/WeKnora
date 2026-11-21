@@ -18,8 +18,9 @@ import (
 )
 
 var (
-	_ datasource.StreamingConnector     = (*Connector)(nil)
-	_ datasource.FullStreamingConnector = (*Connector)(nil)
+	_ datasource.StreamingConnector            = (*Connector)(nil)
+	_ datasource.FullStreamingConnector        = (*Connector)(nil)
+	_ datasource.ItemFailureIsolatingConnector = (*Connector)(nil)
 )
 
 // Connector implements datasource.StreamingConnector for Confluence.
@@ -27,6 +28,10 @@ type Connector struct {
 	newClient  func(config) (*client, error)
 	spaceCache spaceCache
 }
+
+// IsolatesItemIngestFailures reports that Confluence tracks each page version
+// independently so one failed page does not block remaining pages or spaces.
+func (*Connector) IsolatesItemIngestFailures() bool { return true }
 
 const pickerSpaceCacheTTL = time.Minute
 
@@ -327,6 +332,17 @@ func (c *Connector) fetchStream(
 		currentRoots[root.ResourceID] = true
 	}
 	baseline, next := prepareSyncCursors(old, forceFull)
+	prepareAttachmentCursor(decodeCursor(old), &next, forceFull, syncAttachmentsEnabled(ds))
+	// Accepted attachments establish a page baseline even if its body failed.
+	// Include those pages in the existing empty-list/mass-deletion safeguards.
+	for id, owner := range next.AttachmentOwners {
+		if baseline.SpacePages[owner] == nil {
+			baseline.SpacePages[owner] = map[string]string{}
+		}
+		if _, known := baseline.SpacePages[owner][id]; !known {
+			baseline.SpacePages[owner][id] = ""
+		}
+	}
 	// A prior successful body is reusable when ownership moves to a different
 	// selected root and this run cannot fetch the new body. Keep that version in
 	// the new root rather than dropping it during ownership reconciliation.
@@ -391,18 +407,30 @@ func (c *Connector) fetchStream(
 			}
 			seenPages[summary.ID] = struct{}{}
 			version, versionKnown := pageVersion(summary)
+			if syncAttachmentsEnabled(ds) {
+				// Attachment revisions are independent of the page-body version.
+				if err := client.syncPageAttachments(ctx, resourceID, summary, &next, h); err != nil {
+					return nil, err
+				}
+			}
 			// An unknown version cannot prove a page unchanged, so it must
 			// always refresh the body instead of skipping on a stable "t:".
 			if versionKnown {
 				if forceFull {
 					if next.SpacePages[resourceID][summary.ID] == version {
+						datasource.RecordUnchangedItem(h)
 						continue
 					}
 				} else if priorPages[summary.ID] == version {
+					datasource.RecordUnchangedItem(h)
 					continue
 				}
 			}
 			full, err := client.body(ctx, summary.ID)
+			var item types.FetchedItem
+			if err == nil {
+				item, err = markdownItem(ctx, client, resourceID, summary, full)
+			}
 			if err != nil {
 				if ctx.Err() != nil {
 					return nil, err
@@ -410,26 +438,28 @@ func (c *Connector) fetchStream(
 				if emitErr := h.Emit(ctx, failedPageItem(resourceID, summary, err)); emitErr != nil {
 					return nil, emitErr
 				}
-				if !forceFull {
-					if prior, ok := priorVersionByPage[summary.ID]; ok {
-						next.SpacePages[resourceID][summary.ID] = prior
+				if prior, ok := priorVersionByPage[summary.ID]; ok {
+					if forceFull {
+						// Retain deletion ownership without marking the body
+						// refreshed. A retry must still fetch this page.
+						prior = ""
 					}
-				}
-				continue
-			}
-			item, err := markdownItem(ctx, client, resourceID, summary, full)
-			if err != nil {
-				if emitErr := h.Emit(ctx, failedPageItem(resourceID, summary, err)); emitErr != nil {
-					return nil, emitErr
-				}
-				if !forceFull {
-					if prior, ok := priorVersionByPage[summary.ID]; ok {
-						next.SpacePages[resourceID][summary.ID] = prior
-					}
+					next.SpacePages[resourceID][summary.ID] = prior
 				}
 				continue
 			}
 			if err := h.Emit(ctx, item); err != nil {
+				if errors.Is(err, datasource.ErrItemIngestFailed) {
+					if prior, ok := priorVersionByPage[summary.ID]; ok {
+						if forceFull {
+							// Retain deletion ownership without marking the body
+							// refreshed. A retry must still fetch this page.
+							prior = ""
+						}
+						next.SpacePages[resourceID][summary.ID] = prior
+					}
+					continue
+				}
 				return nil, err
 			}
 			next.SpacePages[resourceID][summary.ID] = version
@@ -519,8 +549,12 @@ func (c *Connector) fetchStream(
 	}
 	sort.Strings(missing)
 	for _, id := range missing {
+		if err := removeMissingAttachments(ctx, previousPages[id], id, nil, &next, h); err != nil {
+			return nil, err
+		}
 		deleted := types.FetchedItem{
-			ExternalID: id, IsDeleted: true, SourceResourceID: previousPages[id],
+			RetryOnFailure: syncAttachmentsEnabled(ds),
+			ExternalID:     id, IsDeleted: true, SourceResourceID: previousPages[id],
 			Metadata: map[string]string{"channel": types.ChannelConfluence},
 		}
 		if err := h.Emit(ctx, deleted); err != nil {
@@ -530,6 +564,9 @@ func (c *Connector) fetchStream(
 		// the deletion itself; an interrupted run resumes with the remaining
 		// candidates instead of re-emitting completed tombstones.
 		removePageOwnership(&next, id)
+		delete(next.Attachments, id)
+		delete(next.AttachmentOwners, id)
+		delete(next.FullAttachmentsBaseline, id)
 		if err := h.Checkpoint(ctx, next.syncCursor()); err != nil {
 			return nil, err
 		}
@@ -547,6 +584,7 @@ func (c *Connector) fetchStream(
 	next.SpacePages = committedRoots
 	next.FullSync = false
 	next.FullSyncBaseline = nil
+	retainAttachmentBaseline(&next)
 	return next.syncCursor(), nil
 }
 

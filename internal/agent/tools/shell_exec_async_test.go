@@ -92,6 +92,18 @@ func TestShellExecAsyncClampsYieldAndPassesContext(t *testing.T) {
 	require.Equal(t, interfaces.SessionRef{TenantID: 7, SessionID: "session-1"}, submitter.refs[0])
 }
 
+func TestShellExecAsyncOffersAProgramOnStdinForReview(t *testing.T) {
+	submitter := &fakeSubmitter{}
+	_, err := runAsyncTool(t, submitter, `{"command":"bash","stdin":"rm a"}`)
+	require.NoError(t, err)
+	require.Equal(t, "rm a", submitter.requests[0].ProgramStdin)
+
+	submitter = &fakeSubmitter{}
+	_, err = runAsyncTool(t, submitter, `{"command":"cat","stdin":"rm a"}`)
+	require.NoError(t, err)
+	require.Empty(t, submitter.requests[0].ProgramStdin, "data is not a program")
+}
+
 func TestShellExecAsyncMarksStartedOnRunningHandle(t *testing.T) {
 	marks := &recordingMarks{}
 	submitter := &fakeSubmitter{response: ShellJobSubmission{

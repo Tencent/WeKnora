@@ -137,12 +137,15 @@ def _block_children(container: Any):
 
 
 def _cell_text(cell: Any) -> str:
-    """A table cell's paragraph text, content controls and insertions included."""
-    return "\n".join(
-        _paragraph_text(element)
-        for element, _ in _block_children(cell._tc)
-        if element.tag == _W_P
-    )
+    """Keep cell paragraphs and nested table text in document order."""
+    parts: List[str] = []
+    for element, _ in _block_children(cell._tc):
+        if element.tag == _W_P:
+            parts.append(_paragraph_text(element))
+        elif element.tag == _W_TBL:
+            for row in Table(element, cell).rows:
+                parts.append(" ".join(_cell_text(nested) for nested in row.cells))
+    return "\n".join(parts)
 
 
 def _gfm_cell_text(text: Optional[str]) -> str:
@@ -161,7 +164,11 @@ def table_to_gfm_markdown(table: Any) -> str:
     for row in table.rows:
         cells = [_gfm_cell_text(_cell_text(cell)) for cell in row.cells]
         if cells:
-            rows.append(cells)
+            # Omitted edge cells occupy grid positions but are absent from
+            # row.cells; retain them so values stay under the right headers.
+            rows.append(
+                [""] * row.grid_cols_before + cells + [""] * row.grid_cols_after
+            )
     if not rows:
         return ""
     width = max(len(row) for row in rows)

@@ -1,0 +1,188 @@
+export type Adopter = {
+  name: string;
+  industry: string;
+  useCases: string[];
+  description: string;
+  variant: "A" | "B";
+  stage?: "production" | "poc" | "ecosystem";
+  logo: string;
+  logoSize: { width: number; height: number };
+  logoScale?: number;
+  link?: { href: string; label: string };
+};
+
+export const adopterIssue = "https://github.com/Tencent/WeKnora/issues/4801";
+
+// Only brands from the supplied packs are displayed. See BRAND-ASSETS.md for sources.
+export const adopters: Adopter[] = [
+  {
+    name: "赛乐医疗",
+    industry: "医疗",
+    useCases: ["员工知识助手", "智能客服"],
+    description: "让企业知识服务于员工内部问答与客户咨询。",
+    variant: "A",
+    stage: "production",
+    logo: "sifary.svg",
+    logoSize: { width: 209.5, height: 58.8 },
+  },
+  {
+    name: "出版人杂志社",
+    industry: "出版传媒",
+    useCases: ["专业文档分析", "知识资产沉淀"],
+    description: "把出版行业的高价值信息与智库内容，装进一个可对话的媒体生态。",
+    variant: "A",
+    stage: "production",
+    logo: "china-publishers.png",
+    logoSize: { width: 1452, height: 508 },
+    link: { href: "https://www.epuber.com", label: "访问官网" },
+  },
+  {
+    name: "智达创客",
+    industry: "互联网软件",
+    useCases: ["知识助手", "智能客服", "文档分析"],
+    description: "探索知识问答、客户服务与专业文档分析的应用。",
+    variant: "B",
+    // The community submission explicitly selects POC, despite "online" in the pack.
+    stage: "poc",
+    logo: "zhida-chuangke.png",
+    logoSize: { width: 300, height: 300 },
+    // The supplied image includes a wide blank margin around the complete mark.
+    logoScale: 1.6,
+  },
+  {
+    name: "腾讯云 ClawPro",
+    industry: "云计算 / AI 平台",
+    useCases: ["企业知识库"],
+    description: "在企业 AI 智能体管控平台中集成知识库，让智能体连接企业知识。",
+    variant: "B",
+    stage: "ecosystem",
+    logo: "clawpro.svg",
+    logoSize: { width: 41, height: 40 },
+    link: { href: "https://cloud.tencent.com/document/product/213/129156", label: "了解产品" },
+  },
+  {
+    name: "光子工作室群",
+    industry: "游戏",
+    useCases: ["问答助手"],
+    description: "将团队知识用于问答助手，支持日常资料查询。",
+    variant: "A",
+    stage: "production",
+    logo: "lightspeed.png",
+    logoSize: { width: 391, height: 115 },
+    link: { href: "https://guangzi.qq.com/", label: "访问官网" },
+  },
+  {
+    name: "腾讯客服",
+    industry: "客户服务",
+    useCases: ["智能客服"],
+    description: "将服务知识用于智能客服，支持用户咨询与问题解答。",
+    variant: "A",
+    stage: "production",
+    logo: "tencent-customer-service.png",
+    logoSize: { width: 432, height: 64 },
+    link: { href: "https://kf.qq.com/", label: "访问官网" },
+  },
+  {
+    name: "微信游戏",
+    industry: "游戏",
+    useCases: ["问答助手"],
+    description: "通过知识问答助手，让业务资料更便于查询和使用。",
+    variant: "A",
+    stage: "production",
+    logo: "wechat-games.png",
+    logoSize: { width: 1120, height: 486 },
+    link: { href: "https://gamemp.weixin.qq.com/", label: "访问官网" },
+  },
+  {
+    name: "腾讯云轻量应用服务器",
+    industry: "云计算",
+    useCases: ["WeKnora 一键部署"],
+    description: "提供 WeKnora 应用模板，方便在自己的云服务器上部署和使用。",
+    variant: "B",
+    stage: "ecosystem",
+    logo: "lighthouse.svg",
+    logoSize: { width: 48, height: 48 },
+    link: { href: "https://cloud.tencent.com/product/lighthouse", label: "了解产品" },
+  },
+  {
+    name: "Shade 壹匣",
+    industry: "能源",
+    useCases: ["员工知识助手"],
+    description: "整合班组设备台账与工作群聊天记录，帮助一线成员查询和复用工作知识。",
+    variant: "B",
+    logo: "shade.svg",
+    logoSize: { width: 1024, height: 1024 },
+    link: { href: "https://toolkit.j1net.com", label: "了解产品" },
+  },
+  {
+    name: "随信云链",
+    industry: "互联网金融",
+    useCases: ["员工知识助手", "智能客服"],
+    description: "将业务知识用于员工问答和智能客服，支持内部知识查询与客户咨询。",
+    variant: "B",
+    logo: "suixin-yunlian.png",
+    logoSize: { width: 350, height: 355 },
+  },
+  {
+    name: "检一网络科技",
+    industry: "互联网软件",
+    useCases: ["员工知识助手", "知识资产沉淀"],
+    description: "沉淀团队知识与工作经验，通过知识助手支持员工查询和复用。",
+    variant: "B",
+    logo: "jianyi-network.svg",
+    logoSize: { width: 160, height: 160 },
+    logoScale: 1.25,
+    link: { href: "https://j1net.com", label: "访问官网" },
+  },
+  {
+    name: "浙江博圣生物技术股份有限公司",
+    industry: "医疗健康",
+    useCases: ["员工知识助手", "知识资产沉淀"],
+    description: "打通客服与研发知识：在钉钉中查询已审核条目，并将研发排查与决策经验沉淀到同一知识库。",
+    variant: "A",
+    logo: "biosan.png",
+    logoSize: { width: 150, height: 47 },
+    link: { href: "https://www.biosan.cn/intro", label: "访问官网" },
+  },
+  {
+    name: "诺瓦星云科技股份有限公司",
+    industry: "电子信息科技",
+    useCases: ["员工知识助手", "专业文档分析", "知识资产沉淀"],
+    description: "基于 WeKnora 私有化部署 nora 企业 AI 助手，结合 Wiki、RAG 与知识图谱，支持多智能体协同和多源知识同步。",
+    variant: "A",
+    stage: "production",
+    logo: "novastar.png",
+    logoSize: { width: 288, height: 54 },
+  },
+  {
+    name: "智述AI",
+    industry: "教育科技",
+    useCases: ["员工知识助手", "专业文档分析", "知识资产沉淀"],
+    description: "将教材与真题按考点组织为知识库，结合 GraphRAG 与多模态解析，支持 AI 组卷、出题、批改和学情分析。",
+    variant: "A",
+    logo: "aistory.png",
+    logoSize: { width: 400, height: 170 },
+    link: { href: "https://www.aistory.com.cn", label: "了解产品" },
+  },
+  {
+    name: "深圳盈绰数据科技集团有限公司",
+    industry: "物业服务",
+    useCases: ["员工知识助手", "专业文档分析", "知识资产沉淀"],
+    description: "将作业指导书、业务流程与交付文档沉淀为企业知识库，结合混合检索、Wiki 和知识图谱，支持问答与业务智能体。",
+    variant: "A",
+    logo: "evertro.png",
+    logoSize: { width: 584, height: 160 },
+    link: { href: "https://www.evertro.tech/", label: "访问官网" },
+  },
+  {
+    name: "星知云",
+    industry: "团队协作",
+    useCases: ["员工知识助手", "专业文档分析", "知识资产沉淀"],
+    description: "围绕产品、项目与测试协作建设企业知识库，结合混合检索、Wiki 和知识图谱，支持知识问答与业务智能体。",
+    variant: "B",
+    logo: "xingzhiyun.png",
+    logoSize: { width: 256, height: 256 },
+    logoScale: 1.6,
+    link: { href: "https://alm.gtxygroup.com", label: "了解产品" },
+  },
+];

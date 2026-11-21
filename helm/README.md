@@ -300,6 +300,7 @@ pre-existing Service name does not automatically transfer its ownership to Helm.
 | `app.extraEnv` | Additional env vars | `[]` |
 | `app.extraVolumes` | Additional Pod volumes (rendered verbatim into `spec.template.spec.volumes`) | `[]` |
 | `app.extraVolumeMounts` | Additional volume mounts for the app container (names must match `extraVolumes`) | `[]` |
+| `app.podAnnotations` | Extra annotations for the app Pod template metadata (not the Deployment metadata); rendered verbatim into `spec.template.metadata.annotations` | `{}` |
 
 ### Data Files Storage
 
@@ -457,7 +458,7 @@ kubectl logs -n weknora -l app.kubernetes.io/component=frontend -f
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/Tencent/WeKnora/blob/main/CONTRIBUTING.md) in the main repository.
+See the [Contributing section](https://github.com/Tencent/WeKnora/blob/main/README.md#contributing) of the main README.
 
 ## References
 

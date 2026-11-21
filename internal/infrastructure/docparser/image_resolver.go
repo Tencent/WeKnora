@@ -57,13 +57,49 @@ const (
 func isIconImage(data []byte) bool {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		// Cannot decode dimensions — fall back to size-only heuristic.
-		return len(data) < minImageBytes
+		// Compact metafiles can describe a full-size diagram in a few records.
+		return len(data) < minImageBytes && !hasLargeMetafileBounds(data)
 	}
 	if cfg.Width < minImageDimension && cfg.Height < minImageDimension {
 		return true
 	}
 	return false
+}
+
+// hasLargeMetafileBounds reads only the header, without rendering the image.
+func hasLargeMetafileBounds(data []byte) bool {
+	order := binary.LittleEndian
+	switch {
+	case len(data) >= 88 && order.Uint32(data) == 1 && order.Uint32(data[40:]) == 0x464d4520:
+		// EMR_HEADER bounds are inclusive. Check the declared record and file sizes.
+		headerSize := order.Uint32(data[4:])
+		if headerSize < 88 || headerSize > uint32(len(data)) || order.Uint32(data[48:]) != uint32(len(data)) {
+			return false
+		}
+		width := int64(int32(order.Uint32(data[16:]))) - int64(int32(order.Uint32(data[8:]))) + 1
+		height := int64(int32(order.Uint32(data[20:]))) - int64(int32(order.Uint32(data[12:]))) + 1
+		return width > 0 && height > 0 && max(width, height) >= minImageDimension
+	case len(data) >= 46 && order.Uint32(data) == 0x9ac6cdd7 && order.Uint16(data[24:]) == 9:
+		// The standard WMF length excludes the 22-byte placeable header and is stored in WORDs.
+		wmfBytes := len(data) - 22
+		if wmfBytes%2 != 0 || order.Uint32(data[28:]) != uint32(wmfBytes/2) {
+			return false
+		}
+		// The placeable WMF header expresses bounds in logical units per inch.
+		var checksum uint16
+		for i := 0; i < 20; i += 2 {
+			checksum ^= order.Uint16(data[i:])
+		}
+		unitsPerInch := int(order.Uint16(data[14:]))
+		if checksum != order.Uint16(data[20:]) || unitsPerInch == 0 {
+			return false
+		}
+		width := int(int16(order.Uint16(data[10:]))) - int(int16(order.Uint16(data[6:])))
+		height := int(int16(order.Uint16(data[12:]))) - int(int16(order.Uint16(data[8:])))
+		return width > 0 && height > 0 && max(width, height)*96 >= minImageDimension*unitsPerInch
+	default:
+		return false
+	}
 }
 
 // StoredImage describes an image that has been saved to storage.
@@ -154,7 +190,7 @@ func (r *ImageResolver) ResolveAndStore(
 	markdown = md4
 
 	if len(result.ImageRefs) == 0 {
-		return markdown, sortImagesByPosition(markdown, images), nil
+		return markdown, SortImagesByPosition(markdown, images), nil
 	}
 
 	// Build a map of original_ref -> image ref for fast lookup
@@ -198,14 +234,13 @@ func (r *ImageResolver) ResolveAndStore(
 	markdown = md5
 	images = append(images, imgRelativeHTML...)
 
-	return markdown, sortImagesByPosition(markdown, images), nil
+	return markdown, SortImagesByPosition(markdown, images), nil
 }
 
-// sortImagesByPosition orders images by where they first appear in markdown,
-// since each resolution pass collects its own kind and references are
-// rewritten back to front. Callers number images by this order. Images not
-// found in markdown keep their relative order at the end.
-func sortImagesByPosition(markdown string, images []StoredImage) []StoredImage {
+// SortImagesByPosition 按最终 Markdown 中首次出现的位置原地稳定排序。
+// 各来源会分批、倒序收集图片；合并后调用可让任务序号保持文档顺序。
+// 未出现在 Markdown 中的图片保留相对顺序并排在末尾。
+func SortImagesByPosition(markdown string, images []StoredImage) []StoredImage {
 	position := func(image StoredImage) int {
 		if i := strings.Index(markdown, image.ServingURL); image.ServingURL != "" && i >= 0 {
 			return i

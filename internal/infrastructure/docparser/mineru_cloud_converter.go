@@ -299,8 +299,12 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 
 	// Dump the raw extract_result JSON for debugging
 	rawExtract := string(pollResp.Data.ExtractResult)
-	if len(rawExtract) > 4000 {
-		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result (truncated to 4000 chars): %s ...", rawExtract[:4000])
+	if len(rawExtract) > rawResponseLogBytes {
+		logger.Infof(
+			context.Background(),
+			"[MinerUCloud] Raw extract_result (truncated to %d chars): %s",
+			rawResponseLogBytes, rawResponsePreview(rawExtract),
+		)
 	} else {
 		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result: %s", rawExtract)
 	}
@@ -387,7 +391,7 @@ func downloadAndExtractZip(ctx context.Context, zipURL string) (string, []types.
 // extractMarkdownZip reads the shallowest .md file of a MinerU result package
 // and the images it references, via markdown or inline HTML <img> syntax.
 func extractMarkdownZip(zipData []byte, logLabel string) (string, []types.ImageRef, error) {
-	return extractMarkdownZipBounded(zipData, logLabel, maxZipImagesTotalBytes)
+	return extractMarkdownZipBounded(zipData, logLabel, minerUMaxImageBytes())
 }
 
 // extractMarkdownZipBounded is extractMarkdownZip with the accumulated-image
@@ -454,8 +458,8 @@ func extractMarkdownZipBounded(zipData []byte, logLabel string, maxImages int64)
 			continue
 		}
 		if imageBytes+int64(len(imgData)) > maxImages {
-			return "", nil, fmt.Errorf("%w: images in %q exceed %d bytes",
-				errResultPackageTooLarge, logLabel, maxImages)
+			return "", nil, fmt.Errorf("%w: images in %q reached %d bytes and exceed configured limit %d bytes (%s)",
+				errResultPackageTooLarge, logLabel, imageBytes+int64(len(imgData)), maxImages, mineruMaxImageBytesEnv)
 		}
 		imageBytes += int64(len(imgData))
 

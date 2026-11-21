@@ -205,7 +205,10 @@ func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, str
 	body["max_tokens"] = maxTokens
 
 	if opts != nil {
-		if s.SupportsTemperature && opts.Temperature > 0 && (!plan.enabled || s.TemperatureWithThinking) {
+		acceptsTemperature := s.SupportsTemperature && (!plan.enabled || s.TemperatureWithThinking)
+		if opts.Isolated && acceptsTemperature {
+			body["temperature"] = 0.0
+		} else if acceptsTemperature && opts.Temperature > 0 {
 			body["temperature"] = opts.Temperature
 		} else if s.SupportsTopP && opts.TopP > 0 && !plan.enabled {
 			// temperature and top_p are mutually exclusive on current models;
@@ -296,11 +299,7 @@ func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, str
 	if plan.effort != "" {
 		body["output_config"] = map[string]any{"effort": plan.effort}
 	}
-	for k, v := range s.ExtraBody {
-		if _, exists := body[k]; !exists {
-			body[k] = v
-		}
-	}
+	api.MergeExtraBody(body, s.ExtraBody, opts != nil && opts.Isolated)
 	return body, nil
 }
 

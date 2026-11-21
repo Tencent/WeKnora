@@ -6,6 +6,7 @@ import { Icon } from "./ui";
 import { homeAssets } from "../../shared/header";
 import { ProductGallery, type GalleryShot, type GallerySlide } from "./product-gallery";
 import { Header, ProductVideo } from "./interactive";
+import { AdopterShowcase } from "./adopter-showcase";
 import { clients, dataSources, modelProviders, IntegrationMark } from "./brands";
 import s from "./home.module.css";
 
@@ -97,6 +98,7 @@ export default function Home() {
         <ProductVideo />
         <div className={s.trustBar}><span><Icon name="github" /> 腾讯开源 · MIT License</span><span><Icon name="server" /> 支持私有化部署</span><span><Icon name="model" /> 自由选择模型与存储</span></div>
       </section>
+      <AdopterShowcase />
       <section id="capabilities" className={`${s.chapter}`} data-tone="base" aria-labelledby="capabilities-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>01 / KNOWLEDGE AT WORK</p><h2 id="capabilities-title">知识问答、任务执行与自动 Wiki</h2></div><p>查询资料用 RAG，处理多步任务用 Agent，<br />整理知识用 Wiki。三种能力共享同一知识库。</p></div>
         <div className={s.modeGrid}>{modes.map(mode => <article className={s.mode} key={mode.label}>

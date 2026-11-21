@@ -22,9 +22,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// wikiLinkRegex matches [[wiki-link]] syntax in markdown content
-var wikiLinkRegex = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
-
 // wikiInlineChunkCitationRegex matches internal short handles emitted by the
 // wiki ingest prompt while it classifies supporting chunks. The stable source
 // relationship lives in WikiPage.ChunkRefs, so these handles have no meaning
@@ -42,6 +39,10 @@ func stripWikiPageInlineChunkCitations(page *types.WikiPage) {
 	page.Content = stripWikiInlineChunkCitations(page.Content)
 	page.Summary = stripWikiInlineChunkCitations(page.Summary)
 }
+
+// wikiPageRawReadKey 仅供归并写入读取原始存储值；展示读取仍移除旧引用标记。
+// 快照必须与数据库原值一致，不能用展示层规范化后的正文作保存前提。
+type wikiPageRawReadKey struct{}
 
 // wikiPageService implements the WikiPageService interface
 type wikiPageService struct {
@@ -130,6 +131,12 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	existing, err := s.repo.GetBySlug(ctx, page.KnowledgeBaseID, page.Slug)
 	if err != nil {
 		return nil, fmt.Errorf("get existing page: %w", err)
+	}
+	// 先拒绝过期模型结果，避免把并发修改误判成行数保护失败。
+	// 仓储会在短事务内再次核对，覆盖这里检查之后的写入竞态。
+	if snapshot, ok := types.WikiPageWriteSnapshotFromContext(ctx); ok &&
+		!types.WikiPageWriteSnapshotMatches(snapshot, existing) {
+		return nil, repository.ErrWikiPageConflict
 	}
 	stripWikiPageInlineChunkCitations(page)
 
@@ -283,7 +290,9 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	}
 
 	// 只删除已消失的边；未变链接仍做幂等补齐，避免旧数据缺失反链时失去修复机会。
-	s.syncInLinks(ctx, existing.TenantID, existing.KnowledgeBaseID, existing.Slug, oldOutLinks, existing.OutLinks)
+	// 快照只约束源页保存，不应误用于反链维护涉及的其他页面。
+	linkCtx := types.WithWikiPageWriteSnapshot(ctx, nil)
+	s.syncInLinks(linkCtx, existing.TenantID, existing.KnowledgeBaseID, existing.Slug, oldOutLinks, existing.OutLinks)
 
 	return existing, nil
 }
@@ -438,7 +447,9 @@ func (s *wikiPageService) GetPageBySlug(ctx context.Context, kbID string, slug s
 	if err != nil {
 		return nil, err
 	}
-	stripWikiPageInlineChunkCitations(page)
+	if raw, _ := ctx.Value(wikiPageRawReadKey{}).(bool); !raw {
+		stripWikiPageInlineChunkCitations(page)
+	}
 	return page, nil
 }
 
@@ -1255,6 +1266,13 @@ func (s *wikiPageService) SearchPages(ctx context.Context, kbID string, query st
 	return s.repo.Search(ctx, kbID, query, limit)
 }
 
+// SearchPagesLiteral treats the query as literal text on every database.
+func (s *wikiPageService) SearchPagesLiteral(
+	ctx context.Context, kbID string, query string, limit int,
+) ([]*types.WikiPage, error) {
+	return s.repo.SearchLiteral(ctx, kbID, query, limit)
+}
+
 func (s *wikiPageService) SearchPagesAcross(
 	ctx context.Context, kbIDs []string, query string, limit int,
 ) ([]*types.WikiPage, error) {
@@ -1362,25 +1380,7 @@ func isInvalidWikiSearchQuery(err error) bool {
 
 // parseOutLinks extracts [[wiki-link]] slugs from markdown content
 func (s *wikiPageService) parseOutLinks(content string) types.StringArray {
-	matches := wikiLinkRegex.FindAllStringSubmatch(content, -1)
-	seen := make(map[string]bool)
-	var links types.StringArray
-
-	for _, match := range matches {
-		if len(match) > 1 {
-			slug := strings.TrimSpace(match[1])
-			// Handle [[slug|display name]] format — slug is the first part
-			if parts := strings.SplitN(slug, "|", 2); len(parts) == 2 {
-				slug = strings.TrimSpace(parts[0])
-			}
-			slug = normalizeSlug(slug)
-			if slug != "" && !seen[slug] {
-				seen[slug] = true
-				links = append(links, slug)
-			}
-		}
-	}
-	return links
+	return wikiOutLinks(content)
 }
 
 // normalizeSlug normalizes a wiki link slug
@@ -1406,30 +1406,17 @@ func slugNamespace(slug string) string {
 // untouched. Display text is preserved verbatim. This is a pure helper — the
 // resolution policy lives entirely in the callback.
 func rewriteDeadWikiLinks(content string, resolve func(normSlug, display string) (string, bool)) (string, bool) {
-	changed := false
-	out := wikiLinkRegex.ReplaceAllStringFunc(content, func(match string) string {
-		inner := match[2 : len(match)-2]
-		rawSlug := inner
-		display := ""
-		if parts := strings.SplitN(inner, "|", 2); len(parts) == 2 {
-			rawSlug = parts[0]
-			display = strings.TrimSpace(parts[1])
+	return rewriteMarkdownWikiLinks(content, func(link markdownWikiLink) string {
+		newSlug, ok := resolve(link.slug, link.display)
+		if !ok || newSlug == "" || newSlug == link.slug {
+			return content[link.start:link.end]
 		}
-		norm := normalizeSlug(rawSlug)
-		if norm == "" {
-			return match
+		replacement := "[[" + newSlug
+		if link.display != "" {
+			replacement += link.separator + link.display
 		}
-		newSlug, ok := resolve(norm, display)
-		if !ok || newSlug == "" || newSlug == norm {
-			return match
-		}
-		changed = true
-		if display != "" {
-			return "[[" + newSlug + "|" + display + "]]"
-		}
-		return "[[" + newSlug + "]]"
+		return replacement + "]]"
 	})
-	return out, changed
 }
 
 // RepairContentLinks rewrites [[slug]] / [[slug|display]] references in

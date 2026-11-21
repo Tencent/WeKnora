@@ -361,7 +361,10 @@ func setOIDCPKCECookie(c *gin.Context, verifier string) {
 // oidcCallbackURL derives the absolute /auth/oidc/callback URL from the
 // request's own origin (scheme + host), so external platforms can deep-link
 // to /auth/oidc/start without supplying a redirect_uri.
-func oidcCallbackURL(c *gin.Context) string {
+func oidcCallbackURL(c *gin.Context, cfg *config.Config) string {
+	if base := frontendBaseURLFor(cfg); base != "" {
+		return base + "/api/v1/auth/oidc/callback"
+	}
 	scheme := "http"
 	if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
 		scheme = "https"
@@ -379,7 +382,7 @@ func oidcCallbackURL(c *gin.Context) string {
 // @Router       /auth/oidc/start [get]
 func (h *AuthHandler) OIDCStart(c *gin.Context) {
 	ctx := c.Request.Context()
-	resp, err := h.userService.GetOIDCAuthorizationURL(ctx, oidcCallbackURL(c))
+	resp, err := h.userService.GetOIDCAuthorizationURL(ctx, oidcCallbackURL(c, h.configInfo))
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate OIDC authorization URL: %v", err)
 		appErr := errors.NewForbiddenError("OIDC authorization unavailable").WithDetails(err.Error())
@@ -428,7 +431,7 @@ func (h *AuthHandler) GetOIDCConfig(c *gin.Context) {
 // @Router       /auth/oidc/callback [get]
 func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 	ctx := c.Request.Context()
-	frontendRedirectURI := "/"
+	frontendRedirectURI := frontendBaseURLFor(h.configInfo) + "/"
 
 	if providerError := strings.TrimSpace(c.Query("error")); providerError != "" {
 		redirectURL := frontendRedirectURI + "#oidc_error=" + urlQueryEscape(providerError)

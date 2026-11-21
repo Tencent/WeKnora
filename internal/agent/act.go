@@ -41,6 +41,19 @@ func truncateForLangfuse(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
+// toolOutputPreviewBytes bounds the debug log preview of one tool result.
+const toolOutputPreviewBytes = 500
+
+// toolOutputPreview keeps that preview within the byte budget without cutting
+// a multi-byte character in half: tool output is frequently Chinese, and a
+// byte cut leaves invalid UTF-8 in the log sink.
+func toolOutputPreview(output string) string {
+	if len(output) <= toolOutputPreviewBytes {
+		return output
+	}
+	return common.TruncateUTF8Bytes(output, toolOutputPreviewBytes) + "... (truncated)"
+}
+
 // argKeys returns the sorted list of top-level keys in a tool's argument
 // map. Used when we choose not to send the raw arguments to Langfuse
 // (e.g. database_query's SQL) but still want to signal what was passed in.
@@ -177,6 +190,8 @@ var toolDisplayNames = map[string]string{
 	agenttools.LegacyToolGetDocumentInfo:     "获取文档信息",
 	agenttools.ToolSearchConversations:       "回顾历史对话",
 	agenttools.ToolAskUser:                   "向用户提问",
+	agenttools.ToolRequestSecureForm:         "请求登录凭据",
+	agenttools.ToolBrowserFillSecret:         "填写登录凭据",
 	agenttools.ToolSearchMemory:              "查询长期记忆",
 	agenttools.ToolDatabaseQuery:             "查询数据",
 	agenttools.ToolDataAnalysis:              "数据分析",
@@ -592,6 +607,9 @@ func (e *AgentEngine) runToolCallAnswered(
 	})
 
 	principal, _ := types.PrincipalFromContext(ctx)
+	// Same ID stored on this turn's user messages; host auto-review uses it
+	// to tell current-turn authorization from earlier / forked history.
+	requestID, _ := types.RequestIDFromContext(toolCtx)
 	execTimeout := toolExecutionTimeout(tc.Function.Name, tc.Function.Arguments)
 	if tool, lookupErr := e.toolRegistry.GetTool(tc.Function.Name); lookupErr == nil {
 		if timed, ok := tool.(interface{ ExecutionTimeout() time.Duration }); ok {
@@ -601,6 +619,7 @@ func (e *AgentEngine) runToolCallAnswered(
 	toolExecCtx := agenttools.WithToolExecContext(toolCtx, &agenttools.ToolExecContext{
 		SessionID:          sessionID,
 		AssistantMessageID: assistantMessageID,
+		RequestID:          requestID,
 		EventBus:           e.eventBus,
 		ToolCallID:         tc.ID,
 		UserID:             principal.StorageID(),
@@ -683,10 +702,7 @@ func (e *AgentEngine) runToolCallAnswered(
 	}
 
 	if toolCall.Result != nil && toolCall.Result.Output != "" {
-		preview := toolCall.Result.Output
-		if len(preview) > 500 {
-			preview = preview[:500] + "... (truncated)"
-		}
+		preview := toolOutputPreview(toolCall.Result.Output)
 		logger.Debugf(ctx, "%s Output preview:\n%s", toolTag, preview)
 	}
 	if toolCall.Result != nil && toolCall.Result.Error != "" {
