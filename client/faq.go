@@ -398,22 +398,50 @@ type FAQSuccessEntry struct {
 	StandardQuestion string `json:"standard_question"`  // Standard question
 }
 
+// FAQMergeDetail represents the merge result summary of one FAQ entry in
+// append mode. It mirrors internal/types.FAQMergeDetail on the server.
+type FAQMergeDetail struct {
+	Index            int    `json:"index"`              // Entry index in the batch (0-based)
+	StandardQuestion string `json:"standard_question"`  // Standard question
+	AnswerChanged    bool   `json:"answer_changed"`     // Whether the answer changed
+	NewSimilarCount  int    `json:"new_similar_count"`  // Newly added similar questions
+	NewNegativeCount int    `json:"new_negative_count"` // Newly added negative questions
+}
+
 // FAQImportProgress represents the progress of an async FAQ import task.
 // When Status is "completed", the result fields (SkippedCount, ImportMode, ImportedAt, DisplayStatus, ProcessingTime) are populated.
+// PartialFailedCount counts entries that were imported with some similar
+// questions or negative questions removed by the server, so callers can
+// distinguish full success from partial failure.
 type FAQImportProgress struct {
-	TaskID        string           `json:"task_id"`
-	KBID          string           `json:"kb_id"`
-	KnowledgeID   string           `json:"knowledge_id"`
-	Status        string           `json:"status"`
-	Progress      int              `json:"progress"`
-	Total         int              `json:"total"`
-	Processed     int              `json:"processed"`
-	SuccessCount  int              `json:"success_count"`
-	FailedCount   int              `json:"failed_count"`
-	SkippedCount  int              `json:"skipped_count,omitempty"`
-	FailedEntries []FAQFailedEntry `json:"failed_entries,omitempty"`
+	TaskID       string `json:"task_id"`
+	KBID         string `json:"kb_id"`
+	KnowledgeID  string `json:"knowledge_id"`
+	Status       string `json:"status"`
+	Progress     int    `json:"progress"`
+	Total        int    `json:"total"`
+	Processed    int    `json:"processed"`
+	SuccessCount int    `json:"success_count"`
+	FailedCount  int    `json:"failed_count"`
+	// Entries partially failed (similar questions / negative questions removed, entry itself still imported)
+	PartialFailedCount int              `json:"partial_failed_count,omitempty"`
+	SkippedCount       int              `json:"skipped_count,omitempty"`
+	FailedEntries      []FAQFailedEntry `json:"failed_entries,omitempty"`
 	// Successfully imported entries (when count is small)
 	SuccessEntries []FAQSuccessEntry `json:"success_entries,omitempty"`
+	// Indices of entries that passed validation (used to verify counts in dry-run and to skip validation on retry)
+	ValidEntryIndices []int `json:"valid_entry_indices,omitempty"`
+	// Indices of entries to merge on retry (internal use)
+	MergeEntryIndices []int `json:"merge_entry_indices,omitempty"`
+	// Entries merged into existing entries
+	MergedCount int `json:"merged_count,omitempty"`
+	// Newly added entries
+	AddedCount int `json:"added_count,omitempty"`
+	// Merge details per entry
+	MergeDetails []FAQMergeDetail `json:"merge_details,omitempty"`
+	// Retry cursor reported in live progress responses (observed in the
+	// reporter's response in #5691; not present in the server type on main)
+	NextEntryIndex int `json:"next_entry_index,omitempty"`
 	// CSV download URL when too many failures
 	FailedEntriesURL string `json:"failed_entries_url,omitempty"`
 	Message          string `json:"message"`
