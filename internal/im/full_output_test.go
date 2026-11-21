@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
@@ -358,6 +359,84 @@ func TestExecuteQARequestFullOutputSkipsProgressWhenNotSupported(t *testing.T) {
 	if inner.plainContent != "最终答案" {
 		t.Fatalf("plain reply = %q, want %q", inner.plainContent, "最终答案")
 	}
+}
+
+type typingOrderAdapter struct {
+	Adapter
+	order *fullOutputOrder
+	ctx   context.Context
+}
+
+func (a *typingOrderAdapter) BeginTyping(ctx context.Context, _ *IncomingMessage) func() {
+	a.ctx = ctx
+	a.order.add("typing-start")
+	return sync.OnceFunc(func() { a.order.add("typing-stop") })
+}
+
+func (a *typingOrderAdapter) SendReply(_ context.Context, _ *IncomingMessage, reply *ReplyMessage) error {
+	a.order.add(reply.Content)
+	return nil
+}
+
+func TestExecuteQARequestStopsTypingBeforeFinalReply(t *testing.T) {
+	service, _, _, order := newFullOutputHarness("最终答案")
+	ctx, cancel := context.WithCancel(context.Background())
+	service.executeQARequest(&qaRequest{
+		ctx: ctx, cancel: cancel,
+		msg:     &IncomingMessage{Platform: PlatformWeChat, UserID: "user-1", Content: "问题"},
+		session: &types.Session{ID: "session-1"},
+		adapter: &typingOrderAdapter{order: order},
+		channel: &IMChannel{OutputMode: "full"},
+		userKey: "user-key",
+	})
+
+	want := []string{"typing-start", "qa", "typing-stop", "最终答案"}
+	if got := order.snapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("reply lifecycle = %v, want %v", got, want)
+	}
+}
+
+type typingStopStreamManager struct{ fullOutputStreamManager }
+
+func (*typingStopStreamManager) GetEvents(context.Context, string, string, int) ([]interfaces.StreamEvent, int, error) {
+	return []interfaces.StreamEvent{{Type: types.ResponseType(event.EventStop)}}, 1, nil
+}
+
+type typingBlockedMessageService struct {
+	fullOutputMessageService
+	updating chan struct{}
+	release  chan struct{}
+}
+
+func (s *typingBlockedMessageService) UpdateMessage(context.Context, *types.Message) error {
+	close(s.updating)
+	<-s.release
+	return nil
+}
+
+func TestExecuteQARequestRemoteStopCancelsTypingBeforeSaving(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service, _, sessionService, order := newFullOutputHarness("")
+		sessionService.hangUntilCancel = true
+		messages := &typingBlockedMessageService{updating: make(chan struct{}), release: make(chan struct{})}
+		defer close(messages.release)
+		service.messageService = messages
+		service.streamManager = &typingStopStreamManager{}
+		adapter := &typingOrderAdapter{order: order}
+		ctx, cancel := context.WithCancel(context.Background())
+		go service.executeQARequest(&qaRequest{
+			ctx: ctx, cancel: cancel,
+			msg:     &IncomingMessage{Platform: PlatformWeChat, UserID: "user-1", Content: "问题"},
+			session: &types.Session{ID: "session-1"},
+			adapter: adapter,
+			channel: &IMChannel{OutputMode: "full"},
+			userKey: "user-key",
+		})
+		<-messages.updating
+		if !errors.Is(adapter.ctx.Err(), context.Canceled) {
+			t.Error("typing should be canceled while the stopped reply is still being saved")
+		}
+	})
 }
 
 func TestFormatIMOutboundAnswerOrFallbackAfterCleanup(t *testing.T) {
