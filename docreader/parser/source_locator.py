@@ -41,7 +41,7 @@ def _fold(ch: str) -> str:
     """Letters, digits and combining marks in a decomposed projection."""
     if not ch.isalnum() and not unicodedata.category(ch).startswith("M"):
         return ""
-    return unicodedata.normalize("NFKD", ch).lower()
+    return unicodedata.normalize("NFKD", ch).casefold()
 
 
 def normalize_with_positions(text: str) -> Tuple[str, List[int]]:
