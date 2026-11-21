@@ -62,6 +62,7 @@ func TestRerankProtocolAssignment(t *testing.T) {
 		"aliyun":          api.RerankDashScope,
 		"nvidia":          api.RerankNIM,
 		"pinecone":        api.RerankPinecone,
+		"voyage":          api.RerankVoyage,
 		"huggingface_tei": api.RerankTEI,
 		"lkeap":           api.RerankTencentLKEAP,
 		"volcengine":      api.RerankVolcengineKnowledge,

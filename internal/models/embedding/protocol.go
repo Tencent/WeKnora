@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/dashscopeembeddings"
 	"github.com/Tencent/WeKnora/internal/models/api/googleembeddings"
 	"github.com/Tencent/WeKnora/internal/models/api/openaiembeddings"
+	"github.com/Tencent/WeKnora/internal/models/api/voyageembeddings"
 	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -86,6 +87,18 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 		})
 	case api.EmbeddingGoogle:
 		client = googleembeddings.New(googleembeddings.Config{
+			Endpoint: endpoint, Settings: settings, Dimensions: dimensions, Retry: retry,
+		})
+	case api.EmbeddingVoyage:
+		client = voyageembeddings.NewText(voyageembeddings.Config{
+			Endpoint: endpoint, Settings: settings, Dimensions: dimensions, Retry: retry,
+		})
+	case api.EmbeddingVoyageContextualized:
+		client = voyageembeddings.NewContextualized(voyageembeddings.Config{
+			Endpoint: endpoint, Settings: settings, Dimensions: dimensions, Retry: retry,
+		})
+	case api.EmbeddingVoyageMultimodal:
+		client = voyageembeddings.NewMultimodal(voyageembeddings.Config{
 			Endpoint: endpoint, Settings: settings, Dimensions: dimensions, Retry: retry,
 		})
 	default:

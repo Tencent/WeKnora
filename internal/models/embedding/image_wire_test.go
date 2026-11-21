@@ -106,6 +106,17 @@ func TestImageEmbeddingWireFormatPerVendor(t *testing.T) {
 			},
 		},
 		{
+			name: "voyage sends each image as an image_base64 content part", provider: "voyage",
+			model: "voyage-multimodal-3.5", base: "/v1", images: 2, wantRequests: 2,
+			wantPath: "/v1/multimodalembeddings",
+			wantBody: map[string]any{
+				"model": "voyage-multimodal-3.5", "input_type": "document",
+				"inputs": []any{map[string]any{"content": []any{
+					map[string]any{"type": "image_base64", "image_base64": uri},
+				}}},
+			},
+		},
+		{
 			name: "a generic (vLLM) row sends each image as a messages conversation", provider: "generic",
 			model: "TIGER-Lab/VLM2Vec-Full", base: "/v1", images: 2, wantRequests: 2,
 			wantPath: "/v1/embeddings",
@@ -313,4 +324,31 @@ func TestImageEmbeddingPassesThroughEveryDecorator(t *testing.T) {
 	_, ok = AsImageEmbedder(text)
 	assert.False(t, ok)
 	assert.Equal(t, ImageLimits{}, text.ImageLimits())
+}
+
+// Voyage documents png, jpeg, webp and gif and a 20 MB ceiling per image. An
+// image outside that is refused before any request is spent on it.
+func TestVoyageMultimodalRefusesImagesItDocumentsNotToTake(t *testing.T) {
+	up := newUpstream(t)
+	e := imageEmbedder(t, up, "voyage", "voyage-multimodal-3.5", "/v1", nil)
+	ie, ok := AsImageEmbedder(e)
+	require.True(t, ok, "a multimodal Voyage model must expose its image side")
+
+	_, err := ie.BatchEmbedImages(context.Background(),
+		[]Image{{Data: []byte{1}, MIMEType: "image/bmp"}})
+	require.ErrorContains(t, err, "image/bmp")
+
+	_, err = ie.BatchEmbedImages(context.Background(),
+		[]Image{{Data: make([]byte, 20_000_001), MIMEType: "image/png"}})
+	require.ErrorContains(t, err, "the limit is 20000000")
+	assert.Empty(t, up.requests, "nothing may be sent for a refused image")
+}
+
+// The text models and the contextualized models have no image input at all.
+func TestVoyageTextAndContextualizedModelsTakeNoImages(t *testing.T) {
+	for _, model := range []string{"voyage-4", "voyage-context-4"} {
+		e := imageEmbedder(t, newUpstream(t), "voyage", model, "/v1", nil)
+		_, ok := AsImageEmbedder(e)
+		assert.False(t, ok, model)
+	}
 }
