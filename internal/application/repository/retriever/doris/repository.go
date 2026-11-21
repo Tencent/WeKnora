@@ -3,6 +3,7 @@ package doris
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -252,31 +253,54 @@ func (r *dorisRepository) DeleteBySourceIDList(ctx context.Context,
 	return r.deleteByField(ctx, fieldSourceID, sourceIDList, dimension)
 }
 
-// deleteByField 是三个 Delete* 方法的统一实现：
-// DELETE FROM <table> WHERE <field> IN (?, ?, ...)。
+// deleteByField is shared by the three Delete* methods. It discovers actual
+// dimension shards because the configured model dimension may have changed
+// since rows were written.
 func (r *dorisRepository) deleteByField(ctx context.Context,
-	field string, ids []string, dimension int,
+	field string, ids []string, _ int,
 ) error {
 	log := logger.GetLogger(ctx)
 	if len(ids) == 0 {
 		return nil
 	}
 
-	table := r.getTableName(dimension)
+	tables, err := r.listDimensionTables(ctx)
+	if err != nil {
+		return fmt.Errorf("list embedding tables for delete by %s: %w", field, err)
+	}
+	if len(tables) == 0 {
+		return nil
+	}
+
 	placeholders := make([]string, len(ids))
 	args := make([]any, len(ids))
 	for i, v := range ids {
 		placeholders[i] = "?"
 		args[i] = v
 	}
-	stmt := fmt.Sprintf("DELETE FROM `%s` WHERE %s IN (%s)",
-		table, field, strings.Join(placeholders, ", "))
 
-	if _, err := r.db.ExecContext(ctx, stmt, args...); err != nil {
-		log.Errorf("[Doris] Delete by %s failed: %v", field, err)
-		return fmt.Errorf("delete by %s: %w", field, err)
+	var deleteErrors []error
+	deletedTables := 0
+	for _, table := range tables {
+		stmt := fmt.Sprintf("DELETE FROM `%s` WHERE %s IN (%s)",
+			table, field, strings.Join(placeholders, ", "))
+		if _, err := r.db.ExecContext(ctx, stmt, args...); err != nil {
+			log.Errorf("[Doris] Delete by %s from %s failed: %v", field, table, err)
+			deleteErrors = append(deleteErrors, fmt.Errorf("%s: %w", table, err))
+			continue
+		}
+		deletedTables++
+		log.Infof("[Doris] Deleted matching rows from %s by %s", table, field)
 	}
-	log.Infof("[Doris] Deleted %d rows from %s by %s", len(ids), table, field)
+
+	if deletedTables == 0 && len(deleteErrors) > 0 {
+		return fmt.Errorf("delete by %s failed for all %d embedding tables: %w",
+			field, len(tables), errors.Join(deleteErrors...))
+	}
+	if len(deleteErrors) > 0 {
+		log.Errorf("[Doris] Delete by %s succeeded for %d/%d embedding tables; failures: %v",
+			field, deletedTables, len(tables), errors.Join(deleteErrors...))
+	}
 	return nil
 }
 
