@@ -27,7 +27,10 @@ func (f *exchangeEmbedSvc) ListByAgent(context.Context, uint64, string) ([]*type
 func (f *exchangeEmbedSvc) ListByTenant(context.Context, uint64) ([]*types.EmbedChannel, error) {
 	return nil, nil
 }
-func (f *exchangeEmbedSvc) Update(context.Context, uint64, string, *types.EmbedChannel, *bool, *bool, *bool, *bool, *string, *string, *string) (*types.EmbedChannel, error) {
+func (f *exchangeEmbedSvc) Update(
+	context.Context, uint64, string, *types.EmbedChannel,
+	*bool, *bool, *bool, *bool, *string, *string, *string, *bool, *bool,
+) (*types.EmbedChannel, error) {
 	return nil, nil
 }
 func (f *exchangeEmbedSvc) GetOwnedChannel(context.Context, uint64, string) (*types.EmbedChannel, error) {
