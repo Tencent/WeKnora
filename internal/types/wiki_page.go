@@ -390,6 +390,9 @@ type WikiPageUpdateRequest struct {
 	PageType *string      `json:"page_type,omitempty"`
 	Status   *string      `json:"status,omitempty"`
 	Aliases  *StringArray `json:"aliases,omitempty"`
+	// SourceRefs replaces the page's source provenance when present; an empty
+	// array clears it.
+	SourceRefs *StringArray `json:"source_refs,omitempty"`
 	// Version is the optimistic-lock guard: when > 0 the update is rejected
 	// with a conflict if the stored version differs (someone else edited the
 	// page since the client loaded it). 0 skips the check (legacy clients).
