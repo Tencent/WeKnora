@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/api/openaichataudio"
 	"github.com/Tencent/WeKnora/internal/models/api/openaitranscriptions"
+	"github.com/Tencent/WeKnora/internal/models/api/volcengineauc"
 	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -97,6 +98,17 @@ func newASR(config *Config) (ASR, error) {
 	case api.TranscriptionChatAudio:
 		client = openaichataudio.New(openaichataudio.Config{
 			Endpoint: endpoint, Settings: settings, Retry: retryPolicy(),
+		})
+	case api.TranscriptionVolcengineAUC:
+		// The one-sentence API carries its own credential shape: the token
+		// authenticates a `Bearer;` header the protocol client stamps, and
+		// appid plus cluster live in the request header's app object, so they
+		// arrive explicitly like tencentlkeap's secret pair.
+		client = volcengineauc.New(volcengineauc.Config{
+			Endpoint: endpoint, Settings: settings,
+			Token:   config.APIKey,
+			AppID:   config.ExtraConfig["app_id"],
+			Cluster: config.ExtraConfig["cluster"],
 		})
 	default:
 		return nil, fmt.Errorf("unsupported transcription api %q for provider %s",
