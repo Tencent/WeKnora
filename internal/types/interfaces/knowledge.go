@@ -133,6 +133,10 @@ type KnowledgeService interface {
 		knowledgeID string,
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
+	// UpdateKnowledgeContent rewrites the stored source of a plain-text (md/markdown/txt)
+	// file knowledge with the submitted full text and re-parses it so chunks and
+	// indexes follow the new content. Binary formats stay on ReplaceKnowledgeFile.
+	UpdateKnowledgeContent(ctx context.Context, knowledgeID string, content string) (*types.Knowledge, error)
 	// ReplaceKnowledgeFile replaces the source file of an existing file knowledge
 	// while preserving its ID, then re-parses it. A path-qualified customFileName
 	// also sets the folder; a bare filename keeps the current folder. Metadata

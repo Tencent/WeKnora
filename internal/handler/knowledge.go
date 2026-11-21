@@ -3611,3 +3611,52 @@ func tenantAPIKeySearchScopes(ctx context.Context) ([]types.KnowledgeSearchScope
 	}
 	return scopes, true
 }
+
+// UpdateKnowledgeContent godoc
+// @Summary      在线编辑文本类文件原文
+// @Description  用提交的全文覆盖 md/markdown/txt 文件知识的原始存储对象并触发重解析；二进制格式仍走文件替换上传
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id      path  string                                true  "知识ID"  extensions(x-agent=knowledge_id)
+// @Param        request body handler.UpdateKnowledgeContentRequest true  "新全文"
+// @Success      200     {object}  handler.DataResponse{data=types.Knowledge}       "重解析中的知识"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/{id}/content [put]
+func (h *KnowledgeHandler) UpdateKnowledgeContent(c *gin.Context) {
+	ctx := c.Request.Context()
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		_ = c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	var req UpdateKnowledgeContentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	knowledge, err := h.kgService.UpdateKnowledgeContent(effCtx, id, req.Content)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_id": id})
+		_ = c.Error(errors.NewInternalServerError("更新文件原文失败"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": knowledge})
+}
+
+// UpdateKnowledgeContentRequest carries the full replacement text of a
+// plain-text file knowledge source.
+type UpdateKnowledgeContentRequest struct {
+	// Complete new file content; saved as the new source and re-parsed.
+	Content string `json:"content"`
+}
