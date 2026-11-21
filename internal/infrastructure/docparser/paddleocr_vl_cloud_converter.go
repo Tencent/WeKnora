@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -82,7 +81,7 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 		return nil, fmt.Errorf("PaddleOCR-VL Cloud poll: %w", err)
 	}
 
-	mdContent, imagesURL, layoutUnits, err := c.fetchResults(jsonlURL)
+	mdContent, imagesURL, pageLayouts, err := c.fetchResults(jsonlURL)
 	if err != nil {
 		return nil, fmt.Errorf("PaddleOCR-VL Cloud fetch results: %w", err)
 	}
@@ -98,7 +97,7 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
-		SourceBlocks:    paddleOCRVLSourceBlocks(mdContent, layoutUnits, req.FileType),
+		SourceBlocks:    paddleOCRVLSourceBlocks(mdContent, pageLayouts, req.FileType),
 	}, nil
 }
 
@@ -278,7 +277,9 @@ type paddleOCRVLCloudResultLine struct {
 	} `json:"result"`
 }
 
-func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[string]string, []sourceloc.Unit, error) {
+func (c *PaddleOCRVLCloudReader) fetchResults(
+	jsonlURL string,
+) (string, map[string]string, []paddleOCRVLPageLayout, error) {
 	if err := utils.ValidateURLForSSRF(jsonlURL); err != nil {
 		return "", nil, nil, fmt.Errorf("jsonl URL blocked by SSRF check: %v", err)
 	}
@@ -298,7 +299,7 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 
 	texts := make([]string, 0)
 	images := make(map[string]string)
-	var units []sourceloc.Unit
+	var pageLayouts []paddleOCRVLPageLayout
 	pageNumber := 0
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		line = strings.TrimSpace(line)
@@ -312,7 +313,10 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 		}
 		for _, p := range parsed.Result.LayoutParsingResults {
 			pageNumber++
-			units = append(units, paddleOCRVLPageUnits(pageNumber, p)...)
+			pageLayouts = append(pageLayouts, paddleOCRVLPageLayout{
+				markdown: p.Markdown.Text,
+				units:    paddleOCRVLPageUnits(pageNumber, p),
+			})
 			if t := strings.TrimSpace(p.Markdown.Text); t != "" {
 				texts = append(texts, p.Markdown.Text)
 			}
@@ -325,7 +329,7 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 	}
 
 	logger.Infof(context.Background(), "[PaddleOCR-VL Cloud] fetched %d page(s), images=%d", len(texts), len(images))
-	return strings.Join(texts, "\n\n"), images, units, nil
+	return strings.Join(texts, paddleOCRVLPageSeparator), images, pageLayouts, nil
 }
 
 // downloadImages fetches each referenced image URL and builds ImageRef entries.
