@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -211,4 +212,68 @@ func TestScheduledConsolidationIgnoresAHandfulOfMemories(t *testing.T) {
 	_, total, err := svc.ListItems(ctx, types.MemoryStatusActive, 10, 0)
 	require.NoError(t, err)
 	require.Equal(t, int64(2), total)
+}
+
+type manualEditDuringConsolidationModels struct {
+	*stubModelService
+	hook func()
+}
+
+func (m *manualEditDuringConsolidationModels) GetChatModel(
+	context.Context, string,
+) (chat.Chat, error) {
+	return &manualEditDuringConsolidationChat{
+		stubChatModel: &stubChatModel{},
+		hook:          m.hook,
+	}, nil
+}
+
+type manualEditDuringConsolidationChat struct {
+	*stubChatModel
+	hook func()
+}
+
+func (m *manualEditDuringConsolidationChat) Chat(
+	context.Context, []chat.Message, *chat.ChatOptions,
+) (*types.ChatResponse, error) {
+	m.hook()
+	return &types.ChatResponse{Content: `{"statement":"回答直接给结论，不要铺垫"}`}, nil
+}
+
+// A model result describes the candidates as they were when the call started.
+// A correction saved while the call was in flight must survive: the review
+// discards the stale group instead of superseding the newer wording.
+func TestConsolidationDiscardsResultWhenAManualEditWinsTheRace(t *testing.T) {
+	svc, tenantRepo, models := newConsolidationHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	scope := scopeFor(t, ctx)
+	_, err := svc.repo.EnsureSubject(ctx, scope)
+	require.NoError(t, err)
+	seedSimilarPreferences(t, svc, ctx, scope)
+	items, _, err := svc.repo.ListItems(ctx, scope, types.MemoryStatusActive, 50, 0)
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	target := items[0].ID
+	const corrected = "回答先解释推理过程，然后给结论"
+
+	svc.modelService = &manualEditDuringConsolidationModels{
+		stubModelService: models,
+		hook: func() {
+			edited, editErr := svc.UpdateItem(ctx, target, corrected, 5)
+			require.NoError(t, editErr)
+			require.Equal(t, corrected, edited.Content)
+		},
+	}
+	result, err := svc.ConsolidateNow(ctx)
+	require.NoError(t, err)
+	require.Zero(t, result.Merged)
+	require.Equal(t, types.MemoryConsolidationSkipStaleCandidates, result.Skipped)
+
+	edited, err := svc.repo.GetItem(ctx, scope, target)
+	require.NoError(t, err)
+	require.Equal(t, types.MemoryStatusActive, edited.Status)
+	require.Equal(t, corrected, edited.Content)
+	_, total, err := svc.repo.ListItems(ctx, scope, types.MemoryStatusActive, 10, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total, "the untouched sibling must stay active too")
 }
