@@ -318,6 +318,7 @@ interface BaseModelTestPayload {
 // 检查远程API模型
 export function checkRemoteModel(modelConfig: {
     modelName: string;
+    modelType?: 'KnowledgeQA' | 'VLLM';
     baseUrl: string;
     apiKey?: string;
     provider?: string;

@@ -29,6 +29,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/providers"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -1831,7 +1832,7 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 
 // ModelTestRequest 统一的"测试连接"请求体。
 //
-// 四种模型（chat/embedding/rerank/asr）的测试接口共享同一份结构，以便：
+// 聊天、视觉、Embedding、Rerank 和 ASR 的测试接口共享同一份结构，以便：
 //   - 前端只需维护一份表单 → 后端映射。
 //   - 后端可以直接把请求转成 *types.Model，再调用各包的 ConfigFromModel，
 //     与生产路径（service.modelService.GetXxxModel）走完全相同的装配流程，
@@ -1862,6 +1863,8 @@ type ModelTestRequest struct {
 	// stored values, so a user can validate a new endpoint against the
 	// existing credentials in one click.
 	ModelID string `json:"modelId,omitempty"`
+	// ModelType selects the remote connection probe and defaults to KnowledgeQA.
+	ModelType types.ModelType `json:"modelType,omitempty" enums:"KnowledgeQA,VLLM"`
 }
 
 // fillSecretsFromStoredModel mutates req in place: if req.ModelID is set
@@ -1869,8 +1872,8 @@ type ModelTestRequest struct {
 // the stored (and decrypted) model is copied in. The stored ExtraConfig is
 // filled in as well when the request does not carry one — provider-specific
 // settings (thinking_control, api_version, remote_model_name, ...) must
-// apply to the connection test exactly as they apply to real traffic, and
-// the frontend only sends extraConfig when the user actively edits it.
+// apply to the connection test exactly as they apply to real traffic.
+// Vision probes also inherit an omitted interfaceType from the stored VLM.
 // Non-empty request values are always preferred — they represent the user
 // actively typing a new key they want to verify. Missing or inaccessible
 // model is treated as a no-op (the connection test will fail downstream
@@ -1883,7 +1886,8 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	// secret stored in extra_config (LKEAP / Volcengine secret_key) is
 	// redacted by GET, so "extraConfig is present" does not mean it is
 	// complete.
-	if req.APIKey != "" && req.AppSecret != "" && req.ExtraConfig != nil && req.Spec != nil &&
+	needsInterfaceType := req.ModelType == types.ModelTypeVLLM && req.InterfaceType == ""
+	if !needsInterfaceType && req.APIKey != "" && req.AppSecret != "" && req.ExtraConfig != nil && req.Spec != nil &&
 		dto.HasAllSecretExtras(req.Provider, req.BaseURL, req.ExtraConfig) {
 		return
 	}
@@ -1892,6 +1896,9 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 		logger.Warnf(ctx, "test-connection: stored model %s not found, leaving secrets empty: %v",
 			utils.SanitizeForLog(req.ModelID), err)
 		return
+	}
+	if needsInterfaceType && stored.Type == types.ModelTypeVLLM {
+		req.InterfaceType = stored.Parameters.InterfaceType
 	}
 	if req.Spec == nil && req.Provider == stored.Parameters.Provider {
 		req.Spec = stored.Parameters.Spec
@@ -1981,7 +1988,7 @@ func (h *InitializationHandler) resolveTenantWeKnoraCloudCreds(ctx context.Conte
 
 // CheckRemoteModel godoc
 // @Summary      检查远程模型
-// @Description  检查远程API模型连接是否正常
+// @Description  检查远程 API 模型连接。modelType=VLLM 时发送合成图片，收到完整的非空回复才标记为可用。省略 modelType 时检查聊天模型。
 // @Tags         初始化
 // @Accept       json
 // @Produce      json
@@ -2002,18 +2009,31 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	switch req.ModelType {
+	case "":
+		req.ModelType = types.ModelTypeKnowledgeQA
+	case types.ModelTypeKnowledgeQA, types.ModelTypeVLLM:
+	default:
+		_ = c.Error(errors.NewBadRequestError("modelType must be KnowledgeQA or VLLM"))
+		return
+	}
 	h.fillSecretsFromStoredModel(ctx, &req)
 
-	if req.ModelName == "" || req.BaseURL == "" {
+	model := h.buildTestModel(&req, req.ModelType, types.ModelSourceRemote)
+	// Native Ollama uses the server-configured client. The draft URL is unused.
+	usesOllama := model.Type == types.ModelTypeVLLM && vlm.UsesOllama(model.Source, model.Parameters.InterfaceType)
+	if req.ModelName == "" || (!usesOllama && req.BaseURL == "") {
 		logger.Error(ctx, "Model name and base URL are required")
 		c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
 		return
 	}
 
-	if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
-		logger.Warnf(ctx, "SSRF validation failed for remote model BaseURL: %v", err)
-		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
-		return
+	if !usesOllama {
+		if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
+			logger.Warnf(ctx, "SSRF validation failed for remote model BaseURL: %v", err)
+			_ = c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
+			return
+		}
 	}
 	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
 	if !ok {
@@ -2022,8 +2042,13 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		return
 	}
 
-	model := h.buildTestModel(&req, types.ModelTypeKnowledgeQA, types.ModelSourceRemote)
-	available, message := h.checkChatModelConnection(ctx, model, appID, appSecret)
+	var available bool
+	var message string
+	if model.Type == types.ModelTypeVLLM {
+		available, message = h.checkVisionModelConnection(ctx, model, appID, appSecret)
+	} else {
+		available, message = h.checkChatModelConnection(ctx, model, appID, appSecret)
+	}
 
 	logger.Infof(ctx, "Remote model check completed, available: %v, message: %s", available, message)
 

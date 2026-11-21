@@ -158,3 +158,29 @@ func TestRemoteAPIVLMReportsTruncatedCompletion(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoteAPIVLMRejectsIncompleteReplyWhenRequested(t *testing.T) {
+	withVLMSSRFWhitelist(t, "127.0.0.1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"partial answer"}],"stop_reason":null}`))
+	}))
+	defer server.Close()
+
+	v, err := NewRemoteAPIVLM(&Config{
+		BaseURL: server.URL, ModelName: "claude-sonnet-4-6", APIKey: "test-key", Provider: "anthropic",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := v.PredictWithOptions(
+		t.Context(), [][]byte{testPNG}, "describe the image", &PredictOptions{RejectTruncated: true},
+	)
+	if !errors.Is(err, ErrTruncatedCompletion) || content != "" {
+		t.Fatalf("PredictWithOptions() = (%q, %v), want empty content and %v", content, err, ErrTruncatedCompletion)
+	}
+	content, err = v.Predict(t.Context(), [][]byte{testPNG}, "describe the image")
+	if err != nil || content != "partial answer" {
+		t.Fatalf("Predict() = (%q, %v), want partial answer", content, err)
+	}
+}

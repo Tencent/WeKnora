@@ -94,6 +94,7 @@ type weKnoraCloudVLMResponse struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 }
 
@@ -102,11 +103,9 @@ func (v *WeKnoraCloudVLM) Predict(ctx context.Context, imgBytesList [][]byte, pr
 	return v.PredictWithOptions(ctx, imgBytesList, prompt, nil)
 }
 
-// PredictWithOptions satisfies the interface. The hosted endpoint exposes no
-// thinking switch, so the options are accepted and used for nothing — the same
-// call goes out as Predict sends.
+// PredictWithOptions sends images to the hosted endpoint with optional truncation validation.
 func (v *WeKnoraCloudVLM) PredictWithOptions(
-	ctx context.Context, imgBytesList [][]byte, prompt string, _ *PredictOptions,
+	ctx context.Context, imgBytesList [][]byte, prompt string, opts *PredictOptions,
 ) (string, error) {
 	var parts []weKnoraCloudVLMContentPart
 
@@ -185,7 +184,11 @@ func (v *WeKnoraCloudVLM) PredictWithOptions(
 		return "", fmt.Errorf("weknoracloud VLM: no choices in response")
 	}
 
-	content := vlmResp.Choices[0].Message.Content
+	choice := vlmResp.Choices[0]
+	if opts != nil && opts.RejectTruncated && choice.FinishReason == "length" {
+		return "", fmt.Errorf("%w (finish_reason=length)", ErrTruncatedCompletion)
+	}
+	content := choice.Message.Content
 	logger.Infof(ctx, "[VLM] WeKnoraCloud response received, len=%d", len(content))
 	return content, nil
 }
