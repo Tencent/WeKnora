@@ -224,6 +224,19 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			wantBody: cohere("rerank-v3.5", three, nil),
 		},
 		{
+			name: "contextual v1", provider: "contextual", model: "ctxl-rerank-v2-instruct-multilingual", base: "/v1",
+			wantPath: "/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: cohere("ctxl-rerank-v2-instruct-multilingual", three,
+				map[string]any{"top_n": float64(len(three))}),
+		},
+		{
+			name: "contextual full endpoint", provider: "contextual",
+			model: "ctxl-rerank-v2-instruct-multilingual-mini", base: "/v1/rerank",
+			wantPath: "/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: cohere("ctxl-rerank-v2-instruct-multilingual-mini", three,
+				map[string]any{"top_n": float64(len(three))}),
+		},
+		{
 			name: "zhipu on its full rerank URL", provider: "zhipu", model: "rerank", base: "/api/paas/v4/rerank",
 			wantPath: "/api/paas/v4/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
 			wantBody: cohere("rerank", three, map[string]any{"return_documents": true}),
