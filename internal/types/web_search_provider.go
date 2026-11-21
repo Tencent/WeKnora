@@ -32,6 +32,7 @@ const (
 	WebSearchProviderTypeSerply     WebSearchProviderType = "serply"
 	WebSearchProviderTypeDeepSeek   WebSearchProviderType = "deepseek"
 	WebSearchProviderTypeSearchAPI  WebSearchProviderType = "searchapi"
+	WebSearchProviderTypeFirecrawl  WebSearchProviderType = "firecrawl"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -194,6 +195,25 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			ID: "searchapi", Name: "SearchApi", RequiresAPIKey: true, SupportsProxy: true,
 			Description: "SearchApi Google search API (supports country and freshness filters)",
 			DocsURL:     "https://www.searchapi.io/docs/google",
+		},
+		{
+			ID: "firecrawl", Name: "Firecrawl", RequiresAPIKey: true, SupportsProxy: true,
+			Description: "Firecrawl Search API (supports country and freshness filters, optional page content)",
+			DocsURL: "https://www.firecrawl.dev/signin?utm_source=weknora&utm_medium=integration" +
+				"&redirect=%2Fapp%2Fapi-keys",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:         "include_content",
+					Label:       "Include page content",
+					Type:        "select",
+					Default:     "false",
+					Description: "Return each page as markdown in the unified result Content field (extra credits).",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Enabled", Value: "true"},
+						{Label: "Disabled", Value: "false"},
+					},
+				},
+			},
 		},
 		{
 			ID:             "duckduckgo",

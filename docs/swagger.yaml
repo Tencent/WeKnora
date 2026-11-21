@@ -9915,6 +9915,7 @@ definitions:
     - serply
     - deepseek
     - searchapi
+    - firecrawl
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBrave
@@ -9933,6 +9934,7 @@ definitions:
     - WebSearchProviderTypeSerply
     - WebSearchProviderTypeDeepSeek
     - WebSearchProviderTypeSearchAPI
+    - WebSearchProviderTypeFirecrawl
   github_com_Tencent_WeKnora_internal_types.WebSearchProviderTypeInfo:
     properties:
       clients:
