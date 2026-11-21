@@ -74,7 +74,7 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -118,7 +118,7 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 	var pagination types.Pagination
 	if err := c.ShouldBindQuery(&pagination); err != nil {
 		logger.Errorf(ctx, "Failed to parse pagination parameters: %s", secutils.SanitizeForLog(err.Error()))
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	if pagination.Page < 1 {
@@ -145,7 +145,7 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 	result, err := h.service.ListPagedChunksByKnowledgeID(ctx, knowledgeID, &pagination, chunkType)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -166,6 +166,32 @@ type UpdateChunkRequest struct {
 	IsEnabled *bool `json:"is_enabled" extensions:"x-agent"`
 	// Current content_revision from chunk.get; a stale value fails with HTTP 409.
 	ExpectedRevision *int `json:"expected_revision" minimum:"0" extensions:"x-agent,x-agent-required"`
+}
+
+// CreateChunkRequest defines the request structure for creating a manual chunk
+type CreateChunkRequest struct {
+	// Full content of the new chunk; trimmed and validated like chunk updates.
+	Content string `json:"content" extensions:"x-agent,x-agent-max-bytes=32000"`
+	// Whether the new chunk participates in retrieval; omitted defaults to true.
+	IsEnabled *bool `json:"is_enabled" extensions:"x-agent"`
+}
+
+// MergeChunksRequest defines the request structure for merging chunks
+type MergeChunksRequest struct {
+	// 2..N chunk ids in document order; must be adjacent text chunks of one document.
+	ChunkIDs []string `json:"chunk_ids" extensions:"x-agent"`
+	// Optional content_revision per chunk id; a stale value fails with HTTP 409.
+	ExpectedRevisions []int `json:"expected_revisions" extensions:"x-agent"`
+}
+
+// SplitChunkRequest defines the request structure for splitting a chunk
+type SplitChunkRequest struct {
+	// Rune offset inside the chunk body; both halves must be non-empty.
+	SplitAt int `json:"split_at" minimum:"1" extensions:"x-agent"`
+	// Current content_revision from chunk.get; a stale value fails with HTTP 409.
+	ExpectedRevision *int `json:"expected_revision" minimum:"0" extensions:"x-agent"`
+	// Whether the new suffix chunk participates in retrieval; omitted inherits.
+	IsEnabled *bool `json:"is_enabled" extensions:"x-agent"`
 }
 
 // fetchChunkAndVerifyOwnership fetches a chunk by ID and verifies it
@@ -232,7 +258,7 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 	var req UpdateChunkRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Errorf(ctx, "Failed to parse request parameters: %s", secutils.SanitizeForLog(err.Error()))
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -240,7 +266,7 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		if stderrors.Is(err, service.ErrChunkRevisionConflict) {
-			c.Error(errors.NewConflictError("Chunk was modified by another user; refresh and retry"))
+			_ = c.Error(errors.NewConflictError("Chunk was modified by another user; refresh and retry"))
 			return
 		}
 		var appErr *errors.AppError
@@ -287,7 +313,7 @@ func (h *ChunkHandler) ListChunkRevisions(c *gin.Context) {
 	}
 	items, err := h.service.ListChunkRevisions(c.Request.Context(), chunk.ID)
 	if err != nil {
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": items})
@@ -322,7 +348,7 @@ func (h *ChunkHandler) RevertChunk(c *gin.Context) {
 	}
 	var req RevertChunkRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	if req.Revision == nil || *req.Revision < 0 {
@@ -368,12 +394,12 @@ func (h *ChunkHandler) UpsertGeneratedQuestion(c *gin.Context) {
 	}
 	var req UpsertGeneratedQuestionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	item, err := h.service.UpsertGeneratedQuestion(c.Request.Context(), chunkID, req.QuestionID, req.Question)
 	if err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": item})
@@ -387,7 +413,7 @@ func (h *ChunkHandler) RegenerateGeneratedQuestions(c *gin.Context) {
 	}
 	items, err := h.kgService.RegenerateChunkQuestions(c.Request.Context(), chunkID)
 	if err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": items})
@@ -419,7 +445,7 @@ func (h *ChunkHandler) DeleteChunk(c *gin.Context) {
 
 	if err := h.service.DeleteChunk(ctx, chunk.ID); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -454,7 +480,7 @@ func (h *ChunkHandler) DeleteChunksByKnowledgeID(c *gin.Context) {
 
 	if err := h.service.DeleteChunksByKnowledgeID(ctx, knowledgeID); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
@@ -500,7 +526,7 @@ func (h *ChunkHandler) DeleteGeneratedQuestion(c *gin.Context) {
 
 	if err := h.service.DeleteGeneratedQuestion(ctx, chunkID, req.QuestionID); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 
@@ -517,4 +543,118 @@ func (h *ChunkHandler) DeleteGeneratedQuestion(c *gin.Context) {
 type AgentChunkDetail struct {
 	types.Chunk
 	Content string `json:"content" extensions:"x-agent,x-agent-max-runes=8000"`
+}
+
+// CreateChunk godoc
+// @Summary      新建人工分块
+// @Description  在指定知识下新建一个人工分块并立即重建索引
+// @Tags         分块管理
+// @Accept       json
+// @Produce      json
+// @Param        knowledge_id path string true "知识ID" extensions(x-agent)
+// @Param        request body CreateChunkRequest true "创建请求"
+// @Success      200 {object} handler.DataResponse{data=types.Chunk} "新建的分块"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /chunks/{knowledge_id} [post]
+func (h *ChunkHandler) CreateChunk(c *gin.Context) {
+	ctx := c.Request.Context()
+	knowledgeID := c.Param("knowledge_id")
+	var req CreateChunkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	chunk, err := h.service.CreateManualChunk(ctx, knowledgeID, req.Content, req.IsEnabled)
+	if err != nil {
+		var appErr *errors.AppError
+		if stderrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": chunk})
+}
+
+// MergeChunks godoc
+// @Summary      合并相邻分块
+// @Description  将同一知识下 2..N 个相邻文本分块按文档顺序合并进第一个分块
+// @Tags         分块管理
+// @Accept       json
+// @Produce      json
+// @Param        knowledge_id path string true "知识ID"
+// @Param        request body MergeChunksRequest true "合并请求"
+// @Success      200 {object} handler.DataResponse{data=types.Chunk} "合并后的分块"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /chunks/{knowledge_id}/merge [post]
+func (h *ChunkHandler) MergeChunks(c *gin.Context) {
+	ctx := c.Request.Context()
+	knowledgeID := c.Param("knowledge_id")
+	var req MergeChunksRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	merged, err := h.service.MergeChunks(ctx, knowledgeID, req.ChunkIDs, req.ExpectedRevisions)
+	if err != nil {
+		if stderrors.Is(err, service.ErrChunkRevisionConflict) {
+			_ = c.Error(errors.NewConflictError("Chunk was modified by another user; refresh and retry"))
+			return
+		}
+		var appErr *errors.AppError
+		if stderrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": merged})
+}
+
+// SplitChunk godoc
+// @Summary      拆分分块
+// @Description  在指定字符偏移处把一个文本分块拆成两块并各自重建索引
+// @Tags         分块管理
+// @Accept       json
+// @Produce      json
+// @Param        knowledge_id path string true "知识ID" extensions(x-agent)
+// @Param        id path string true "分块ID" extensions(x-agent=chunk_id)
+// @Param        request body SplitChunkRequest true "拆分请求"
+// @Success      200 {object} handler.DataResponse{data=[]types.Chunk} "拆分后的两个分块"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /chunks/{knowledge_id}/{id}/split [post]
+func (h *ChunkHandler) SplitChunk(c *gin.Context) {
+	ctx := c.Request.Context()
+	// The chunk must belong to the :knowledge_id in the path; without this
+	// check a caller could split a chunk of another document by id alone.
+	chunk, _, err := h.fetchChunkAndVerifyOwnership(c)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	var req SplitChunkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	pair, err := h.service.SplitChunk(ctx, chunk.ID, req.SplitAt, req.ExpectedRevision, req.IsEnabled)
+	if err != nil {
+		if stderrors.Is(err, service.ErrChunkRevisionConflict) {
+			_ = c.Error(errors.NewConflictError("Chunk was modified by another user; refresh and retry"))
+			return
+		}
+		var appErr *errors.AppError
+		if stderrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": pair})
 }

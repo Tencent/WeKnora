@@ -109,6 +109,21 @@ type ChunkRepository interface {
 	DeleteChunk(ctx context.Context, tenantID uint64, id string) error
 	// DeleteChunks deletes chunks by IDs in batch
 	DeleteChunks(ctx context.Context, tenantID uint64, ids []string) error
+	// NextChunkIndex returns the chunk_index a newly appended text chunk
+	// should take: one past the highest index stored for the knowledge.
+	NextChunkIndex(ctx context.Context, tenantID uint64, knowledgeID string) (int, error)
+	// SplitChunkRows shifts the chunks after the split point and inserts the
+	// suffix row in one transaction so a failure never leaves a gap or a
+	// duplicate chunk_index behind.
+	SplitChunkRows(
+		ctx context.Context, tenantID uint64, knowledgeID string, fromIndex int, tail *types.Chunk,
+	) error
+	// MergeChunkRows deletes the absorbed rows with their revision snapshots
+	// and compacts the following chunk_index values in one transaction.
+	MergeChunkRows(
+		ctx context.Context, tenantID uint64, knowledgeID string,
+		absorbedIDs []string, compactFrom int, delta int,
+	) error
 	// DeleteChunksByKnowledgeID deletes chunks by knowledge id
 	DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list
@@ -212,6 +227,14 @@ type ChunkService interface {
 	// DeleteGeneratedQuestion deletes a single generated question from a chunk by question ID
 	// This updates the chunk metadata and removes the corresponding vector index
 	DeleteGeneratedQuestion(ctx context.Context, chunkID string, questionID string) error
+	// CreateManualChunk appends a user-authored text chunk to a document.
+	CreateManualChunk(ctx context.Context, knowledgeID string, content string, isEnabled *bool) (*types.Chunk, error)
+	// MergeChunks folds 2..N adjacent text chunks into the first one.
+	MergeChunks(ctx context.Context, knowledgeID string, chunkIDs []string,
+		expectedRevisions []int) (*types.Chunk, error)
+	// SplitChunk divides one text chunk at a rune offset into two rows.
+	SplitChunk(ctx context.Context, chunkID string, splitAt int,
+		expectedRevision *int, isEnabled *bool) ([]*types.Chunk, error)
 	// UpdateDocumentChunk applies a revision-checked edit and synchronizes retrieval indices.
 	UpdateDocumentChunk(ctx context.Context, chunkID string, content *string, isEnabled *bool, expectedRevision *int) (*types.Chunk, error)
 	// ListChunkRevisions lists immutable snapshots for a chunk.
