@@ -1,4 +1,18 @@
 export default {
+  answerFeedback: {
+    like: '좋아요',
+    dislike: '싫어요',
+    liked: '좋아요 표시됨',
+    disliked: '싫어요 표시됨',
+    dialogTitle: '이 답변의 어떤 점이 도움이 되지 않았나요?',
+    dialogHint: '선택 사항입니다. 이유는 이 답변이 인용한 지식 조각에 기록됩니다.',
+    reasonPlaceholder: '고쳐야 할 내용',
+    submit: '제출',
+    cancel: '취소',
+    saved: '피드백을 저장했습니다',
+    cancelled: '평가를 취소했습니다',
+    failed: '피드백을 저장하지 못했습니다'
+  },
   localBrowser: {
     pipOpen: '미리보기 팝업 열기',
     pipReturn: '대화 내 미리보기로 돌아가기',

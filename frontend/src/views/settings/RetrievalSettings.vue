@@ -82,6 +82,32 @@
         </div>
       </div>
     </div>
+    <div v-show="activeTab === 'feedback'" id="retrieval-panel-feedback" role="tabpanel" aria-labelledby="retrieval-tab-feedback">
+      <div class="settings-group">
+        <p class="setting-desc">{{ t('retrievalSettings.feedbackDescription') }}</p>
+        <div class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ t('retrievalSettings.feedbackEnabled') }}</span>
+            <t-switch v-model="localConfig.chunk_feedback.enabled" :disabled="!canEdit" @change="handleParamChange" />
+          </div>
+          <p class="setting-desc">{{ t('retrievalSettings.feedbackEnabledDescription') }}</p>
+        </div>
+        <div v-for="field in feedbackFields" :key="field.key" class="setting-item">
+          <div class="setting-label-row">
+            <span>{{ field.label }}</span>
+            <span class="value-display">{{ feedbackValue(field.key) }}</span>
+          </div>
+          <t-slider
+            :value="localConfig.chunk_feedback[field.key]"
+            :min="field.min"
+            :max="field.max"
+            :step="field.step"
+            :disabled="!canEdit"
+            @change="handleFeedbackChange(field.key, $event)"
+          />
+        </div>
+      </div>
+    </div>
     <div v-show="activeTab === 'rerank'" id="retrieval-panel-rerank" role="tabpanel" aria-labelledby="retrieval-tab-rerank">
       <div class="settings-group">
         <!-- Rerank Model -->
@@ -152,6 +178,7 @@ import ModelSelector from '@/components/ModelSelector.vue'
 import {
   getTenantRetrievalConfig,
   updateTenantRetrievalConfig,
+  type ChunkFeedbackConfig,
   type RetrievalConfig,
 } from '@/api/retrieval'
 import { useAuthStore } from '@/stores/auth'
@@ -163,6 +190,7 @@ const tabs = computed(() => [
   { key: 'recall', label: t('retrievalSettings.recallTab') },
   { key: 'rrf', label: t('retrievalSettings.rrfTitle') },
   { key: 'rerank', label: t('retrievalSettings.rerankTab') },
+  { key: 'feedback', label: t('retrievalSettings.feedbackTab') },
 ])
 const moveTab = (index: number, direction: number, event: KeyboardEvent) => {
   const next = (index + direction + tabs.value.length) % tabs.value.length
@@ -177,6 +205,17 @@ const isCurrentView = () => !viewInvalidated.value && authStore.effectiveTenantI
 // 加载完成前保持只读，避免用默认值覆盖尚未读回的空间配置。
 const canEdit = computed(() => authStore.hasRole('admin') && !isInitializing.value && isCurrentView())
 
+const defaultFeedback: ChunkFeedbackConfig = {
+  enabled: true,
+  boost_threshold: 0.8,
+  degrade_threshold: 0.5,
+  needs_optimization_threshold: 0.3,
+  boost_weight: 1.2,
+  neutral_weight: 1,
+  degrade_weight: 0.8,
+  min_samples: 1,
+}
+
 const defaultConfig: RetrievalConfig = {
   embedding_top_k: 50,
   vector_threshold: 0.15,
@@ -184,6 +223,7 @@ const defaultConfig: RetrievalConfig = {
   rerank_top_k: 10,
   rerank_threshold: 0.2,
   rerank_model_id: '',
+  chunk_feedback: { ...defaultFeedback },
 }
 
 type RrfField = 'rrf_k' | 'rrf_vector_weight' | 'rrf_keyword_weight'
@@ -193,7 +233,10 @@ const rrfFields = computed<{ key: RrfField; label: string; description: string; 
   { key: 'rrf_keyword_weight', label: t('retrievalSettings.rrfKeywordWeightLabel'), description: t('retrievalSettings.rrfKeywordWeightDescription'), defaultValue: 0.3, step: 0.1 },
 ])
 
-const localConfig = reactive<RetrievalConfig>({ ...defaultConfig })
+const localConfig = reactive<RetrievalConfig & { chunk_feedback: ChunkFeedbackConfig }>({
+  ...defaultConfig,
+  chunk_feedback: { ...defaultFeedback },
+})
 let initialConfig: RetrievalConfig = { ...defaultConfig }
 const SAVE_DEBOUNCE_MS = 500
 const INITIALIZATION_DELAY_MS = 100
@@ -232,8 +275,9 @@ const loadConfig = async () => {
       rrf_k: cfg.rrf_k,
       rrf_vector_weight: cfg.rrf_vector_weight,
       rrf_keyword_weight: cfg.rrf_keyword_weight,
+      chunk_feedback: { ...defaultFeedback, ...(cfg.chunk_feedback || {}) },
     })
-    initialConfig = { ...localConfig }
+    initialConfig = { ...localConfig, chunk_feedback: { ...localConfig.chunk_feedback } }
     await nextTick()
     await nextTick()
     if (!isCurrentView()) return
@@ -255,7 +299,10 @@ const saveConfig = async () => {
   saveRequested = false
   if (!hasConfigChanged()) return
 
-  const submittedConfig = { ...localConfig }
+  const submittedConfig = {
+    ...localConfig,
+    chunk_feedback: { ...localConfig.chunk_feedback },
+  }
   isSaving = true
   let request: ReturnType<typeof updateTenantRetrievalConfig> | undefined
   try {
@@ -265,7 +312,7 @@ const saveConfig = async () => {
     if (!isCurrentView()) return
     if (!response.data) throw new Error('Missing retrieval configuration in save response')
     // 只能确认本次提交的快照，不能把请求期间的新编辑也标记为已保存。
-    initialConfig = submittedConfig
+    initialConfig = { ...submittedConfig, chunk_feedback: { ...submittedConfig.chunk_feedback } }
     if (!hasConfigChanged()) MessagePlugin.success(t('retrievalSettings.toasts.saveSuccess'))
   } catch (error: any) {
     if (!isCurrentView()) return
@@ -299,6 +346,25 @@ const handleRrfChange = (field: RrfField, value: number | string) => {
   if (!canEdit.value || typeof value !== 'number' || !Number.isFinite(value) || value < 0) return
   if (field === 'rrf_k' && !Number.isSafeInteger(value)) return
   localConfig[field] = value
+  debouncedSave()
+}
+type FeedbackNumberKey = Exclude<keyof ChunkFeedbackConfig, 'enabled'>
+const feedbackFields = computed<{ key: FeedbackNumberKey; label: string; min: number; max: number; step: number }[]>(() => [
+  { key: 'boost_threshold', label: t('retrievalSettings.feedbackBoostThreshold'), min: 0.05, max: 1, step: 0.05 },
+  { key: 'degrade_threshold', label: t('retrievalSettings.feedbackDegradeThreshold'), min: 0, max: 1, step: 0.05 },
+  { key: 'needs_optimization_threshold', label: t('retrievalSettings.feedbackNeedsOptimizationThreshold'), min: 0, max: 1, step: 0.05 },
+  { key: 'boost_weight', label: t('retrievalSettings.feedbackBoostWeight'), min: 0.1, max: 3, step: 0.05 },
+  { key: 'neutral_weight', label: t('retrievalSettings.feedbackNeutralWeight'), min: 0.1, max: 3, step: 0.05 },
+  { key: 'degrade_weight', label: t('retrievalSettings.feedbackDegradeWeight'), min: 0.1, max: 3, step: 0.05 },
+  { key: 'min_samples', label: t('retrievalSettings.feedbackMinSamples'), min: 1, max: 50, step: 1 },
+])
+const feedbackValue = (key: FeedbackNumberKey) => {
+  const value = localConfig.chunk_feedback[key]
+  return key === 'min_samples' ? String(value) : Number(value).toFixed(2)
+}
+const handleFeedbackChange = (key: FeedbackNumberKey, value: number) => {
+  if (!canEdit.value || !Number.isFinite(value)) return
+  localConfig.chunk_feedback[key] = key === 'min_samples' ? Math.round(value) : value
   debouncedSave()
 }
 const handleModelChange = (modelId: string) => {

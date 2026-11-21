@@ -59,6 +59,7 @@ export const DOMAIN_BY_NAMESPACE: Readonly<Record<string, LocaleDomain>> = {
 
   // chat, mentions, artifacts & local browser preview
   chat: 'chat',
+  answerFeedback: 'chat',
   chatHeader: 'chat',
   createChat: 'chat',
   input: 'chat',
@@ -83,6 +84,7 @@ export const DOMAIN_BY_NAMESPACE: Readonly<Record<string, LocaleDomain>> = {
   knowledgeStages: 'knowledge',
   kbSettings: 'knowledge',
   upload: 'knowledge',
+  chunkFeedback: 'knowledge',
   uploadTasks: 'knowledge',
   uploadConfirm: 'knowledge',
   manualEditor: 'knowledge',

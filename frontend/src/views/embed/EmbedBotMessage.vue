@@ -17,6 +17,10 @@
       <div v-if="hasActualContent" class="content-wrapper">
         <div class="ai-markdown-template markdown-content" v-stable-html="renderedHTML" />
       </div>
+      <div v-if="session?.is_completed" class="embed-feedback">
+        <AnswerFeedbackBar :session-id="sessionId" :message-id="feedbackMessageId"
+          :feedback="session?.feedback" @saved="onFeedbackSaved" />
+      </div>
     </div>
     <Teleport to="body">
       <div v-if="citationFloat.visible" class="embed-citation-float"
@@ -60,6 +64,8 @@ import {
 } from '@/utils/mermaidShared'
 import { useEmbedCitationPopover } from '@/composables/useEmbedCitationPopover'
 import { useTypewriter } from '@/composables/useTypewriter'
+import { persistedAssistantId } from '@/utils/steerStreamFork'
+import AnswerFeedbackBar from '@/views/chat/components/AnswerFeedbackBar.vue'
 import { vStableHtml } from '@/directives/stableHtml'
 
 const RagPipelineProgress = defineAsyncComponent(
@@ -90,6 +96,7 @@ type EmbedSession = {
   showThink?: boolean
   hideContent?: boolean
   is_completed?: boolean
+  feedback?: { rating?: string; reason?: string } | null
   agentEventStream?: Array<Record<string, unknown>>
   knowledge_references?: Array<{ chunk_type?: string; knowledge_id?: string; knowledge_title?: string }>
 }
@@ -118,6 +125,12 @@ const props = withDefaults(
     embedVisitorId: '',
   },
 )
+
+const feedbackMessageId = computed(() => persistedAssistantId(props.session as Record<string, unknown>) || '')
+const onFeedbackSaved = (state: { rating: string; reason?: string }) => {
+  if (!props.session) return
+  props.session.feedback = state.rating === 'none' ? null : state
+}
 
 const parentMd = ref<HTMLElement | null>(null)
 
@@ -230,6 +243,12 @@ onMounted(() => {
 
 .content-wrapper {
   padding: 2px 0;
+}
+
+.embed-feedback {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
 }
 
 .markdown-content {

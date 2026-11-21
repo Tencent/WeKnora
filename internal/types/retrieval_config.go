@@ -35,6 +35,10 @@ type RetrievalConfig struct {
 	RRFVectorWeight float64 `json:"rrf_vector_weight,omitempty"`
 	// RRFKeywordWeight is the keyword counterpart. Default: 0.3.
 	RRFKeywordWeight float64 `json:"rrf_keyword_weight,omitempty"`
+
+	// ChunkFeedback is the approval-rate policy that adjusts chunk recall
+	// weight. Nil means DefaultChunkFeedbackConfig (the feature is on).
+	ChunkFeedback *ChunkFeedbackConfig `json:"chunk_feedback,omitempty"`
 }
 
 // DefaultRetrievalTopK is the retrieval depth used when a caller supplies no

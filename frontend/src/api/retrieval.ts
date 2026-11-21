@@ -12,6 +12,18 @@ export interface RetrievalConfig {
   rrf_k?: number
   rrf_vector_weight?: number
   rrf_keyword_weight?: number
+  chunk_feedback?: ChunkFeedbackConfig
+}
+
+export interface ChunkFeedbackConfig {
+  enabled: boolean
+  boost_threshold: number
+  degrade_threshold: number
+  needs_optimization_threshold: number
+  boost_weight: number
+  neutral_weight: number
+  degrade_weight: number
+  min_samples: number
 }
 
 // Get tenant retrieval config via KV API

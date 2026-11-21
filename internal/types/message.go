@@ -561,6 +561,9 @@ type Message struct {
 	// only; nil unless a later turn's compaction ended exactly here. Internal
 	// to history loading, so it stays out of API responses.
 	ContextCheckpoint *ContextCheckpoint `json:"-" gorm:"type:jsonb;column:context_checkpoint"`
+	// Feedback is the calling user's like/dislike on this assistant message.
+	// It is filled when history is loaded and is never stored on the row.
+	Feedback *MessageFeedbackState `json:"feedback,omitempty" gorm:"-"`
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at" extensions:"x-agent,x-agent-response"`
 	// Last update timestamp

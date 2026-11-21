@@ -34,6 +34,20 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, 
 	}
 }
 
+// RegisterAnswerFeedbackRoutes registers like/dislike routes on assistant
+// messages. Session ownership is enforced in the service, matching the other
+// message routes. Viewer+ keeps revoked members out.
+func RegisterAnswerFeedbackRoutes(r *gin.RouterGroup, handler *handler.AnswerFeedbackHandler, g *rbacGuards) {
+	if handler == nil {
+		return
+	}
+	messages := g.apiKeyGroup(r.Group("/messages"), apiKeyChat(apiKeyFullAccess()))
+	{
+		messages.GET("/:session_id/:id/feedback", g.Viewer(), handler.GetAnswerFeedback)
+		messages.POST("/:session_id/:id/feedback", g.Viewer(), handler.SubmitAnswerFeedback)
+	}
+}
+
 // RegisterSessionRoutes 注册路由。
 //
 // Sessions are per-user resources; the handler enforces user ownership.

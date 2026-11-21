@@ -1,4 +1,18 @@
 export default {
+  answerFeedback: {
+    like: '按讚',
+    dislike: '倒讚',
+    liked: '已按讚',
+    disliked: '已倒讚',
+    dialogTitle: '這則回答哪裡不合適？',
+    dialogHint: '選填。原因會記到這則回答引用的知識片段上。',
+    reasonPlaceholder: '需要改正的地方',
+    submit: '提交',
+    cancel: '取消',
+    saved: '已記錄回饋',
+    cancelled: '已取消評價',
+    failed: '回饋儲存失敗'
+  },
   localBrowser: {
     pipOpen: '彈出懸浮窗',
     pipReturn: '返回對話小窗',

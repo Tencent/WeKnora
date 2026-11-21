@@ -13,7 +13,7 @@
 
 其余取值一律返回 `unsupported database driver`，因此配置 `DB_DRIVER=mysql` 会导致服务启动失败。
 
-本目录下的 `00-init-db.sql` 是一份一次性建表脚本，覆盖 10 张核心表（`tenants`、`models`、`knowledge_bases`、`knowledges`、`sessions`、`messages`、`message_suggestion_sets`、`message_suggestion_events`、`chunks`、`chunk_revisions`）。它会在有人改动这些基础表时被顺带更新，但**没有任何 Go 代码、Makefile 目标或 compose 配置引用它**。
+本目录下的 `00-init-db.sql` 是一份一次性建表脚本，覆盖 10 张核心表（`tenants`、`models`、`knowledge_bases`、`knowledges`、`sessions`、`messages`、`message_suggestion_sets`、`message_suggestion_events`、`chunks`、`chunk_revisions`）。问答反馈给 `chunks` 增加了赞踩计数和召回权重列。它会在有人改动这些基础表时被顺带更新，但**没有任何 Go 代码、Makefile 目标或 compose 配置引用它**。可执行的反馈表在 `migrations/versioned/` 与 `migrations/sqlite/`。
 
 ## 要真正支持 MySQL 还差什么
 

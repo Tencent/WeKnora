@@ -1684,7 +1684,12 @@ func (h *TenantHandler) GetTenantRetrievalConfig(c *gin.Context) {
 	data := tenant.RetrievalConfig
 	if data == nil {
 		data = &types.RetrievalConfig{}
+	} else {
+		copied := *data
+		data = &copied
 	}
+	feedback := data.EffectiveChunkFeedback()
+	data.ChunkFeedback = &feedback
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    data,
@@ -1722,6 +1727,12 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 	if cfg.RerankTopK < 0 || cfg.RerankTopK > 200 {
 		c.Error(errors.NewBadRequestError("rerank_top_k must be between 0 and 200"))
 		return
+	}
+	if cfg.ChunkFeedback != nil {
+		if err := cfg.ChunkFeedback.Validate(); err != nil {
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
+			return
+		}
 	}
 
 	tenant, _ := types.TenantInfoFromContext(ctx)

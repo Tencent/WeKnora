@@ -1,4 +1,18 @@
 export default {
+  answerFeedback: {
+    like: 'Like',
+    dislike: 'Dislike',
+    liked: 'Liked',
+    disliked: 'Disliked',
+    dialogTitle: 'Why was this answer not helpful?',
+    dialogHint: 'Optional. The reason is stored with the knowledge chunks this answer used.',
+    reasonPlaceholder: 'What should be corrected?',
+    submit: 'Submit',
+    cancel: 'Cancel',
+    saved: 'Feedback saved',
+    cancelled: 'Feedback removed',
+    failed: 'Could not save feedback'
+  },
   localBrowser: {
     pipOpen: 'Pop out preview',
     pipReturn: 'Return to conversation',
