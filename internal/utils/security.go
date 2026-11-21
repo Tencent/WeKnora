@@ -727,7 +727,12 @@ func NewSSRFSafeTransport(config SSRFSafeHTTPClientConfig) *http.Transport {
 	return &http.Transport{
 		DisableKeepAlives:  config.DisableKeepAlives,
 		DisableCompression: config.DisableCompression,
-		// Dial with SSRF protection - validates resolved IPs before connecting
+		// Honor proxy environment variables (HTTP_PROXY/HTTPS_PROXY/NO_PROXY),
+		// matching internal/models/api/transport.go. Without a proxy configured
+		// ProxyFromEnvironment returns nil and behavior is unchanged.
+		Proxy: http.ProxyFromEnvironment,
+		// Dial with SSRF protection - validates resolved IPs before connecting.
+		// When a proxy is set, this validates the proxy address instead.
 		DialContext: SSRFSafeDialContext,
 	}
 }
