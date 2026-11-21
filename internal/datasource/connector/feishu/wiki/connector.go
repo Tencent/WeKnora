@@ -30,8 +30,16 @@ func NewConnector(region core.Region) *Connector {
 
 // Feishu supports resumable streaming sync; the service prefers FetchStream over
 // FetchAll/FetchIncremental when a connector implements StreamingConnector.
-var _ datasource.StreamingConnector = (*Connector)(nil)
-var _ datasource.FullStreamingConnector = (*Connector)(nil)
+var (
+	_ datasource.StreamingConnector            = (*Connector)(nil)
+	_ datasource.FullStreamingConnector        = (*Connector)(nil)
+	_ datasource.ItemFailureIsolatingConnector = (*Connector)(nil)
+)
+
+// IsolatesItemIngestFailures reports that the wiki connector tracks each node's
+// edit time independently and can skip advancing a single failed node without
+// aborting the rest of the sync.
+func (c *Connector) IsolatesItemIngestFailures() bool { return true }
 
 // Type returns the connector type identifier.
 func (c *Connector) Type() string {
@@ -335,6 +343,7 @@ func (o *wikiOps) List(ctx context.Context, client *core.Client, resourceID stri
 func (o *wikiOps) Token(n core.WikiNode) string   { return n.NodeToken }
 func (o *wikiOps) Title(n core.WikiNode) string   { return n.Title }
 func (o *wikiOps) ObjType(n core.WikiNode) string { return n.ObjType }
+func (o *wikiOps) DirPath(n core.WikiNode) string { return o.dirPaths[n.NodeToken] }
 
 // EditTime is an opaque change key including the effective destination path.
 // An ancestor rename/move changes that path without touching this node's times.

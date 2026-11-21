@@ -18,8 +18,9 @@ import (
 )
 
 var (
-	_ datasource.StreamingConnector     = (*Connector)(nil)
-	_ datasource.FullStreamingConnector = (*Connector)(nil)
+	_ datasource.StreamingConnector            = (*Connector)(nil)
+	_ datasource.FullStreamingConnector        = (*Connector)(nil)
+	_ datasource.ItemFailureIsolatingConnector = (*Connector)(nil)
 )
 
 // Connector implements datasource.StreamingConnector for Confluence.
@@ -27,6 +28,10 @@ type Connector struct {
 	newClient  func(config) (*client, error)
 	spaceCache spaceCache
 }
+
+// IsolatesItemIngestFailures reports that Confluence tracks each page version
+// independently so one failed page does not block remaining pages or spaces.
+func (*Connector) IsolatesItemIngestFailures() bool { return true }
 
 const pickerSpaceCacheTTL = time.Minute
 
@@ -413,9 +418,11 @@ func (c *Connector) fetchStream(
 			if versionKnown {
 				if forceFull {
 					if next.SpacePages[resourceID][summary.ID] == version {
+						datasource.RecordUnchangedItem(h)
 						continue
 					}
 				} else if priorPages[summary.ID] == version {
+					datasource.RecordUnchangedItem(h)
 					continue
 				}
 			}
@@ -442,6 +449,17 @@ func (c *Connector) fetchStream(
 				continue
 			}
 			if err := h.Emit(ctx, item); err != nil {
+				if errors.Is(err, datasource.ErrItemIngestFailed) {
+					if prior, ok := priorVersionByPage[summary.ID]; ok {
+						if forceFull {
+							// Retain deletion ownership without marking the body
+							// refreshed. A retry must still fetch this page.
+							prior = ""
+						}
+						next.SpacePages[resourceID][summary.ID] = prior
+					}
+					continue
+				}
 				return nil, err
 			}
 			next.SpacePages[resourceID][summary.ID] = version
