@@ -11,6 +11,23 @@ import (
 
 var errTenantAPIKeyScopeForbidden = stderrors.New("workspace API key scope forbidden")
 
+// APIKeyRoutePolicyContextKey stashes the matched route policy on gin.Context
+// so downstream KB guards can map read/write/manage onto per-KB overlays.
+const APIKeyRoutePolicyContextKey = "rbac.api_key_route_policy"
+
+// APIKeyRoutePolicyFromContext returns the policy stored by APIKeyGate.
+func APIKeyRoutePolicyFromContext(c *gin.Context) (APIKeyRoutePolicy, bool) {
+	if c == nil {
+		return APIKeyRoutePolicy{}, false
+	}
+	v, ok := c.Get(APIKeyRoutePolicyContextKey)
+	if !ok {
+		return APIKeyRoutePolicy{}, false
+	}
+	policy, ok := v.(APIKeyRoutePolicy)
+	return policy, ok
+}
+
 // APIKeyRoutePolicy declares how an X-API-Key caller may use a single route.
 //
 // Design: API-key authorization is a SEPARATE authority from the JWT
@@ -120,6 +137,9 @@ func (a *APIKeyRouteAuthorizer) Middleware() gin.HandlerFunc {
 				"error": "Forbidden: API key scope does not allow this operation",
 			})
 			return
+		}
+		if policy, ok := a.Lookup(c.Request.Method, c.FullPath()); ok {
+			c.Set(APIKeyRoutePolicyContextKey, policy)
 		}
 		c.Next()
 	}

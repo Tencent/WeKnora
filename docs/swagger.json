@@ -32024,6 +32024,15 @@
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeBasePermissionMap": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "array",
+                "items": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfile": {
             "type": "object",
             "properties": {
@@ -44238,6 +44247,9 @@
                         "type": "string"
                     }
                 },
+                "knowledge_base_permissions": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBasePermissionMap"
+                },
                 "last_used_at": {
                     "type": "string"
                 },
@@ -44281,6 +44293,9 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "knowledge_base_permissions": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBasePermissionMap"
                 },
                 "last_used_at": {
                     "type": "string"

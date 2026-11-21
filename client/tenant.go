@@ -78,38 +78,41 @@ const (
 
 // TenantAPIKey is the API key metadata returned by list/create APIs.
 type TenantAPIKey struct {
-	ID               uint64           `json:"id"`
-	TenantID         uint64           `json:"tenant_id"`
-	ScopeType        string           `json:"scope_type"`
-	Name             string           `json:"name"`
-	APIKey           string           `json:"api_key"`
-	Role             TenantAPIKeyRole `json:"role"`
-	FullAccess       bool             `json:"full_access"`
-	KnowledgeBaseIDs []string         `json:"knowledge_base_ids"`
-	Capabilities     []string         `json:"capabilities"`
-	LastUsedAt       *time.Time       `json:"last_used_at,omitempty"`
-	ExpiresAt        *time.Time       `json:"expires_at,omitempty"`
-	CreatedAt        time.Time        `json:"created_at"`
-	UpdatedAt        time.Time        `json:"updated_at"`
+	ID                       uint64              `json:"id"`
+	TenantID                 uint64              `json:"tenant_id"`
+	ScopeType                string              `json:"scope_type"`
+	Name                     string              `json:"name"`
+	APIKey                   string              `json:"api_key"`
+	Role                     TenantAPIKeyRole    `json:"role"`
+	FullAccess               bool                `json:"full_access"`
+	KnowledgeBaseIDs         []string            `json:"knowledge_base_ids"`
+	KnowledgeBasePermissions map[string][]string `json:"knowledge_base_permissions,omitempty"`
+	Capabilities             []string            `json:"capabilities"`
+	LastUsedAt               *time.Time          `json:"last_used_at,omitempty"`
+	ExpiresAt                *time.Time          `json:"expires_at,omitempty"`
+	CreatedAt                time.Time           `json:"created_at"`
+	UpdatedAt                time.Time           `json:"updated_at"`
 }
 
 // CreateTenantAPIKeyRequest creates a revocable tenant API key.
 type CreateTenantAPIKeyRequest struct {
-	Name             string           `json:"name"`
-	Role             TenantAPIKeyRole `json:"role,omitempty"`
-	FullAccess       bool             `json:"full_access,omitempty"`
-	KnowledgeBaseIDs []string         `json:"knowledge_base_ids,omitempty"`
-	Capabilities     []string         `json:"capabilities,omitempty"`
-	ExpiresAtUnix    *int64           `json:"expires_at_unix,omitempty"`
+	Name                     string              `json:"name"`
+	Role                     TenantAPIKeyRole    `json:"role,omitempty"`
+	FullAccess               bool                `json:"full_access,omitempty"`
+	KnowledgeBaseIDs         []string            `json:"knowledge_base_ids,omitempty"`
+	KnowledgeBasePermissions map[string][]string `json:"knowledge_base_permissions,omitempty"`
+	Capabilities             []string            `json:"capabilities,omitempty"`
+	ExpiresAtUnix            *int64              `json:"expires_at_unix,omitempty"`
 }
 
 // UpdateTenantAPIKeyRequest replaces an existing tenant API key's configurable attributes.
 type UpdateTenantAPIKeyRequest struct {
-	Name             string   `json:"name"`
-	FullAccess       bool     `json:"full_access"`
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
-	Capabilities     []string `json:"capabilities"`
-	ExpiresAtUnix    *int64   `json:"expires_at_unix"`
+	Name                     string              `json:"name"`
+	FullAccess               bool                `json:"full_access"`
+	KnowledgeBaseIDs         []string            `json:"knowledge_base_ids"`
+	KnowledgeBasePermissions map[string][]string `json:"knowledge_base_permissions,omitempty"`
+	Capabilities             []string            `json:"capabilities"`
+	ExpiresAtUnix            *int64              `json:"expires_at_unix"`
 }
 
 // CreatedTenantAPIKey includes the created API key. Token is kept for
