@@ -884,19 +884,26 @@ func TestE2BBuildStandardTemplateOverridesPtyPrompt(t *testing.T) {
 
 func TestE2BRemoteClientListTemplatesMarksDesktopSibling(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/templates", r.URL.Path)
-		writeJSON(w, http.StatusOK, []map[string]any{
-			{
-				"templateID":  "tpl-cli",
-				"names":       []string{"weknora"},
-				"buildStatus": "ready",
-			},
-			{
-				"templateID":  "tpl-desktop",
-				"names":       []string{"weknora-desktop"},
-				"buildStatus": "ready",
-			},
-		})
+		// The catalog is served on the v2 surface; the legacy path answers
+		// 404 so the fallback contract stays exercised.
+		if r.URL.Path == "/v2/templates" {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"Templates": []map[string]any{
+					{
+						"templateID":  "tpl-cli",
+						"names":       []string{"weknora"},
+						"buildStatus": "ready",
+					},
+					{
+						"templateID":  "tpl-desktop",
+						"names":       []string{"weknora-desktop"},
+						"buildStatus": "ready",
+					},
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
 	}))
 	t.Cleanup(server.Close)
 
