@@ -24,6 +24,7 @@ func TestCreateChunks_PostgresPreservesEnabledStateAndReturnsSeqIDs(t *testing.T
 		makeChunk("kb", "faq", types.ChunkTypeFAQ),
 	}
 	chunks[1].IsEnabled = false
+	chunks[1].Flags = 0
 	// Check the bound values for both rows, not only the caller's structs.
 	stmt := &gorm.Statement{DB: db}
 	require.NoError(t, stmt.Parse(&types.Chunk{}))
@@ -35,6 +36,8 @@ func TestCreateChunks_PostgresPreservesEnabledStateAndReturnsSeqIDs(t *testing.T
 			}
 			if name == "is_enabled" {
 				args = append(args, chunk.IsEnabled)
+			} else if name == "flags" {
+				args = append(args, chunk.Flags)
 			} else {
 				args = append(args, sqlmock.AnyArg())
 			}
@@ -50,6 +53,8 @@ func TestCreateChunks_PostgresPreservesEnabledStateAndReturnsSeqIDs(t *testing.T
 	require.EqualValues(t, 102, chunks[1].SeqID)
 	require.True(t, chunks[0].IsEnabled)
 	require.False(t, chunks[1].IsEnabled)
+	require.Equal(t, types.ChunkFlagRecommended, chunks[0].Flags)
+	require.Equal(t, types.ChunkFlags(0), chunks[1].Flags)
 	require.False(t, chunks[0].CreatedAt.IsZero())
 	require.NoError(t, mock.ExpectationsWereMet())
 }
