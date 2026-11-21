@@ -19,38 +19,121 @@ func TestConstructors(t *testing.T) {
 		wantMsg    string
 		wantDetail any
 	}{
-		{"BadRequest", NewBadRequestError("bad input"), ErrBadRequest, http.StatusBadRequest, "bad input", nil},
-		{"Unauthorized", NewUnauthorizedError("no token"), ErrUnauthorized, http.StatusUnauthorized, "no token", nil},
-		{"Forbidden", NewForbiddenError("denied"), ErrForbidden, http.StatusForbidden, "denied", nil},
-		{"NotFound", NewNotFoundError("missing"), ErrNotFound, http.StatusNotFound, "missing", nil},
-		{"Conflict", NewConflictError("exists"), ErrConflict, http.StatusConflict, "exists", nil},
-		{"Validation", NewValidationError("bad field"), ErrValidation, http.StatusBadRequest, "bad field", nil},
+		{
+			"BadRequest", NewBadRequestError("bad input"),
+			ErrBadRequest, http.StatusBadRequest, "bad input", nil,
+		},
+		{
+			"Unauthorized", NewUnauthorizedError("no token"),
+			ErrUnauthorized, http.StatusUnauthorized, "no token", nil,
+		},
+		{
+			"Forbidden", NewForbiddenError("denied"),
+			ErrForbidden, http.StatusForbidden, "denied", nil,
+		},
+		{
+			"NotFound", NewNotFoundError("missing"),
+			ErrNotFound, http.StatusNotFound, "missing", nil,
+		},
+		{
+			"Conflict", NewConflictError("exists"),
+			ErrConflict, http.StatusConflict, "exists", nil,
+		},
+		{
+			"Validation", NewValidationError("bad field"),
+			ErrValidation, http.StatusBadRequest, "bad field", nil,
+		},
 
-		{"TooManyRequests custom", NewTooManyRequestsError("slow down"), ErrTooManyRequests, http.StatusTooManyRequests, "slow down", nil},
-		{"TooManyRequests default", NewTooManyRequestsError(""), ErrTooManyRequests, http.StatusTooManyRequests, "too many requests", nil},
-		{"Internal custom", NewInternalServerError("boom"), ErrInternalServer, http.StatusInternalServerError, "boom", nil},
-		{"Internal default", NewInternalServerError(""), ErrInternalServer, http.StatusInternalServerError, "服务器内部错误", nil},
-		{"ServiceUnavailable custom", NewServiceUnavailableError("down"), ErrServiceUnavailable, http.StatusServiceUnavailable, "down", nil},
-		{"ServiceUnavailable default", NewServiceUnavailableError(""), ErrServiceUnavailable, http.StatusServiceUnavailable, "服务暂时不可用", nil},
+		{
+			"TooManyRequests custom", NewTooManyRequestsError("slow down"),
+			ErrTooManyRequests, http.StatusTooManyRequests, "slow down", nil,
+		},
+		{
+			"TooManyRequests default", NewTooManyRequestsError(""),
+			ErrTooManyRequests, http.StatusTooManyRequests, "too many requests", nil,
+		},
+		{
+			"Internal custom", NewInternalServerError("boom"),
+			ErrInternalServer, http.StatusInternalServerError, "boom", nil,
+		},
+		{
+			"Internal default", NewInternalServerError(""),
+			ErrInternalServer, http.StatusInternalServerError, "服务器内部错误", nil,
+		},
+		{
+			"ServiceUnavailable custom", NewServiceUnavailableError("down"),
+			ErrServiceUnavailable, http.StatusServiceUnavailable, "down", nil,
+		},
+		{
+			"ServiceUnavailable default", NewServiceUnavailableError(""),
+			ErrServiceUnavailable, http.StatusServiceUnavailable, "服务暂时不可用", nil,
+		},
 
-		{"ImportPrerequisite", NewImportPrerequisiteError("VLM not configured"), ErrImportPrerequisiteMissing, http.StatusBadRequest, "VLM not configured", nil},
-		{"ModelInUse with details", NewModelInUseError("model in use", details), ErrModelInUse, http.StatusBadRequest, "model in use", details},
-		{"ModelInUse nil details", NewModelInUseError("model in use", nil), ErrModelInUse, http.StatusBadRequest, "model in use", nil},
+		{
+			"ImportPrerequisite", NewImportPrerequisiteError("VLM not configured"),
+			ErrImportPrerequisiteMissing, http.StatusBadRequest, "VLM not configured", nil,
+		},
+		{
+			"ModelInUse with details", NewModelInUseError("model in use", details),
+			ErrModelInUse, http.StatusBadRequest, "model in use", details,
+		},
+		{
+			"ModelInUse nil details", NewModelInUseError("model in use", nil),
+			ErrModelInUse, http.StatusBadRequest, "model in use", nil,
+		},
 
-		{"VectorStoreBindingInvalid custom", NewVectorStoreBindingInvalidError("bad uuid"), ErrVectorStoreBindingInvalid, http.StatusBadRequest, "bad uuid", nil},
-		{"VectorStoreBindingInvalid default", NewVectorStoreBindingInvalidError(""), ErrVectorStoreBindingInvalid, http.StatusBadRequest, "vector store not found", nil},
-		{"VectorStoreUnavailable custom", NewVectorStoreUnavailableError("registry miss"), ErrVectorStoreUnavailable, http.StatusBadRequest, "registry miss", nil},
-		{"VectorStoreUnavailable default", NewVectorStoreUnavailableError(""), ErrVectorStoreUnavailable, http.StatusBadRequest, "vector store is currently unavailable", nil},
+		{
+			"VectorStoreBindingInvalid custom", NewVectorStoreBindingInvalidError("bad uuid"),
+			ErrVectorStoreBindingInvalid, http.StatusBadRequest, "bad uuid", nil,
+		},
+		{
+			"VectorStoreBindingInvalid default", NewVectorStoreBindingInvalidError(""),
+			ErrVectorStoreBindingInvalid, http.StatusBadRequest, "vector store not found", nil,
+		},
+		{
+			"VectorStoreUnavailable custom", NewVectorStoreUnavailableError("registry miss"),
+			ErrVectorStoreUnavailable, http.StatusBadRequest, "registry miss", nil,
+		},
+		{
+			"VectorStoreUnavailable default", NewVectorStoreUnavailableError(""),
+			ErrVectorStoreUnavailable, http.StatusBadRequest, "vector store is currently unavailable", nil,
+		},
 
-		{"TenantNotFound", NewTenantNotFoundError(), ErrTenantNotFound, http.StatusNotFound, "空间不存在", nil},
-		{"TenantAlreadyExists", NewTenantAlreadyExistsError(), ErrTenantAlreadyExists, http.StatusConflict, "空间已存在", nil},
-		{"TenantInactive", NewTenantInactiveError(), ErrTenantInactive, http.StatusForbidden, "空间已停用", nil},
-		{"TenantCreationDisabled", NewTenantCreationDisabledError(), ErrTenantCreationDisabled, http.StatusForbidden, "self-service workspace creation is disabled; join a workspace by invitation", nil},
+		{
+			"TenantNotFound", NewTenantNotFoundError(),
+			ErrTenantNotFound, http.StatusNotFound, "空间不存在", nil,
+		},
+		{
+			"TenantAlreadyExists", NewTenantAlreadyExistsError(),
+			ErrTenantAlreadyExists, http.StatusConflict, "空间已存在", nil,
+		},
+		{
+			"TenantInactive", NewTenantInactiveError(),
+			ErrTenantInactive, http.StatusForbidden, "空间已停用", nil,
+		},
+		{
+			"TenantCreationDisabled", NewTenantCreationDisabledError(),
+			ErrTenantCreationDisabled, http.StatusForbidden,
+			"self-service workspace creation is disabled; join a workspace by invitation", nil,
+		},
 
-		{"AgentMissingThinkingModel", NewAgentMissingThinkingModelError(), ErrAgentMissingThinkingModel, http.StatusBadRequest, "启用Agent模式前，请先选择思考模型", nil},
-		{"AgentMissingAllowedTools", NewAgentMissingAllowedToolsError(), ErrAgentMissingAllowedTools, http.StatusBadRequest, "至少需要选择一个允许的工具", nil},
-		{"AgentInvalidMaxIterations", NewAgentInvalidMaxIterationsError(), ErrAgentInvalidMaxIterations, http.StatusBadRequest, "最大迭代次数须为正整数，或 -1 表示不限制", nil},
-		{"AgentInvalidTemperature", NewAgentInvalidTemperatureError(), ErrAgentInvalidTemperature, http.StatusBadRequest, "温度参数必须在0-2之间", nil},
+		{
+			"AgentMissingThinkingModel", NewAgentMissingThinkingModelError(),
+			ErrAgentMissingThinkingModel, http.StatusBadRequest, "启用Agent模式前，请先选择思考模型", nil,
+		},
+		{
+			"AgentMissingAllowedTools", NewAgentMissingAllowedToolsError(),
+			ErrAgentMissingAllowedTools, http.StatusBadRequest, "至少需要选择一个允许的工具", nil,
+		},
+		{
+			"AgentInvalidMaxIterations", NewAgentInvalidMaxIterationsError(),
+			ErrAgentInvalidMaxIterations, http.StatusBadRequest,
+			"最大迭代次数须为正整数，或 -1 表示不限制", nil,
+		},
+		{
+			"AgentInvalidTemperature", NewAgentInvalidTemperatureError(),
+			ErrAgentInvalidTemperature, http.StatusBadRequest, "温度参数必须在0-2之间", nil,
+		},
 	}
 
 	for _, tc := range tests {
@@ -102,7 +185,9 @@ func TestWithDetails(t *testing.T) {
 	}
 
 	// Overwriting details replaces the previous value.
-	ret.WithDetails("plain detail")
+	if ret.WithDetails("plain detail") != err {
+		t.Error("WithDetails should return the same *AppError pointer")
+	}
 	if err.Details != "plain detail" {
 		t.Errorf("Details after second WithDetails = %#v, want %q", err.Details, "plain detail")
 	}
@@ -189,7 +274,7 @@ func TestParseErrorCodes(t *testing.T) {
 		}
 		seen[code] = true
 		for _, r := range code {
-			if !(r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_') {
+			if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
 				t.Errorf("parse error code %q is not SCREAMING_SNAKE", code)
 				break
 			}
