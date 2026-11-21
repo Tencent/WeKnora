@@ -21,6 +21,13 @@ func replacementFixture(t *testing.T) (*gorm.DB, interfaces.KnowledgeRepository,
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.KnowledgeTagRelation{}))
+	require.NoError(t, db.Exec(
+		"ALTER TABLE knowledges ADD COLUMN deletion_pending BOOLEAN NOT NULL DEFAULT FALSE",
+	).Error)
+	require.NoError(t, db.Exec(`
+		CREATE TABLE knowledge_bases(id TEXT PRIMARY KEY,tenant_id BIGINT,deleted_at DATETIME);
+		INSERT INTO knowledge_bases VALUES ('kb-1',7,NULL)
+	`).Error)
 	repo := NewKnowledgeRepository(db)
 	before := &types.Knowledge{
 		ID: "old", TenantID: 7, KnowledgeBaseID: "kb-1", Type: "file",

@@ -233,8 +233,8 @@ func Rerank(
 
 // topByScore returns the positions of the limit highest-scoring rows, or nil
 // when limit is not positive or every row fits. Ties keep the earlier row.
-// Graph hits are always kept outside the limit: they carry no retrieval score
-// (CompositeScore substitutes the model score) and would otherwise always be
+// Graph and bounded knowledge-tree evidence stay outside the retrieval-score cap:
+// they carry no similarity score (CompositeScore uses the model score) and would be
 // cut; their number is bounded where they are added.
 func topByScore(results []*types.SearchResult, limit int) map[int]bool {
 	if limit <= 0 || len(results) <= limit {
@@ -245,7 +245,7 @@ func topByScore(results []*types.SearchResult, limit int) map[int]bool {
 	for i, r := range results {
 		switch {
 		case r == nil:
-		case r.MatchType == types.MatchTypeGraph:
+		case r.MatchType == types.MatchTypeGraph || r.MatchType == types.MatchTypeKnowledgeTree:
 			keep[i] = true
 		default:
 			order = append(order, i)
@@ -358,15 +358,15 @@ func scoredCopy(r *types.SearchResult, modelScore, faqBoost float64) *types.Sear
 }
 
 // CompositeScore blends the rerank model score with the retrieval score and a
-// source weight, clamped to [0, 1]. Graph hits carry no retrieval score (they
-// come from entity lookups, not similarity search), so the model score stands
+// source weight, clamped to [0, 1]. Graph/tree evidence has no retrieval score (it
+// comes from structural lookups, not similarity search), so the model score stands
 // in for it rather than a made-up constant.
 func CompositeScore(r *types.SearchResult, modelScore, baseScore float64) float64 {
 	sourceWeight := 1.0
 	if strings.EqualFold(r.KnowledgeSource, "web_search") {
 		sourceWeight = 0.95
 	}
-	if r.MatchType == types.MatchTypeGraph {
+	if r.MatchType == types.MatchTypeGraph || r.MatchType == types.MatchTypeKnowledgeTree {
 		baseScore = modelScore
 	}
 	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight

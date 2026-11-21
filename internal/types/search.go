@@ -262,6 +262,8 @@ type SearchResult struct {
 
 // SearchParams represents the search parameters
 type SearchParams struct {
+	ChildrenDepth int `json:"children_depth,omitempty"`
+	ChildrenLimit int `json:"children_limit,omitempty"`
 	// QueryText is required unless query_embedding is provided, keyword matching is disabled,
 	// and vector matching remains enabled.
 	QueryText      string    `json:"query_text" extensions:"x-agent,x-agent-required"`
@@ -377,6 +379,11 @@ const (
 	// KeptByImageVector: a pictorial image hit a text reranker rejected and
 	// its vector still vouched for.
 	KeptByImageVector = "image_vector"
+	// KeptByKnowledgeTree: a parent/descendant passage fetched by
+	// children_depth expansion that no reranker scored. It is recall-time
+	// enrichment, so a top-k cut must not discard it when rerank is disabled
+	// or fails.
+	KeptByKnowledgeTree = "knowledge_tree"
 	// MetadataImageVectorMatch marks a result that stands in for an
 	// image_vector hit de-duplication dropped as a copy of it, so the image
 	// still reaches a model that can see it.

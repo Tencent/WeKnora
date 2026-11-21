@@ -66,6 +66,13 @@ func datasourceReplacementFixture(t *testing.T) (
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.KnowledgeTag{}, &types.KnowledgeTagRelation{}))
+	require.NoError(t, db.Exec(
+		"ALTER TABLE knowledges ADD COLUMN deletion_pending BOOLEAN NOT NULL DEFAULT FALSE",
+	).Error)
+	require.NoError(t, db.Exec(`
+		CREATE TABLE knowledge_bases(id TEXT PRIMARY KEY,tenant_id BIGINT,deleted_at DATETIME);
+		INSERT INTO knowledge_bases VALUES ('kb-1',7,NULL)
+	`).Error)
 	repo := repository.NewKnowledgeRepository(db)
 	h.original.Metadata = types.JSON(`{"datasource_id":"ds-1","external_id":"doc-1"}`)
 	require.NoError(t, repo.CreateKnowledge(h.ctx, &h.original))

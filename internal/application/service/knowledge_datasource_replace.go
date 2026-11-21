@@ -8,6 +8,7 @@ import (
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // errInvalidJSONContent marks a synchronous JSON validation rejection during
@@ -35,9 +36,21 @@ func (s *knowledgeService) checkKnowledgeForCreation(ctx context.Context, tenant
 }
 
 func (s *knowledgeService) persistKnowledgeForCreation(ctx context.Context, knowledge *types.Knowledge,
-	replacement *knowledgeReplacement,
+	replacement *knowledgeReplacement, creationTags ...string,
 ) error {
 	if replacement == nil {
+		if knowledge.ParentKnowledgeID != "" {
+			if err := s.validateKnowledgeTagIDs(
+				ctx, knowledge.TenantID, knowledge.KnowledgeBaseID, creationTags,
+			); err != nil {
+				return err
+			}
+			r, ok := s.repo.(interfaces.KnowledgeTreeRepository)
+			if !ok {
+				return fmt.Errorf("parent repository unavailable")
+			}
+			return r.CreateKnowledgeWithParent(ctx, knowledge, creationTags...)
+		}
 		return s.repo.CreateKnowledge(ctx, knowledge)
 	}
 	// URL creation normally has no datasource metadata. Include it in the same
@@ -134,6 +147,10 @@ func (s *knowledgeService) ReplaceKnowledgeFromDataSource(ctx context.Context, k
 func (s *knowledgeService) attachCreationTags(ctx context.Context, knowledge *types.Knowledge,
 	tagIDs []string, replacement *knowledgeReplacement,
 ) error {
+	if knowledge.ParentKnowledgeID != "" && replacement == nil {
+		s.attachTagsToKnowledge(ctx, knowledge)
+		return nil
+	}
 	if replacement == nil {
 		return s.setAndAttachKnowledgeTags(ctx, knowledge.TenantID, knowledge.KnowledgeBaseID, knowledge, tagIDs)
 	}

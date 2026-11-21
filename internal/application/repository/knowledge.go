@@ -41,7 +41,7 @@ func escapeLikeKeyword(keyword string) string {
 // counter jump back up and never reach zero (the "stuck
 // pending_subtasks_count / never promoted to completed" bug). Omitting
 // the column here means Save can never touch it.
-var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount"}
+var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount", "ParentKnowledgeID"}
 
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
@@ -56,8 +56,10 @@ func NewKnowledgeRepository(db *gorm.DB) interfaces.KnowledgeRepository {
 // CreateKnowledge creates knowledge
 func (r *knowledgeRepository) CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
 	knowledge.ErrorMessage = common.CleanInvalidUTF8(knowledge.ErrorMessage)
-	err := r.db.WithContext(ctx).Create(knowledge).Error
-	return err
+	if knowledge.ParentKnowledgeID == "" {
+		return r.db.WithContext(ctx).Create(knowledge).Error
+	}
+	return r.CreateKnowledgeWithParent(ctx, knowledge)
 }
 
 // GetKnowledgeByID gets knowledge

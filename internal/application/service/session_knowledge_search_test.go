@@ -35,6 +35,14 @@ func (s *searchKBService) GetKnowledgeBasesByIDsOnly(_ context.Context, ids []st
 	return kbs, nil
 }
 
+// ExpandKnowledgeRerankCandidates stands in for a knowledge base without a
+// parent hierarchy: the hit set and its response shape are unchanged.
+func (s *searchKBService) ExpandKnowledgeRerankCandidates(
+	_ context.Context, _ types.SearchTargets, hits []*types.SearchResult, _ types.KnowledgeChildrenOptions,
+) ([]*types.SearchResult, *types.KnowledgeTreeDiagnostics, error) {
+	return hits, &types.KnowledgeTreeDiagnostics{}, nil
+}
+
 // fakeRetrieval stands in for CHUNK_SEARCH and CHUNK_MERGE: it records the
 // pipeline request it saw and serves canned retrieval results.
 type fakeRetrieval struct {

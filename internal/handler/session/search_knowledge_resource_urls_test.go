@@ -156,7 +156,23 @@ func TestSearchKnowledge_OmittedOverridesKeepTenantConfig(t *testing.T) {
 	w := performKnowledgeSearch(t, svc, `{"query":"q","knowledge_base_ids":["kb-1"]}`)
 	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 	require.NotNil(t, svc.lastOpts)
-	assert.Equal(t, types.KnowledgeSearchOptions{}, *svc.lastOpts)
+	// children_limit defaults to 200 even when omitted: it bounds the direct
+	// parents added at children_depth=0. Every other zero value keeps the
+	// tenant RetrievalConfig.
+	assert.Equal(t, types.KnowledgeSearchOptions{ChildrenLimit: 200}, *svc.lastOpts)
+}
+
+func TestSearchKnowledge_ChildrenOptionsFromJSON(t *testing.T) {
+	svc := &stubSearchSessionService{}
+	w := performKnowledgeSearch(t, svc,
+		`{"query":"q","knowledge_base_ids":["kb-1"],"children_depth":2,"children_limit":25}`,
+	)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, 2, svc.lastOpts.ChildrenDepth)
+	require.Equal(t, 25, svc.lastOpts.ChildrenLimit)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.NotContains(t, body, "expanded", "candidate expansion must happen before rerank")
 }
 
 func TestSearchKnowledge_RejectsInvalidOverrides(t *testing.T) {

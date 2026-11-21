@@ -907,7 +907,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 	applyKnowledgeSearchOverrides(chatManage, opts)
 
-	results, err := s.runKnowledgeSearchPipeline(ctx, chatManage, len(searchTargets))
+	results, treeDiag, err := s.runKnowledgeSearchPipeline(ctx, chatManage, len(searchTargets))
 	if err != nil {
 		return nil, err
 	}
@@ -940,7 +940,9 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base search completed, found %d results, rerank outcome: %s",
 		len(results), diag.Outcome)
-	return &types.RetrievalResult{Results: results, Meta: types.RetrievalMeta{Rerank: diag}}, nil
+	treeDiag = knowledgeTreeVisible(treeDiag, opts.ChildrenDepth != 0)
+	response := &types.RetrievalResult{Results: results, Meta: types.RetrievalMeta{Rerank: diag, Tree: treeDiag}}
+	return response, nil
 }
 
 // applyKnowledgeSearchOverrides applies the caller's knowledge-search
@@ -953,6 +955,8 @@ func applyKnowledgeSearchOverrides(chatManage *types.ChatManage, opts *types.Kno
 		chatManage.KeywordThreshold = *opts.KeywordThreshold
 	}
 	chatManage.ParentSlotAggregation = opts.ParentSlotAggregation
+	chatManage.ChildrenDepth = opts.ChildrenDepth
+	chatManage.ChildrenLimit = opts.ChildrenLimit
 	// The final FILTER_TOP_K stage cuts to RerankTopK whether or not the
 	// rerank stage runs, so it is the result count. Recall must be at least
 	// as deep for the count to be reachable.
@@ -977,10 +981,10 @@ func (s *sessionService) runKnowledgeSearchPipeline(
 	ctx context.Context,
 	chatManage *types.ChatManage,
 	targetCount int,
-) ([]*types.SearchResult, error) {
+) ([]*types.SearchResult, *types.KnowledgeTreeDiagnostics, error) {
 	if targetCount == 0 {
 		logger.Warn(ctx, "No search targets available, returning empty results")
-		return []*types.SearchResult{}, nil
+		return []*types.SearchResult{}, nil, nil
 	}
 
 	// Use specific event list, only including retrieval-related events, not LLM summarization
@@ -993,7 +997,20 @@ func (s *sessionService) runKnowledgeSearchPipeline(
 
 	logger.Infof(ctx, "Trigger search event list: %v", searchEvents)
 
+	var treeDiag *types.KnowledgeTreeDiagnostics
+	var originalHits []*types.SearchResult
 	for _, event := range searchEvents {
+		if event == types.CHUNK_RERANK {
+			// A hit's direct parent is part of its context, so expansion runs
+			// whatever children_depth asks for. A positive depth additionally
+			// expands the parent's and the hit's own descendants.
+			originalHits = chatManage.SearchResult
+			var err error
+			treeDiag, err = s.expandSearchKnowledgeCandidates(ctx, chatManage)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 		logger.Infof(ctx, "Starting to trigger search event: %v", event)
 		stageCtx, stageSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 			Name: "pipeline." + string(event),
@@ -1009,19 +1026,30 @@ func (s *sessionService) runKnowledgeSearchPipeline(
 		}
 		stageSpan.Finish(nil, nil, spanErr)
 
+		if event == types.CHUNK_RERANK && treeDiag != nil && chatManage.RerankDiagnostics != nil {
+			treeDiag.Applied = chatManage.RerankDiagnostics.Applied
+			if !treeDiag.Applied {
+				// Keep the parent / descendant knowledge expansion produced
+				// before reranking even when the provider failed or no model
+				// ran; only the rerank order is discarded.
+				chatManage.SearchResult = mergeKnowledgeTreeFallback(originalHits, chatManage.SearchResult)
+				chatManage.RerankResult = nil
+			}
+		}
+
 		if err == chatpipeline.ErrSearchNothing {
 			logger.Warnf(ctx, "Event %v triggered, search result is empty", event)
-			return []*types.SearchResult{}, nil
+			return []*types.SearchResult{}, treeDiag, nil
 		}
 
 		if err != nil {
 			logger.Errorf(ctx, "Event triggering failed, event: %v, error type: %s, description: %s, error: %v",
 				event, err.ErrorType, err.Description, err.Err)
-			return nil, err.Err
+			return nil, treeDiag, err.Err
 		}
 		logger.Infof(ctx, "Event %v triggered successfully", event)
 	}
-	return chatManage.MergeResult, nil
+	return chatManage.MergeResult, treeDiag, nil
 }
 
 // handleFallbackResponse handles fallback response based on strategy

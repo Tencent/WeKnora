@@ -206,6 +206,24 @@ func TestCompositeScore_graphHitUsesModelScoreAsBase(t *testing.T) {
 	if got := CompositeScore(vector, 0.8, 0); math.Abs(got-(0.6*0.8+0.1)) > 1e-9 {
 		t.Fatalf("vector composite = %v", got)
 	}
+	tree := &types.SearchResult{MatchType: types.MatchTypeKnowledgeTree}
+	if got := CompositeScore(tree, 0.8, 0); math.Abs(got-(0.9*0.8+0.1)) > 1e-9 {
+		t.Fatalf("tree evidence must use model score without invented similarity: %v", got)
+	}
+}
+
+func TestRerankTreeEvidenceSurvivesRetrievalScoreCap(t *testing.T) {
+	in := rows("base", "other", "parent")
+	in[0].Score, in[1].Score = .9, .8
+	in[2].Score, in[2].MatchType = 0, types.MatchTypeKnowledgeTree
+	model := &stubReranker{scores: []float64{.5, .99}}
+	res := Rerank(context.Background(), model, "q", in, Options{Threshold: .2, MaxCandidates: 1})
+	if strings.Join(model.documents, ",") != "base,parent" {
+		t.Fatalf("model must score scoreless tree evidence: %v", model.documents)
+	}
+	if !res.Diagnostics.Applied || res.Results[0].ID != in[2].ID {
+		t.Fatalf("parent should win unified rerank: %+v", res.Diagnostics)
+	}
 }
 
 func TestPreBoostScore_fallsBackToScore(t *testing.T) {

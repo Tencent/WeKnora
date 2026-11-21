@@ -2,11 +2,15 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // UpdateKnowledgeForTransfer is a compare-and-swap checkpoint. Full-row Save
@@ -23,6 +27,29 @@ func (r *knowledgeRepository) UpdateKnowledgeForTransfer(ctx context.Context, be
 	after.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
 	var storedUpdatedAt time.Time
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Claim moving under the same KB lock as native child creation, before
+		// any vector/file/chunk side effects. A prior admission check can race.
+		if moveErr := access.RejectMovingKnowledge(after); moveErr != nil {
+			var appErr *apperrors.AppError
+			if !errors.As(moveErr, &appErr) || appErr.HTTPCode != 409 {
+				return moveErr
+			}
+			if err := lockKnowledgeTreeKB(tx, before.TenantID, before.KnowledgeBaseID); err != nil {
+				return err
+			}
+			var current types.Knowledge
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
+				"id = ? AND tenant_id = ? AND knowledge_base_id = ?",
+				before.ID, before.TenantID, before.KnowledgeBaseID,
+			).First(&current).Error; err != nil {
+				return err
+			}
+			// An empty target rejects links in every KB when claiming a move.
+			treeRepo := &knowledgeRepository{db: tx}
+			if err := treeRepo.CheckKnowledgeTreeMove(ctx, before.TenantID, before.ID, ""); err != nil {
+				return err
+			}
+		}
 		result := tx.Model(&types.Knowledge{}).
 			Where("id = ? AND tenant_id = ? AND knowledge_base_id = ? AND parse_status = ? AND "+
 				"updated_at = ?",
@@ -70,5 +97,5 @@ func (r *knowledgeRepository) UpdateKnowledgeForTransfer(ctx context.Context, be
 	if err == nil {
 		after.UpdatedAt = storedUpdatedAt
 	}
-	return err
+	return nativeKnowledgeError(err)
 }

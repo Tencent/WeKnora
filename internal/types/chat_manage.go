@@ -30,6 +30,10 @@ type PipelineRequest struct {
 	// top-k slot, so sibling children of the same parent cannot crowd out other
 	// pages. Set by the knowledge-search API; off by default.
 	ParentSlotAggregation bool `json:"parent_slot_aggregation,omitempty"`
+	// ChildrenDepth / ChildrenLimit bound the parent and descendant knowledge
+	// expansion done before reranking. Set by the knowledge-search API.
+	ChildrenDepth int `json:"-"`
+	ChildrenLimit int `json:"-"`
 
 	// QueryImage is set when the caller submits an image to search by
 	// similarity instead of by text. Vector recall then embeds the image with

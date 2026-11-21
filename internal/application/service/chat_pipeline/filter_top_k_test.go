@@ -93,6 +93,38 @@ func TestPluginFilterTopKRecordsTruncation(t *testing.T) {
 	}, *chatManage.Truncation)
 }
 
+// Parent / descendant evidence fetched before rerank has no model score. Like
+// kept image evidence, it must ride outside the top-k cut when rerank did not
+// produce a scored order.
+func TestPluginFilterTopKLetsKnowledgeTreeEvidenceRideAlong(t *testing.T) {
+	kept := func(id string) *types.SearchResult {
+		return &types.SearchResult{
+			ID: id, KnowledgeID: id, MatchType: types.MatchTypeKnowledgeTree,
+			Metadata: map[string]string{types.MetadataKeptBy: types.KeptByKnowledgeTree},
+		}
+	}
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 1},
+		PipelineState: types.PipelineState{MergeResult: []*types.SearchResult{
+			{ID: "hit", KnowledgeID: "hit", Score: 0.9},
+			kept("parent"),
+			kept("sibling"),
+		}},
+	}
+
+	plugin := &PluginFilterTopK{}
+	err := plugin.OnEvent(
+		context.Background(),
+		types.FILTER_TOP_K,
+		chatManage,
+		func() *PluginError { return nil },
+	)
+	require.Nil(t, err)
+	require.Equal(t, []string{"hit", "parent", "sibling"}, searchResultIDs(chatManage.MergeResult))
+	require.Nil(t, chatManage.Truncation, "nothing was hidden by the cut")
+	require.Equal(t, types.KeptByKnowledgeTree, chatManage.MergeResult[1].Metadata[types.MetadataKeptBy])
+}
+
 // An earlier, wider cut is the one the prompt must report: a later
 // FILTER_TOP_K cut only removes passages from the pool the model was already
 // told about, and restating the pool as the narrower number would understate

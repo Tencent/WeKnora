@@ -220,7 +220,7 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 
 ### POST /api/v1/knowledge-bases/:id/hybrid-search（兼容 GET）
 
-用途：KB 内的底层召回（向量+关键词），默认不做 rerank，返回召回分；可选开启 rerank。适合评测召回、传预计算向量等需要控制原始召回的场景，一般的检索请用 [`knowledge-search`](./02-api-chat.md)，选择方法见[检索接口怎么选](./01-api-overview.md#retrieval-api)。权限：Viewer+，KB read；API key `retrieve`/full。GET 携带 JSON body 仅为向后兼容（#1727），推荐 POST。
+用途：KB 内的底层召回（向量+关键词），默认不做 rerank，返回召回分；可选开启 rerank。命中知识若有直接父知识，默认额外返回父知识；children_depth / children_limit 控制是否继续展开父与命中自身的子知识（见[原生父子知识](./11-api-knowledge-hierarchy.md)）。适合评测召回、传预计算向量等需要控制原始召回的场景，一般的检索请用 [`knowledge-search`](./02-api-chat.md)，选择方法见[检索接口怎么选](./01-api-overview.md#retrieval-api)。权限：Viewer+，KB read；API key `retrieve`/full。GET 携带 JSON body 仅为向后兼容（#1727），推荐 POST。
 
 查询参数：`resource_urls=handle|public`（`public` 把结果 `content` / `image_info` 里的 `resource://` 换成可加载直链，详见 [API 总览](./01-api-overview.md)）。
 
@@ -399,6 +399,8 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/url -H "X-API-Key: $API
 ### POST /api/v1/knowledge-bases/:id/knowledge/manual
 
 用途：创建手工（Markdown）知识。权限/API key 同上。
+
+file/URL/manual 上传支持可选顶层 `parent_knowledge_id`，查询可展开子孙，删除可选级联，详见[父子知识参数](./11-api-knowledge-hierarchy.md)。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
