@@ -1,0 +1,108 @@
+{
+  "class": "Probe",
+  "invertedIndexConfig": {
+    "bm25": {
+      "b": 0.75,
+      "k1": 1.2
+    },
+    "cleanupIntervalSeconds": 60,
+    "stopwords": {
+      "additions": null,
+      "preset": "en",
+      "removals": null
+    },
+    "usingBlockMaxWAND": true
+  },
+  "multiTenancyConfig": {
+    "autoTenantActivation": false,
+    "autoTenantCreation": false,
+    "enabled": false
+  },
+  "properties": [
+    {
+      "dataType": [
+        "text"
+      ],
+      "indexFilterable": true,
+      "indexRangeFilters": false,
+      "indexSearchable": true,
+      "name": "content",
+      "tokenization": "word"
+    }
+  ],
+  "shardingConfig": {
+    "actualCount": 1,
+    "actualVirtualCount": 128,
+    "desiredCount": 1,
+    "desiredVirtualCount": 128,
+    "function": "murmur3",
+    "key": "_id",
+    "strategy": "hash",
+    "virtualPerPhysical": 128
+  },
+  "vectorConfig": {
+    "embedding": {
+      "vectorIndexConfig": {
+        "bq": {
+          "enabled": false
+        },
+        "cleanupIntervalSeconds": 300,
+        "distance": "cosine",
+        "dynamicEfFactor": 8,
+        "dynamicEfMax": 500,
+        "dynamicEfMin": 100,
+        "ef": -1,
+        "efConstruction": 128,
+        "filterStrategy": "acorn",
+        "flatSearchCutoff": 40000,
+        "maxConnections": 32,
+        "multivector": {
+          "aggregation": "maxSim",
+          "enabled": false,
+          "muvera": {
+            "dprojections": 16,
+            "enabled": false,
+            "ksim": 4,
+            "repetitions": 10
+          }
+        },
+        "pq": {
+          "bitCompression": false,
+          "centroids": 256,
+          "enabled": false,
+          "encoder": {
+            "distribution": "log-normal",
+            "type": "kmeans"
+          },
+          "segments": 0,
+          "trainingLimit": 100000
+        },
+        "rq": {
+          "bits": 8,
+          "centering": false,
+          "enabled": false,
+          "rescoreLimit": 20,
+          "trainingLimit": 10000
+        },
+        "skip": false,
+        "skipDefaultQuantization": false,
+        "sq": {
+          "enabled": false,
+          "rescoreLimit": 20,
+          "trainingLimit": 100000
+        },
+        "trackDefaultQuantization": false,
+        "vectorCacheMaxObjects": 1000000000000
+      },
+      "vectorIndexType": "hnsw",
+      "vectorizer": {
+        "none": {}
+      }
+    }
+  },
+  "replicationConfig": {
+    "deletionStrategy": "TimeBasedResolution",
+    "factor": 1,
+    "asyncEnabled": false
+  }
+}
