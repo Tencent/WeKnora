@@ -623,6 +623,12 @@ class WeKnoraClient:
                         }
                         if response_type == "stop":
                             result["stopped"] = True
+                        else:
+                            # A complete event can end only the current stream
+                            # while the run is still waiting on a human prompt.
+                            data = event_data.get("data")
+                            if isinstance(data, dict) and data.get("suspended"):
+                                result["suspended"] = data["suspended"]
                         return result
 
             raise RequestException("SSE stream ended before complete event")
