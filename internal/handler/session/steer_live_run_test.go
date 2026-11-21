@@ -101,6 +101,18 @@ func TestSteerMessageMessageLookupFailureReturns503(t *testing.T) {
 	assert.NotContains(t, w.Body.String(), `"new_run"`)
 }
 
+func TestDocumentScopedAgentTurnRejectsSteering(t *testing.T) {
+	h := &Handler{
+		sessionService: &steerOwnedSessionStub{},
+		messageService: &steerMessageLookupStub{msg: &types.Message{
+			ID: "assist-1", ExecutionContext: types.MessageExecutionContext{DocumentScopeAPIKeyID: 11},
+		}},
+		streamManager: &steerLiveRunLookupStub{assistantID: "assist-1"},
+	}
+	w := postSteer(t, newSteerLiveRunRouter(h), `{"query":"broaden the document scope"}`)
+	require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
+}
+
 func TestSteerMessageNoLiveRunStillReturnsNewRun(t *testing.T) {
 	h := &Handler{
 		sessionService: &steerOwnedSessionStub{},

@@ -84,6 +84,7 @@
 | 推理模型拒绝 `temperature` / `top_p` | `{"supports_temperature": false}` |
 | 接口只接受固定温度（例如 1） | `{"fixed_temperature": 1}` |
 | vLLM / SGLang 部署的 Qwen3 等混合思考模型无法关闭或开启思考 | `{"thinking_format": "chat-template-kwargs"}` |
+| 经 OpenAI 兼容网关调用 Qwen，服务端要求 `enable_thinking` 开关 | `{"thinking_format": "enable-thinking"}`；调用方的关闭思考偏好会序列化为 `enable_thinking: false` |
 | 网关不支持流式返回用量，流式请求报错 | `{"supports_usage_in_streaming": false}` |
 | 网关拒绝带图片的消息结构 | `{"supports_multi_content": false}`（只发送文字，图片会被丢弃） |
 | 需要附带厂商私有参数，如阿里云联网搜索 | `{"extra_body": {"enable_search": true}}` |

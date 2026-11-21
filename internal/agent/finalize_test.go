@@ -11,12 +11,265 @@ import (
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/api/anthropicmessages"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDocumentScopedAgentPublishesOnlyReadableFinalAnswer(t *testing.T) {
+	for _, maxRounds := range []int{1, 3} {
+		t.Run(fmt.Sprint(maxRounds), func(t *testing.T) {
+			planningStop := mockResponse{chunks: []types.StreamResponse{{
+				ResponseType: types.ResponseTypeAnswer, Content: "READY", Done: true, FinishReason: "stop",
+			}}}
+			if maxRounds == 1 {
+				planningStop = mockResponse{chunks: []types.StreamResponse{
+					{ResponseType: types.ResponseTypeAnswer, Content: `<ref id="chunk://1"/>`},
+					{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "stop"},
+				}}
+			}
+			model := &mockChat{responses: []mockResponse{
+				{chunks: []types.StreamResponse{
+					{ResponseType: types.ResponseTypeAnswer, Content: "I’ll search the knowledge base."},
+					{
+						ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "tool_calls",
+						ToolCalls: []types.LLMToolCall{{
+							ID: "search-once", Type: "function",
+							Function: types.FunctionCall{Name: "synthetic_lookup", Arguments: "{}"},
+						}},
+					},
+				}},
+				planningStop,
+				{chunks: []types.StreamResponse{
+					{ResponseType: types.ResponseTypeThinking, Content: "Internal reasoning."},
+					{ResponseType: types.ResponseTypeAnswer, Content: "<thi"},
+					{ResponseType: types.ResponseTypeAnswer, Content: "nk>Internal draft.</think>请在线提交申请。"},
+					{ResponseType: types.ResponseTypeAnswer, Content: `审批后领取。<ref id="chunk://`},
+					{
+						ResponseType: types.ResponseTypeAnswer,
+						Content:      `1"/><ref id="chunk://999"/><kb doc="forged" chunk_id="forged" kb_id="foreign"/>`,
+						Done:         true, FinishReason: "stop",
+					},
+				}},
+			}}
+			engine := newTestEngine(t, model, func(cfg *types.AgentConfig) {
+				cfg.DocumentScoped = true
+				cfg.MaxIterations = maxRounds
+			})
+			engine.modelContext.RegisterChunk(modelcontext.ChunkReference{
+				ChunkID: "evidence", KnowledgeID: "allowed", KnowledgeBaseID: "allowed-base",
+				DocumentTitle: "办理指引",
+			})
+			engine.toolRegistry = agenttools.NewToolRegistry()
+			tool := newCountingTool("synthetic_lookup")
+			engine.toolRegistry.RegisterTool(tool)
+
+			var seen []event.AgentFinalAnswerData
+			engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+				seen = append(seen, evt.Data.(event.AgentFinalAnswerData))
+				return nil
+			})
+			state := &types.AgentState{}
+			_, err := engine.executeLoop(t.Context(), state, "怎么办理？", emptyMessages(),
+				engine.buildToolsForLLM(), "session", "message")
+
+			require.NoError(t, err)
+			require.True(t, state.IsComplete)
+			require.Len(t, seen, 3)
+			require.Equal(t, "请在线提交申请。", seen[0].Content)
+			require.Equal(t, "审批后领取。", seen[1].Content)
+			var delivered strings.Builder
+			for i, delta := range seen {
+				require.False(t, delta.Replace)
+				require.Equal(t, i == len(seen)-1, delta.Done)
+				delivered.WriteString(delta.Content)
+			}
+			require.Equal(t, state.FinalAnswer, delivered.String())
+			require.Contains(t, state.FinalAnswer, `chunk_id="evidence"`)
+			require.Contains(t, state.FinalAnswer, `kb_id="allowed-base"`)
+			require.NotContains(t, state.FinalAnswer, "999")
+			require.NotContains(t, state.FinalAnswer, "forged")
+			require.Equal(t, 1, tool.calls)
+			require.Len(t, model.opts, 3)
+			last := model.opts[2]
+			require.Empty(t, last.Tools)
+			require.Equal(t, "none", last.ToolChoice)
+			require.Equal(t, api.ReasoningOff, last.ReasoningEffort)
+		})
+	}
+}
+
+func TestDocumentScopedSynthesisKeepsToolEvidenceAndCitationHandles(t *testing.T) {
+	for _, toolName := range []string{agenttools.ToolSearchKnowledge, agenttools.ToolReadDocument} {
+		for _, citations := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/citations=%v", toolName, citations), func(t *testing.T) {
+				model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+					{ResponseType: types.ResponseTypeAnswer, Content: "请在线提交申请。<ref id=\"chunk://"},
+					{ResponseType: types.ResponseTypeAnswer, Content: "1\"/>", Done: true, FinishReason: "stop"},
+				}}}}
+				engine := newTestEngine(t, model, withCitationsEnabled(citations), func(cfg *types.AgentConfig) {
+					cfg.DocumentScoped = true
+				})
+				row := map[string]interface{}{
+					"chunk_id": "current-chunk", "knowledge_id": "allowed-document",
+					"knowledge_base_id": "allowed-base", "knowledge_title": "办理指引",
+					"content": "请在线提交申请。",
+				}
+				data := map[string]interface{}{
+					"display_type": "search_results", "mode": "semantic",
+					"results": []map[string]interface{}{row},
+				}
+				args := map[string]interface{}{"query": "如何申请？"}
+				if toolName == agenttools.ToolReadDocument {
+					row["knowledge_base"] = row["knowledge_base_id"]
+					delete(row, "knowledge_base_id")
+					data = map[string]interface{}{
+						"display_type": "knowledge_chunks_list", "knowledge_id": "allowed-document",
+						"knowledge_base_id": "allowed-base", "knowledge_title": "办理指引",
+						"chunks":   []map[string]interface{}{row},
+						"document": map[string]interface{}{"knowledge_id": "allowed-document", "title": "办理指引"},
+					}
+					args = map[string]interface{}{"id": "allowed-document"}
+				}
+				step := types.AgentStep{ToolCalls: []types.ToolCall{{
+					ID: "lookup", Name: toolName, Args: args, Result: &types.ToolResult{Success: true, Data: data},
+				}}}
+				messages := []chat.Message{
+					{Role: "system", Content: engine.buildSystemPrompt(t.Context())},
+					{Role: "user", Content: "如何申请？"},
+				}
+				messages = engine.appendToolResults(messages, step)
+				state := &types.AgentState{RoundSteps: []types.AgentStep{step}}
+				var published strings.Builder
+				engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+					published.WriteString(evt.Data.(event.AgentFinalAnswerData).Content)
+					return nil
+				})
+				require.NoError(t, engine.streamFinalAnswerToEventBus(t.Context(), "如何申请？", state, "session", messages))
+				require.Len(t, model.calls, 1)
+				evidence := model.calls[0][len(messages)-1]
+				require.Equal(t, "tool", evidence.Role)
+				require.Equal(t, "lookup", evidence.ToolCallID)
+				require.Equal(t, toolName, evidence.Name)
+				require.Contains(t, evidence.Content, `<document id="doc://1" kb="kb://1" title="办理指引">`)
+				require.Contains(t, evidence.Content, `<chunk id="chunk://1" index="0" view="full">`)
+				require.Contains(t, evidence.Content, "请在线提交申请。")
+				require.NotContains(t, evidence.Content, "current-chunk")
+				require.Equal(t, state.FinalAnswer, published.String())
+				want := "请在线提交申请。"
+				if citations {
+					want += `<kb doc="办理指引" chunk_id="current-chunk" kb_id="allowed-base" />`
+				}
+				require.Equal(t, want, state.FinalAnswer)
+			})
+		}
+	}
+}
+
+func TestDocumentScopedSynthesisDoesNotRetryAfterPublishing(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "请在线提交申请。"},
+		{ResponseType: types.ResponseTypeError, Content: "context_length_exceeded", Done: true},
+	}}}}
+	engine := newTestEngine(t, model, func(cfg *types.AgentConfig) { cfg.DocumentScoped = true })
+	var seen []event.AgentFinalAnswerData
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		seen = append(seen, evt.Data.(event.AgentFinalAnswerData))
+		return nil
+	})
+	state := &types.AgentState{}
+	err := engine.streamFinalAnswerToEventBus(t.Context(), "怎么办理？", state, "session", storedHistoryOverflow())
+	require.ErrorContains(t, err, "context_length_exceeded")
+	require.Equal(t, 1, model.callCount)
+	require.Equal(t, []event.AgentFinalAnswerData{{Content: "请在线提交申请。"}}, seen)
+	require.Equal(t, "请在线提交申请。", state.FinalAnswer)
+}
+
+func TestDocumentScopedSynthesisCancellationRetainsOnlyPublishedAnswer(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "请在线提交申请。"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "审批后领取。"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "未发送的尾部。", Done: true, FinishReason: "stop"},
+	}}}}
+	engine := newTestEngine(t, model, func(cfg *types.AgentConfig) { cfg.DocumentScoped = true })
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var seen []event.AgentFinalAnswerData
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		seen = append(seen, evt.Data.(event.AgentFinalAnswerData))
+		cancel()
+		return nil
+	})
+	state := &types.AgentState{}
+	err := engine.streamFinalAnswerToEventBus(ctx, "怎么办理？", state, "session", emptyMessages())
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, model.callCount)
+	require.Equal(t, []event.AgentFinalAnswerData{{Content: "请在线提交申请。"}}, seen)
+	require.Equal(t, "请在线提交申请。", state.FinalAnswer)
+	require.False(t, state.IsComplete)
+}
+
+func TestDocumentScopedSynthesisReportsEmptyRecoveryInsteadOfCompleting(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{
+		{chunks: []types.StreamResponse{{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "stop"}}},
+		{chunks: []types.StreamResponse{{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "stop"}}},
+	}}
+	engine := newTestEngine(t, model, func(cfg *types.AgentConfig) { cfg.DocumentScoped = true })
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, _ event.Event) error {
+		t.Fatal("empty synthesis must emit no answer")
+		return nil
+	})
+	state := &types.AgentState{}
+	err := engine.streamFinalAnswerToEventBus(t.Context(), "test", state, "session", emptyMessages())
+	require.ErrorContains(t, err, "no readable text")
+	require.Empty(t, state.FinalAnswer)
+	require.Equal(t, 2, model.callCount)
+}
+
+func TestDocumentScopedSynthesisAfterConsecutiveLengthStops(t *testing.T) {
+	for name, content := range map[string]string{"empty": "", "citation-only": `<ref id="chunk://1"/>`} {
+		t.Run(name, func(t *testing.T) {
+			cappedTool := mockResponse{chunks: []types.StreamResponse{{
+				Done: true, FinishReason: "length",
+				ToolCalls: []types.LLMToolCall{{
+					ID: "capped", Type: "function",
+					Function: types.FunctionCall{Name: "synthetic_lookup", Arguments: `{"query":"unfinished`},
+				}},
+			}}}
+			rounds := make([]mockResponse, maxConsecutiveLengthRounds-1)
+			for i := range rounds {
+				rounds[i] = cappedTool
+			}
+			const answer = "当前没有足够的资料可以确认。"
+			rounds = append(rounds,
+				mockResponse{chunks: []types.StreamResponse{{
+					ResponseType: types.ResponseTypeAnswer, Content: content, Done: true, FinishReason: "length",
+				}}},
+				mockResponse{chunks: []types.StreamResponse{{
+					ResponseType: types.ResponseTypeAnswer, Content: answer, Done: true, FinishReason: "stop",
+				}}},
+			)
+			model := &mockChat{responses: rounds}
+			engine := newTestEngine(t, model, func(cfg *types.AgentConfig) {
+				cfg.DocumentScoped = true
+				cfg.MaxIterations = maxConsecutiveLengthRounds + 1
+			})
+			state := &types.AgentState{}
+
+			_, err := engine.executeLoop(t.Context(), state, "怎么处理？", emptyMessages(),
+				emptyTools(), "session", "message")
+
+			require.NoError(t, err)
+			require.True(t, state.IsComplete)
+			require.Equal(t, answer, state.FinalAnswer)
+			require.Len(t, model.opts, len(rounds))
+			require.Equal(t, "none", model.opts[len(rounds)-1].ToolChoice)
+		})
+	}
+}
 
 // This fixture uses synthetic data only. No model service or deployment is needed.
 type oversizedSynthesisChat struct {

@@ -30,3 +30,16 @@ func TestMessageSuggestionWriteErrorMapsSessionNotFoundTo404(t *testing.T) {
 	require.Equal(t, apperrors.ErrNotFound, appErr.Code)
 	require.Equal(t, http.StatusNotFound, appErr.HTTPCode)
 }
+
+func TestMessageSuggestionWriteErrorPreservesForbidden(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+
+	NewMessageSuggestionHandler(nil).writeError(c, apperrors.NewForbiddenError("forbidden"))
+
+	require.Len(t, c.Errors, 1)
+	var appErr *apperrors.AppError
+	require.ErrorAs(t, c.Errors[0].Err, &appErr)
+	require.Equal(t, http.StatusForbidden, appErr.HTTPCode)
+}

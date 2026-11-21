@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"io"
 	"os"
@@ -124,6 +125,82 @@ func TestFinalSynthesisKeepsConversationRolesImagesAndSteering(t *testing.T) {
 	require.Empty(t, model.opts[0].Tools)
 	require.Equal(t, "none", model.opts[0].ToolChoice)
 	require.Equal(t, original, messages, "synthesis must not mutate the live transcript")
+}
+
+func TestDocumentPlanningNoticeAdvancesAfterInitialLookup(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		scoped    bool
+		iteration int
+	}{
+		{name: "initial lookup", scoped: true, iteration: 0},
+		{name: "review existing evidence", scoped: true, iteration: 1},
+		{name: "ordinary Agent", scoped: false, iteration: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{{
+				ResponseType: types.ResponseTypeAnswer, Content: "READY", Done: true, FinishReason: "stop",
+			}}}}}
+			engine := newTestEngine(t, model, func(cfg *types.AgentConfig) { cfg.DocumentScoped = tc.scoped })
+			const custom = "Keep the existing recovery constraints."
+			_, err := engine.streamThinkingToEventBus(
+				t.Context(), emptyMessages(), emptyTools(), tc.iteration, "session", custom,
+			)
+			require.NoError(t, err)
+			require.Len(t, model.opts, 1)
+			notice := model.opts[0].RuntimeNotice
+			if !tc.scoped {
+				require.Equal(t, custom, notice)
+				return
+			}
+			require.True(t, strings.HasPrefix(notice, custom+"\n"))
+			require.Contains(t, notice, documentAnswerNotice)
+			if tc.iteration == 0 {
+				require.Contains(t, notice, documentInitialSearchNotice)
+				require.Contains(t, notice, `mode="semantic"`)
+				require.NotContains(t, notice, documentEvidenceNotice)
+				return
+			}
+			require.Contains(t, notice, documentEvidenceNotice)
+			require.Contains(t, notice, "return only READY now")
+			require.NotContains(t, notice, documentInitialSearchNotice)
+			require.NotContains(t, notice, `mode="semantic"`)
+		})
+	}
+}
+
+func TestDocumentScopedToolDescriptionsKeepRegistryAndSchemas(t *testing.T) {
+	want := map[string]string{
+		tools.ToolSearchKnowledge: documentSearchToolDescription,
+		tools.ToolReadDocument:    documentReadToolDescription,
+		tools.ToolListDocuments:   "Original list_documents description.",
+	}
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = tools.NewToolRegistry()
+	const schema = `{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`
+	for name := range want {
+		tool := newCountingTool(name)
+		tool.BaseTool = tools.NewBaseTool(name, "Original "+name+" description.", json.RawMessage(schema))
+		engine.toolRegistry.RegisterTool(tool)
+	}
+	originalDefinitions := engine.toolRegistry.GetModelFunctionDefinitions()
+	ordinary := engine.buildToolsForLLM()
+	engine.config.DocumentScoped = true
+	scoped := engine.buildToolsForLLM()
+	engine.config.DocumentScoped = false
+	require.Equal(t, ordinary, engine.buildToolsForLLM(), "scoped construction must not affect later ordinary runs")
+	require.Equal(t, originalDefinitions, engine.toolRegistry.GetModelFunctionDefinitions())
+	require.Len(t, scoped, len(ordinary))
+	for i, tool := range scoped {
+		t.Run(tool.Function.Name, func(t *testing.T) {
+			require.Equal(t, ordinary[i].Type, tool.Type)
+			require.Equal(t, ordinary[i].Function.Name, tool.Function.Name)
+			require.Equal(t, ordinary[i].Function.Parameters, tool.Function.Parameters)
+			require.JSONEq(t, schema, string(tool.Function.Parameters))
+			require.Equal(t, "Original "+tool.Function.Name+" description.", ordinary[i].Function.Description)
+			require.Equal(t, want[tool.Function.Name], tool.Function.Description)
+		})
+	}
 }
 
 func TestSkillInstallationPromptDoesNotReceiveSessionArtifactWorkflow(t *testing.T) {
