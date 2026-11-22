@@ -825,7 +825,13 @@ const credentialLabel = computed(() =>
 )
 const apiKeyLabel = computed(() => {
   const label = credentialLabel.value
-  return label ? pickLocalized(label.labels, currentLocale.value, label.label) : t('model.editor.apiKeyOptional')
+  if (label) {
+    return pickLocalized(label.labels, currentLocale.value, label.label)
+  }
+
+  return selectedProvider.value?.requiresAuth
+    ? t('model.editor.apiKey')
+    : t('model.editor.apiKeyOptional')
 })
 const apiKeyRequired = computed(
   () => credentialLabel.value?.required === true || (!!selectedProvider.value?.requiresAuth && !isEdit.value),

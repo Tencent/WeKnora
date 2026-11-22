@@ -184,6 +184,7 @@ func (r *syncRun) syncFile(e entry) error {
 	r.seen[e.Path] = true
 	fp := fingerprint(e)
 	if r.cur.Files[e.Path] == fp {
+		datasource.RecordUnchangedItem(r.h)
 		return nil
 	}
 	body, err := r.client.download(r.ctx, e, r.limit)
@@ -204,21 +205,28 @@ func (r *syncRun) syncFile(e entry) error {
 		if err := r.emit(item); err != nil {
 			return err
 		}
-		_, known := r.cur.Files[e.Path]
-		_, baseline := r.cur.FullSyncBaseline[e.Path]
-		if known || baseline {
-			r.cur.Files[e.Path] = ""
-			return r.mutated()
-		}
-		return nil
+		return r.markFailed(e.Path)
 	}
 	item := r.identity(e)
 	item.Content, item.ContentType = body, http.DetectContentType(body)
 	if err := r.emit(item); err != nil {
+		if errors.Is(err, datasource.ErrItemIngestFailed) {
+			return r.markFailed(e.Path)
+		}
 		return err
 	}
 	r.cur.Files[e.Path] = fp
 	return r.mutated()
+}
+
+func (r *syncRun) markFailed(filePath string) error {
+	_, known := r.cur.Files[filePath]
+	_, baseline := r.cur.FullSyncBaseline[filePath]
+	if known || baseline {
+		r.cur.Files[filePath] = ""
+		return r.mutated()
+	}
+	return nil
 }
 
 func fetchReason(err error) string {

@@ -367,3 +367,21 @@ test('DingTalk configuration and sync failures remain localized after pruning', 
     }
   }
 })
+
+test('datasource ingest sync error codes are localized across all locales and survive pruning', () => {
+  const keys = [
+    'syncError.ingest_failed',
+    'syncError.unsupported_file_type',
+    'syncError.prerequisite_not_configured',
+    'syncError.invalid_item_name',
+    'syncError.invalid_url',
+    'syncError.invalid_json_content',
+    'syncError.storage_quota_exceeded',
+  ].map(key => `datasource.${key}`)
+  for (const key of keys) {
+    assert.ok(referencedKeys.has(key), `pruning would remove ${key}`)
+    for (const [locale, bundle] of Object.entries(LOCALE_BUNDLES)) {
+      assert.equal(typeof getLocaleValueAtPath(bundle, key), 'string', `${locale}: missing ${key}`)
+    }
+  }
+})

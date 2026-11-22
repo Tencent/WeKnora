@@ -37,6 +37,7 @@ type feishuSelectedNodeServer struct {
 	deniedTokens  map[string]bool
 	driveFiles    map[string][]core.DriveFile
 	deletedDrive  map[string]bool
+	failDownload  map[string]int
 }
 
 func newFeishuSelectedNodeServer(t *testing.T, spaceID string) *feishuSelectedNodeServer {
@@ -163,6 +164,13 @@ func (f *feishuSelectedNodeServer) handle(w http.ResponseWriter, r *http.Request
 		})
 	case strings.HasPrefix(r.URL.Path, "/open-apis/drive/v1/files/") &&
 		strings.HasSuffix(r.URL.Path, "/download"):
+		trimmed := strings.TrimPrefix(r.URL.Path, "/open-apis/drive/v1/files/")
+		fileTok := strings.TrimSuffix(trimmed, "/download")
+		if status := f.failDownload[fileTok]; status > 0 {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(`{"code":99991672,"msg":"permission denied"}`))
+			return
+		}
 		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("# drive markdown"))
 	default:

@@ -69,6 +69,13 @@ type NodeOps[N any] interface {
 	EncodeCursor(times map[string]map[string]string, lastSync time.Time) *types.SyncCursor
 }
 
+// nodeDirPathOps is an optional capability on NodeOps adapters that already
+// resolve per-node directory paths during List so fetch-failure error items
+// preserve the same folder-qualified label as ingest-failure error items.
+type nodeDirPathOps[N any] interface {
+	DirPath(n N) string
+}
+
 // CollectHandler is the StreamHandler used by FetchAll / FetchIncremental to
 // gather every Emitted item into a slice instead of streaming. Checkpoint is a
 // no-op: those paths return a single cursor at the end.
@@ -212,6 +219,7 @@ func runSync[N any](
 			// and Skip re-fetching.
 			if !forceFull && hadPrev && prevEdit == editTimeStr {
 				newTimes[resourceID][tok] = editTimeStr
+				datasource.RecordUnchangedItem(h)
 				processed++
 				maybeCheckpoint()
 				continue
@@ -226,29 +234,45 @@ func runSync[N any](
 				// skipped on a transient export failure (Tencent/WeKnora#2136).
 				// The seeded entry keeps the prior key, or the invalidated
 				// full-fetch key, without losing its deletion identity.
-				if eerr := h.Emit(ctx, types.FetchedItem{
+				errItem := types.FetchedItem{
 					ExternalID:       tok,
 					Title:            ops.Title(node),
 					SourceResourceID: resourceID,
 					Metadata:         FeishuErrorItemMeta(ferr, nil),
-				}); eerr != nil {
+				}
+				if dirOps, ok := ops.(nodeDirPathOps[N]); ok {
+					if dir := dirOps.DirPath(node); dir != "" {
+						errItem.FileName = dir + "/" + SanitizeFileName(ops.Title(node))
+					}
+				}
+				if eerr := h.Emit(ctx, errItem); eerr != nil {
 					return nil, eerr
 				}
-			} else {
-				// Fetched, or an unsupported type (nothing to fetch): record
-				// the current edit time so the node is not re-processed next run.
-				newTimes[resourceID][tok] = editTimeStr
-				if len(items) > 0 {
-					tally.fetch()
-					for _, it := range items {
-						if eerr := h.Emit(ctx, *it); eerr != nil {
-							return nil, eerr
+			} else if len(items) > 0 {
+				itemIngestFailed := false
+				for _, it := range items {
+					if eerr := h.Emit(ctx, *it); eerr != nil {
+						if errors.Is(eerr, datasource.ErrItemIngestFailed) {
+							itemIngestFailed = true
+							continue
 						}
+						return nil, eerr
 					}
-				} else {
-					// Unsupported type (mindnote/slides/…): no item.
-					tally.Skip(ops.ObjType(node))
 				}
+				if itemIngestFailed {
+					tally.fail()
+					// Keep the prior edit time (or leave the node absent) so a
+					// single item's ingest failure retries on a later sync
+					// without blocking unrelated nodes or newly added resources.
+				} else {
+					tally.fetch()
+					newTimes[resourceID][tok] = editTimeStr
+				}
+			} else {
+				// Unsupported type (mindnote/slides/…): record the current edit
+				// time so the node is not re-processed next run.
+				newTimes[resourceID][tok] = editTimeStr
+				tally.Skip(ops.ObjType(node))
 			}
 
 			processed++
