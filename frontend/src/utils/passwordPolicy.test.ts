@@ -14,7 +14,12 @@ function t(key: string, params?: Record<string, unknown>): string {
 
 /** Collect the pattern rules of a rule set in order. */
 function patternRules(rules: ReturnType<typeof newPasswordRules>) {
-  return rules.filter((rule) => rule.pattern)
+  // `pattern` is typed `string | RegExp`; narrow to RegExp so `.test()` and
+  // `.source` type-check (all patterns produced here are regexes).
+  return rules.filter(
+    (rule): rule is typeof rule & { pattern: RegExp } =>
+      rule.pattern instanceof RegExp,
+  )
 }
 
 /** Return the messages of the pattern rules that the password fails. */
