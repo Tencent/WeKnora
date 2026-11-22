@@ -77,6 +77,7 @@ func newOAuthRuntime(
 	serviceID, baseURL string,
 	cfg transport.OAuthConfig,
 ) *oauthRuntime {
+	cfg.HTTPClient = oauthResourceClient(cfg.HTTPClient, baseURL)
 	h := transport.NewOAuthHandler(cfg)
 	h.SetBaseURL(baseURL)
 	leaseDuration := oauthRefreshLease

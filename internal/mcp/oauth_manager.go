@@ -66,7 +66,7 @@ func (m *OAuthManager) newHandler(
 		TokenStore:            newDBTokenStore(m.repo, tenantID, principal, service.ID),
 		PKCEEnabled:           true,
 		AuthServerMetadataURL: service.AuthConfig.AuthServerMetadataURL,
-		HTTPClient:            newOAuthHTTPClient(),
+		HTTPClient:            oauthResourceClient(newOAuthHTTPClient(), *service.URL),
 	}
 	if clientID, clientSecret, ok := preRegisteredClient(service); ok {
 		cfg.ClientID, cfg.ClientSecret = clientID, clientSecret
@@ -166,6 +166,18 @@ func (m *OAuthManager) StartAuthorization(
 	if err != nil {
 		return "", "", fmt.Errorf("failed to build authorization URL: %w", err)
 	}
+
+	// Keep an SDK-discovered resource; otherwise bind the configured MCP URL.
+	parsedAuthURL, err := url.Parse(authURL)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid authorization URL: %w", err)
+	}
+	query := parsedAuthURL.Query()
+	if !query.Has("resource") {
+		query.Set("resource", *service.URL)
+	}
+	parsedAuthURL.RawQuery = query.Encode()
+	authURL = parsedAuthURL.String()
 
 	if err := m.states.Put(ctx, state, OAuthState{
 		TenantID:         tenantID,
