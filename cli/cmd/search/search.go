@@ -34,7 +34,7 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 }
 
 // emptyContentSearchHint returns an actionable note when a KB-scoped content
-// search (chunks / docs) yields zero results, so an agent can distinguish
+// search (chunks) yields zero results, so an agent can distinguish
 // "no match" from "the KB has no indexed content". Empty when n > 0 so it
 // never adds noise to real results.
 func emptyContentSearchHint(n int) string {
