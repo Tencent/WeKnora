@@ -13,7 +13,11 @@ func TestMCPAuthorizationSetup(t *testing.T) {
 	if !probe.OAuthRequired {
 		t.Fatal("missing authorization challenge")
 	}
-	body, err := json.Marshal(MCPService{AuthConfig: &MCPAuthConfig{AuthType: "oauth", ClientID: "example-client", Scopes: []string{"files.read"}}})
+	body, err := json.Marshal(MCPService{
+		AuthConfig: &MCPAuthConfig{
+			AuthType: "oauth", ClientID: "example-client", Scopes: []string{"files.read"},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
