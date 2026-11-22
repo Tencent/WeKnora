@@ -6,7 +6,13 @@ import (
 )
 
 func TestAssistantSelectedPage(t *testing.T) {
-	req := AgentQARequest{Query: "explain this setting", PageContext: &PageContext{Page: "models", ModelID: "model-1", Selection: &PageSelection{Text: "temperature", Field: "config", StartLine: 2, EndLine: 2}}}
+	req := AgentQARequest{
+		Query: "explain this setting",
+		PageContext: &PageContext{
+			Page: "models", ModelID: "model-1",
+			Selection: &PageSelection{Text: "temperature", Field: "config", StartLine: 2, EndLine: 2},
+		},
+	}
 	b, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
