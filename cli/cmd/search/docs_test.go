@@ -171,13 +171,14 @@ func TestSearchDocs_AllPagesFlag_DefaultsTrue_WalksAllPages(t *testing.T) {
 // caps server round-trips at one, even when the server reports far more
 // items available. New v0.5 opt-out for the walk-all default.
 func TestSearchDocs_AllPagesFalse_StopsAtFirstPage(t *testing.T) {
-	_, _ = iostreams.SetForTest(t)
+	out, _ := iostreams.SetForTest(t)
 	svc := &fakeDocsSearchSvc{
 		pages: map[int][]sdk.Knowledge{1: {{ID: "d1", Title: "needle"}, {ID: "d2", Title: "needle"}}},
 		total: 100,
 	}
 	opts := &DocsSearchOptions{Query: "needle", KBID: "kb_abc", Limit: 100, PageSize: 2, AllPages: false}
 	require.NoError(t, runDocsSearch(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	assert.Contains(t, out.String(), `"has_more":true`)
 	assert.Len(t, svc.calls, 1, "must stop at first page when --all-pages=false")
 }
 

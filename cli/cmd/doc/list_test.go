@@ -442,6 +442,7 @@ func TestList_JSON_TotalCount_SinglePage(t *testing.T) {
 	opts := &ListOptions{PageSize: 20, Limit: 30}
 	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx"))
 	body := out.String()
+	assert.Contains(t, body, `"has_more":true`)
 	assert.Contains(t, body, `"total_count":99`, "single-page fetch must surface server total in meta.total_count")
 }
 
