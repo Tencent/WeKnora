@@ -273,9 +273,25 @@ func fitPassages(ctx context.Context, passages []string, limit int) {
 	}
 	trimmed := 0
 	for i, p := range passages {
-		if utf8.RuneCountInString(p) > limit {
-			passages[i] = string([]rune(p)[:limit])
+		if len(p) <= limit {
+			continue
+		}
+		remaining := limit
+		for offset := range p {
+			if remaining > 0 {
+				remaining--
+				continue
+			}
+			prefix := p[:offset]
+			if utf8.ValidString(prefix) {
+				// Own the prefix so a short passage does not retain a large OCR buffer.
+				passages[i] = strings.Clone(prefix)
+			} else {
+				// Keep the existing per-byte replacement of invalid UTF-8.
+				passages[i] = string([]rune(prefix))
+			}
 			trimmed++
+			break
 		}
 	}
 	if trimmed > 0 {
