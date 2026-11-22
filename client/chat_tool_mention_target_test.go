@@ -6,7 +6,13 @@ import (
 )
 
 func TestChatMentionTargets(t *testing.T) {
-	req := AgentQARequest{Query: "use these tools", MentionedItems: []MentionedItem{{Type: "mcp", Name: "lookup", ServiceID: "crm"}, {Type: "skill", Name: "Review", SkillName: "review-doc"}}}
+	req := AgentQARequest{
+		Query: "use these tools",
+		MentionedItems: []MentionedItem{
+			{Type: "mcp", Name: "lookup", ServiceID: "crm"},
+			{Type: "skill", Name: "Review", SkillName: "review-doc"},
+		},
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
