@@ -53,7 +53,10 @@ func TestList_Success_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	now := time.Now()
 	items := []sdk.Knowledge{
-		{ID: "doc1", FolderPath: "retail", FileName: "alpha.pdf", FileSize: 2048, ParseStatus: "completed", UpdatedAt: now.Add(-1 * time.Hour)},
+		{
+			ID: "doc1", FolderPath: "retail", FileName: "alpha.pdf",
+			FileSize: 2048, ParseStatus: "completed", UpdatedAt: now.Add(-time.Hour),
+		},
 		{ID: "doc2", FileName: "beta.md", FileSize: 0, ParseStatus: "pending", UpdatedAt: now.Add(-2 * 24 * time.Hour)},
 	}
 	svc := &fakeListSvc{items: items, total: 2}
@@ -66,7 +69,10 @@ func TestList_Success_Text(t *testing.T) {
 	assert.Equal(t, sdk.KnowledgeListFilter{}, svc.got.filter, "no flags ⇒ empty filter")
 
 	got := out.String()
-	for _, want := range []string{"ID", "NAME", "STATUS", "SIZE", "UPDATED", "doc1", "retail/alpha.pdf", "completed", "2.0KB", "doc2", "beta.md", "pending"} {
+	for _, want := range []string{
+		"ID", "NAME", "STATUS", "SIZE", "UPDATED", "doc1", "retail/alpha.pdf",
+		"completed", "2.0KB", "doc2", "beta.md", "pending",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q in:\n%s", want, got)
 		}
