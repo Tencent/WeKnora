@@ -50,7 +50,10 @@ func TestModelsByType(t *testing.T) {
 		ids[m.ID] = true
 	}
 	// Deprecated and empty-ID entries are hidden; typeless entries fold to chat.
-	for _, want := range []string{"gpt-5", "qwen3-family", "qwen3-235b", "deepseek-r1", "vision-1", "text-only", "typeless"} {
+	for _, want := range []string{
+		"gpt-5", "qwen3-family", "qwen3-235b", "deepseek-r1",
+		"vision-1", "text-only", "typeless",
+	} {
 		if !ids[want] {
 			t.Errorf("ModelsByType(chat) is missing %q: %v", want, ids)
 		}
@@ -111,7 +114,7 @@ func TestFindModelKeepsTypesSeparate(t *testing.T) {
 		t.Fatalf("FindModel(chat, gpt-5-embed) = %+v, %v; want the chat row gpt-5, never the embedding row", m, ok)
 	}
 	if m, ok := c.FindModel("qwen3.8-text-embedding", types.ModelTypeKnowledgeQA); !ok || m.ID != "qwen3-family" {
-		t.Fatalf("FindModel(chat, qwen3.8-text-embedding) = %+v, %v; want the chat row qwen3-family, never the embedding row", m, ok)
+		t.Fatalf("FindModel(chat, qwen3.8-text-embedding) = %+v, %v; want qwen3-family, never embedding", m, ok)
 	}
 	if m, ok := c.FindModel("gpt-5-embed", types.ModelTypeEmbedding); !ok || m.ID != "gpt-5-embed" {
 		t.Fatalf("FindModel(embedding) = %+v, %v", m, ok)
