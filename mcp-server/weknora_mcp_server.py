@@ -711,12 +711,19 @@ class WeKnoraClient:
         """Read a wiki page by slug, returns full markdown + metadata + links"""
         return self._request("GET", f"/knowledgebase/{kb_id}/wiki/pages/{slug}")
 
-    def wiki_index_view(self, kb_id: str, limit: int = 50) -> Dict:
-        """Get structured wiki index with per-type directory groups"""
+    def wiki_index_view(
+        self, kb_id: str, limit: int = 50, page_type: str = "", cursor: str = ""
+    ) -> Dict:
+        """Get a window of wiki directory entries."""
+        params = {"limit": limit}
+        if page_type:
+            params["types"] = page_type
+        if cursor:
+            params["cursor"] = cursor
         return self._request(
             "GET",
             f"/knowledgebase/{kb_id}/wiki/index",
-            params={"limit": limit},
+            params=params,
         )
 
 
@@ -1157,13 +1164,15 @@ def wiki_read_page(kb_id: str, slug: str) -> dict:
 
 
 @mcp.tool()
-def wiki_index_view(kb_id: str, limit: int = 50) -> dict:
+def wiki_index_view(
+    kb_id: str, limit: int = 50, page_type: str = "", cursor: str = ""
+) -> dict:
     """Get a structured wiki index with per-type directory groups.
 
-    Returns an overview of all wiki pages organized by type (entity, concept,
-    summary, etc.).
+    Pass a group's type as page_type and its next_cursor as cursor to read
+    the next window of that group.
     """
-    return client.wiki_index_view(kb_id, limit)
+    return client.wiki_index_view(kb_id, limit, page_type, cursor)
 
 
 # ---------------------------------------------------------------------------
