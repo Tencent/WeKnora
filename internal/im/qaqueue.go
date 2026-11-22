@@ -247,7 +247,8 @@ func (q *qaQueue) runWorker(id int) {
 			id, req.msg.UserID, waitDuration, q.Metrics().Depth)
 
 		// Acquire global concurrency slot (blocks until a slot opens or request is cancelled).
-		if !q.acquireGlobalGate(req.ctx) {
+		releaseGate, proceed := q.acquireGlobalGate(req.ctx)
+		if !proceed {
 			// Context cancelled while waiting for a global slot — treat as timeout.
 			q.totalTimeout.Add(1)
 			q.redisDecrUser(context.Background(), req.userKey)
@@ -260,7 +261,7 @@ func (q *qaQueue) runWorker(id int) {
 		q.handler(req)
 		q.activeWorkers.Add(-1)
 		q.totalProcessed.Add(1)
-		q.releaseGlobalGate()
+		releaseGate()
 		q.redisDecrUser(context.Background(), req.userKey)
 	}
 }
@@ -313,11 +314,15 @@ return 0
 `)
 
 // acquireGlobalGate blocks until a global concurrency slot is available.
-// Returns true if the slot was acquired, false if ctx was cancelled while waiting.
-// When globalMaxWorkers is 0 or Redis is nil, it returns true immediately (no limit).
-func (q *qaQueue) acquireGlobalGate(ctx context.Context) bool {
+// The returned release function decrements only a confirmed Redis acquisition;
+// bypassed limits and fail-open Redis errors return a no-op release. A canceled
+// request returns false and must not run.
+func (q *qaQueue) acquireGlobalGate(ctx context.Context) (release func(), ok bool) {
+	if ctx.Err() != nil {
+		return nil, false
+	}
 	if q.globalMaxWorkers <= 0 || q.redis == nil {
-		return true
+		return func() {}, true
 	}
 
 	for {
@@ -326,18 +331,21 @@ func (q *qaQueue) acquireGlobalGate(ctx context.Context) bool {
 			q.globalMaxWorkers, globalGateTTL.Milliseconds(),
 		).Int64()
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, false
+			}
 			// Redis error — skip global check to avoid blocking the worker.
 			logger.Warnf(ctx, "[IM] Global gate Redis error (proceeding without limit): %v", err)
-			return true
+			return func() {}, true
 		}
 		if result == 1 {
-			return true
+			return q.releaseGlobalGate, true
 		}
 
 		// Global limit reached — wait and retry.
 		select {
 		case <-ctx.Done():
-			return false
+			return nil, false
 		case <-time.After(globalGateRetryInterval):
 		}
 	}
