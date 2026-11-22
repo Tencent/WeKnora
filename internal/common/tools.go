@@ -42,18 +42,22 @@ func GetAttrs[A, B any](extract func(A) B, attrs ...A) []B {
 	return result
 }
 
-// Deduplicate removes duplicates from a slice based on a key function
+// Deduplicate removes duplicates from a slice based on a key function,
+// keeping the first occurrence of each key, in first-appearance order.
 // T: the type of elements in the slice
 // K: the type of key used for deduplication
 func Deduplicate[T any, K comparable](keyFunc func(T) K, items ...T) []T {
-	seen := make(map[K]T)
+	seen := make(map[K]struct{}, len(items))
+	result := make([]T, 0, len(items))
 	for _, item := range items {
 		key := keyFunc(item)
-		if _, exists := seen[key]; !exists {
-			seen[key] = item
+		if _, exists := seen[key]; exists {
+			continue
 		}
+		seen[key] = struct{}{}
+		result = append(result, item)
 	}
-	return slices.Collect(maps.Values(seen))
+	return result
 }
 
 // ScoreComparable is an interface for types that have a Score method returning float64
