@@ -14,6 +14,8 @@ import (
 // Chunk represents the information about a document chunk
 // Chunks are the basic units of storage and indexing in the knowledge base
 type Chunk struct {
+	SourceLocators []SourceLocator `json:"source_locators,omitempty"`
+
 	ID                     string `json:"id"`                       // Unique identifier of the chunk
 	SeqID                  int64  `json:"seq_id"`                   // Auto-increment integer ID for external API usage
 	KnowledgeID            string `json:"knowledge_id"`             // Identifier of the parent knowledge
@@ -213,4 +215,45 @@ func (c *Client) DeleteChunksByKnowledgeID(ctx context.Context, knowledgeID stri
 	}
 
 	return parseResponse(resp, &response)
+}
+
+// SourceLocator describes the location supplied by the API.
+type SourceLocator struct {
+	Type string `json:"type"`
+	// Mapping records verified text-to-source alignment. Empty means legacy.
+	Mapping string `json:"mapping,omitempty"`
+	// Partial means some of the chunk has no source mapping.
+	Partial bool `json:"partial,omitempty"`
+	// SourceID identifies a block within the parser result, not a rendered item.
+	SourceID string `json:"source_id,omitempty"`
+	// SourceHash binds the locator to the knowledge record’s source revision hash.
+	SourceHash string `json:"source_hash,omitempty"`
+	// Page is the 1-based PDF page.
+	Page int `json:"page,omitempty"`
+	// BBox is [x0, y0, x1, y1] as fractions of the page width and height,
+	// origin at the top-left corner of the rendered page.
+	BBox []float64 `json:"bbox,omitempty"`
+	// Block is the 1-based index among a Word file's body paragraphs and tables.
+	Block int `json:"block,omitempty"`
+	// Slide is the 1-based slide number in presentation order.
+	Slide int `json:"slide,omitempty"`
+	// Sheet is the spreadsheet sheet name; RowStart/RowEnd are its 1-based
+	// row numbers as shown by spreadsheet applications.
+	Sheet    string `json:"sheet,omitempty"`
+	RowStart int    `json:"row_start,omitempty"`
+	RowEnd   int    `json:"row_end,omitempty"`
+	// Start/End are rune offsets into the original text file.
+	Start int `json:"start,omitempty"`
+	End   int `json:"end,omitempty"`
+	// StartMs/EndMs bound an audio segment.
+	StartMs int64 `json:"start_ms,omitempty"`
+	EndMs   int64 `json:"end_ms,omitempty"`
+	// Section is the 1-based EPUB spine index.
+	Section int `json:"section,omitempty"`
+	// Title names the section or slide when the source has one.
+	Title string `json:"title,omitempty"`
+	// Quote is the complete cited overlap as parsed. Viewers match it
+	// inside the rendered original and against the
+	// answer sentence that cites the chunk.
+	Quote string `json:"quote,omitempty"`
 }

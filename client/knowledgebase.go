@@ -219,6 +219,8 @@ const (
 // produced each result. Per-channel thresholds (vector_threshold,
 // keyword_threshold) filter pre-fusion at retrieval time, before RRF runs.
 type SearchResult struct {
+	SourceLocators []SourceLocator `json:"source_locators,omitempty"`
+
 	ID                string            `json:"id"`
 	Content           string            `json:"content"`
 	KnowledgeID       string            `json:"knowledge_id"`
