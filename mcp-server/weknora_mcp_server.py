@@ -1042,10 +1042,12 @@ async def agent_chat(
 
     REQUIRED: agent_id (name or UUID) — use list_agents to discover agents.
     IMPORTANT: many agents have KBSelectionMode=none and NO built-in knowledge bases.
-    In that case you MUST pass knowledge_base_ids, otherwise the agent will fail
+    When retrieval is needed, pass knowledge_base_ids to avoid failing
     with 'no search targets available'. Use get_agent to inspect an agent's
     kb_selection_mode and knowledge_bases before calling. If kb_selection_mode is
-    'none' or 'selected' with an empty list, always provide knowledge_base_ids.
+    'none' or 'selected' with an empty list, provide knowledge_base_ids for
+    knowledge retrieval. For agents configured to retrieve only on mention,
+    omit IDs for a turn that does not need retrieval.
     """
     resolved_agent_id = await asyncio.to_thread(client.resolve_agent_id, agent_id)
     kb_ids = (
@@ -1065,7 +1067,7 @@ async def agent_chat(
             needs_kbs = (mode == "none") or (
                 mode in ("selected", "") and not built_in_kbs
             )
-            if needs_kbs:
+            if needs_kbs and not cfg.get("retrieve_kb_only_when_mentioned"):
                 all_kbs = _normalize_kb_entries(
                     await asyncio.to_thread(client.list_knowledge_bases)
                 ) + _normalize_kb_entries(
