@@ -98,7 +98,7 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, fopts *cmdutil
 			if !fopts.WantsJSON() {
 				fmt.Fprintf(iostreams.IO.Out, "FAIL %s: %v\n", filepath.Base(p), err)
 			}
-			return err
+			return classifyUploadError(err, p)
 		}
 		id, name := "", ""
 		if k != nil {

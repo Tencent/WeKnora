@@ -303,14 +303,18 @@ func runUpload(ctx context.Context, opts *UploadOptions, fopts *cmdutil.FormatOp
 	}
 	k, err := svc.CreateKnowledgeFromFile(ctx, kbID, path, meta, opts.EnableMultimodel, opts.Name, cmp.Or(opts.Channel, uploadChannel), nil)
 	if err != nil {
-		if errors.Is(err, sdk.ErrDuplicateFile) {
-			// SDK returns sentinel without an "HTTP error <status>:" prefix
-			// (the duplicate is detected by file hash, not by status code),
-			// so WrapHTTP would misclassify it as network.error.
-			return cmdutil.Wrapf(cmdutil.CodeResourceAlreadyExists, err,
-				"file already uploaded to this knowledge base")
-		}
-		return cmdutil.WrapHTTP(err, "upload %s", path)
+		return classifyUploadError(err, path)
 	}
 	return renderUploadSuccess(k, fopts, "Uploaded", opts.Name, path)
+}
+
+func classifyUploadError(err error, path string) error {
+	if errors.Is(err, sdk.ErrDuplicateFile) {
+		// SDK returns sentinel without an "HTTP error <status>:" prefix
+		// (the duplicate is detected by file hash, not by status code),
+		// so WrapHTTP would misclassify it as network.error.
+		return cmdutil.Wrapf(cmdutil.CodeResourceAlreadyExists, err,
+			"file already uploaded to this knowledge base")
+	}
+	return cmdutil.WrapHTTP(err, "upload %s", path)
 }

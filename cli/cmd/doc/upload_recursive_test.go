@@ -152,7 +152,7 @@ func TestUploadRecursive_PartialFailure_Exits1(t *testing.T) {
 	require.ErrorAs(t, err, &typed)
 	// Any per-file failure aggregates to operation.failed (exit 1), matching the
 	// batch-delete contract — a partial failure (even a permanent one like a
-	// duplicate, which classifies as server.error per-file) must not surface as
+	// duplicate, which classifies as resource.already_exists per-file) must not surface as
 	// a retryable exit 7 an agent would loop on. Per-file codes live in the
 	// batch envelope.
 	assert.Equal(t, cmdutil.CodeOperationFailed, typed.Code)
@@ -251,7 +251,7 @@ func TestUploadRecursive_JSON_BatchEnvelope(t *testing.T) {
 		k   *sdk.Knowledge
 		err error
 	}{
-		"bad.pdf": {err: errors.New("HTTP error 500: internal")},
+		"bad.pdf": {err: sdk.ErrDuplicateFile},
 	}}
 	opts := &UploadOptions{Recursive: true, Glob: "*"}
 	err := runUploadRecursive(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx", dir)
@@ -297,7 +297,8 @@ func TestUploadRecursive_JSON_BatchEnvelope(t *testing.T) {
 			assert.NotNil(t, item.Result)
 		} else {
 			assert.False(t, item.OK)
-			assert.NotNil(t, item.Error)
+			require.NotNil(t, item.Error)
+			assert.Equal(t, string(cmdutil.CodeResourceAlreadyExists), item.Error.Type)
 		}
 	}
 
