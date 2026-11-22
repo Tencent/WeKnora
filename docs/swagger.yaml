@@ -4447,6 +4447,10 @@ definitions:
       number_of_shards:
         description: ES, OpenSearch
         type: integer
+      qdrant_keyword_search:
+        description: 'Qdrant keyword retrieval: empty/text keeps payload filtering;
+          bm25 uses ranked sparse vectors.'
+        type: string
       replica_number:
         description: Milvus LoadCollection / Tencent VectorDB CreateCollection replicas
         type: integer
