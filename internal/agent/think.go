@@ -78,6 +78,8 @@ func (e *AgentEngine) streamLLMToEventBus(
 	}
 
 	result := &streamLLMResult{}
+	// Keep incremental answer snapshots without copying the accumulated text on each chunk.
+	var answerText, reasoningText strings.Builder
 	chunkCount := 0
 	responseTypeCounts := make(map[string]int)
 	firstChunkTime := time.Time{}
@@ -138,9 +140,9 @@ func (e *AgentEngine) streamLLMToEventBus(
 			isExtracted := chunk.Data != nil && chunk.Data["source"] != nil
 			if !isExtracted {
 				if chunk.ResponseType == types.ResponseTypeThinking {
-					result.ReasoningContent += chunk.Content
+					reasoningText.WriteString(chunk.Content)
 				} else {
-					result.Content += chunk.Content
+					answerText.WriteString(chunk.Content)
 				}
 			}
 		}
@@ -164,7 +166,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 		}
 
 		if emitFunc != nil {
-			emitFunc(&chunk, result.Content)
+			emitFunc(&chunk, answerText.String())
 		}
 	}
 	guardTail, guardErr := answerGuard.Flush()
@@ -176,8 +178,10 @@ func (e *AgentEngine) streamLLMToEventBus(
 	}
 	answerTail := guardTail + answerDecoder.Flush()
 	thinkingTail := thinkingDecoder.Flush()
-	result.Content += answerTail
-	result.ReasoningContent += thinkingTail
+	answerText.WriteString(answerTail)
+	reasoningText.WriteString(thinkingTail)
+	result.Content = answerText.String()
+	result.ReasoningContent = reasoningText.String()
 	if emitFunc != nil {
 		if thinkingTail != "" {
 			emitFunc(

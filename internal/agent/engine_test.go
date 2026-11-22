@@ -75,6 +75,61 @@ func (m *mockChat) ChatStream(
 	return ch, nil
 }
 
+func TestStreamLLMToEventBusKeepsAnswerSnapshots(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeThinking, Content: "推理"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "第一段"},
+		{ResponseType: types.ResponseTypeThinking, Content: "补充"},
+		{ResponseType: types.ResponseTypeThinking, Content: "提取的推理", Data: map[string]interface{}{"source": "content"}},
+		{ResponseType: types.ResponseTypeAnswer, Content: "第二段", Done: true, FinishReason: "stop"},
+	}}}}
+	engine := newTestEngine(t, model)
+	var snapshots []string
+	emit := func(_ *types.StreamResponse, answer string) {
+		snapshots = append(snapshots, answer)
+	}
+	result, err := engine.streamLLMToEventBus(context.Background(), nil, nil, emit)
+	require.NoError(t, err)
+	require.Equal(t, []string{"", "第一段", "第一段", "第一段", "第一段第二段"}, snapshots)
+	require.Equal(t, "第一段第二段", result.Content)
+	require.Equal(t, "推理补充", result.ReasoningContent)
+}
+
+func BenchmarkStreamLLMToEventBus(b *testing.B) {
+	fragment := strings.Repeat("streamed text. ", 8)
+	for _, pairs := range []int{256, 1024} {
+		b.Run(fmt.Sprint(pairs), func(b *testing.B) {
+			chunks := make([]types.StreamResponse, 0, 2*pairs+1)
+			for range pairs {
+				chunks = append(chunks,
+					types.StreamResponse{ResponseType: types.ResponseTypeThinking, Content: fragment},
+					types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Content: fragment},
+				)
+			}
+			chunks = append(chunks, types.StreamResponse{
+				ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "stop",
+			})
+			model := &mockChat{responses: []mockResponse{{chunks: chunks}}}
+			engine := newTestEngine(b, model)
+			ctx := context.Background()
+			var latestAnswer string
+			emit := func(_ *types.StreamResponse, answer string) { latestAnswer = answer }
+			b.ReportAllocs()
+			b.SetBytes(int64(2 * pairs * len(fragment)))
+			for b.Loop() {
+				model.callCount = 0
+				model.calls = model.calls[:0]
+				model.opts = model.opts[:0]
+				result, err := engine.streamLLMToEventBus(ctx, nil, nil, emit)
+				if err != nil || len(result.Content) != pairs*len(fragment) ||
+					len(result.ReasoningContent) != pairs*len(fragment) || latestAnswer != result.Content {
+					b.Fatalf("unexpected stream result: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestStreamLLMResourceAliasesRoundTrip(t *testing.T) {
 	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
 	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
@@ -786,7 +841,7 @@ func TestBuildSystemPromptUsesHostWorkspace(t *testing.T) {
 	require.NotContains(t, prompt, "There is no /workspace")
 }
 
-func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) *AgentEngine {
+func newTestEngine(t testing.TB, chatModel chat.Chat, opts ...testEngineOption) *AgentEngine {
 	t.Helper()
 	cfg := &types.AgentConfig{
 		MaxIterations: 10,
