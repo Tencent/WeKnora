@@ -398,6 +398,16 @@ func isSSRFSafeURL(rawURL string) (bool, string) {
 		return false, "IP-like hostname format is not allowed"
 	}
 
+	// Check for suspicious port numbers before resolving the host. The port
+	// rule does not depend on the DNS answer, so a blocked port has to be
+	// reported the same way whether or not the hostname resolves: otherwise a
+	// proxied or intercepted resolver turns this verdict into a DNS failure
+	// (or a restricted-IP verdict) and the caller loses the actionable reason.
+	port := parsed.Port()
+	if restrictedPorts[port] {
+		return false, fmt.Sprintf("port %s is blocked for security reasons", port)
+	}
+
 	// Perform DNS resolution to check the resolved IP
 	// This prevents DNS rebinding attacks where a domain resolves to internal IPs
 	ips, err := net.LookupIP(hostname)
@@ -410,12 +420,6 @@ func isSSRFSafeURL(rawURL string) (bool, string) {
 		if restricted, reason := isRestrictedIP(resolvedIP); restricted {
 			return false, fmt.Sprintf("hostname %s resolves to restricted IP %s: %s", hostname, resolvedIP.String(), reason)
 		}
-	}
-
-	// Check for suspicious port numbers
-	port := parsed.Port()
-	if restrictedPorts[port] {
-		return false, fmt.Sprintf("port %s is blocked for security reasons", port)
 	}
 
 	return true, ""
