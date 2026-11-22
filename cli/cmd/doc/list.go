@@ -22,7 +22,7 @@ var docListFields = []string{
 	"id", "knowledge_base_id", "tag_id", "type", "title", "description",
 	"source", "channel", "parse_status", "summary_status", "enable_status",
 	"embedding_model_id", "file_name", "file_type", "file_size", "file_hash",
-	"file_path", "storage_size",
+	"folder_path", "file_path", "storage_size",
 	"created_at", "updated_at", "processed_at", "error_message",
 }
 
@@ -38,12 +38,13 @@ type ListOptions struct {
 	AllPages bool
 	// Additional server-side filters (each maps 1:1 to a sdk.KnowledgeListFilter
 	// field). Empty / zero values are omitted from the request.
-	Keyword   string
-	FileType  string
-	Source    string
-	TagID     string
-	StartTime string // raw RFC3339; parsed into filter.StartTime
-	EndTime   string // raw RFC3339; parsed into filter.EndTime
+	FolderPath *string
+	Keyword    string
+	FileType   string
+	Source     string
+	TagID      string
+	StartTime  string // raw RFC3339; parsed into filter.StartTime
+	EndTime    string // raw RFC3339; parsed into filter.EndTime
 }
 
 // docListStatusValues mirrors internal/types/knowledge.go ParseStatus*
@@ -61,6 +62,7 @@ type ListService interface {
 // NewCmdList builds `weknora doc list`.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListOptions{}
+	var folder string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List documents in a knowledge base",
@@ -87,6 +89,9 @@ backend storage order is not guaranteed and varies between deployments.`,
 			// input.invalid_argument (exit 5) instead of an auth error (exit 3)
 			// when the profile is unconfigured — an agent must see the real,
 			// fixable problem.
+			if c.Flags().Changed("folder") {
+				opts.FolderPath = &folder
+			}
 			if err := validateListOpts(opts); err != nil {
 				return err
 			}
@@ -102,6 +107,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 		},
 	}
 	cmdutil.AddKBFlag(cmd)
+	cmd.Flags().StringVar(&folder, "folder", "", "List documents directly in this folder (empty selects the root)")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", 50, "Items per server batch (1..1000)")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return — client-side cap; meta.has_more/total_count report the full size (1..10000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
@@ -152,6 +158,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		return err
 	}
 	filter := sdk.KnowledgeListFilter{
+		FolderPath:  opts.FolderPath,
 		ParseStatus: opts.Status,
 		Keyword:     opts.Keyword,
 		FileType:    opts.FileType,
@@ -235,6 +242,9 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	now := time.Now()
 	for _, k := range items {
 		name := text.Truncate(40, text.KnowledgeDisplayName(k.FileName, k.Title, k.ID))
+		if k.FolderPath != "" {
+			name = k.FolderPath + "/" + name
+		}
 		updated := text.FuzzyAgo(now, k.UpdatedAt)
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", k.ID, name, k.ParseStatus, formatSize(k.FileSize), updated)
 	}
