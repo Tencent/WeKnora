@@ -382,7 +382,8 @@ export default {
         endpoint: '請求地址',
         thinkingFormat: '思考開關傳參',
         thinkingLevels: '可選思考強度',
-        noThinking: '該模型不支援思考'
+        noThinking: '該模型不支援思考',
+        defaultThinking: '使用模型預設思考設定'
       },
       advanced: {
         toggle: '進階',

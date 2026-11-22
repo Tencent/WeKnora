@@ -1297,3 +1297,31 @@ test('opening the model editor refreshes its catalog candidates', async () => {
     assert.equal(f.catalogEvents[0], 'refresh')
   } finally { f.close() }
 })
+
+test('catalog filtering matches both the displayed name and the exact model ID', async () => {
+  const f = await fixture()
+  try {
+    const claude = { label: 'Claude Sonnet 5.5', value: 'claude-sonnet-5-5' }
+    const image = { label: 'GPT-4o Image', value: 'gpt-4o-image' }
+    assert.equal(f.vm.filterCatalogModel('claude-sonnet-5-5', claude), true)
+    assert.equal(f.vm.filterCatalogModel('CLAUDE SONNET', claude), true)
+    assert.equal(f.vm.filterCatalogModel('gpt-4o-image', image), true)
+    assert.equal(f.vm.filterCatalogModel('unrelated', claude), false)
+  } finally {
+    f.close()
+  }
+})
+
+test('a reasoning model without configured controls is not described as unable to think', async () => {
+  const f = await fixture()
+  try {
+    f.vm.resolved = { capabilities: { reasoning: true, thinking_levels: [] } }
+    await nextTick()
+    assert.equal(f.vm.resolvedThinkingHintKey, 'model.editor.resolved.defaultThinking')
+    f.vm.resolved = { capabilities: { reasoning: false, thinking_levels: [] } }
+    await nextTick()
+    assert.equal(f.vm.resolvedThinkingHintKey, 'model.editor.resolved.noThinking')
+  } finally {
+    f.close()
+  }
+})

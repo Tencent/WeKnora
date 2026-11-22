@@ -281,6 +281,7 @@
               v-else
               v-model="formData.modelName"
               filterable
+              :filter="filterCatalogModel"
               creatable
               clearable
               :placeholder="getModelNamePlaceholder()"
@@ -449,7 +450,7 @@
                         {{ $t(levelLabelKey(level)) }}
                       </span>
                     </template>
-                    <span v-else class="form-desc form-desc--inline">{{ $t('model.editor.resolved.noThinking') }}</span>
+                    <span v-else class="form-desc form-desc--inline">{{ $t(resolvedThinkingHintKey) }}</span>
                   </dd>
                   <template v-if="resolved.capabilities?.context_window">
                     <dt>{{ $t('model.editor.contextWindowLabel') }}</dt>
@@ -946,6 +947,13 @@ const catalogModelOptions = computed<CatalogModelOption[]>(() => {
   return options
 })
 
+const filterCatalogModel = (query: string, option: { label?: unknown; value?: unknown }) => {
+  const needle = query.trim().toLowerCase()
+  return [option.label, option.value].some(value =>
+    typeof value === 'string' && value.toLowerCase().includes(needle),
+  )
+}
+
 const findCatalogEntry = (name: string) => catalogEntries.value.find(m => m.id === name)
 
 /**
@@ -1061,6 +1069,9 @@ const showResolvedPanel = computed(() =>
 )
 
 const resolvedThinkingLevels = computed(() => supportedLevels(resolved.value?.capabilities))
+const resolvedThinkingHintKey = computed(() => resolved.value?.capabilities?.reasoning
+  ? 'model.editor.resolved.defaultThinking'
+  : 'model.editor.resolved.noThinking')
 
 const runResolve = async () => {
   const revision = ++resolveRevision
