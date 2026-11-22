@@ -64,6 +64,15 @@ class ModuleIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_preflight_rejects_incompatible_mcp(self):
+        from types import ModuleType
+        from unittest.mock import patch
+        from main import check_dependencies
+
+        modules = {"mcp": ModuleType("mcp"), "mcp.server": ModuleType("mcp.server")}
+        with patch.dict(sys.modules, modules):
+            self.assertFalse(check_dependencies())
+
     def test_main_check_only(self):
         result = subprocess.run(
             [sys.executable, "main.py", "--check-only"],
