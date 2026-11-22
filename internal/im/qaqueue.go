@@ -49,6 +49,9 @@ type qaRequest struct {
 	// userKey is "channelID:userID:chatID", used for per-user limits and /stop.
 	userKey    string
 	enqueuedAt time.Time
+	// releaseUser owns this request's confirmed Redis reservation, or is a
+	// no-op when reservation was bypassed. Assigned by Enqueue.
+	releaseUser func()
 }
 
 // QueueMetrics exposes observable queue state.
@@ -136,23 +139,23 @@ func (q *qaQueue) Stop() {
 // or an error if the queue is full or per-user limit is reached.
 func (q *qaQueue) Enqueue(req *qaRequest) (position int, err error) {
 	// Check global per-user limit via Redis before acquiring local lock.
-	if q.redis != nil {
-		if err := q.redisCheckAndIncrUser(context.Background(), req.userKey); err != nil {
-			q.totalRejected.Add(1)
-			return 0, err
-		}
+	releaseUser, err := q.redisCheckAndIncrUser(context.Background(), req.userKey)
+	if err != nil {
+		q.totalRejected.Add(1)
+		return 0, err
 	}
+	req.releaseUser = releaseUser
 
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	if q.closed {
-		q.redisDecrUser(context.Background(), req.userKey)
+		req.releaseUser()
 		return 0, fmt.Errorf("queue is closed")
 	}
 
 	if len(q.queue) >= q.maxSize {
-		q.redisDecrUser(context.Background(), req.userKey)
+		req.releaseUser()
 		q.totalRejected.Add(1)
 		return 0, fmt.Errorf("queue full (%d/%d)", len(q.queue), q.maxSize)
 	}
@@ -193,7 +196,7 @@ func (q *qaQueue) Remove(userKey string) bool {
 					delete(q.perUser, userKey)
 				}
 			}
-			q.redisDecrUser(context.Background(), userKey)
+			req.releaseUser()
 			return true
 		}
 	}
@@ -226,14 +229,14 @@ func (q *qaQueue) runWorker(id int) {
 		// Skip requests that have been cancelled or timed out while queued.
 		if req.ctx.Err() != nil {
 			q.totalTimeout.Add(1)
-			q.redisDecrUser(context.Background(), req.userKey)
+			req.releaseUser()
 			continue
 		}
 
 		waitDuration := time.Since(req.enqueuedAt)
 		if waitDuration > queueTimeout {
 			q.totalTimeout.Add(1)
-			q.redisDecrUser(context.Background(), req.userKey)
+			req.releaseUser()
 			logger.Warnf(req.ctx, "[IM] Queue timeout: user=%s waited=%s, discarding", req.msg.UserID, waitDuration)
 			_ = req.adapter.SendReply(req.ctx, req.msg, &ReplyMessage{
 				Content: "您的消息等待超时，请重新发送。",
@@ -251,7 +254,7 @@ func (q *qaQueue) runWorker(id int) {
 		if !proceed {
 			// Context cancelled while waiting for a global slot — treat as timeout.
 			q.totalTimeout.Add(1)
-			q.redisDecrUser(context.Background(), req.userKey)
+			req.releaseUser()
 			logger.Warnf(req.ctx, "[IM] Global gate wait cancelled: worker=%d user=%s", id, req.msg.UserID)
 			req.cancel()
 			continue
@@ -262,7 +265,7 @@ func (q *qaQueue) runWorker(id int) {
 		q.activeWorkers.Add(-1)
 		q.totalProcessed.Add(1)
 		releaseGate()
-		q.redisDecrUser(context.Background(), req.userKey)
+		req.releaseUser()
 	}
 }
 
@@ -361,25 +364,24 @@ func (q *qaQueue) releaseGlobalGate() {
 
 // ── Redis global per-user counting ──────────────────────────────────────────
 
-// redisCheckAndIncrUser atomically increments the global per-user counter and
-// returns an error if the limit is exceeded. On success the caller MUST later
-// call redisDecrUser to release the slot.
-func (q *qaQueue) redisCheckAndIncrUser(ctx context.Context, userKey string) error {
+// redisCheckAndIncrUser reserves a global per-user slot. Its release callback
+// decrements only a confirmed reservation. Redis failures preserve fail-open
+// admission but must not release another request's slot later.
+func (q *qaQueue) redisCheckAndIncrUser(ctx context.Context, userKey string) (release func(), err error) {
 	if q.redis == nil {
-		return nil
+		return func() {}, nil
 	}
 	key := RedisKeyQueueUser + userKey
 	count, err := q.redis.Incr(ctx, key).Result()
 	if err != nil {
-		// Redis error — skip global check, rely on local limit.
-		return nil
+		return func() {}, nil
 	}
 	q.redis.Expire(ctx, key, redisQueueUserTTL)
 	if count > int64(q.maxPerUser) {
 		q.redis.Decr(ctx, key)
-		return fmt.Errorf("global per-user queue limit reached (%d/%d)", count, q.maxPerUser)
+		return nil, fmt.Errorf("global per-user queue limit reached (%d/%d)", count, q.maxPerUser)
 	}
-	return nil
+	return func() { q.redisDecrUser(context.Background(), userKey) }, nil
 }
 
 // redisDecrUser releases one slot in the global per-user counter.
