@@ -108,3 +108,19 @@ func TestEmitStatus_Text(t *testing.T) {
 		}
 	}
 }
+
+func TestChunkCountDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		kind  string
+		count int64
+		want  string
+	}{
+		{"document", 0, "not reported"}, {"faq", 0, "0"}, {"document", 5, "5"},
+	} {
+		var out bytes.Buffer
+		writeChunkCount(&out, tc.kind, tc.count)
+		if !strings.Contains(out.String(), tc.want) {
+			t.Errorf("%s: got %q, want %q", tc.kind, out.String(), tc.want)
+		}
+	}
+}

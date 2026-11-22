@@ -42,6 +42,6 @@ func emptyContentSearchHint(n int) string {
 		return ""
 	}
 	return "0 results: this may be no match, OR the KB has no indexed chunks. " +
-		"Check `weknora kb status <kb>` (chunk_count) and `weknora doc list --kb <kb>` (parse_status); " +
+		"Check `weknora doc list --kb <kb>` (parse_status) and `weknora chunk list --doc <doc-id>` for indexed chunks; " +
 		"documents in parse_status=draft are not indexed — run `weknora doc reparse <doc-id>`."
 }
