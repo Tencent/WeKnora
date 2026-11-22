@@ -342,6 +342,7 @@ interface StreamEvent {
   content?: string
   knowledge_references?: SearchResult[]
   session_id?: string
+  data?: { tool_name?: string }
   tool_calls?: { function?: { name?: string }, name?: string }[]
 }
 
@@ -361,6 +362,9 @@ async function assembleStream(
   const reader = body.getReader()
   const answer: string[] = []
   const toolCalls: string[] = []
+  const recordTool = (name: unknown): void => {
+    if (typeof name === 'string' && name !== '' && !toolCalls.includes(name)) toolCalls.push(name)
+  }
   let references: SearchResult[] = []
   let resolvedSessionId = sessionId
   let buffer = ''
@@ -385,9 +389,9 @@ async function assembleStream(
         if (Array.isArray(event.knowledge_references)) references = event.knowledge_references
         break
       case 'tool_call':
+        recordTool(event.data?.tool_name)
         for (const call of event.tool_calls ?? []) {
-          const name = call.function?.name ?? call.name
-          if (typeof name === 'string' && name !== '' && !toolCalls.includes(name)) toolCalls.push(name)
+          recordTool(call.function?.name ?? call.name)
         }
         break
       case 'error':
