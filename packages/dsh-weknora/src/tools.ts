@@ -342,19 +342,32 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
             + 'nothing to search. Check the deployment\'s API key scope.')
         }
         const limit = boundedIntArg(args, 'max_results', config.maxResults, config.maxResults)
-        const [hits, named] = await Promise.all([
+        const [hits, firstNamedPage] = await Promise.all([
           client.search({ query, knowledgeBaseIds, knowledgeIds }, exec.signal),
           // By-name matching is an enrichment, and older WeKnora builds may not
           // route it. Losing it must not cost the model its passages.
-          client.findDocuments({ keyword: query, limit }, exec.signal).catch(() => []),
+          client.findDocuments({ keyword: query, limit }, exec.signal).catch(() => null),
         ])
         const results = hits.slice(0, limit).map((hit, index) => projectHit(hit, index + 1, config.maxChunkChars))
+        const candidates: DocumentRecord[] = []
+        let documents: DocumentMatch[] = []
+        let namedPage = firstNamedPage
+        // The server applies its page limit before the tool applies its scope.
+        // Look ahead a few pages without turning optional enrichment into an
+        // unbounded scan of the credential's entire document catalog.
+        for (let page = 0; page < 4 && namedPage; page++) {
+          candidates.push(...namedPage.documents)
+          documents = projectNamedDocuments(candidates, results, knowledgeBaseIds, knowledgeIds)
+          if (documents.length >= limit || !namedPage.hasMore || namedPage.documents.length === 0 || page === 3) break
+          namedPage = await client.findDocuments({ keyword: query, limit, offset: (page + 1) * limit }, exec.signal)
+            .catch(() => null)
+        }
         return {
           query,
           knowledge_base_ids: knowledgeBaseIds,
           count: results.length,
           results,
-          documents: projectNamedDocuments(named, results, knowledgeBaseIds, knowledgeIds),
+          documents: documents.slice(0, limit),
         }
       },
     })

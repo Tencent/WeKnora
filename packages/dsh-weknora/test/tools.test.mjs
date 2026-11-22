@@ -12,8 +12,8 @@ const never = new AbortController().signal
 const exec = { signal: never }
 
 /** Build the tools against a live mock backend. */
-async function toolset(overrides = {}) {
-  const mock = await startMockWeknora()
+async function toolset(overrides = {}, mockOptions = {}) {
+  const mock = await startMockWeknora(mockOptions)
   after(() => mock.close())
   const config = resolveConfig({ baseUrl: mock.url, ...overrides })
   const tools = createTools(new WeknoraClient(config), config)
@@ -151,6 +151,19 @@ test('a query naming a document finds it even with no passage match', async () =
   assert.deepEqual(value.documents.map(document => document.knowledge_id), ['doc-release-checklist'])
   assert.match(text, /No passage matched "灰度发布检查单", but its name matches document/)
   assert.match(text, /knowledge_id: doc-release-checklist · in Ops runbooks/)
+})
+
+test('by-name matching looks past an out-of-scope page', async () => {
+  const { byName, mock } = await toolset({ knowledgeBaseIds: ['kb-product'], maxResults: 1 }, {
+    namedDocuments: [
+      { knowledge_id: 'out-of-scope', knowledge_title: 'Invoice.md', knowledge_base_id: 'kb-ops' },
+      { knowledge_id: 'in-scope', knowledge_title: 'Invoice.md', knowledge_base_id: 'kb-product' },
+    ],
+  })
+  const { value } = await call(byName.get('weknora_search'), { query: 'Invoice.md' })
+  assert.deepEqual(value.documents.map(document => document.knowledge_id), ['in-scope'])
+  const nameQueries = mock.requests.filter(request => request.path === '/api/v1/knowledge/search')
+  assert.deepEqual(nameQueries.map(request => request.query.offset ?? '0'), ['0', '1'])
 })
 
 test('by-name matches stay inside the scope the call asked for', async () => {

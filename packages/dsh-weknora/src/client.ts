@@ -79,6 +79,7 @@ interface Envelope<T> {
   total?: number
   page?: number
   page_size?: number
+  has_more?: boolean
 }
 
 /** Trim a response body for an error message without leaking a whole page. */
@@ -220,14 +221,17 @@ export class WeknoraClient {
    * answers "where is the document called X".
    */
   async findDocuments(
-    input: { keyword: string, limit: number },
+    input: { keyword: string, limit: number, offset?: number },
     signal: AbortSignal,
-  ): Promise<DocumentRecord[]> {
+  ): Promise<{ documents: DocumentRecord[], hasMore: boolean }> {
     const envelope = await this.fetchJson<DocumentRecord[]>('/knowledge/search', {
       method: 'GET',
-      query: { keyword: input.keyword, limit: input.limit },
+      query: { keyword: input.keyword, limit: input.limit, offset: input.offset },
     }, signal)
-    return Array.isArray(envelope.data) ? envelope.data : []
+    return {
+      documents: Array.isArray(envelope.data) ? envelope.data : [],
+      hasMore: envelope.has_more === true,
+    }
   }
 
   /** A document's metadata, including the generated summary WeKnora stores as `description`. */
