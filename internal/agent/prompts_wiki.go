@@ -87,6 +87,8 @@ Output the SUMMARY line first, then the Markdown content. Do not include any oth
 // WikiKnowledgeExtractPrompt extracts both entities and concepts in a single LLM call.
 // Returns a JSON object with "entities" and "concepts" arrays.
 // This replaces the former separate WikiEntityExtractPrompt and WikiConceptExtractPrompt.
+//
+//nolint:lll // Prompt bullets stay on one line; wrapping would change the text sent to the model.
 const WikiKnowledgeExtractPrompt = `You are a knowledge extraction system. Analyze the following document and extract all significant entities AND key concepts.
 
 <document>
@@ -169,6 +171,8 @@ Output ONLY valid JSON. Example:
 // The heavy lifting — linking each slug to concrete supporting chunks — is
 // done in a second pass (see WikiChunkCitationPrompt). Because this prompt no
 // longer has to carry full facts per item, it stays cheap even for long docs.
+//
+//nolint:lll // Prompt bullets stay on one line; wrapping would change the text sent to the model.
 const WikiCandidateSlugPrompt = `You are a knowledge extraction system. Analyze the following document and list all significant entities AND key concepts as a lightweight candidate set. Another pass will later attach concrete supporting chunks to each item, so you do NOT need to write exhaustive per-item facts here.
 
 <document>

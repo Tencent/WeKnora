@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func createAliasPage(t *testing.T, ctx context.Context, h wikiRevisionTestHarness, aliases ...string) *types.WikiPage {
+func createAliasPage(ctx context.Context, t *testing.T, h wikiRevisionTestHarness, aliases ...string) *types.WikiPage {
 	t.Helper()
 	page, err := h.svc.CreatePage(ctx, &types.WikiPage{
 		KnowledgeBaseID: "kb-alias", TenantID: 1, Slug: "concept/buddha-nature", Title: "佛性",
@@ -19,7 +19,8 @@ func createAliasPage(t *testing.T, ctx context.Context, h wikiRevisionTestHarnes
 }
 
 func writeAliases(
-	t *testing.T, ctx context.Context, h wikiRevisionTestHarness, source string, page *types.WikiPage, aliases ...string,
+	ctx context.Context, t *testing.T, h wikiRevisionTestHarness,
+	source string, page *types.WikiPage, aliases ...string,
 ) *types.WikiPage {
 	t.Helper()
 	edit := *page
@@ -32,14 +33,15 @@ func writeAliases(
 func TestUserRemovedAliasCannotComeBackThroughAutomatedWrites(t *testing.T) {
 	for _, source := range []string{types.WikiEditSourcePipeline, types.WikiEditSourceAgent} {
 		t.Run(source, func(t *testing.T) {
-			ctx, h, _ := newWikiRevisionTestService(t)
-			page := createAliasPage(t, ctx, h, "如来藏", "佛种")
+			ctx, h, db := newWikiRevisionTestService(t)
+			seedWikiTestKnowledgeBase(t, db, "kb-alias", 1)
+			page := createAliasPage(ctx, t, h, "如来藏", "佛种")
 
-			page = writeAliases(t, ctx, h, types.WikiEditSourceUser, page, "佛种")
+			page = writeAliases(ctx, t, h, types.WikiEditSourceUser, page, "佛种")
 			require.Equal(t, []string{"如来藏"}, page.RejectedAliases())
 			version := page.Version
 
-			page = writeAliases(t, ctx, h, source, page, "佛种", "如来藏", "佛性论")
+			page = writeAliases(ctx, t, h, source, page, "佛种", "如来藏", "佛性论")
 			require.Equal(t, types.StringArray{"佛种", "佛性论"}, page.Aliases)
 			require.Equal(t, []string{"如来藏"}, page.RejectedAliases())
 			require.Equal(t, version+1, page.Version)
@@ -48,44 +50,48 @@ func TestUserRemovedAliasCannotComeBackThroughAutomatedWrites(t *testing.T) {
 }
 
 func TestRejectedAliasMatchIgnoresCaseAndSpacing(t *testing.T) {
-	ctx, h, _ := newWikiRevisionTestService(t)
-	page := createAliasPage(t, ctx, h, "RAG")
+	ctx, h, db := newWikiRevisionTestService(t)
+	seedWikiTestKnowledgeBase(t, db, "kb-alias", 1)
+	page := createAliasPage(ctx, t, h, "RAG")
 
-	page = writeAliases(t, ctx, h, types.WikiEditSourceUser, page)
-	page = writeAliases(t, ctx, h, types.WikiEditSourcePipeline, page, " rag ")
+	page = writeAliases(ctx, t, h, types.WikiEditSourceUser, page)
+	page = writeAliases(ctx, t, h, types.WikiEditSourcePipeline, page, " rag ")
 
 	require.Empty(t, page.Aliases)
 }
 
 func TestAutomatedWriteThatOnlyReAddsRejectedAliasDoesNotBumpVersion(t *testing.T) {
-	ctx, h, _ := newWikiRevisionTestService(t)
-	page := createAliasPage(t, ctx, h, "如来藏")
-	page = writeAliases(t, ctx, h, types.WikiEditSourceUser, page)
+	ctx, h, db := newWikiRevisionTestService(t)
+	seedWikiTestKnowledgeBase(t, db, "kb-alias", 1)
+	page := createAliasPage(ctx, t, h, "如来藏")
+	page = writeAliases(ctx, t, h, types.WikiEditSourceUser, page)
 	version := page.Version
 
-	page = writeAliases(t, ctx, h, types.WikiEditSourcePipeline, page, "如来藏")
+	page = writeAliases(ctx, t, h, types.WikiEditSourcePipeline, page, "如来藏")
 
 	require.Equal(t, version, page.Version)
 	require.Empty(t, page.Aliases)
 }
 
 func TestUserCanRestoreRejectedAlias(t *testing.T) {
-	ctx, h, _ := newWikiRevisionTestService(t)
-	page := createAliasPage(t, ctx, h, "如来藏")
-	page = writeAliases(t, ctx, h, types.WikiEditSourceUser, page)
+	ctx, h, db := newWikiRevisionTestService(t)
+	seedWikiTestKnowledgeBase(t, db, "kb-alias", 1)
+	page := createAliasPage(ctx, t, h, "如来藏")
+	page = writeAliases(ctx, t, h, types.WikiEditSourceUser, page)
 
-	page = writeAliases(t, ctx, h, types.WikiEditSourceUser, page, "如来藏")
+	page = writeAliases(ctx, t, h, types.WikiEditSourceUser, page, "如来藏")
 	require.Equal(t, types.StringArray{"如来藏"}, page.Aliases)
 	require.Empty(t, page.RejectedAliases())
 
-	page = writeAliases(t, ctx, h, types.WikiEditSourcePipeline, page, "如来藏", "佛种")
+	page = writeAliases(ctx, t, h, types.WikiEditSourcePipeline, page, "如来藏", "佛种")
 	require.Equal(t, types.StringArray{"如来藏", "佛种"}, page.Aliases)
 }
 
 func TestRevertRestoringAliasLiftsRejection(t *testing.T) {
-	ctx, h, _ := newWikiRevisionTestService(t)
-	page := createAliasPage(t, ctx, h, "如来藏")
-	writeAliases(t, ctx, h, types.WikiEditSourceUser, page)
+	ctx, h, db := newWikiRevisionTestService(t)
+	seedWikiTestKnowledgeBase(t, db, "kb-alias", 1)
+	page := createAliasPage(ctx, t, h, "如来藏")
+	writeAliases(ctx, t, h, types.WikiEditSourceUser, page)
 
 	reverted, err := h.svc.RevertPageToVersion(ctx, "kb-alias", "concept/buddha-nature", page.Version)
 	require.NoError(t, err)
@@ -95,24 +101,26 @@ func TestRevertRestoringAliasLiftsRejection(t *testing.T) {
 }
 
 func TestRejectedAliasesKeepOtherPageMetadata(t *testing.T) {
-	ctx, h, _ := newWikiRevisionTestService(t)
-	page := createAliasPage(t, ctx, h, "如来藏")
+	ctx, h, db := newWikiRevisionTestService(t)
+	seedWikiTestKnowledgeBase(t, db, "kb-alias", 1)
+	page := createAliasPage(ctx, t, h, "如来藏")
 	edit := *page
 	edit.PageMetadata = types.JSON(`{"note":"keep","rank":12345678901234567}`)
 	page, err := h.svc.UpdatePage(ctx, &edit)
 	require.NoError(t, err)
 
-	page = writeAliases(t, ctx, h, types.WikiEditSourceUser, page)
+	page = writeAliases(ctx, t, h, types.WikiEditSourceUser, page)
 
 	require.JSONEq(t, `{"note":"keep","rank":12345678901234567,"rejected_aliases":["如来藏"]}`, string(page.PageMetadata))
 }
 
 func TestPagesWithoutRejectionsKeepMetadataUntouched(t *testing.T) {
-	ctx, h, _ := newWikiRevisionTestService(t)
-	page := createAliasPage(t, ctx, h, "佛种")
+	ctx, h, db := newWikiRevisionTestService(t)
+	seedWikiTestKnowledgeBase(t, db, "kb-alias", 1)
+	page := createAliasPage(ctx, t, h, "佛种")
 	before := string(page.PageMetadata)
 
-	page = writeAliases(t, ctx, h, types.WikiEditSourcePipeline, page, "佛种", "佛性论")
+	page = writeAliases(ctx, t, h, types.WikiEditSourcePipeline, page, "佛种", "佛性论")
 
 	require.Equal(t, before, string(page.PageMetadata))
 }
