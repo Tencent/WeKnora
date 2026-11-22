@@ -320,6 +320,11 @@ func (r *Resolved) Capabilities() Capabilities {
 	case api.APIAnthropicMessages:
 		caps.ThinkingFormat = "thinking." + string(r.AnthropicMessages.ThinkingMode)
 		caps.MaxTokensField = "max_tokens"
+		if r.AnthropicMessages.ThinkingMode == api.AnthropicThinkingNone {
+			caps.ThinkingFormat = "none"
+			caps.ThinkingLevels = []api.ReasoningEffort{}
+			return caps
+		}
 	case api.APIGoogleGenerativeAI:
 		caps.ThinkingFormat = "thinkingConfig." + string(r.GoogleGenerativeAI.ThinkingMode)
 		caps.MaxTokensField = "maxOutputTokens"

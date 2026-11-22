@@ -428,6 +428,17 @@ go test ./path/to/changed/package -count=1
 
 Run `gofmt` on changed Go files before committing. For frontend changes, run the relevant tests from `frontend/` and use `npm run type-check` when the change affects TypeScript or Vue components.
 
+Ace Data Cloud's catalog is generated from its public typed API contracts. Refresh
+its pinned seed with `python3 scripts/model-catalog/sync_acedatacloud.py`, then run
+`python3 scripts/model-catalog/generate.py` and review the changes. `--check`
+detects source drift without writing, and `--catalog <response.json>` accepts a
+captured response for reproducible review. Normal application startup and builds
+use the pinned catalog. The refresh keeps old IDs as deprecated entries for saved
+configurations, while current chat and Messages models appear in the picker.
+Host limits and prices stay unspecified; the Messages client's default output
+budget is a request setting, not a model capacity claim. Explicit model overrides
+remain available for custom endpoints and verified thinking controls.
+
 The full maintainer gate remains:
 
 ```bash

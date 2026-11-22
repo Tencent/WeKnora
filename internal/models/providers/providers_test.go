@@ -40,14 +40,17 @@ func TestAceDataCloudChatCatalog(t *testing.T) {
 	if !v.RequiresAuth || v.Auth != providers.AuthBearer || v.API != api.APIOpenAICompletions {
 		t.Fatal("unexpected Ace Data Cloud authentication or chat protocol")
 	}
-	entries := v.Models()
-	if len(entries) != 88 {
-		t.Fatalf("want 88 pinned public Chat Completions models, got %d", len(entries))
+	entries := v.ModelsByType(types.ModelTypeKnowledgeQA)
+	if len(entries) < 103 {
+		t.Fatalf("want the complete published chat catalog, got %d", len(entries))
 	}
 	for _, m := range entries {
 		switch m.ID {
-		case "gpt-4o-all", "gpt-4o-image", "gpt-5.1-all", "claude-opus-5-5", "claude-sonnet-5-5":
-			t.Errorf("non-Chat-Completions model %q must not be offered", m.ID)
+		case "deepseek-r1", "deepseek-v3", "kimi-k2.5":
+			t.Errorf("retired model %q must not be suggested", m.ID)
+		}
+		if m.ContextWindow != 0 || m.MaxOutputTokens != 0 || m.Cost != nil {
+			t.Errorf("unknown host metadata must remain unknown: %s", m.ID)
 		}
 	}
 	resolved, err := modelruntime.Resolve(modelruntime.Ref{
