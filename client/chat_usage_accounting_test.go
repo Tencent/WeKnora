@@ -6,7 +6,15 @@ import (
 )
 
 func TestCompletedTurnTokenAccounting(t *testing.T) {
-	payload := []byte(`{"usage":{"prompt_tokens":40,"completion_tokens":6,"total_tokens":46,"cache_read_tokens":30,"cache_reported":true}}`)
+	payload := []byte(`{
+  "usage": {
+    "prompt_tokens": 40,
+    "completion_tokens": 6,
+    "total_tokens": 46,
+    "cache_read_tokens": 30,
+    "cache_reported": true
+  }
+}`)
 	var live StreamResponse
 	var agent AgentStreamResponse
 	var saved Message
