@@ -341,7 +341,10 @@ export async function startMockWeknora(options = {}) {
         for (const piece of pieces) {
           send({ id: 'a1', response_type: 'answer', content: piece, done: false, session_id: sessionId })
         }
-        send({ id: 'c1', response_type: 'complete', content: '', done: true, session_id: sessionId })
+        send({
+          id: 'c1', response_type: 'complete', content: '', done: true, session_id: sessionId,
+          ...(options.finalContent !== undefined ? { data: { final_content: options.finalContent } } : {}),
+        })
         response.end()
         return
       }

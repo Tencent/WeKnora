@@ -365,6 +365,7 @@ async function assembleStream(
   let resolvedSessionId = sessionId
   let buffer = ''
   let completed = false
+  let finalContent: string | undefined
 
   const consumeLine = (line: string): void => {
     if (!line.startsWith('data:')) return
@@ -392,9 +393,12 @@ async function assembleStream(
         break
       case 'error':
         throw new WeknoraApiError(`POST ${path} streamed an error: ${event.content ?? 'unknown error'}`)
-      case 'complete':
+      case 'complete': {
+        const content = (event as StreamEvent & { data?: { final_content?: unknown } }).data?.final_content
+        if (typeof content === 'string') finalContent = content
         completed = true
         break
+      }
       default:
         break
     }
@@ -429,5 +433,5 @@ async function assembleStream(
       + `${answer.join('').length} character(s) had streamed`)
   }
 
-  return { answer: answer.join(''), references, sessionId: resolvedSessionId, toolCalls }
+  return { answer: finalContent ?? answer.join(''), references, sessionId: resolvedSessionId, toolCalls }
 }

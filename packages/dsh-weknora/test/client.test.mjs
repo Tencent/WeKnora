@@ -108,6 +108,17 @@ test('an agent id routes to agent-chat and reports the server-side tools', async
   assert.deepEqual(answer.toolCalls, ['knowledge_search'])
 })
 
+for (const finalContent of ['Only the persisted answer', '']) {
+  test(`ask uses the persisted final answer (${finalContent === '' ? 'empty' : 'text'})`, async () => {
+    const { client } = await harness({}, { finalContent })
+    const answer = await client.ask(
+      { sessionId: 's1', query: 'x', knowledgeBaseIds: [], agentId: 'agent-9', webSearch: false },
+      never,
+    )
+    assert.equal(answer.answer, finalContent)
+  })
+}
+
 test('a streamed error event becomes a failed call, not an empty answer', async () => {
   const { client } = await harness({}, { streamError: true })
   await assert.rejects(
