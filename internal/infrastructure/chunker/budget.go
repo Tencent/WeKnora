@@ -4,6 +4,8 @@
 // at the embedding boundary.
 package chunker
 
+import "sort"
+
 // tokenRuneBudget converts cfg.TokenLimit into a conservative rune budget for
 // the configured language. Zero means no explicit budget.
 func tokenRuneBudget(cfg SplitterConfig) int {
@@ -26,7 +28,7 @@ func TokenBudgetLanguage(cfg SplitterConfig) string {
 // used when an explicit token budget is configured because separator
 // exhaustion and protected spans can otherwise leave a unit unbounded.
 // Offsets stay in source rune space and the concatenated text is unchanged.
-func splitOversizeUnits(units []splitUnit, limit int) []splitUnit {
+func splitOversizeUnits(units []splitUnit, limit int, protected []span) []splitUnit {
 	if limit <= 0 {
 		return units
 	}
@@ -38,7 +40,7 @@ func splitOversizeUnits(units []splitUnit, limit int) []splitUnit {
 		}
 		runes := []rune(u.text)
 		for offset := 0; offset < len(runes); {
-			end := runeSplitEnd(runes, offset, limit)
+			end := protectedRuneSplitEnd(runes, offset, limit, u.start, protected)
 			out = append(out, splitUnit{
 				text:  string(runes[offset:end]),
 				start: u.start + offset,
@@ -61,6 +63,31 @@ func runeSplitEnd(runes []rune, offset, limit int) int {
 	for i := end - 1; i > offset && i > end-200; i-- {
 		if runes[i] == '\n' || runes[i] == ' ' {
 			return i + 1
+		}
+	}
+	return end
+}
+
+// protectedRuneSplitEnd keeps a span intact when it can fit within the hard
+// limit. Larger spans still use the normal forced split.
+func protectedRuneSplitEnd(runes []rune, offset, limit, sourceStart int, protected []span) int {
+	end := runeSplitEnd(runes, offset, limit)
+	if end == len(runes) {
+		return end
+	}
+
+	cut := sourceStart + end
+	i := sort.Search(len(protected), func(i int) bool { return protected[i].end > cut })
+	if i < len(protected) {
+		p := protected[i]
+		if p.start < cut && p.end-p.start <= limit {
+			spanEnd := p.end - sourceStart
+			if spanEnd <= offset+limit && spanEnd <= len(runes) {
+				return spanEnd
+			}
+			if spanStart := p.start - sourceStart; spanStart > offset {
+				return spanStart
+			}
 		}
 	}
 	return end

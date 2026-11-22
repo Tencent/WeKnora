@@ -270,6 +270,10 @@ func TestSplitText_OverlapChunks_NonNegativeStart(t *testing.T) {
 	}
 }
 
+func findSemanticOverlapBoundary(text string) (int, bool) {
+	return findSemanticOverlapBoundaryEndingAtOrAfter(text, 0, 0, protectedSpansRune(text, protectedSpans(text)))
+}
+
 func TestFindSemanticOverlapBoundary_PriorityThenEarliest(t *testing.T) {
 	tests := []struct {
 		name string
@@ -391,7 +395,7 @@ func TestFindSemanticOverlapBoundary_FiltersEligibilityBeforePriorityAndPosition
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			end, ok := findSemanticOverlapBoundaryEndingAtOrAfter(tt.text, tt.minEnd)
+			end, ok := findSemanticOverlapBoundaryEndingAtOrAfter(tt.text, tt.minEnd, 0, nil)
 			if !ok {
 				t.Fatal("expected eligible semantic overlap boundary")
 			}
@@ -406,7 +410,7 @@ func TestComputeOverlap_FindsBoundaryInsideLargeUnit(t *testing.T) {
 	text := "abcdefgh。尾巴内容"
 	unit := splitUnit{text: text, start: 100, end: 100 + len([]rune(text))}
 
-	overlap, overlapLen := computeOverlap([]splitUnit{unit}, 8, 32, 8)
+	overlap, overlapLen := computeOverlap([]splitUnit{unit}, 8, 32, 8, nil)
 	if got := unitsText(overlap); got != "尾巴内容" {
 		t.Fatalf("overlap = %q, want %q", got, "尾巴内容")
 	}
@@ -422,7 +426,7 @@ func TestComputeOverlap_NoBoundaryMeansNoOverlap(t *testing.T) {
 	text := "abcdefgh尾巴内容"
 	unit := splitUnit{text: text, start: 0, end: len([]rune(text))}
 
-	overlap, overlapLen := computeOverlap([]splitUnit{unit}, 8, 32, 8)
+	overlap, overlapLen := computeOverlap([]splitUnit{unit}, 8, 32, 8, nil)
 	if len(overlap) != 0 || overlapLen != 0 {
 		t.Fatalf("expected no overlap, got %q (%d)", unitsText(overlap), overlapLen)
 	}
@@ -432,7 +436,7 @@ func TestComputeOverlap_RespectsNextChunkCapacity(t *testing.T) {
 	text := "abcdefgh。尾巴"
 	unit := splitUnit{text: text, start: 0, end: len([]rune(text))}
 
-	overlap, overlapLen := computeOverlap([]splitUnit{unit}, 10, 8, 5)
+	overlap, overlapLen := computeOverlap([]splitUnit{unit}, 10, 8, 5, nil)
 	if got := unitsText(overlap); got != "尾巴" {
 		t.Fatalf("overlap = %q, want %q", got, "尾巴")
 	}
@@ -472,7 +476,7 @@ func TestComputeOverlap_LookbehindBoundaryEligibility(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			unit := splitUnit{text: tt.text, start: 0, end: len([]rune(tt.text))}
-			overlap, overlapLen := computeOverlap([]splitUnit{unit}, 4, 20, 4)
+			overlap, overlapLen := computeOverlap([]splitUnit{unit}, 4, 20, 4, nil)
 			if got := unitsText(overlap); got != tt.want {
 				t.Fatalf("overlap = %q, want %q", got, tt.want)
 			}
