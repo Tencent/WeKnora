@@ -18,7 +18,7 @@ func TestKnowledgeTagWireFormat(t *testing.T) {
 		if want == "" {
 			want = "red"
 		}
-		c := NewClient("https://example.test", WithTransport(tagTransport(func(req *http.Request) (*http.Response, error) {
+		transport := tagTransport(func(req *http.Request) (*http.Response, error) {
 			body := `{"success":true,"data":[]}`
 			if req.Method == http.MethodPost {
 				var input struct {
@@ -34,13 +34,22 @@ func TestKnowledgeTagWireFormat(t *testing.T) {
 			} else if got := req.URL.Query().Get("tag_ids"); got != want {
 				t.Errorf("list tag_ids = %q, want %q", got, want)
 			}
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
-		})))
-		_, err := c.CreateKnowledgeFromURL(context.Background(), "kb", CreateKnowledgeFromURLRequest{URL: "https://example.test/document", TagID: "red", TagIDs: tags})
+			return &http.Response{
+				StatusCode: 200,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     make(http.Header),
+			}, nil
+		})
+		c := NewClient("https://example.test", WithTransport(transport))
+		request := CreateKnowledgeFromURLRequest{
+			URL: "https://example.test/document", TagID: "red", TagIDs: tags,
+		}
+		_, err := c.CreateKnowledgeFromURL(context.Background(), "kb", request)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, _, err = c.ListKnowledgeWithFilter(context.Background(), "kb", 1, 10, KnowledgeListFilter{TagID: "red", TagIDs: tags})
+		filter := KnowledgeListFilter{TagID: "red", TagIDs: tags}
+		_, _, err = c.ListKnowledgeWithFilter(context.Background(), "kb", 1, 10, filter)
 		if err != nil {
 			t.Fatal(err)
 		}
