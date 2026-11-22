@@ -7,7 +7,13 @@ import (
 
 func TestImportScannedDocumentOverrides(t *testing.T) {
 	off := false
-	req := CreateKnowledgeFromURLRequest{URL: "https://example.org/scanned.pdf", ProcessConfig: &KnowledgeProcessOverrides{ParserEngineOverrides: map[string]string{"pdf_force_scanned": "true"}, SummaryEnabled: &off}}
+	req := CreateKnowledgeFromURLRequest{
+		URL: "https://example.org/scanned.pdf",
+		ProcessConfig: &KnowledgeProcessOverrides{
+			ParserEngineOverrides: map[string]string{"pdf_force_scanned": "true"},
+			SummaryEnabled:        &off,
+		},
+	}
 	b, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
