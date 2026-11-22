@@ -20,6 +20,7 @@ type fakeChatService struct {
 	createSessionResp *sdk.Session
 	createSessionErr  error
 	createCalled      bool
+	createdTitle      string
 
 	streamErr      error
 	streamEvents   []*sdk.StreamResponse
@@ -31,6 +32,7 @@ type fakeChatService struct {
 
 func (f *fakeChatService) CreateSession(_ context.Context, req *sdk.CreateSessionRequest) (*sdk.Session, error) {
 	f.createCalled = true
+	f.createdTitle = req.Title
 	if f.createSessionErr != nil {
 		return nil, f.createSessionErr
 	}
@@ -93,6 +95,9 @@ func TestChat_StreamMode(t *testing.T) {
 	// auto-created session must announce itself on stderr
 	if !strings.Contains(errBuf.String(), "session: sess_auto") {
 		t.Errorf("expected stderr session hint, got %q", errBuf.String())
+	}
+	if svc.createdTitle != opts.Query {
+		t.Errorf("session title = %q, want %q", svc.createdTitle, opts.Query)
 	}
 	if !svc.createCalled {
 		t.Error("expected CreateSession invocation when SessionID empty")
