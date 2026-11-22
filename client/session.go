@@ -232,6 +232,16 @@ type QuestionOrigin struct {
 // PageContext identifies the open page. Knowledge-base resources must be in
 // the retrieval scope; agents must be visible in the current tenant.
 type PageContext struct {
+	Page         string         `json:"page,omitempty"`
+	Section      string         `json:"section,omitempty"`
+	ModelID      string         `json:"model_id,omitempty"`
+	MCPServiceID string         `json:"mcp_service_id,omitempty"`
+	SessionID    string         `json:"session_id,omitempty"`
+	MessageID    string         `json:"message_id,omitempty"`
+	Title        string         `json:"title,omitempty"`
+	View         string         `json:"view,omitempty"`
+	Selection    *PageSelection `json:"selection,omitempty"`
+
 	AgentID         string   `json:"agent_id,omitempty"`
 	KnowledgeBaseID string   `json:"knowledge_base_id,omitempty"`
 	KnowledgeID     string   `json:"knowledge_id,omitempty"`
@@ -580,4 +590,13 @@ func (c *Client) SearchKnowledgeDetailed(
 
 	debugLogger.Debug("search_knowledge_completed", "result_count", len(response.Data))
 	return &response, nil
+}
+
+// PageSelection describes the location supplied by the API.
+type PageSelection struct {
+	Text      string `json:"text"`
+	Field     string `json:"field,omitempty"`      // the field's label
+	Ref       string `json:"ref,omitempty"`        // the field's read_page ref
+	StartLine int    `json:"start_line,omitempty"` // 1-based, multi-line fields only
+	EndLine   int    `json:"end_line,omitempty"`
 }
