@@ -4947,7 +4947,7 @@
         "source": "https://api.runcrate.ai/v1/models"
       }
     ],
-    "uberllm": [
+    "martllm": [
       {
         "id": "deepseek/deepseek-v4.1-flash",
         "name": "DeepSeek V4.1 Flash",
@@ -4958,7 +4958,7 @@
         ],
         "context_window": 1048576,
         "max_output_tokens": 384000,
-        "source": "https://api.uberllm.dev/v1/models"
+        "source": "https://api.martllm.com/v1/models"
       },
       {
         "id": "z-ai/glm-5.3",
@@ -4969,7 +4969,7 @@
         ],
         "context_window": 1000000,
         "max_output_tokens": 131072,
-        "source": "https://api.uberllm.dev/v1/models"
+        "source": "https://api.martllm.com/v1/models"
       },
       {
         "id": "z-ai/glm-5.3-flash",
@@ -4981,7 +4981,7 @@
         ],
         "context_window": 1048576,
         "max_output_tokens": 131072,
-        "source": "https://api.uberllm.dev/v1/models"
+        "source": "https://api.martllm.com/v1/models"
       },
       {
         "id": "qwen/qwen3.8-flash",
@@ -4993,19 +4993,19 @@
         ],
         "context_window": 1000000,
         "max_output_tokens": 131072,
-        "source": "https://api.uberllm.dev/v1/models"
+        "source": "https://api.martllm.com/v1/models"
       },
       {
         "id": "venice/whisper-large-v3",
         "name": "Whisper Large V3",
         "type": "ASR",
-        "source": "https://api.uberllm.dev/v1/models?type=transcription"
+        "source": "https://api.martllm.com/v1/models?type=transcription"
       },
       {
         "id": "elevenlabs/elevenlabs-scribe-v2",
         "name": "ElevenLabs Scribe v2",
         "type": "ASR",
-        "source": "https://api.uberllm.dev/v1/models?type=transcription"
+        "source": "https://api.martllm.com/v1/models?type=transcription"
       }
     ]
   }

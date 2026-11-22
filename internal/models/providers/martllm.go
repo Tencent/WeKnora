@@ -1,6 +1,6 @@
-// Package providers registers UberLLM's OpenAI-compatible API.
+// Package providers registers MartLLM's OpenAI-compatible API.
 //
-// Facts (checked against https://api.uberllm.dev/v1 on 2026-11-10):
+// Facts (checked against https://api.martllm.com/v1 on 2026-11-10):
 //   - one base URL serves chat completions and audio transcriptions; model
 //     ids are always `vendor/model` (deepseek/deepseek-v4.1-flash), as listed
 //     by the public GET /v1/models (?type=transcription lists the speech
@@ -17,7 +17,7 @@
 //     Qwen3.8 Flash;
 //   - transcriptions are OpenAI-style multipart (`file`, `model`,
 //     `language`), json by default, files up to 40 MB in mp3, wav, ogg,
-//     flac, m4a/mp4, webm or aac (https://uberllm.dev/openapi.json).
+//     flac, m4a/mp4, webm or aac (https://martllm.com/openapi.json).
 //
 // Unverified: Claude, Gemini, GPT and Kimi models accept `reasoning_effort`
 // but return no reasoning text, so whether "none" switches them off could not
@@ -32,33 +32,33 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-//go:embed assets/uberllm.svg
-var uberllmIcon []byte
+//go:embed assets/martllm.svg
+var martllmIcon []byte
 
-// UberllmID is the provider identifier stored on model rows.
-const UberllmID = "uberllm"
+// MartllmID is the provider identifier stored on model rows.
+const MartllmID = "martllm"
 
-// UberllmBaseURL is the OpenAI-compatible endpoint.
-const UberllmBaseURL = "https://api.uberllm.dev/v1"
+// MartllmBaseURL is the OpenAI-compatible endpoint.
+const MartllmBaseURL = "https://api.martllm.com/v1"
 
-func newUberllmProvider() *Definition {
+func newMartllmProvider() *Definition {
 	return &Definition{
-		ID:    UberllmID,
-		Name:  "UberLLM",
-		Names: map[string]string{"zh-CN": "UberLLM"},
+		ID:    MartllmID,
+		Name:  "MartLLM",
+		Names: map[string]string{"zh-CN": "MartLLM"},
 		Description: "deepseek/deepseek-v4.1-flash, z-ai/glm-5.3, qwen/qwen3.8-flash, " +
 			"venice/whisper-large-v3, etc.",
-		Website:      "https://uberllm.dev",
-		Icon:         uberllmIcon,
+		Website:      "https://martllm.com",
+		Icon:         martllmIcon,
 		API:          api.APIOpenAICompletions,
 		Order:        43,
 		RequiresAuth: true,
 		Auth:         AuthBearer,
-		URLPatterns:  []string{"api.uberllm.dev"},
+		URLPatterns:  []string{"api.martllm.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
-			types.ModelTypeKnowledgeQA: UberllmBaseURL,
-			types.ModelTypeVLLM:        UberllmBaseURL,
-			types.ModelTypeASR:         UberllmBaseURL,
+			types.ModelTypeKnowledgeQA: MartllmBaseURL,
+			types.ModelTypeVLLM:        MartllmBaseURL,
+			types.ModelTypeASR:         MartllmBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
@@ -77,7 +77,7 @@ func newUberllmProvider() *Definition {
 				SupportsReasoningEffort: api.Ptr(true),
 			},
 		},
-		// UberLLM accepts the whole ladder up to max; "off" is the literal
+		// MartLLM accepts the whole ladder up to max; "off" is the literal
 		// "none".
 		ThinkingLevels: api.ThinkingLevelMap{
 			api.ReasoningOff:   api.StringPtr("none"),

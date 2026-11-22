@@ -22,7 +22,7 @@ var expectedIDs = []string{
 	"minimax", "moonshot", "mimo", "modelscope", "qianfan", "qiniu", "longcat", "lkeap",
 	"openai", "azure_openai", "anthropic", "gemini",
 	"openrouter", "litellm", "requesty", "pinecone",
-	"jina", "nvidia", "novita", "gpustack", "cohere", "runcrate", "uberllm",
+	"jina", "nvidia", "novita", "gpustack", "cohere", "runcrate", "martllm",
 }
 
 func TestMinimaxOfficialDefaultURLs(t *testing.T) {

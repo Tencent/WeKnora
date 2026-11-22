@@ -2184,7 +2184,7 @@
         }
       }
     ],
-    "uberllm": [
+    "martllm": [
       {
         "id": "z-ai/glm-5.3",
         "thinking_levels": {

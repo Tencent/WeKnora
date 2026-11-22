@@ -11,19 +11,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUberllmCatalog(t *testing.T) {
-	v, ok := modelruntime.Get("uberllm")
+func TestMartllmCatalog(t *testing.T) {
+	v, ok := modelruntime.Get("martllm")
 	require.True(t, ok)
 	for _, mt := range []types.ModelType{types.ModelTypeKnowledgeQA, types.ModelTypeVLLM, types.ModelTypeASR} {
-		assert.Equal(t, "https://api.uberllm.dev/v1", v.GetDefaultURL(mt), mt)
+		assert.Equal(t, "https://api.martllm.com/v1", v.GetDefaultURL(mt), mt)
 	}
-	assert.Equal(t, "uberllm", modelruntime.DetectByURL("https://api.uberllm.dev/v1"))
+	assert.Equal(t, "martllm", modelruntime.DetectByURL("https://api.martllm.com/v1"))
 	assert.Error(t, v.ValidateConfig(&providers.Config{ModelName: "deepseek/deepseek-v4.1-flash"}))
 	assert.NoError(t, v.ValidateConfig(&providers.Config{ModelName: "deepseek/deepseek-v4.1-flash", APIKey: "k"}))
 
 	for _, model := range []string{"deepseek/deepseek-v4.1-flash", "z-ai/glm-5.3-flash"} {
 		r, err := modelruntime.Resolve(modelruntime.Ref{
-			Provider: "uberllm", Model: model, ModelType: types.ModelTypeKnowledgeQA,
+			Provider: "martllm", Model: model, ModelType: types.ModelTypeKnowledgeQA,
 		})
 		require.NoError(t, err, model)
 		assert.True(t, r.Cataloged, model)
@@ -35,7 +35,7 @@ func TestUberllmCatalog(t *testing.T) {
 
 	// Qwen3.8 Flash keeps reasoning with "none", so "off" is not offered.
 	r, err := modelruntime.Resolve(modelruntime.Ref{
-		Provider: "uberllm", Model: "qwen/qwen3.8-flash", ModelType: types.ModelTypeKnowledgeQA,
+		Provider: "martllm", Model: "qwen/qwen3.8-flash", ModelType: types.ModelTypeKnowledgeQA,
 	})
 	require.NoError(t, err)
 	assert.True(t, r.Cataloged)
@@ -43,7 +43,7 @@ func TestUberllmCatalog(t *testing.T) {
 
 	// GLM-5.3 accepts only low, high and max; the other rungs clamp onto them.
 	r, err = modelruntime.Resolve(modelruntime.Ref{
-		Provider: "uberllm", Model: "z-ai/glm-5.3", ModelType: types.ModelTypeKnowledgeQA,
+		Provider: "martllm", Model: "z-ai/glm-5.3", ModelType: types.ModelTypeKnowledgeQA,
 	})
 	require.NoError(t, err)
 	assert.True(t, r.Cataloged)
@@ -54,7 +54,7 @@ func TestUberllmCatalog(t *testing.T) {
 
 	for _, model := range []string{"venice/whisper-large-v3", "elevenlabs/elevenlabs-scribe-v2"} {
 		r, err := modelruntime.Resolve(modelruntime.Ref{
-			Provider: "uberllm", Model: model, ModelType: types.ModelTypeASR,
+			Provider: "martllm", Model: model, ModelType: types.ModelTypeASR,
 		})
 		require.NoError(t, err, model)
 		assert.True(t, r.Cataloged, model)

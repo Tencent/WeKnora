@@ -309,7 +309,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 | LiteLLM | `litellm` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Requesty | `requesty` | ✓ | ✓ | | ✓ | ✓ |
 | Runcrate | `runcrate` | ✓ | ✓ | | ✓ | |
-| UberLLM | `uberllm` | ✓ | | | ✓ | ✓ |
+| MartLLM | `martllm` | ✓ | | | ✓ | ✓ |
 | Jina | `jina` | | ✓ | ✓ | | |
 | NVIDIA | `nvidia` | ✓ | ✓ | ✓ | ✓ | |
 | Novita AI | `novita` | ✓ | ✓ | ✓ | ✓ | |
@@ -373,12 +373,12 @@ Runcrate 是提供 OpenAI 兼容推理 API 的 GPU 云，默认地址为 `https:
 思考强度通过 `reasoning_effort` 发送，关闭思考时发送 `none`；GLM-5.3、GLM-5.3 Flash、
 Qwen3.8 Flash 和 gpt-oss 120B 的思考无法关闭，目录中不提供「关闭」档位。
 
-### UberLLM
+### MartLLM
 
-UberLLM 提供 OpenAI 兼容 API，默认地址为 `https://api.uberllm.dev/v1`，对话、视觉和语音识别模型共用该地址和同一个
+MartLLM 提供 OpenAI 兼容 API，默认地址为 `https://api.martllm.com/v1`，对话、视觉和语音识别模型共用该地址和同一个
 API Key，模型 ID 带厂商前缀（如 `deepseek/deepseek-v4.1-flash`），完整列表见公开的 `GET /v1/models`
-（语音识别模型加 `?type=transcription`）。API Key 在 [uberllm.dev](https://uberllm.dev/signup) 创建，预付费，
-各模型价格见 [模型列表](https://uberllm.dev/models)。UberLLM 不提供向量和重排模型，知识库的向量模型需另选厂商。
+（语音识别模型加 `?type=transcription`）。API Key 在 [martllm.com](https://martllm.com/signup) 创建，预付费，
+各模型价格见 [模型列表](https://martllm.com/models)。MartLLM 不提供向量和重排模型，知识库的向量模型需另选厂商。
 
 通过 `POST /api/v1/models` 创建语音识别模型时，请求体示例：
 
@@ -388,9 +388,9 @@ API Key，模型 ID 带厂商前缀（如 `deepseek/deepseek-v4.1-flash`），�
   "type": "ASR",
   "source": "remote",
   "parameters": {
-    "provider": "uberllm",
-    "base_url": "https://api.uberllm.dev/v1",
-    "api_key": "your-uberllm-api-key"
+    "provider": "martllm",
+    "base_url": "https://api.martllm.com/v1",
+    "api_key": "your-martllm-api-key"
   }
 }
 ```
