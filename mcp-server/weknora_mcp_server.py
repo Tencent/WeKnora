@@ -442,14 +442,13 @@ class WeKnoraClient:
         """List knowledge in a knowledge base.
 
         ``folder_path`` filters to one folder (empty string = root).
-        ``folder_scope`` is passed through when the backend supports
-        scoped folder listing.
+        Use ``folder_scope="subtree"`` (or "all") to include descendants.
         """
         params = {"page": page, "page_size": page_size}
         if folder_path is not None:
             params["folder_path"] = folder_path
-        if folder_scope:
-            params["folder_scope"] = folder_scope
+        if folder_path is not None and folder_scope in ("all", "subtree"):
+            params["folder_recursive"] = "true"
         return self._request(
             "GET", f"/knowledge-bases/{kb_id}/knowledge", params=params
         )
@@ -910,7 +909,7 @@ def list_knowledge(
     """List knowledge entries in a knowledge base.
 
     ``folder_path`` optionally filters to one folder (``""`` = root).
-    ``folder_scope`` is forwarded when the backend supports scoped listing.
+    Use ``folder_scope="subtree"`` (or "all") to include descendants.
     """
     return client.list_knowledge(
         kb_id, page, page_size, folder_path=folder_path, folder_scope=folder_scope
