@@ -618,9 +618,17 @@ services:
     image: redis:7.0-alpine
     container_name: WeKnora-redis
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
-    restart: always
+    volumes:
+      - redis_data:/data
     networks:
       - WeKnora-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: always
 
   # One-shot init: copy the read-only template settings.yml into a named volume
   # before searxng starts. Necessary because the searxng entrypoint sed-replaces
@@ -1102,6 +1110,7 @@ networks:
 
 volumes:
   postgres-data:
+  redis_data:
   data-files:
   docreader-tmp:
   minio_data:
