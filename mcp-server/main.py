@@ -102,7 +102,7 @@ def parse_arguments():
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.getenv("MCP_PORT", "8000")),
+        default=os.getenv("MCP_PORT", "8000"),
         help="Bind port for network transports (default: 8000)",
     )
 
