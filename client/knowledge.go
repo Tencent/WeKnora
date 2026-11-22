@@ -832,6 +832,7 @@ func (c *Client) UpdateImageInfo(ctx context.Context,
 
 // CreateManualKnowledgeRequest contains the parameters for creating a manual Markdown knowledge entry.
 type CreateManualKnowledgeRequest struct {
+	Status  string `json:"status,omitempty"`
 	Title   string `json:"title"`
 	Content string `json:"content"`
 	TagID   string `json:"tag_id,omitempty"`

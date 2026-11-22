@@ -26,6 +26,7 @@ var docCreateFields = []string{
 
 // CreateOptions holds CLI flag values for `doc create`.
 type CreateOptions struct {
+	Publish bool
 	Text    string // --text (required): document text content (Markdown)
 	Title   string // --title: document title (matches `doc update --title`)
 	TagID   string // --tag-id: associate with a tag
@@ -79,9 +80,10 @@ don't require a file upload or remote URL. KB resolution follows the standard
 				if handled, err := cmdutil.HandleDryRun(c, true, cmdutil.DryRunPlan{
 					Action: "doc.create",
 					Args: map[string]any{
-						"text":  opts.Text,
-						"title": opts.Title,
-						"kb":    kbID,
+						"publish": opts.Publish,
+						"text":    opts.Text,
+						"title":   opts.Title,
+						"kb":      kbID,
 					},
 				}); handled {
 					return err
@@ -101,6 +103,7 @@ don't require a file upload or remote URL. KB resolution follows the standard
 	}
 	cmdutil.AddKBFlag(cmd)
 	cmd.Flags().StringVar(&opts.Text, "text", "", "Document text content in Markdown format (required)")
+	cmd.Flags().BoolVar(&opts.Publish, "publish", false, "Publish the document and queue it for indexing immediately")
 	cmd.Flags().StringVar(&opts.Title, "title", "", "Document title")
 	cmd.Flags().StringVar(&opts.TagID, "tag-id", "", "Tag id to associate with the new entry")
 	cmd.Flags().StringVar(&opts.Channel, "channel", "", "Ingestion-channel tag recorded server-side (default \"api\")")
@@ -133,11 +136,14 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 		TagID:   opts.TagID,
 		Channel: cmp.Or(opts.Channel, uploadChannel),
 	}
+	if opts.Publish {
+		req.Status = "publish"
+	}
 	k, err := svc.CreateManualKnowledge(ctx, kbID, req)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "create document")
 	}
-	// Inline-created docs land in parse_status=draft and are NOT auto-queued
+	// By default, inline-created docs land in parse_status=draft and are NOT auto-queued
 	// for parsing (unlike `doc upload`), so they aren't searchable until
 	// reparsed. Surface the next step so an agent doesn't `doc wait` into a
 	// timeout or `search` into empty results.
