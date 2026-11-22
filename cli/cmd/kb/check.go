@@ -153,7 +153,9 @@ func writeCheckText(w io.Writer, res *CheckResult) error {
 	}
 	fmt.Fprintf(w, "Retrieval:    %v%s\n", res.RetrievalReady, retrievalHint(res.RetrievalReady))
 	fmt.Fprintf(w, "Knowledge:    %d\n", res.KnowledgeCount)
-	writeChunkCount(w, res.kbType, res.ChunkCount)
+	if err := writeChunkCount(w, res.kbType, res.ChunkCount); err != nil {
+		return err
+	}
 	fmt.Fprintf(w, "Processing:   %v (%d active)\n", res.IsProcessing, res.ProcessingCount)
 	fmt.Fprintf(w, "Failed:       %d\n", res.FailedCount)
 	return nil

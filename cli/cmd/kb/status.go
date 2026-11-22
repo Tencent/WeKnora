@@ -124,7 +124,9 @@ func writeStatusText(w io.Writer, res *StatusResult) error {
 	}
 	fmt.Fprintf(w, "Retrieval:    %v%s\n", res.RetrievalReady, retrievalHint(res.RetrievalReady))
 	fmt.Fprintf(w, "Knowledge:    %d\n", res.KnowledgeCount)
-	writeChunkCount(w, res.kbType, res.ChunkCount)
+	if err := writeChunkCount(w, res.kbType, res.ChunkCount); err != nil {
+		return err
+	}
 	fmt.Fprintf(w, "Processing:   %v (%d active)\n", res.IsProcessing, res.ProcessingCount)
 	return nil
 }
@@ -140,11 +142,12 @@ func retrievalHint(ready bool) string {
 // compile-time check: SDK client satisfies StatusService.
 var _ StatusService = (*sdk.Client)(nil)
 
-func writeChunkCount(w io.Writer, kbType string, count int64) {
+func writeChunkCount(w io.Writer, kbType string, count int64) error {
 	// The server counts documents for document KBs and chunks for FAQ KBs.
 	if kbType == "document" && count == 0 {
-		fmt.Fprintln(w, "Chunks:       not reported for document knowledge bases")
-		return
+		_, err := fmt.Fprintln(w, "Chunks:       not reported for document knowledge bases")
+		return err
 	}
-	fmt.Fprintf(w, "Chunks:       %d\n", count)
+	_, err := fmt.Fprintf(w, "Chunks:       %d\n", count)
+	return err
 }

@@ -118,7 +118,9 @@ func TestChunkCountDiagnostics(t *testing.T) {
 		{"document", 0, "not reported"}, {"faq", 0, "0"}, {"document", 5, "5"},
 	} {
 		var out bytes.Buffer
-		writeChunkCount(&out, tc.kind, tc.count)
+		if err := writeChunkCount(&out, tc.kind, tc.count); err != nil {
+			t.Fatal(err)
+		}
 		if !strings.Contains(out.String(), tc.want) {
 			t.Errorf("%s: got %q, want %q", tc.kind, out.String(), tc.want)
 		}
