@@ -1952,6 +1952,71 @@ func (s *Service) persistIMLastRequestState(ctx context.Context, sessionID, agen
 	}
 }
 
+// imReactionTimeout bounds a single reaction call so a slow Feishu API can
+// never stall a QA round. It mirrors the 2s budget in the DSH reference
+// implementation (MessageProgress.safely, #5726).
+const imReactionTimeout = 2 * time.Second
+
+// imReactionTracker tracks one QA round's message reactions (Feishu OnIt /
+// DONE / ERROR), mirroring DSH MessageProgress: transitions are serial and
+// best-effort, and a reaction failure never fails the round. It is used on
+// the worker goroutine only, so no locking is needed.
+type imReactionTracker struct {
+	sender     ReactionSender
+	msg        *IncomingMessage
+	reactionID string
+}
+
+func newIMReactionTracker(adapter Adapter, msg *IncomingMessage) *imReactionTracker {
+	sender, _ := adapter.(ReactionSender)
+	return &imReactionTracker{sender: sender, msg: msg}
+}
+
+// Begin adds the OnIt reaction once a round starts processing. It is a no-op
+// when the adapter does not support reactions or the message has no ID.
+// Failures are logged, never returned.
+func (t *imReactionTracker) Begin(ctx context.Context) {
+	if t == nil || t.sender == nil || t.msg == nil || t.msg.MessageID == "" {
+		return
+	}
+	callCtx, cancel := context.WithTimeout(ctx, imReactionTimeout)
+	defer cancel()
+	reactionID, err := t.sender.AddReaction(callCtx, t.msg, "OnIt")
+	if err != nil {
+		logger.Warnf(ctx, "[IM] Failed to add OnIt reaction: %v", err)
+		return
+	}
+	t.reactionID = reactionID
+}
+
+// Finish removes OnIt (if added) and adds the terminal reaction: DONE when
+// the round produced an answer, ERROR when it failed. The terminal reaction
+// is added even if removing OnIt fails. It is a no-op when the adapter does
+// not support reactions.
+func (t *imReactionTracker) Finish(ctx context.Context, success bool) {
+	if t == nil || t.sender == nil || t.msg == nil || t.msg.MessageID == "" {
+		return
+	}
+	if t.reactionID != "" {
+		rmCtx, cancel := context.WithTimeout(ctx, imReactionTimeout)
+		err := t.sender.RemoveReaction(rmCtx, t.msg, t.reactionID)
+		cancel()
+		t.reactionID = ""
+		if err != nil {
+			logger.Warnf(ctx, "[IM] Failed to remove OnIt reaction: %v", err)
+		}
+	}
+	emoji := "DONE"
+	if !success {
+		emoji = "ERROR"
+	}
+	addCtx, cancel := context.WithTimeout(ctx, imReactionTimeout)
+	defer cancel()
+	if _, err := t.sender.AddReaction(addCtx, t.msg, emoji); err != nil {
+		logger.Warnf(ctx, "[IM] Failed to add %s reaction: %v", emoji, err)
+	}
+}
+
 // executeQARequest is the worker handler that runs the QA pipeline for a queued request.
 // It is called by qaQueue workers and must not block indefinitely.
 func (s *Service) executeQARequest(req *qaRequest) {
@@ -1973,6 +2038,12 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	// runQA after the assistant message is created (that's when we have the
 	// sessionID + messageID needed to poll StreamManager).
 
+	// Track message reactions for this round (Feishu OnIt/DONE/ERROR, #5726).
+	// Begin marks processing start; each delivery path below calls Finish
+	// once the final content has been delivered.
+	reactions := newIMReactionTracker(req.adapter, req.msg)
+	reactions.Begin(ctx)
+
 	// kbIDs is left empty so the QA pipeline resolves them from the agent config.
 	var kbIDs []string
 	attachments, imageURLs, downloaded, err := s.prepareIMAttachments(ctx, req.msg, req.adapter)
@@ -1981,6 +2052,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 		if sendErr := req.adapter.SendReply(ctx, req.msg, &ReplyMessage{Content: "❌ 无法读取此附件，请重试或改用文字描述。", IsFinal: true}); sendErr != nil {
 			logger.Warnf(ctx, "[IM] Failed to send attachment error reply: %v", sendErr)
 		}
+		reactions.Finish(ctx, false)
 		return
 	}
 	if req.channel.KnowledgeBaseID != "" && downloaded != nil {
@@ -2000,7 +2072,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 			// sent; the placeholder is replaced only after QA completes.
 			if err := s.handleMessageFullOutput(
 				ctx, req.msg, req.session, req.agent, kbIDs, attachments, imageURLs,
-				progressSender, req.adapter, req.userKey, req.tenant,
+				progressSender, req.adapter, req.userKey, req.tenant, reactions,
 			); err != nil {
 				logger.Errorf(ctx, "[IM] Full-output QA failed: %v", err)
 			}
@@ -2010,7 +2082,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 		// Stream mode sends intermediate reasoning and answer updates.
 		if err := s.handleMessageStream(
 			ctx, req.msg, req.session, req.agent, kbIDs, attachments, imageURLs,
-			streamer, req.adapter, req.userKey, req.tenant,
+			streamer, req.adapter, req.userKey, req.tenant, reactions,
 		); err != nil {
 			logger.Errorf(ctx, "[IM] Stream QA failed: %v", err)
 		}
@@ -2030,8 +2102,10 @@ func (s *Service) executeQARequest(req *qaRequest) {
 			s.newOutboundFileServiceResolver(req.tenant, req.agent, kbIDs)),
 		IsFinal: true,
 	}
-	if err := req.adapter.SendReply(outCtx, req.msg, reply); err != nil {
-		logger.Errorf(ctx, "[IM] Send reply failed: %v", err)
+	sendErr := req.adapter.SendReply(outCtx, req.msg, reply)
+	reactions.Finish(outCtx, err == nil && sendErr == nil)
+	if sendErr != nil {
+		logger.Errorf(ctx, "[IM] Send reply failed: %v", sendErr)
 		return
 	}
 
@@ -2055,12 +2129,13 @@ func (s *Service) handleMessageFullOutput(
 	adapter Adapter,
 	userKey string,
 	tenant *types.Tenant,
+	reactions *imReactionTracker,
 ) error {
 	streamID, err := streamer.StartStream(ctx, msg)
 	if err != nil {
 		logger.Warnf(ctx, "[IM] StartStream failed for full output, falling back to plain reply: %v", err)
 		return s.fallbackNonStream(
-			ctx, msg, session, customAgent, kbIDs, attachments, imageURLs, adapter, userKey, tenant,
+			ctx, msg, session, customAgent, kbIDs, attachments, imageURLs, adapter, userKey, tenant, reactions,
 		)
 	}
 
@@ -2096,6 +2171,10 @@ func (s *Service) handleMessageFullOutput(
 			logger.Errorf(ctx, "[IM] Plain reply fallback after full-output finalize failure failed: %v", fallbackErr)
 		}
 	}
+
+	// The terminal reaction goes after the final content has been delivered
+	// (card replace and any plain fallback), never before it (#5726).
+	reactions.Finish(outCtx, qaErr == nil && (finalizeErr == nil || fallbackErr == nil))
 
 	if finalizeErr == nil || fallbackErr == nil {
 		logger.Infof(
@@ -2515,12 +2594,28 @@ func briefToolSummary(output string) string {
 // handleMessageStream runs the QA pipeline and streams answer chunks to the IM platform
 // in real-time via the StreamSender interface. Chunks are batched at streamFlushInterval
 // to avoid API rate-limiting.
-func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, streamer StreamSender, adapter Adapter, userKey string, tenant *types.Tenant) error {
+func (s *Service) handleMessageStream(
+	ctx context.Context,
+	msg *IncomingMessage,
+	session *types.Session,
+	customAgent *types.CustomAgent,
+	kbIDs []string,
+	attachments types.MessageAttachments,
+	imageURLs []string,
+	streamer StreamSender,
+	adapter Adapter,
+	userKey string,
+	tenant *types.Tenant,
+	reactions *imReactionTracker,
+) error {
 	// Start the stream on the IM platform (e.g., create Feishu streaming card)
 	streamID, err := streamer.StartStream(ctx, msg)
 	if err != nil {
 		logger.Warnf(ctx, "[IM] StartStream failed, falling back to non-streaming: %v", err)
-		return s.fallbackNonStream(ctx, msg, session, customAgent, kbIDs, attachments, imageURLs, adapter, userKey, tenant)
+		return s.fallbackNonStream(
+			ctx, msg, session, customAgent, kbIDs, attachments, imageURLs,
+			adapter, userKey, tenant, reactions,
+		)
 	}
 
 	// Prepare the QA pipeline
@@ -2950,6 +3045,10 @@ loop:
 		}
 	}
 
+	// The terminal reaction goes after the final content has been delivered
+	// (card replace and any plain fallback), never before it (#5726).
+	reactions.Finish(outCtx, finalErr == nil && (finalizeErr == nil || fallbackErr == nil))
+
 	if answer == "" {
 		answer = imNoAnswerFallback
 	}
@@ -2968,7 +3067,19 @@ loop:
 }
 
 // fallbackNonStream is used when streaming initialization fails.
-func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, adapter Adapter, userKey string, tenant *types.Tenant) error {
+func (s *Service) fallbackNonStream(
+	ctx context.Context,
+	msg *IncomingMessage,
+	session *types.Session,
+	customAgent *types.CustomAgent,
+	kbIDs []string,
+	attachments types.MessageAttachments,
+	imageURLs []string,
+	adapter Adapter,
+	userKey string,
+	tenant *types.Tenant,
+	reactions *imReactionTracker,
+) error {
 	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
@@ -2976,11 +3087,13 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 	}
 
 	outCtx := imOutboundContext(ctx)
-	return adapter.SendReply(outCtx, msg, &ReplyMessage{
+	sendErr := adapter.SendReply(outCtx, msg, &ReplyMessage{
 		Content: formatIMOutboundAnswerOrFallback(outCtx, answer,
 			s.newOutboundFileServiceResolver(tenant, customAgent, kbIDs)),
 		IsFinal: true,
 	})
+	reactions.Finish(outCtx, err == nil && sendErr == nil)
+	return sendErr
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.

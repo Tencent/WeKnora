@@ -289,7 +289,7 @@ func TestIMStreamUpdatesUseResourceStorageBeforeCompletion(t *testing.T) {
 	defer cancel()
 	err := s.handleMessageStream(ctx,
 		&IncomingMessage{Platform: PlatformWeCom, UserID: "test-user", Content: "Show the images"},
-		&types.Session{ID: "test-session"}, nil, nil, nil, nil, adapter, adapter, "test-user", f.tenant)
+		&types.Session{ID: "test-session"}, nil, nil, nil, nil, adapter, adapter, "test-user", f.tenant, nil)
 	require.NoError(t, err)
 	require.Positive(t, adapter.updates)
 	f.checkSignedImages(t, adapter.content)
