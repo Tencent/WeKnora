@@ -958,6 +958,12 @@ func (c *Client) MoveKnowledge(ctx context.Context, req *MoveKnowledgeRequest) (
 
 // KnowledgeMoveProgress represents the progress of a knowledge move task
 type KnowledgeMoveProgress struct {
+	SourceKBID string `json:"source_kb_id,omitempty"`
+	TargetKBID string `json:"target_kb_id,omitempty"`
+	Failed     int    `json:"failed"`
+	CreatedAt  int64  `json:"created_at,omitempty"`
+	UpdatedAt  int64  `json:"updated_at,omitempty"`
+
 	TaskID    string `json:"task_id"`
 	Status    string `json:"status"`
 	Progress  int    `json:"progress"`
