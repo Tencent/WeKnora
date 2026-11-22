@@ -11,10 +11,22 @@ from io import BytesIO
 from multiprocessing import Manager
 from typing import Any, Dict, List, Optional, Tuple
 
-
 # patch from https://github.com/python-openxml/python-docx/issues/1105#issuecomment-1298075246
 from docx.opc.pkgreader import _SerializedRelationships, _SerializedRelationship
 from docx.opc.oxml import parse_xml
+
+DOCX_TEMP_IMAGE_PREFIX = os.path.join(tempfile.gettempdir(), "docx_img_")
+
+
+def _is_docx_temp_image(path: str) -> bool:
+    """Whether `path` names an image this module wrote for a page under the temp dir.
+
+    The directory `_save_image_to_temp` creates lives under the host's temp root,
+    which is only `/tmp` on Linux: comparing against that literal leaked every
+    image (and one directory each) on Windows and macOS.
+    """
+    return path.startswith(DOCX_TEMP_IMAGE_PREFIX)
+
 
 def load_from_xml_v2(baseURI, rels_item_xml):
     """
@@ -965,8 +977,8 @@ class Docx:
                 # Collect temporary image paths for later cleanup
                 for line in page_lines:
                     for image_data in line.images:
-                        if image_data.local_path and image_data.local_path.startswith(
-                            "/tmp/docx_img_"
+                        if image_data.local_path and _is_docx_temp_image(
+                            image_data.local_path
                         ):
                             temp_img_paths.add(image_data.local_path)
 
@@ -1139,9 +1151,7 @@ class Docx:
                     # Delete temporary directory (if empty)
                     try:
                         temp_dir = os.path.dirname(path)
-                        if temp_dir.startswith("/tmp/docx_img_") and os.path.exists(
-                            temp_dir
-                        ):
+                        if _is_docx_temp_image(temp_dir) and os.path.exists(temp_dir):
                             os.rmdir(temp_dir)
                     except OSError:
                         # If directory is not empty, ignore error
