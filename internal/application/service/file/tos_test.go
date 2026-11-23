@@ -59,7 +59,8 @@ func TestTOSGetFilePreviewStreamsSDKBody(t *testing.T) {
 				req := httptest.NewRequest(scenario.method, "/api/v1/knowledge/k1/preview", nil)
 				req.Header.Set("Range", scenario.rangeHeader)
 				w := httptest.NewRecorder()
-				require.NoError(t, filetransport.Serve(w, req, reader, filetransport.Options{Filename: filename, Download: scenario.download}))
+				options := filetransport.Options{Filename: filename, Download: scenario.download}
+				require.NoError(t, filetransport.Serve(w, req, reader, options))
 				require.Equal(t, http.StatusOK, w.Code, "preview response: %s", w.Body.String())
 				if scenario.method == http.MethodGet {
 					require.Equal(t, transport.body, w.Body.String())
