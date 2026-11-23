@@ -1183,9 +1183,8 @@ func (s *wikiPageService) ListPagesBySourceRef(ctx context.Context, kbID string,
 }
 
 // ListSlugsBySourceRef returns just the slugs of pages that cite the given
-// knowledge id. Backed by the source_refs GIN index added in migration
-// 000041 — the wiki ingest pipeline uses it as a cheap "before" snapshot
-// when reconciling old vs new extraction sets.
+// knowledge id. Wiki ingest uses these slugs as a "before" snapshot when
+// reconciling old and new extraction sets.
 func (s *wikiPageService) ListSlugsBySourceRef(ctx context.Context, kbID string, knowledgeID string) ([]string, error) {
 	return s.repo.ListSlugsBySourceRef(ctx, kbID, knowledgeID)
 }

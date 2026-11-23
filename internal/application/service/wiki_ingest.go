@@ -2118,10 +2118,8 @@ func formatExistingTaxonomyForPrompt(paths [][]string) string {
 // state before re-ingest so the reduce phase can reconcile additions vs
 // retractions.
 //
-// Backed by idx_wiki_pages_source_refs (GIN jsonb_path_ops, migration
-// 000041) and the legacy text-index fallback for "kid|title" entries.
-// We project to slugs only — no need to load full row content for a
-// per-doc snapshot.
+// The lookup projects only slugs to avoid loading page content for each
+// document snapshot.
 //
 // Index/log slugs (wiki-intrinsic system pages) never carry real
 // source_refs in practice, but we filter them out explicitly here as
