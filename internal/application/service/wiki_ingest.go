@@ -3033,6 +3033,7 @@ func isTransientLLMError(ctx context.Context, err error) bool {
 		"no such host", // DNS hiccup
 		"i/o timeout",
 		"unexpected eof",
+		"decode response: unexpected end of json input", // incomplete HTTP response envelope
 		"tls handshake",
 		"context deadline exceeded", // nested per-call deadline
 	} {
