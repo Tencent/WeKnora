@@ -384,7 +384,7 @@ defineExpose({ openAdd: handleAdd })
   }
 }
 .qcc-preset__badge {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: normal;
   color: var(--td-brand-color);
 }

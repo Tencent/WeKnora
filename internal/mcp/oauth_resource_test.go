@@ -1,20 +1,24 @@
 package mcp
 
 import (
-	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestOAuthResourceTokenRequests(t *testing.T) {
 	for _, tc := range []struct{ name, body, want string }{
 		{"exchange", "grant_type=authorization_code&code=test", "https://resource.example/mcp"},
 		{"refresh", "grant_type=refresh_token&refresh_token=test", "https://resource.example/mcp"},
-		{"preserve", "grant_type=refresh_token&resource=https%3A%2F%2Fother.example%2Fmcp", "https://other.example/mcp"},
+		{
+			"preserve", "grant_type=refresh_token&resource=https%3A%2F%2Fother.example%2Fmcp",
+			"https://other.example/mcp",
+		},
 		{"unrelated", "token=test", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -33,13 +37,13 @@ func TestOAuthResourceTokenRequests(t *testing.T) {
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			resp, err := c.Do(req)
 			require.NoError(t, err)
-			resp.Body.Close()
+			require.NoError(t, resp.Body.Close())
 			require.Equal(t, tc.want, received.Get("resource"))
 			require.Equal(t, transport, original.Transport)
 			b, err := req.GetBody()
 			require.NoError(t, err)
 			raw, err := io.ReadAll(b)
-			b.Close()
+			require.NoError(t, b.Close())
 			require.NoError(t, err)
 			require.Equal(t, tc.body, string(raw))
 		})

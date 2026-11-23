@@ -14,13 +14,13 @@ func oauthResourceClient(client *http.Client, resource string) *http.Client {
 	if client == nil {
 		client = newOAuthHTTPClient()
 	}
-	copy := *client
-	base := copy.Transport
+	clientCopy := *client
+	base := clientCopy.Transport
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	copy.Transport = &oauthResourceTransport{base: base, resource: resource}
-	return &copy
+	clientCopy.Transport = &oauthResourceTransport{base: base, resource: resource}
+	return &clientCopy
 }
 
 type oauthResourceTransport struct {
@@ -29,7 +29,9 @@ type oauthResourceTransport struct {
 }
 
 func (t *oauthResourceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.Method != http.MethodPost || !strings.HasPrefix(req.Header.Get("Content-Type"), "application/x-www-form-urlencoded") || req.GetBody == nil {
+	if req.Method != http.MethodPost ||
+		!strings.HasPrefix(req.Header.Get("Content-Type"), "application/x-www-form-urlencoded") ||
+		req.GetBody == nil {
 		return t.base.RoundTrip(req)
 	}
 	body, err := req.GetBody()
@@ -37,7 +39,7 @@ func (t *oauthResourceTransport) RoundTrip(req *http.Request) (*http.Response, e
 		return nil, err
 	}
 	raw, err := io.ReadAll(body)
-	body.Close()
+	_ = body.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -56,6 +58,6 @@ func (t *oauthResourceTransport) RoundTrip(req *http.Request) (*http.Response, e
 	clone.ContentLength = int64(len(encoded))
 	clone.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(encoded)), nil }
 	// The original body is owned by this transport once RoundTrip is called.
-	req.Body.Close()
+	_ = req.Body.Close()
 	return t.base.RoundTrip(clone)
 }
