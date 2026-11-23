@@ -41,7 +41,9 @@ func paddleOCRVLTestMarkdown(pages []paddleOCRVLPage) string {
 	return strings.Join(texts, "\n\n")
 }
 
-func paddleOCRVLTestLocator(t *testing.T, markdown string, blocks []types.SourceBlock, text string, page int, boxed bool) {
+func paddleOCRVLTestLocator(
+	t *testing.T, markdown string, blocks []types.SourceBlock, text string, page int, boxed bool,
+) {
 	t.Helper()
 	at := strings.Index(markdown, text)
 	require.NotEqual(t, -1, at)
@@ -110,7 +112,9 @@ func TestPaddleOCRVLSourceBlocksRecoversMultipleUnmatchedPages(t *testing.T) {
 
 func TestPaddleOCRVLSourceBlocksTableDivergenceIsOrderedAndRemappable(t *testing.T) {
 	pages := []paddleOCRVLPage{
-		paddleOCRVLTestPage(t, "序言段落\n\n<table><tr><th>项目</th><th>值</th></tr><tr><td>甲</td><td>42</td></tr></table>\n\n末尾段落",
+		paddleOCRVLTestPage(t, "序言段落\n\n"+
+			"<table><tr><th>项目</th><th>值</th></tr><tr><td>甲</td><td>42</td></tr></table>"+
+			"\n\n末尾段落",
 			"序言段落", "项目 值 乙 99", "末尾段落"),
 		paddleOCRVLTestPage(t, "next page", "next page"),
 	}

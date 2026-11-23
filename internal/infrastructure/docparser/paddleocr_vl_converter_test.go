@@ -21,7 +21,8 @@ func TestPaddleOCRVLReadersPreservePageBounds(t *testing.T) {
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1,localhost")
 	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
 	pages := []paddleOCRVLPage{
-		paddleOCRVLTestPage(t, "# Repeated heading\n\nfirst body\n\n<table><tr><th>项目</th><th>值</th></tr><tr><td>甲</td><td>42</td></tr></table>",
+		paddleOCRVLTestPage(t, "# Repeated heading\n\nfirst body\n\n"+
+			"<table><tr><th>项目</th><th>值</th></tr><tr><td>甲</td><td>42</td></tr></table>",
 			"first body", "unmatched layout"),
 		paddleOCRVLTestPage(t, "\n "),
 		paddleOCRVLTestPage(t, "# Repeated heading\n\nthird body", "Repeated heading", "third body"),
