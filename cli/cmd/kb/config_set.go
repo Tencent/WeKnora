@@ -154,7 +154,9 @@ func runConfigSet(ctx context.Context, opts *ConfigSetOptions, fopts *cmdutil.Fo
 		return fopts.Emit(iostreams.IO.Out, result, meta)
 	}
 	if meta != nil {
-		fmt.Fprintln(iostreams.IO.Err, meta.Hint)
+		if _, err := fmt.Fprintln(iostreams.IO.Err, meta.Hint); err != nil {
+			return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "configuration saved; writing read-back warning failed")
+		}
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Configured knowledge base %s (chat: %s, embedding: %s)\n",
 		kbID, orUnset(result.LLM.ModelName), orUnset(result.Embedding.ModelName))
