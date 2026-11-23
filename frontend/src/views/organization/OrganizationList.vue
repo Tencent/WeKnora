@@ -448,11 +448,11 @@ import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import ResourceSortControl from '@/components/ResourceSortControl.vue'
 import { shouldShowOrgRelationTag } from '@/utils/card-list-badge'
 import {
-  DEFAULT_RESOURCE_SORT,
   sortResourcesWithinGroups,
   type ResourceSortAccessors,
   type ResourceSortValue,
 } from '@/utils/resourceSorting'
+import { loadResourceSortPreference, saveResourceSortPreference } from '@/utils/resourceSortPreference'
 
 type OrgWithUI = Organization
 
@@ -461,7 +461,8 @@ const route = useRoute()
 const router = useRouter()
 const orgStore = useOrganizationStore()
 const authStore = useAuthStore()
-const selectedResourceSort = ref<ResourceSortValue>(DEFAULT_RESOURCE_SORT)
+const selectedResourceSort = ref<ResourceSortValue>(loadResourceSortPreference('organizations'))
+watch(selectedResourceSort, value => saveResourceSortPreference('organizations', value))
 
 const organizationSortAccessors: ResourceSortAccessors<OrgWithUI> = {
   getName: organization => organization.name,
