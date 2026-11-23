@@ -42,7 +42,7 @@ export function AdopterShowcase() {
         <a className={a.join} href={adopterIssue} target="_blank" rel="noreferrer">分享你的实践 <Icon name="arrow" /></a>
       </div>
       <div id="adopter-logos" className={a.viewport}>
-        <div className={a.track}>
+        <div className={a.track} style={{ animationDuration: `${adopters.length * 7.5}s` }}>
           {/* Equal-width copies make the linear animation loop without a jump. */}
           {[0, 1].map(copy => <ul className={a.group} key={copy} aria-hidden={copy === 1 ? true : undefined} aria-label={copy === 0 ? "使用 WeKnora 的团队与产品" : undefined}>
             {adopters.map((adopter, index) => <li key={adopter.name}>

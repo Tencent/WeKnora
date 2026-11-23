@@ -84,6 +84,10 @@ type knowledgeService struct {
 	// which has a no-op fallback. See knowledge_span_tracker.go.
 	spanTracker SpanTracker
 	audit       interfaces.AuditLogService
+
+	// In-memory transfer progress fallbacks for Lite / Desktop mode (no Redis)
+	memKBCloneProgress       sync.Map // taskID -> memProgressEntry[types.KBCloneProgress]
+	memKnowledgeMoveProgress sync.Map // taskID -> memProgressEntry[types.KnowledgeMoveProgress]
 }
 
 const (

@@ -14,7 +14,7 @@ import "@/components/css/assistant-page-fill.less";
 // RecycleScroller/DynamicScroller to size their viewport correctly.
 // Without it the scroller computes 0 height and renders no items.
 import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
-import i18n from "./i18n";
+import i18n, { initI18n } from "./i18n";
 import { initTheme } from "@/composables/useTheme";
 import { initFont } from "@/composables/useFont";
 import { installTDesignIconOfflineGuard } from "@/utils/tdesign-icon-offline";
@@ -38,6 +38,12 @@ async function bootstrap() {
   app.use(TDesign);
   const pinia = createPinia();
   app.use(pinia);
+
+  try {
+    await initI18n();
+  } catch (err) {
+    console.error("[WeKnora] Failed to load initial locale bundle:", err);
+  }
 
   // Capabilities (can_create_tenant, auto_accept_invitation) are not cached
   // in localStorage — reconcile once before first paint when a session exists.

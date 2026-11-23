@@ -284,15 +284,16 @@ RAG 流水线的可视化进度（`views/chat/components/RagPipelineProgress.vue
 
 实现于 `frontend/src/i18n/index.ts`，基于 `vue-i18n`（`legacy: false` 的 Composition 模式，`globalInjection: true`）：
 
-- **支持语言**（`frontend/src/i18n/locales/`）：
+- **支持语言**（`frontend/src/i18n/locales/`，按 `common`、`auth`、`chat`、`agent`、`knowledge`、`datasource`、`model`、`settings`、`system` 9 个业务域拆分为 `<locale>/<domain>.ts`，并通过动态 `import()` 按需懒加载当前激活语言，`main.ts` 在挂载前 `await initI18n()`，切换语言调用 `setI18nLanguage()`）：
   - `zh-CN`（简体中文，默认与 fallback）
+  - `zh-TW`（繁体中文）
   - `en-US`（英语）
   - `ru-RU`（俄语）
   - `ko-KR`（韩语）
   - `ja-JP`（日语）
 - 语言选择持久化在 `localStorage` 的 `locale` key；axios 拦截器会把当前语言写入 `Accept-Language` 请求头，使后端返回本地化内容。
 - 部分翻译内嵌 `<strong>` 标记（经 DOMPurify 消毒后 v-html 渲染），配置了 `warnHtmlMessage: false` 关闭 vue-i18n 的 HTML 告警。
-- **Embed 独立 i18n**：访客侧嵌入页使用单独的 `frontend/src/i18n/embed.ts`（由 `embed-main.ts` 加载），管理端「网页嵌入」文案仍在主语言包中；`frontend/src/i18n/locales/embed/index.ts` 统一 re-export 语言归一化助手（支持从 URL 参数同步 embed 语言）。
+- **Embed 独立 i18n**：访客侧嵌入页使用单独的 `frontend/src/i18n/embed.ts`（由 `embed-main.ts` 加载，并同步注入共享 `src/i18n/index.ts` 实例以支持代码块复制、Mermaid 与工具调用等跨端工具组件的本地化），管理端「网页嵌入」文案仍在主语言包中；`frontend/src/i18n/locales/embed/index.ts` 统一 re-export 语言归一化助手（支持从 URL 参数同步 embed 语言）。
 - **审计与裁剪工具**：语言包体量大、容易积累无人引用的死键或漏翻的新键，因此配套了三个脚本（`frontend/package.json`）：
 
   | 命令 | 作用 |
