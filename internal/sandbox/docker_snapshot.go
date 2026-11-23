@@ -11,13 +11,18 @@ import (
 
 const (
 	// dockerSkillSnapshotRepo is the local image namespace every skill
-	// snapshot is committed into. It is not a registry path: these tags are
+	// snapshot is saved into. It is not a registry path: these tags are
 	// never pulled, and ListTemplates hides anything under it so an admin
 	// cannot pick a baked skill image as the config's base template.
 	dockerSkillSnapshotRepo = "weknora-skill"
 
 	dockerSkillSnapshotLabel       = "com.weknora.sandbox.skill-snapshot"
 	dockerSkillSnapshotSourceLabel = "com.weknora.sandbox.skill-snapshot-source"
+	dockerSkillSnapshotComment     = "weknora skill snapshot"
+
+	// Leave headroom below overlay2's layer limit, including Docker's
+	// container layers. Subsequent generations can use cheap commits again.
+	dockerSkillSnapshotCompactAt = 96
 
 	// DockerForkSnapshotRepo is the local image namespace for session-fork
 	// snapshots. It is deliberately separate from dockerSkillSnapshotRepo: the
@@ -30,13 +35,11 @@ const (
 	dockerForkSnapshotSourceLabel = "com.weknora.sandbox.fork-snapshot-source"
 )
 
-// CreateSnapshot commits the container's filesystem into a tagged local image.
+// CreateSnapshot saves the container's filesystem into a tagged local image.
 //
-// The Engine pauses the container for the duration of the commit unless we
-// opt out (we do not): that is the same "provider pauses while snapshotting"
-// contract Cube and E2B honour. The resulting tag is a template ID — Create
-// accepts it as RemoteCreateRequest.TemplateID — so the skill install path
-// needs no Docker-specific branch past this adapter.
+// Shallow images use a Docker commit. Deep images are flattened before
+// another layer is added. Both paths capture a paused filesystem and return
+// a tag that Create accepts as RemoteCreateRequest.TemplateID.
 func (c *DockerRemoteClient) CreateSnapshot(
 	ctx context.Context, sandboxID string, name string,
 ) (RemoteSnapshotRef, error) {
@@ -44,10 +47,10 @@ func (c *DockerRemoteClient) CreateSnapshot(
 	if id == "" {
 		return RemoteSnapshotRef{}, dockerInvalidRequest("CreateSnapshot", "sandbox ID is required")
 	}
-	return c.commitSnapshot(
+	return c.createDockerSnapshot(
 		ctx, id, name,
 		dockerSkillSnapshotRepo,
-		"weknora skill snapshot",
+		dockerSkillSnapshotComment,
 		dockerSkillSnapshotLabel,
 		dockerSkillSnapshotSourceLabel,
 		"CreateSnapshot",
@@ -64,7 +67,7 @@ func (c *DockerRemoteClient) CreateForkSnapshot(
 	if id == "" {
 		return RemoteSnapshotRef{}, dockerInvalidRequest("CreateForkSnapshot", "sandbox ID is required")
 	}
-	return c.commitSnapshot(
+	return c.createDockerSnapshot(
 		ctx, id, name,
 		DockerForkSnapshotRepo,
 		"weknora fork snapshot",
@@ -74,13 +77,31 @@ func (c *DockerRemoteClient) CreateForkSnapshot(
 	)
 }
 
-func (c *DockerRemoteClient) commitSnapshot(
+func (c *DockerRemoteClient) createDockerSnapshot(
 	ctx context.Context,
 	sandboxID, name, repo, comment, label, sourceLabel, op string,
 ) (RemoteSnapshotRef, error) {
 	reference, err := dockerSnapshotReference(repo, name, sandboxID, op)
 	if err != nil {
 		return RemoteSnapshotRef{}, err
+	}
+
+	if repo == dockerSkillSnapshotRepo {
+		inspected, err := c.api.ContainerInspect(ctx, sandboxID, client.ContainerInspectOptions{})
+		if err != nil {
+			return RemoteSnapshotRef{}, dockerError(op, err)
+		}
+		source := inspected.Container
+		parent, err := c.api.ImageInspect(ctx, source.Image)
+		if err != nil {
+			return RemoteSnapshotRef{}, dockerError(op, err)
+		}
+		if len(parent.RootFS.Layers) >= dockerSkillSnapshotCompactAt {
+			if err := c.compactSkillSnapshot(ctx, sandboxID, reference, source, parent.InspectResponse); err != nil {
+				return RemoteSnapshotRef{}, dockerError(op, err)
+			}
+			return dockerTaggedSnapshotRef(reference), nil
+		}
 	}
 
 	committed, err := c.api.ContainerCommit(ctx, sandboxID, client.ContainerCommitOptions{
@@ -97,23 +118,20 @@ func (c *DockerRemoteClient) commitSnapshot(
 	if strings.TrimSpace(committed.ID) == "" {
 		return RemoteSnapshotRef{}, dockerInvalidRequest(op, "provider returned an empty snapshot ID")
 	}
-	return RemoteSnapshotRef{
-		ID:    dockerCanonicalSnapshotID(reference),
-		Names: []string{dockerCanonicalSnapshotID(reference)},
-	}, nil
+	return dockerTaggedSnapshotRef(reference), nil
 }
 
-// DeleteSnapshot removes a committed skill image. A missing image is success:
+func dockerTaggedSnapshotRef(reference string) RemoteSnapshotRef {
+	id := dockerCanonicalSnapshotID(reference)
+	return RemoteSnapshotRef{ID: id, Names: []string{id}}
+}
+
+// DeleteSnapshot removes a local snapshot image. A missing image is success:
 // the reaper and the install-compensation path both retry deletes.
 //
-// PruneChildren is what makes the delete reclaim anything. Each generation is
-// committed from a container started off the previous one, so generation N+1
-// holds generation N's layers as ancestors. Untagging N alone therefore frees
-// nothing while N+1 exists — which is correct and unavoidable — but the layers
-// of a chain whose every tag has been retired would stay on disk forever
-// without this, because the Go client defaults to noprune. Layers a live image
-// still references are refcounted by the daemon, so cascading here cannot take
-// the current image's storage out from under it.
+// Consecutive commits share ancestor layers. PruneChildren lets Docker reclaim
+// the chain once the last descendant is gone, including after compaction. The
+// daemon retains layers still referenced by a live image or container.
 func (c *DockerRemoteClient) DeleteSnapshot(ctx context.Context, snapshotID string) error {
 	id := strings.TrimSpace(snapshotID)
 	if id == "" {

@@ -164,6 +164,24 @@ func (f *fakeDockerEngine) ContainerStart(
 	return client.ContainerStartResult{}, nil
 }
 
+func (f *fakeDockerEngine) ContainerPause(
+	context.Context, string, client.ContainerPauseOptions,
+) (client.ContainerPauseResult, error) {
+	return client.ContainerPauseResult{}, errors.New("unexpected container pause")
+}
+
+func (f *fakeDockerEngine) ContainerExport(
+	context.Context, string, client.ContainerExportOptions,
+) (client.ContainerExportResult, error) {
+	return nil, errors.New("unexpected container export")
+}
+
+func (f *fakeDockerEngine) ImageLoad(
+	context.Context, io.Reader, ...client.ImageLoadOption,
+) (client.ImageLoadResult, error) {
+	return nil, errors.New("unexpected image load")
+}
+
 func (f *fakeDockerEngine) ContainerUnpause(
 	_ context.Context, id string, _ client.ContainerUnpauseOptions,
 ) (client.ContainerUnpauseResult, error) {
