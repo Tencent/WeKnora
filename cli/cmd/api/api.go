@@ -413,7 +413,7 @@ func emitRawBody(body []byte, fopts *cmdutil.FormatOptions) error {
 			// digits through instead.
 			decoder := json.NewDecoder(bytes.NewReader(body))
 			decoder.UseNumber()
-			if err := decoder.Decode(&bodyAny); err != nil {
+			if err := decoder.Decode(&bodyAny); err != nil || !json.Valid(body) {
 				bodyAny = string(body)
 			}
 		}

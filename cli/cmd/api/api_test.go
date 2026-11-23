@@ -709,3 +709,21 @@ func TestAPI_POST_NotGated(t *testing.T) {
 		t.Error("POST handler not called - POST must not be gated")
 	}
 }
+
+func TestRawEnvelopePreservesNDJSON(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	body := []byte("{\"page\":1}\n{\"page\":2}\n")
+	opts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+	if err := emitRawBody(body, opts); err != nil {
+		t.Fatal(err)
+	}
+	var envelope struct {
+		Data string `json:"data"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data != string(body) {
+		t.Errorf("response lost bytes: %q", envelope.Data)
+	}
+}
