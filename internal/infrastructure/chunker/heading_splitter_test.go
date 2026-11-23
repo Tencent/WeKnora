@@ -360,3 +360,76 @@ func TestSplitByHeadings_DeepSubHeadingInLargeSection(t *testing.T) {
 		t.Errorf("marker chunk lost its section heading in the breadcrumb:\nContextHeader=%q", marker.ContextHeader)
 	}
 }
+
+// TestSplitByHeadings_MergesTinyClosingSection covers a short last section
+// ("## 处理措施" with one sentence) after a section that already reached the
+// merge target: it is merged into the previous chunk instead of becoming a
+// chunk of its own.
+func TestSplitByHeadings_MergesTinyClosingSection(t *testing.T) {
+	doc := "# Report\n\n## Findings\n\n" + strings.Repeat("Finding line with details.\n\n", 25) +
+		"## Actions\n\nThe certificate was revoked.\n"
+	cfg := SplitterConfig{ChunkSize: 1000, ChunkOverlap: 0}
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
+	if len(chunks) != 1 {
+		t.Fatalf("expected the tiny closing section to merge into one chunk, got %d chunks", len(chunks))
+	}
+	if !strings.Contains(chunks[0].Content, "## Actions") || chunks[0].Start != 0 || chunks[0].End != len([]rune(doc)) {
+		t.Fatalf("merged chunk should cover the whole document, got [%d,%d)", chunks[0].Start, chunks[0].End)
+	}
+}
+
+// TestSplitByHeadings_TinySectionStillRespectsChunkSize: the tiny-section
+// merge never produces a chunk larger than ChunkSize.
+func TestSplitByHeadings_TinySectionStillRespectsChunkSize(t *testing.T) {
+	doc := "# Report\n\n## Findings\n\n" + strings.Repeat("x", 980) + "\n\n## Actions\n\nRevoked.\n"
+	cfg := SplitterConfig{ChunkSize: 1000, ChunkOverlap: 0}
+	for i, c := range splitByHeadingsImpl(doc, cfg, nil) {
+		if l := len([]rune(c.Content)); l > cfg.ChunkSize {
+			t.Errorf("chunk %d exceeds ChunkSize: %d > %d", i, l, cfg.ChunkSize)
+		}
+	}
+}
+
+// TestCarryTrailingHeadings moves a sub-heading that ends a chunk to the
+// start of the next chunk, keeping positions contiguous.
+func TestCarryTrailingHeadings(t *testing.T) {
+	first := "Body paragraph.\n\n### 5. Plan\n\n#### 5.1 Existing data\n\n"
+	second := "Summarise the existing data."
+	chunks := []Chunk{
+		{Content: first, Start: 0, End: len([]rune(first))},
+		{Content: second, Start: len([]rune(first)), End: len([]rune(first)) + len([]rune(second))},
+	}
+	got := carryTrailingHeadings(chunks, 1000)
+	if got[0].Content != "Body paragraph.\n\n" {
+		t.Fatalf("heading lines should leave the first chunk, got %q", got[0].Content)
+	}
+	if !strings.HasPrefix(got[1].Content, "### 5. Plan\n\n#### 5.1 Existing data\n\n") {
+		t.Fatalf("heading lines should open the second chunk, got %q", got[1].Content)
+	}
+	if got[0].End != got[1].Start || got[1].End-got[1].Start != len([]rune(got[1].Content)) ||
+		got[0].End-got[0].Start != len([]rune(got[0].Content)) {
+		t.Fatalf("positions must stay contiguous and match content: %+v", got)
+	}
+}
+
+func TestCarryTrailingHeadings_LeavesChunksAlone(t *testing.T) {
+	cases := map[string][]Chunk{
+		// would exceed the budget of the receiving chunk
+		"over budget": {{Content: "a\n\n## H\n", Start: 0, End: 8}, {Content: strings.Repeat("b", 10), Start: 8, End: 18}},
+		// overlapping (not adjacent) chunks are never touched
+		"overlap": {{Content: "a\n\n## H\n", Start: 0, End: 8}, {Content: "## H\nbody", Start: 4, End: 13}},
+		// a chunk that is only a heading is not emptied
+		"heading only": {{Content: "## H\n", Start: 0, End: 5}, {Content: "body", Start: 5, End: 9}},
+		// a heading inside a code fence is code
+		"fenced": {{Content: "```\n# comment\n", Start: 0, End: 14}, {Content: "```", Start: 14, End: 17}},
+	}
+	for name, chunks := range cases {
+		before := append([]Chunk(nil), chunks...)
+		got := carryTrailingHeadings(chunks, 12)
+		for i := range got {
+			if got[i] != before[i] {
+				t.Errorf("%s: chunk %d changed: %+v -> %+v", name, i, before[i], got[i])
+			}
+		}
+	}
+}
