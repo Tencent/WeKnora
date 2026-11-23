@@ -234,12 +234,16 @@
         <section class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionKnowledge') }}</h4>
           <div class="form-item">
+            <label class="form-label" for="im-save-attachments">{{ $t('agentEditor.im.saveAttachments') }}</label>
+            <t-switch id="im-save-attachments" v-model="saveAttachments" :aria-label="$t('agentEditor.im.saveAttachments')" />
+            <p class="form-desc">{{ $t('agentEditor.im.fileKnowledgeBaseHint') }}</p>
+          </div>
+          <div v-if="saveAttachments" class="form-item">
             <label class="form-label">{{ $t('agentEditor.im.fileKnowledgeBase') }}</label>
             <t-select v-model="formData.knowledge_base_id"
               :placeholder="$t('agentEditor.im.fileKnowledgeBasePlaceholder')" clearable filterable>
               <t-option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id" :label="kb.name" />
             </t-select>
-            <p class="form-desc">{{ $t('agentEditor.im.fileKnowledgeBaseHint') }}</p>
           </div>
         </section>
       </div>
@@ -649,6 +653,7 @@ const channels = computed(() => {
 });
 const loading = ref(false);
 const saving = ref(false);
+const saveAttachments = ref(false);
 const showCreateDialog = ref(false);
 const editingChannel = ref<IMChannel | null>(null);
 const editingEnabled = ref(true);
@@ -707,6 +712,10 @@ const drawerTitle = computed(() => {
 });
 
 function validateWizardStep(step: number): boolean {
+  if (step === 2 && saveAttachments.value && !normalizeOptionalString(formData.value.knowledge_base_id)) {
+    MessagePlugin.warning(t('agentEditor.im.fileKnowledgeBasePlaceholder'));
+    return false;
+  }
   if (step === 0 && !formData.value.target_agent_id) {
     MessagePlugin.warning(t('integrations.selectAgentHint'));
     return false;
@@ -994,6 +1003,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     MessagePlugin.error(t('common.operationFailed'));
     return;
   }
+  saveAttachments.value = Boolean(fullChannel.knowledge_base_id);
   editingChannel.value = fullChannel;
   editingEnabled.value = fullChannel.enabled;
   channelNameTouched.value = true;
@@ -1013,6 +1023,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
 }
 
 function resetForm() {
+  saveAttachments.value = false;
   editingChannel.value = null;
   editingEnabled.value = true;
   wizardStep.value = 0;
@@ -1036,6 +1047,11 @@ function resetForm() {
 }
 
 async function handleSave() {
+  if (!validateWizardStep(2)) {
+    wizardStep.value = 2;
+    return;
+  }
+  const knowledgeBaseId = saveAttachments.value ? normalizeOptionalString(formData.value.knowledge_base_id) : '';
   saving.value = true;
   try {
     // For WeChat, validate that credentials are bound
@@ -1060,7 +1076,7 @@ async function handleSave() {
         output_mode: formData.value.output_mode,
         locale: formData.value.locale,
         session_mode: formData.value.session_mode,
-        knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
+        knowledge_base_id: knowledgeBaseId,
         credentials: formData.value.credentials,
         enabled: editingEnabled.value,
         ...(formData.value.target_agent_id ? { agent_id: formData.value.target_agent_id } : {}),
@@ -1079,7 +1095,7 @@ async function handleSave() {
         output_mode: formData.value.output_mode,
         locale: formData.value.locale,
         session_mode: formData.value.session_mode,
-        knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
+        knowledge_base_id: knowledgeBaseId,
         credentials: formData.value.credentials,
       });
       MessagePlugin.success(t('common.createSuccess'));
