@@ -317,7 +317,7 @@ func runUpload(ctx context.Context, opts *UploadOptions, fopts *cmdutil.FormatOp
 func existingDocumentError(cause error, k *sdk.Knowledge, message string) *cmdutil.Error {
 	err := cmdutil.Wrapf(cmdutil.CodeResourceAlreadyExists, cause, "%s", message)
 	if k != nil && k.ID != "" {
-		err.WithDetail(map[string]string{"knowledge_id": k.ID})
+		return err.WithDetail(map[string]string{"knowledge_id": k.ID})
 	}
 	return err
 }
