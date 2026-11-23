@@ -965,8 +965,8 @@ class Docx:
                 # Collect temporary image paths for later cleanup
                 for line in page_lines:
                     for image_data in line.images:
-                        if image_data.local_path and image_data.local_path.startswith(
-                            "/tmp/docx_img_"
+                        if image_data.local_path and _is_temp_image_file(
+                            image_data.local_path
                         ):
                             temp_img_paths.add(image_data.local_path)
 
@@ -1139,9 +1139,7 @@ class Docx:
                     # Delete temporary directory (if empty)
                     try:
                         temp_dir = os.path.dirname(path)
-                        if temp_dir.startswith("/tmp/docx_img_") and os.path.exists(
-                            temp_dir
-                        ):
+                        if _is_temp_image_dir(temp_dir) and os.path.exists(temp_dir):
                             os.rmdir(temp_dir)
                     except OSError:
                         # If directory is not empty, ignore error
@@ -1259,6 +1257,30 @@ class Docx:
             logger.error(f"Detailed error: {traceback.format_exc()}")
             # If concatenation fails, return the first image
             return images[0]
+
+
+# ``_save_image_to_temp`` gives every image its own ``tempfile.mkdtemp``
+# directory. Cleanup used to recognise them by the literal POSIX prefix
+# ``/tmp/docx_img_``, which never matches on Windows: ``mkdtemp`` there returns
+# ``C:\Users\...\Temp\docx_img_xxxx``, so no path was collected and every
+# multimodal parse left its PNGs (and their directories) behind.
+_DOCX_IMAGE_TEMP_PREFIX = "docx_img_"
+
+
+def _is_temp_image_dir(path):
+    """Whether *path* is one of the directories ``_save_image_to_temp`` made."""
+    if not path:
+        return False
+    return os.path.basename(os.path.normpath(path)).startswith(
+        _DOCX_IMAGE_TEMP_PREFIX
+    )
+
+
+def _is_temp_image_file(path):
+    """Whether *path* is an image written by ``_save_image_to_temp``."""
+    if not path:
+        return False
+    return _is_temp_image_dir(os.path.dirname(path))
 
 
 def _save_image_to_temp(logger, image, page_num, img_idx):
