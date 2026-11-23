@@ -756,8 +756,8 @@ const { loaded: modelsReadyLoaded, isReadyForDocumentKb } = useTenantModelReadin
 const orgStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
 const { t } = useI18n()
-const selectedResourceSort = ref<ResourceSortValue>(loadResourceSortPreference('knowledge_bases'))
-watch(selectedResourceSort, value => saveResourceSortPreference('knowledge_bases', value))
+const selectedResourceSort = ref<ResourceSortValue>(loadResourceSortPreference('knowledge_bases', authStore.effectiveTenantId))
+watch(selectedResourceSort, value => saveResourceSortPreference('knowledge_bases', authStore.effectiveTenantId, value))
 
 // 左侧空间选择：默认根据当前角色决定。
 // Viewer 在该空间里通常 0 KB owned，"我的"会显示空状态、又把共享 KB 藏起来，

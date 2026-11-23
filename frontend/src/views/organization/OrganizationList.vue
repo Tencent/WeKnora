@@ -461,8 +461,8 @@ const route = useRoute()
 const router = useRouter()
 const orgStore = useOrganizationStore()
 const authStore = useAuthStore()
-const selectedResourceSort = ref<ResourceSortValue>(loadResourceSortPreference('organizations'))
-watch(selectedResourceSort, value => saveResourceSortPreference('organizations', value))
+const selectedResourceSort = ref<ResourceSortValue>(loadResourceSortPreference('organizations', authStore.effectiveTenantId))
+watch(selectedResourceSort, value => saveResourceSortPreference('organizations', authStore.effectiveTenantId, value))
 
 const organizationSortAccessors: ResourceSortAccessors<OrgWithUI> = {
   getName: organization => organization.name,

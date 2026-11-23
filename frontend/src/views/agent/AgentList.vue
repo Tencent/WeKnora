@@ -788,8 +788,8 @@ const uiStore = useUIStore()
 const orgStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
 const { loaded: modelsReadyLoaded, isReadyForAgent } = useTenantModelReadiness()
-const selectedResourceSort = ref<ResourceSortValue>(loadResourceSortPreference('agents'))
-watch(selectedResourceSort, value => saveResourceSortPreference('agents', value))
+const selectedResourceSort = ref<ResourceSortValue>(loadResourceSortPreference('agents', authStore.effectiveTenantId))
+watch(selectedResourceSort, value => saveResourceSortPreference('agents', authStore.effectiveTenantId, value))
 
 interface AgentWithUI extends CustomAgent {
   showMore?: boolean
