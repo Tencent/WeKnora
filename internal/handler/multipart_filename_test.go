@@ -42,7 +42,11 @@ func TestRecoverWindowsMultipartFilename(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer file.Close()
+			t.Cleanup(func() {
+				if err := file.Close(); err != nil {
+					t.Errorf("close multipart file: %v", err)
+				}
+			})
 
 			if filepath.Separator == '\\' {
 				if header.Filename != tt.windowsName {
