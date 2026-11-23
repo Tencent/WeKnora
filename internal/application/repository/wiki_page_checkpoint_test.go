@@ -15,8 +15,14 @@ func TestWikiPageCheckpointConcurrentSlugsPostgres(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&types.WikiPage{}, &types.WikiPageRevision{}, &types.TaskPendingOp{}))
 	var ids []int64
 	for _, kid := range []string{"k1", "k2"} {
-		row := &types.TaskPendingOp{TenantID: 1, TaskType: "wiki:ingest", Scope: "knowledge_base",
-			ScopeID: "kb", DedupKey: kid, Payload: []byte(`{"future_field":42,"reduce_checkpoint":{"Updates":[{"Slug":"entity/alpha","Type":"retract"},{"Slug":"entity/alpha","Type":"entity"},{"Slug":"entity/beta","Type":"entity"}],"Applied":[]}}`)}
+		row := &types.TaskPendingOp{
+			TenantID: 1, TaskType: "wiki:ingest", Scope: "knowledge_base",
+			ScopeID: "kb", DedupKey: kid,
+			Payload: []byte(`{"future_field":42,"reduce_checkpoint":{"Updates":[` +
+				`{"Slug":"entity/alpha","Type":"retract"},` +
+				`{"Slug":"entity/alpha","Type":"entity"},` +
+				`{"Slug":"entity/beta","Type":"entity"}],"Applied":[]}}`),
+		}
 		require.NoError(t, db.Create(row).Error)
 		ids = append(ids, row.ID)
 	}

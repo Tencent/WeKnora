@@ -23,11 +23,12 @@ func TestWikiPageCheckpointRollsBackPageAndRevisionOnProgressFailure(t *testing.
 	require.NoError(t, svc.checkpointWikiReduce(context.Background(), []WikiPendingOp{op}, updates,
 		[]*docIngestResult{{KnowledgeID: "k-1"}}, nil, nil))
 	wantErr := errors.New("simulated progress storage failure after page update")
-	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:fail_checkpoint", func(tx *gorm.DB) {
-		if tx.Statement.Table == "task_pending_ops" {
-			tx.AddError(wantErr)
-		}
-	}))
+	require.NoError(t, db.Callback().Update().Before("gorm:update").
+		Register("test:fail_checkpoint", func(tx *gorm.DB) {
+			if tx.Statement.Table == "task_pending_ops" {
+				tx.AddError(wantErr)
+			}
+		}))
 	ctx := types.WithWikiPageCheckpoint(context.Background(), types.WikiPageCheckpoint{
 		TenantID: 7, KnowledgeBaseID: "kb-1", Slug: "entity/alpha", PendingOpIDs: []int64{row.ID},
 	})
@@ -68,11 +69,12 @@ func TestWikiPageCheckpointCreateAndMetaRollback(t *testing.T) {
 				Op: WikiOpIngest, KnowledgeID: "k-1", dbID: row.ID,
 			}}, updates, []*docIngestResult{{KnowledgeID: "k-1"}}, nil, nil))
 			wantErr := errors.New("progress unavailable")
-			require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:fail_checkpoint", func(tx *gorm.DB) {
-				if tx.Statement.Table == "task_pending_ops" {
-					tx.AddError(wantErr)
-				}
-			}))
+			require.NoError(t, db.Callback().Update().Before("gorm:update").
+				Register("test:fail_checkpoint", func(tx *gorm.DB) {
+					if tx.Statement.Table == "task_pending_ops" {
+						tx.AddError(wantErr)
+					}
+				}))
 			ctx := types.WithWikiPageCheckpoint(context.Background(), types.WikiPageCheckpoint{
 				TenantID: 7, KnowledgeBaseID: "kb-1", Slug: slug, PendingOpIDs: []int64{row.ID},
 			})
