@@ -3,7 +3,6 @@ package im
 import (
 	"context"
 	"errors"
-	"github.com/Tencent/WeKnora/internal/event"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/alicebob/miniredis/v2"
@@ -127,10 +127,12 @@ func newOriginalFixture(t *testing.T) *originalFixture {
 	const userTable = "CREATE TABLE users (id TEXT PRIMARY KEY, is_active BOOLEAN, deleted_at DATETIME)"
 	require.NoError(t, db.Exec(userTable).Error)
 	require.NoError(t, db.Exec("INSERT INTO users (id,is_active) VALUES ('owner',true)").Error)
-	require.NoError(t, db.Create(&types.TenantMember{UserID: "owner", TenantID: 7, Role: types.TenantRoleAdmin,
+	require.NoError(t, db.Create(&types.TenantMember{
+		UserID: "owner", TenantID: 7, Role: types.TenantRoleAdmin,
 		Status: types.TenantMemberStatusActive,
 	}).Error)
-	ch := &IMChannel{ID: "channel", TenantID: 7, AgentID: "agent", Platform: "feishu", Enabled: true,
+	ch := &IMChannel{
+		ID: "channel", TenantID: 7, AgentID: "agent", Platform: "feishu", Enabled: true,
 		Credentials: types.JSON("{}"),
 	}
 	require.NoError(t, db.Create(ch).Error)
@@ -142,10 +144,12 @@ func newOriginalFixture(t *testing.T) *originalFixture {
 		PhysicalPath: "local://7/file/source.pdf", Provider: "local", StorageBackendID: "source-store",
 		State: types.ResourceStateActive,
 	}
-	require.NoError(t, db.Create(&types.ResourceBinding{ResourceID: resource.ID, TenantID: 7,
+	require.NoError(t, db.Create(&types.ResourceBinding{
+		ResourceID: resource.ID, TenantID: 7,
 		OwnerType: types.ResourceOwnerKnowledge, OwnerID: "doc", Relation: types.ResourceRelationSourceFile,
 	}).Error)
-	doc := &types.Knowledge{ID: "doc", KnowledgeBaseID: "kb", TenantID: 7,
+	doc := &types.Knowledge{
+		ID: "doc", KnowledgeBaseID: "kb", TenantID: 7,
 		FilePath: types.BuildResourcePath(resource.Handle), FileName: "file.pdf",
 	}
 	kb := &types.KnowledgeBase{ID: "kb", TenantID: 7}
@@ -153,7 +157,7 @@ func newOriginalFixture(t *testing.T) *originalFixture {
 	agent.Config.KBSelectionMode = "selected"
 	agent.Config.KnowledgeBases = []string{"kb"}
 	fs := &originalFSStub{file: filepath.Join(t.TempDir(), "file.pdf")}
-	require.NoError(t, os.WriteFile(fs.file, []byte("original bytes"), 0600))
+	require.NoError(t, os.WriteFile(fs.file, []byte("original bytes"), 0o600))
 	s := Service{
 		db: db, redis: client, knowledgeService: originalKnowledgeStub{k: doc},
 		kbService: originalKBStub{kb: kb}, agentService: originalAgentStub{agent: agent},
@@ -278,8 +282,10 @@ type referencedAnswerSession struct {
 }
 
 func (s *referencedAnswerSession) KnowledgeQA(ctx context.Context, req *types.QARequest, bus *event.EventBus) error {
-	if err := bus.Emit(ctx, event.Event{ID: "references", Type: event.EventAgentReferences, SessionID: req.Session.ID,
-		Data: event.AgentReferencesData{References: s.refs}}); err != nil {
+	if err := bus.Emit(ctx, event.Event{
+		ID: "references", Type: event.EventAgentReferences, SessionID: req.Session.ID,
+		Data: event.AgentReferencesData{References: s.refs},
+	}); err != nil {
 		return err
 	}
 	return s.fullOutputSessionService.KnowledgeQA(ctx, req, bus)
