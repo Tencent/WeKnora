@@ -6,7 +6,7 @@ const output = join(process.cwd(), 'out');
 const html = await readFile(join(output, 'index.html'), 'utf8');
 const visible = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<[^>]+>/g, '');
 assert.equal((html.match(/<h1\b/g) || []).length, 1, 'The homepage must have one main heading');
-for (const term of ['帮你找到答案', '并将知识付诸实践', 'v0.9.0', 'RAG', 'Agent', 'Wiki', 'ClawHub', 'SkillHub', 'Docker', 'E2B', 'Cube', '长期记忆', '交互终端', '图形桌面', '本机浏览器', 'BrowserSkill', 'MCP Server', '画廊', '多模态 Embedding', '内置 30 家厂商', '分叉或回滚', '原文引用定位', '附件按需读取', '平台用户管理', 'Seafile', 'Confluence', '钉钉', 'GitLab', '腾讯 IMA', 'LiteLLM', 'DeepSeek Harness']) {
+for (const term of ['帮你找到答案', '并将知识付诸实践', 'v0.9.1', 'RAG', 'Agent', 'Wiki', 'ClawHub', 'SkillHub', 'Docker', 'E2B', 'Cube', '长期记忆', '交互终端', '图形桌面', '本机浏览器', 'BrowserSkill', 'MCP Server', '画廊', '多模态 Embedding', '内置 31 家厂商', '分叉或回滚', '原文引用定位', '附件按需读取', '平台用户管理', 'Seafile', 'Confluence', '钉钉', 'GitLab', '腾讯 IMA', 'LiteLLM', 'DeepSeek Harness']) {
   assert.ok(visible.includes(term), `Missing product content: ${term}`);
 }
 for (const term of ['三套', '方案选择', '历史 Demo', '18K+', '成为行动力', '从零散文档', '到鲜活知识', '模型接入与目录管理']) {
@@ -16,10 +16,10 @@ const films = html.match(/<figure id="demo"[\s\S]*?<\/figure>/)?.[0];
 assert.ok(films, 'Keep the product film on the homepage');
 assert.equal((films.match(/<video\b/g) || []).length, 1, 'Films must share one player');
 const selectedFilm = films.match(/<button[^>]*aria-pressed="true"[^>]*>([\s\S]*?)<\/button>/)?.[1];
-assert.ok(selectedFilm?.includes('v0.9.0 发布'), 'Feature the current release first');
+assert.ok(selectedFilm?.includes('v0.9.0 发布'), 'Keep the v0.9.0 product film selected');
 assert.ok(films.includes('WeKnora 产品全览'), 'Keep the previous product film selectable');
 assert.match(films, /poster="\/docs\/videos\/weknora-v0.9.0-poster.png"/, 'Use the approved release cover');
-assert.match(films, /https:\/\/github.com\/user-attachments\/assets\/de0e490a-e738-405e-bb3a-64b63edd7278/, 'Link to the current README film');
+assert.match(films, /https:\/\/github.com\/user-attachments\/assets\/de0e490a-e738-405e-bb3a-64b63edd7278/, 'Link to the v0.9.0 film in the README');
 assert.match(films, /<video[^>]+preload="none"/, 'Video should not load before user interaction');
 assert.ok(!/<video[^>]+(?:autoplay|\bsrc=)/i.test(films), 'Load the selected film only after playback is requested');
 const capabilities = html.match(/<section id="capabilities"[\s\S]*?<\/section>/)?.[0];
@@ -35,10 +35,10 @@ for (const term of ['/docs/_home/product/wiki-browser.png', '/docs/_home/product
 }
 // Release highlights and enduring capabilities must survive independently.
 const release = html.match(/<section id="release"[\s\S]*?<\/section>/)?.[0];
-for (const term of ['WeKnora 助手、多智能体协作与自动化', '多智能体协作', '自动化', '执行权限与审批', '按用户复用沙箱', '飞书 / Lark 同步', '产品问答', '任务协助', '一句话设置', '手动设置', '以你的身份']) {
+for (const term of ['画廊校对', '沙箱登录', '手动维护 Wiki', 'Nextcloud 同步', '按住说话与嵌入聊天', '升级须知', '07-releases/v0.9.1.html']) {
   assert.ok(release?.includes(term), `Missing release highlight: ${term}`);
 }
-for (const shot of ['assistant-release-guide', 'assistant-overview', 'agent-collaboration', 'automation-conversation', 'automation-setup', 'assistant-permissions']) {
+for (const shot of ['release-v091-gallery', 'release-v091-vault', 'release-v091-wiki', 'release-v091-nextcloud']) {
   assert.ok(release.includes(`src="/docs/_home/product/${shot}.png"`), `Missing release screenshot: ${shot}`);
 }
 const browser = html.match(/<section id="agent-workflow"[\s\S]*?<\/section>/)?.[0];

@@ -92,11 +92,11 @@ try {
   assert.equal(context.pages().length, 1);
 
   // Navigation to the current release feature docs, returning through the explicit home link.
-  await page.locator('#release').getByRole('button', { name: 'WeKnora 助手 了解 WeKnora，也帮你处理任务', exact: true }).click();
-  await page.locator('#release a[href="/docs/03-features/26-weknora-assistant.html"]').click();
+  await page.locator('#release').getByRole('button', { name: '手动维护 Wiki 由你决定何时更新 Wiki', exact: true }).click();
+  await page.locator('#release a[href="/docs/03-features/14-wiki.html"]').click();
   await page.waitForSelector('.VPDoc h1');
-  assert.equal(new URL(page.url()).pathname, '/docs/03-features/26-weknora-assistant.html');
-  assert.match(await page.locator('.VPDoc h1').innerText(), /WeKnora 助手/);
+  assert.equal(new URL(page.url()).pathname, '/docs/03-features/14-wiki.html');
+  assert.match(await page.locator('.VPDoc h1').innerText(), /Wiki/);
   await page.locator('.wk-brand').click();
   await homepage();
   assert.equal(context.pages().length, 1);

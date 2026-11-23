@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - Unreleased
+
+Changes since v0.9.0. [Release and upgrade guide](./website-docs/07-releases/v0.9.1.md)
+
+### Knowledge and search
+
+- Correct existing OCR text and captions from the image gallery, and order PDF figures by source page (#4942, #4649). The knowledge-search API accepts an image on its own or alongside text when the knowledge base has compatible image embeddings (#4823).
+- Open a global search result at the matching passage and see the source knowledge base in a citation. Parent-aware retrieval can count hits under the same parent as a single top-K slot (#5177, #5343, #4740).
+- Keep the previous searchable content until a reparse succeeds, preserve Wiki sources during reprocessing, and inspect document processing progress and failure history (#5024, #5186, #4732).
+- Maintain Wiki pages manually, select a separate model for question generation, and parse XLSX with a compatible self-hosted MinerU service (#4707, #4718, #5039).
+
+### Agents, chat and integrations
+
+- Give each supported sandbox session its own desktop and browser. The desktop and the agent now share the login state within that session. Secure forms and a per-user encrypted vault handle site credentials (#4785, #5035, #5047). Lite adds session-level review for host tools and path-scoped file approvals (#5050).
+- Sync selected Nextcloud folders or files over WebDAV. Confluence syncs page attachments and preserves table structure. Notion handles nested page content more reliably (#4601, #4953, #4795, #5574).
+- Hold to dictate using the agent’s ASR model. Embedded chat can retain history in the current browser, and signed visitors can delete their own sessions (#4804, #4631, #5715).
+- Add optional OIDC PKCE S256, memory subject management for tenant admins, SearchApi, DeepSeek web search and fetch, and the Runcrate model provider (#4818, #4954, #4807, #4792, #4714).
+- Revalidate saved remote MCP tools when the server changes, stop context compaction and knowledge-file preparation on cancellation, and reject trailing data in SDK JSON responses (#5624, #5818, #5664, #5751).
+- Browse knowledge folders from the file mention picker, and inspect DocReader build information in Settings (#4700, #4769). OpenRouter's catalog adds Claude 5.5 entries (#4784).
+- The website now features teams using WeKnora. [Community showcase](https://github.com/Tencent/WeKnora/issues/4801)
+
+### Deployment and upgrade
+
+- Frontend navigation and OIDC callbacks support deployments under a path prefix. [Reverse proxy configuration](./docs/subpath-deployment.md) (#4977)
+- Back up the database, file storage, deployment configuration and encryption key before upgrading. PostgreSQL migrations advance from 134 to 137 and SQLite from 51 to 53. Downgrading can discard saved credentials, shorten PostgreSQL audit identifiers or conflict with new IM thread mappings. Restore a pre-upgrade backup to roll back.
+- Use the same 32-byte `SYSTEM_AES_KEY` across replicas and restarts when storing personal credentials. Pin Compose and Helm application images to `v0.9.1`, including the matching sandbox image or desktop template where enabled.
+- PostgreSQL supports dimension-aware HNSW indexes and configurable connection pool limits. Helm supports application pod annotations (#3364, #4349, #5159).
+
 ## [0.9.0] - 2026-10-29
 
 Changes since v0.8.3. [Website release notes](./website-docs/07-releases/v0.9.0.md) · [Full comparison](https://github.com/Tencent/WeKnora/compare/v0.8.3...v0.9.0).

@@ -20,14 +20,15 @@ const modes = [
   ] },
   { number: "02", icon: "agent", label: "Agent", title: "用知识和工具完成任务", description: "按需阅读附件中的正文与图片，检索知识，调用 MCP 工具与技能。在沙箱或本机浏览器中执行任务，对话中可追加要求、分叉或回滚。", tags: ["附件按需读取", "多步推理", "技能与沙箱", "本机浏览器", "MCP 工具", "长期记忆"], link: "03-features/07-agent", related: [
     { label: "附件与对话", href: guide("03-features/18-chat-experience") },
+    { label: "工作助手与多智能体协作", href: guide("03-features/26-weknora-assistant") },
+    { label: "自动化", href: guide("03-features/27-automations") },
   ] },
   { number: "03", icon: "wiki", label: "Wiki", title: "把文档整理成 Wiki", description: "从原始文档生成相互链接的 Wiki 页面与知识图谱，支持浏览、编辑和版本回滚。", tags: ["自动组织", "知识图谱", "版本回滚"], link: "03-features/14-wiki", related: [] },
 ];
 const releaseExtras = [
-  { name: "按用户复用沙箱", link: "03-features/22-skills-sandbox" },
-  { name: "图像处理管线", link: "03-features/03-document-parsing" },
-  { name: "飞书 / Lark 同步", link: "03-features/24-feishu-drive" },
-  { name: "检索与解析改进", link: "03-features/05-retrieval-engines" },
+  { name: "按住说话与嵌入聊天", link: "07-releases/v0.9.1", anchor: "#chat" },
+  { name: "文档重解析", link: "07-releases/v0.9.1", anchor: "#knowledge" },
+  { name: "升级须知", link: "07-releases/v0.9.1", anchor: "#upgrade-notes" },
 ];
 
 const productShotExists = (src: string) => existsSync(join(process.cwd(), "public", src));
@@ -37,16 +38,10 @@ const withAvailability = (slide: SlideSource): GallerySlide => {
   return { name: slide.name, icon: slide.icon, title: slide.title, description: slide.description, link: slide.link, external: slide.external, shots: shots.map(shot => ({ ...shot, available: productShotExists(`${homeAssets}/product/${shot.image}.png`) })) };
 };
 const releaseSlides = [
-  { name: "WeKnora 助手", icon: "agent", shots: [
-    { label: "产品问答", icon: "file", image: "assistant-release-guide", alt: "向 WeKnora 助手询问 v0.9.0 的更新，依据产品文档了解新增能力" },
-    { label: "任务协助", icon: "agent", image: "assistant-overview", alt: "在知识库卡片视图中，让助手阅读活动资料并给出可执行的筹备建议" },
-  ], title: "了解 WeKnora，也帮你处理任务", description: "询问版本更新、功能用法与配置问题。助手结合当前页面，以你的身份查资料、创建智能体、设置定时任务，或修改有权管理的内容。", link: guide("03-features/26-weknora-assistant") },
-  { name: "多智能体协作", icon: "channels", image: "agent-collaboration", title: "多个智能体同时处理任务", description: "把搜集、整理、核对分给多个智能体同时处理。子任务有独立对话，进度和结果都能查看。", alt: "多个智能体分别整理读书会资料并汇总结果", link: guide("03-features/26-weknora-assistant") + "#collaboration" },
-  { name: "自动化", icon: "history", shots: [
-    { label: "一句话设置", icon: "agent", image: "automation-conversation", alt: "用一句话请 WeKnora 助手设置自动化，核对任务和执行时间" },
-    { label: "手动设置", icon: "history", image: "automation-setup", alt: "在自动化表单中手动设置重复频率、时间和时区，并预览后续运行时间" },
-  ], title: "一句话安排，也能手动设置", description: "告诉助手要做什么、何时执行，或在表单中逐项设置。任务以你的身份按计划运行，结果和待审批事项会通知你。", link: guide("03-features/27-automations") },
-  { name: "执行权限与审批", icon: "shield", image: "assistant-permissions", title: "决定哪些操作需要确认", description: "选择只读、修改前确认或自动执行。确认前可查看具体操作；删除等高影响操作仍须批准。", alt: "在卡片知识库中，核对助手要修改的文档和新标题后批准", link: guide("03-features/28-agent-permissions") },
+  { name: "画廊校对", icon: "search", image: "release-v091-gallery", title: "对照原图改正识别文字", description: "在画廊中修订已有的图片说明和 OCR 文字。PDF 图片可按原文页码排序，全局搜索可以直接跳到命中的原文段落。", alt: "在读书会统计图旁编辑图中文字", link: guide("07-releases/v0.9.1") + "#images" },
+  { name: "沙箱登录", icon: "shield", image: "release-v091-vault", title: "登录后把同一个浏览器交给智能体", description: "你可以在会话桌面登录，也可以通过安全表单填写账号密码。需要再次登录时，可以从个人凭据保险库选用允许在该域名使用的账号。", alt: "个人凭据保险库展示示例账号及其允许的域名", link: guide("07-releases/v0.9.1") + "#sandbox" },
+  { name: "手动维护 Wiki", icon: "wiki", image: "release-v091-wiki", title: "由你决定何时更新 Wiki", description: "关闭自动生成后，导入文档时会保留人工整理的页面。团队仍能浏览、编辑并回滚 Wiki。", alt: "保留 Wiki 索引并关闭自动生成页面的知识库设置", link: guide("03-features/14-wiki") },
+  { name: "Nextcloud 同步", icon: "sources", image: "release-v091-nextcloud", title: "选择要同步的目录和文件", description: "通过 WebDAV 连接 Nextcloud，把选中的资料同步到知识库，随后手动或按计划获取更新。Confluence 也支持导入页面附件。", alt: "选择读书会 Nextcloud 中需要同步的目录", link: guide("03-features/26-nextcloud") },
 ].map(withAvailability);
 const browserSlides = [
   { name: "执行任务", icon: "browser", title: "在自己的浏览器里完成任务",
@@ -85,7 +80,7 @@ export default function Home() {
     <Header />
     <main id="main">
       <section className={`${s.shell} ${s.hero}`} aria-labelledby="hero-title">
-        <a href="#release" className={s.releaseLink}><span>v0.9.0</span> 助手 · 多智能体协作 · 自动化 · 执行权限 <Icon name="arrow" /></a>
+        <a href="#release" className={s.releaseLink}><span>v0.9.1</span> 画廊校对 · 沙箱登录 · Nextcloud 同步 <Icon name="arrow" /></a>
         <div className={s.heroGrid}>
           <h1 id="hero-title">帮你找到答案，<br /><em>并将知识付诸实践。</em></h1>
           <div className={s.heroAside}>
@@ -111,9 +106,9 @@ export default function Home() {
         </article>)}</div>
       </div></section>
       <section id="release" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="release-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>02 / INTRODUCING v0.9.0</p><h2 id="release-title">WeKnora 助手、多智能体协作与自动化</h2></div><a className={s.textLink} href={guide("07-releases/v0.9.0")}>版本说明与发布视频 <Icon name="arrow" /></a></div>
-        <ProductGallery id="release-gallery" label="v0.9.0" slides={releaseSlides} layout="compact" />
-        <div className={s.releaseExtras}><span>本次更新还包括</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link)}>{item.name} <Icon name="arrow" /></a>)}</div>
+        <div className={s.sectionHeading}><div><p className={s.eyebrow}>v0.9.1</p><h2 id="release-title">画廊校对、沙箱登录与知识库同步</h2></div><a className={s.textLink} href={guide("07-releases/v0.9.1")}>完整图文与升级说明 <Icon name="arrow" /></a></div>
+        <ProductGallery id="release-gallery" label="v0.9.1" slides={releaseSlides} layout="compact" />
+        <div className={s.releaseExtras}><span>本次更新还包括</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link) + item.anchor}>{item.name} <Icon name="arrow" /></a>)}</div>
       </div></section>
       <section id="agent-workflow" className={`${s.chapter}`} data-tone="base" aria-labelledby="agent-workflow-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>03 / YOUR LOCAL BROWSER</p><h2 id="agent-workflow-title">让智能体操作你自己的浏览器</h2></div><a className={s.textLink} href={guide("05-clients/09-local-browser")}>连接本机浏览器 <Icon name="arrow" /></a></div>
@@ -141,7 +136,7 @@ export default function Home() {
           <div className={s.ecosystemCore}><BrandLogo /><span>团队知识库与智能体</span><div>理解 · 检索 · 推理 · 行动</div></div>
           <div className={s.ecosystemColumn}><Icon name="channels" /><h3>在常用工具中访问</h3><p>支持 IM 问答、浏览器插件、MCP 客户端和开发工具集成。</p><div className={s.integrations}>{clients.map(item => <span key={item.name}><IntegrationMark item={item} /></span>)}</div><a className={s.textLink} href={guide("03-features/12-im-integration")}>客户端与渠道 <Icon name="arrow" /></a><div className={s.mcpEntry}><h4>通过 MCP Server 共享知识</h4><p>让 Claude、Cursor 等 AI 工具连接团队知识库，直接检索资料和提问。</p><a className={s.textLink} href={guide("03-features/08-mcp")}>配置 MCP 端点 <Icon name="arrow" /></a></div></div>
         </div>
-        <div className={s.models}><span>模型由你选择 · 内置 30 家厂商 <a className={s.textLink} href={guide("03-features/06-models")}>查看全部 <Icon name="arrow" /></a></span>{modelProviders.map(item => <p key={item.name}><IntegrationMark item={item} /></p>)}</div>
+        <div className={s.models}><span>模型由你选择 · 内置 31 家厂商 <a className={s.textLink} href={guide("03-features/06-models")}>查看全部 <Icon name="arrow" /></a></span>{modelProviders.map(item => <p key={item.name}><IntegrationMark item={item} /></p>)}</div>
       </div></section>
       <section id="enterprise" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="enterprise-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>08 / BUILT FOR YOUR TEAM</p><h2 id="enterprise-title">私有化部署，<br />按团队需要管理权限。</h2></div><p>配置数据存储与成员权限，<br />查看操作记录和任务运行状态。</p></div>
