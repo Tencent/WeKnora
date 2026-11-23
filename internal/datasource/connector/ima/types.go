@@ -258,6 +258,10 @@ type imaCursor struct {
 	LastSyncTime time.Time                    `json:"last_sync_time"`
 	KBLogical    map[string]map[string]string `json:"kb_logical,omitempty"`
 	KBMedia      map[string]map[string]string `json:"kb_media,omitempty"`
+	// Notes are edited in place without changing their media IDs. Keep their
+	// last fetched body hashes separately so unchanged notes are not re-ingested.
+	// A skippedNoteHash marker caches deterministic unexportable notes.
+	KBNoteHashes map[string]map[string]string `json:"kb_note_hashes,omitempty"`
 }
 
 // logicalKey derives a stable identity for an IMA item that survives
