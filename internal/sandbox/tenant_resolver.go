@@ -265,7 +265,7 @@ func NewRemoteClientForCheck(cfg *Config) (RemoteSandboxClient, error) {
 		if err := EnsureDockerBackendAllowed(SandboxTypeDocker); err != nil {
 			return nil, err
 		}
-		return NewDockerRemoteClientForCheck(cfg)
+		return NewDockerRemoteClient(cfg)
 	default:
 		return nil, fmt.Errorf("sandbox: provider %q cannot be probed", cfg.Type)
 	}

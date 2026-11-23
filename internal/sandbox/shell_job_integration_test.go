@@ -213,8 +213,6 @@ func dockerIntegrationClient(t *testing.T) RemoteSandboxClient {
 	cfg := dockerIntegrationConfig(t)
 	client, err := NewDockerRemoteClient(cfg)
 	require.NoError(t, err)
-	// This process must not sweep unrelated containers on a shared daemon.
-	client.sweeper = nil
 	probeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := client.Health(probeCtx); err != nil {

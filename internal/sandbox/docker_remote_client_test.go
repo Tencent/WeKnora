@@ -525,8 +525,7 @@ func newTestDockerClient(t *testing.T, engine *fakeDockerEngine) *DockerRemoteCl
 		DockerImage: "weknora/sandbox:test",
 	})
 	require.NoError(t, err)
-	// Idle sweeping is disabled: it would race the assertions with a
-	// background goroutine deleting the very containers under test.
+	// Keep terminal activity refresh opt-in for tests using this fake.
 	settings.IdleTTL = 0
 	return newDockerRemoteClientWithAPI(engine, settings)
 }
@@ -600,6 +599,34 @@ func TestDockerClientCreatePullsMissingImage(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{"weknora/sandbox:test"}, engine.pulled)
+}
+
+func TestDockerClientCreateEnforcesContainerLimitForSkillImages(t *testing.T) {
+	t.Setenv("WEKNORA_SANDBOX_DOCKER_MAX_CONTAINERS", "2")
+	engine := newFakeDockerEngine()
+	const skillImage = "weknora-skill/example"
+	engine.imagePresent[skillImage] = true
+	engine.list = []container.Summary{
+		{ID: "running", State: "running", Labels: map[string]string{dockerManagedLabel: "true"}},
+		{ID: "stopped", State: "exited", Labels: map[string]string{dockerManagedLabel: "true"}},
+	}
+	docker := newTestDockerClient(t, engine)
+	request := RemoteCreateRequest{
+		TemplateID: skillImage,
+		Timeout:    RemoteTimeoutPolicy{Mode: RemoteTimeoutExplicit, Value: 30 * time.Minute},
+	}
+
+	_, err := docker.Create(t.Context(), request)
+	require.Equal(t, RemoteErrorKindCapacity, remoteKind(err),
+		"creation at the managed-container limit should return a capacity error")
+	require.Empty(t, engine.created)
+
+	engine.list = engine.list[:1]
+	_, err = docker.Create(t.Context(), request)
+	require.NoError(t, err)
+	require.Len(t, engine.created, 1)
+	require.Equal(t, skillImage, engine.created[0].Image)
+	require.Equal(t, "1800", engine.created[0].Config.Labels[dockerIdleTTLLabel])
 }
 
 // A container that cannot start is a leak waiting to happen: nothing binds it,

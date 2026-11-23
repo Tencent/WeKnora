@@ -22,32 +22,28 @@ package sandbox
 
 import (
 	"context"
-	"log"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/moby/moby/client"
 )
 
 // dockerIdleTTLLabel records the TTL each container was created with, so a
-// sweep triggered by one workspace config never applies its own TTL to a
-// container belonging to another.
+// sweep uses the original TTL even when several configs share a daemon.
 const dockerIdleTTLLabel = "com.weknora.sandbox.idle-ttl-seconds"
-
-// dockerSweepMinInterval bounds how often one daemon is swept, no matter how
-// many requests trigger it. Sweeping is a list plus one stat per container;
-// cheap, but not free enough to run on every execution.
-const dockerSweepMinInterval = time.Minute
 
 // dockerSweepBudget bounds one sweep so a wedged daemon cannot leave a
 // goroutine hanging around forever.
 const dockerSweepBudget = 2 * time.Minute
 
-// dockerSweepThrottle records the last sweep per daemon endpoint. It is
-// process-wide because the adapter is rebuilt per request; per-instance state
-// would throttle nothing.
+// Prevent overlapping maintenance runs from sweeping the same endpoint while
+// the previous pass still has time left in its budget.
+const dockerSweepMinInterval = dockerSweepBudget
+
+// dockerSweepThrottle records the last sweep per daemon endpoint in this process.
 var dockerSweepThrottle = struct {
 	mu   sync.Mutex
 	last map[string]time.Time
@@ -67,31 +63,57 @@ func newDockerIdleSweeper(cli *DockerRemoteClient, ttl time.Duration) *dockerIdl
 	return &dockerIdleSweeper{client: cli, ttl: ttl, now: time.Now}
 }
 
-// trigger runs a sweep in the background unless one ran recently. It detaches
-// from the caller's context so finishing the request does not abort the sweep,
-// and it never reports failures upward: reclaiming storage must not turn a
-// working execution into an error.
-func (s *dockerIdleSweeper) trigger(ctx context.Context) {
-	if s == nil || s.client == nil {
+// SweepDockerIdleContainers runs a maintenance pass against the stored Docker
+// endpoints, including those that have seen no requests since startup.
+func SweepDockerIdleContainers(ctx context.Context, configs []*types.TenantSandboxConfigEntity) {
+	if !DockerBackendEnabled() {
 		return
 	}
-	if !s.claimSweep() {
-		return
-	}
-	go func() {
-		// Drop the chat-trace parent: Engine API list/stat/delete from a
-		// sweep must not appear as siblings of agent.round after the tool
-		// that triggered the sweep has already finished its span.
-		sweepCtx, cancel := context.WithTimeout(
-			logger.CloneContextWithoutTrace(ctx), dockerSweepBudget,
-		)
-		defer cancel()
-		if reclaimed, err := s.sweep(sweepCtx); err != nil {
-			log.Printf("[sandbox] docker idle sweep failed: %v", err)
-		} else if reclaimed > 0 {
-			log.Printf("[sandbox] docker idle sweep reclaimed %d container(s)", reclaimed)
+	sweepers := make(map[string]*dockerIdleSweeper)
+	for _, row := range configs {
+		if row == nil || row.SandboxType != string(SandboxTypeDocker) || row.Config == nil {
+			continue
 		}
-	}()
+		cfg, err := ResolveEffectiveConfig(row.Config, DefaultConfig())
+		if err != nil {
+			logger.Warnf(ctx, "[sandbox] docker idle sweep: resolve config %s: %v", row.ID, err)
+			continue
+		}
+		if cfg.Type != SandboxTypeDocker {
+			continue
+		}
+		adapter, err := NewDockerRemoteClient(cfg)
+		if err != nil {
+			logger.Warnf(ctx, "[sandbox] docker idle sweep: build client for config %s: %v", row.ID, err)
+			continue
+		}
+		key := adapter.settings.Endpoint.key()
+		// Legacy containers without a label use the longest configured TTL
+		// for this endpoint so a shorter policy cannot reclaim them early.
+		if previous := sweepers[key]; previous == nil || previous.ttl < cfg.DockerIdleTTL {
+			sweepers[key] = newDockerIdleSweeper(adapter, cfg.DockerIdleTTL)
+		}
+	}
+	for _, sweeper := range sweepers {
+		sweeper.run(ctx)
+	}
+}
+
+func (s *dockerIdleSweeper) run(ctx context.Context) {
+	if ctx.Err() != nil || !s.claimSweep() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, dockerSweepBudget)
+	defer cancel()
+	host := s.client.settings.Endpoint.Host
+	logger.Infof(ctx, "[sandbox] docker idle sweep started on %s", host)
+	reclaimed, err := s.sweep(ctx)
+	if err != nil {
+		logger.Warnf(ctx, "[sandbox] docker idle sweep failed on %s after reclaiming %d container(s): %v",
+			host, reclaimed, err)
+		return
+	}
+	logger.Infof(ctx, "[sandbox] docker idle sweep reclaimed %d container(s) on %s", reclaimed, host)
 }
 
 // claimSweep reports whether this caller won the right to sweep now.
@@ -135,7 +157,7 @@ func (s *dockerIdleSweeper) sweep(ctx context.Context) (int, error) {
 		if err := s.client.Delete(ctx, summary.ID); err != nil {
 			// One undeletable container must not stop the sweep; the next
 			// pass will try again.
-			log.Printf("[sandbox] docker idle sweep: delete %s: %v", summary.ID, err)
+			logger.Warnf(ctx, "[sandbox] docker idle sweep: delete %s: %v", summary.ID, err)
 			continue
 		}
 		reclaimed++
@@ -188,7 +210,7 @@ func (s *dockerIdleSweeper) lastActivity(
 	if err == nil && !stat.Stat.Mtime.IsZero() {
 		marker := stat.Stat.Mtime.UTC()
 		if marker.After(s.now().UTC().Add(dockerActivityClockSkew)) {
-			log.Printf(
+			logger.Warnf(ctx,
 				"[sandbox] docker idle sweep: container %s reports activity at %s, "+
 					"which is in the future; falling back to its start time",
 				summary.ID, marker.Format(time.RFC3339),

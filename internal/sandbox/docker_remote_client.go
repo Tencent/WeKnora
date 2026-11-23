@@ -42,6 +42,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -52,6 +53,7 @@ import (
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+	"golang.org/x/sync/semaphore"
 )
 
 // dockerActivityMarker is touched by every exec and read by the idle sweeper.
@@ -83,10 +85,6 @@ var dockerSandboxEntrypoint = []string{
 type DockerRemoteClient struct {
 	api      dockerEngineAPI
 	settings dockerRuntimeSettings
-
-	// sweeper reclaims idle containers. Nil disables idle reclamation, which
-	// is only appropriate for the connectivity-check client.
-	sweeper *dockerIdleSweeper
 }
 
 // dockerRuntimeSettings is the per-config slice of Config the adapter reads.
@@ -113,24 +111,7 @@ func NewDockerRemoteClient(cfg *Config) (*DockerRemoteClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newDockerRemoteClientWithAPI(withDockerRPCTimeout(api, settings.HTTPTimeout), settings), nil
-}
-
-// NewDockerRemoteClientForCheck builds a client for the connectivity check.
-//
-// It differs from the resolved client in one way: no idle sweeping. A probe
-// runs against a config an admin is still editing, and a half-finished config
-// must never delete containers a working config owns.
-func NewDockerRemoteClientForCheck(cfg *Config) (*DockerRemoteClient, error) {
-	settings, err := dockerSettingsFromConfig(cfg)
-	if err != nil {
-		return nil, err
-	}
-	api, err := sharedDockerEngineClients.get(settings.Endpoint)
-	if err != nil {
-		return nil, err
-	}
-	settings.IdleTTL = 0
+	settings.Endpoint.Host = api.DaemonHost()
 	return newDockerRemoteClientWithAPI(withDockerRPCTimeout(api, settings.HTTPTimeout), settings), nil
 }
 
@@ -140,11 +121,7 @@ func newDockerRemoteClientWithAPI(
 	api dockerEngineAPI,
 	settings dockerRuntimeSettings,
 ) *DockerRemoteClient {
-	adapter := &DockerRemoteClient{api: api, settings: settings}
-	if settings.IdleTTL > 0 {
-		adapter.sweeper = newDockerIdleSweeper(adapter, settings.IdleTTL)
-	}
-	return adapter
+	return &DockerRemoteClient{api: api, settings: settings}
 }
 
 // dockerSettingsFromConfig projects Config, applying the built-in defaults for
@@ -269,7 +246,7 @@ func (c *DockerRemoteClient) Create(
 
 	labels := dockerContainerLabels(req.Metadata)
 	labels[dockerIdleTTLLabel] = strconv.Itoa(int(c.effectiveIdleTTL(req.Timeout).Seconds()))
-	created, err := c.api.ContainerCreate(ctx, client.ContainerCreateOptions{
+	created, err := c.createWithinCapacity(ctx, client.ContainerCreateOptions{
 		Image: image,
 		Config: &container.Config{
 			// The entrypoint has to create and chmod the activity marker under
@@ -309,8 +286,50 @@ func (c *DockerRemoteClient) Create(
 		c.removeQuietly(ctx, created.ID)
 		return nil, err
 	}
-	c.sweepInBackground(ctx)
 	return &dockerSandboxHandle{id: created.ID, metadata: dockerSandboxMetadata(labels)}, nil
+}
+
+const (
+	dockerMaxContainersEnv     = "WEKNORA_SANDBOX_DOCKER_MAX_CONTAINERS"
+	defaultDockerMaxContainers = 16
+)
+
+// Serialize the count and create calls across adapters in this process.
+// Separate credentials for the same daemon address share the admission gate.
+var dockerCreateGates sync.Map // map[string]*semaphore.Weighted
+
+func (c *DockerRemoteClient) createWithinCapacity(
+	ctx context.Context, opts client.ContainerCreateOptions,
+) (client.ContainerCreateResult, error) {
+	limit, err := strconv.Atoi(strings.TrimSpace(os.Getenv(dockerMaxContainersEnv)))
+	if err != nil || limit <= 0 {
+		limit = defaultDockerMaxContainers
+	}
+	key := c.settings.Endpoint.Host
+	gate, _ := dockerCreateGates.LoadOrStore(key, semaphore.NewWeighted(1))
+	slot := gate.(*semaphore.Weighted)
+	if err := slot.Acquire(ctx, 1); err != nil {
+		return client.ContainerCreateResult{}, err
+	}
+	defer slot.Release(1)
+
+	listed, err := c.api.ContainerList(ctx, client.ContainerListOptions{
+		All:     true,
+		Limit:   limit,
+		Filters: client.Filters{}.Add("label", dockerManagedLabel+"=true"),
+	})
+	if err != nil {
+		return client.ContainerCreateResult{}, fmt.Errorf("count managed containers: %w", err)
+	}
+	if len(listed.Items) >= limit {
+		return client.ContainerCreateResult{}, &RemoteError{
+			Kind:     RemoteErrorKindCapacity,
+			Provider: SandboxTypeDocker,
+			Op:       "Create",
+			Message:  fmt.Sprintf("managed container limit (%d) reached", limit),
+		}
+	}
+	return c.api.ContainerCreate(ctx, opts)
 }
 
 // effectiveIdleTTL resolves how long this sandbox may sit unused.
@@ -412,7 +431,6 @@ func (c *DockerRemoteClient) Connect(
 			return nil, err
 		}
 	}
-	c.sweepInBackground(ctx)
 
 	var labels map[string]string
 	if inspected.Container.Config != nil {
@@ -1314,15 +1332,6 @@ func (c *DockerRemoteClient) ensureImage(ctx context.Context, image string) erro
 		return dockerError("Create", fmt.Errorf("pull image %s: %w", image, err))
 	}
 	return nil
-}
-
-// sweepInBackground triggers a rate-limited idle sweep without adding latency
-// to the request that happened to trigger it.
-func (c *DockerRemoteClient) sweepInBackground(ctx context.Context) {
-	if c.sweeper == nil {
-		return
-	}
-	c.sweeper.trigger(ctx)
 }
 
 // dockerHandleID validates a handle belongs to this backend.

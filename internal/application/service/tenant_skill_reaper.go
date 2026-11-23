@@ -843,7 +843,20 @@ func (s *TenantSkillService) runSkillReaper(ctx context.Context) {
 	s.reconcileAllSnapshots(ctx)
 }
 
-// Start registers the five-minute stuck-run sweep and begins the background
+func (s *TenantSkillService) runDockerIdleReaper() {
+	if !sandbox.DockerBackendEnabled() {
+		return
+	}
+	ctx := context.Background()
+	configs, err := s.configs.ListAll(ctx)
+	if err != nil {
+		logger.Warnf(ctx, "[sandbox] docker idle sweep: list sandbox configs failed: %v", err)
+		return
+	}
+	sandbox.SweepDockerIdleContainers(ctx, configs)
+}
+
+// Start registers the five-minute maintenance jobs and begins the background
 // runner. Idempotent — repeated calls are a no-op so wiring code can call
 // Start without coordinating ordering.
 func (s *TenantSkillService) Start(ctx context.Context) error {
@@ -853,14 +866,22 @@ func (s *TenantSkillService) Start(ctx context.Context) error {
 		return nil
 	}
 	if s.cron == nil {
-		s.cron = cron.New(cron.WithSeconds(), cron.WithChain(
+		scheduler := cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		))
-	}
-	if _, err := s.cron.AddFunc(skillReaperCronSpec, func() {
-		s.runSkillReaper(context.Background())
-	}); err != nil {
-		return err
+		if _, err := scheduler.AddFunc(skillReaperCronSpec, func() {
+			s.runSkillReaper(context.Background())
+		}); err != nil {
+			return err
+		}
+		if !s.host.Desktop && s.configs != nil {
+			// Keep Docker cleanup independent of skill-provider RPCs and
+			// skip a tick while a pass is still visiting Docker endpoints.
+			job := cron.NewChain(cron.SkipIfStillRunning(cron.DefaultLogger)).
+				Then(cron.FuncJob(s.runDockerIdleReaper))
+			scheduler.Schedule(cron.Every(5*time.Minute), job)
+		}
+		s.cron = scheduler
 	}
 	if s.host.SkillsAvailable() {
 		if err := s.host.SkillTree.Sweep(); err != nil {

@@ -167,8 +167,7 @@ func TestDockerIdleSweeperHonoursPerContainerTTL(t *testing.T) {
 	require.Empty(t, engine.removed)
 }
 
-// The sweep runs off the back of ordinary requests, so it must not turn into a
-// list-plus-stat storm when a workspace is busy.
+// Concurrent maintenance passes must not repeat a sweep on the same endpoint.
 func TestDockerIdleSweeperThrottlesPerDaemon(t *testing.T) {
 	now := time.Now().UTC()
 	sweeper, _ := newSweeperFixture(t, time.Minute, now, nil)
@@ -177,7 +176,7 @@ func TestDockerIdleSweeperThrottlesPerDaemon(t *testing.T) {
 	dockerSweepThrottle.mu.Unlock()
 
 	require.True(t, sweeper.claimSweep(), "the first caller sweeps")
-	require.False(t, sweeper.claimSweep(), "a second caller in the same minute does not")
+	require.False(t, sweeper.claimSweep(), "a second caller within the sweep budget does not")
 
 	sweeper.now = func() time.Time { return now.Add(2 * dockerSweepMinInterval) }
 	require.True(t, sweeper.claimSweep(), "the throttle expires")
