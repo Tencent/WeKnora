@@ -378,32 +378,40 @@ func (s *knowledgeService) acknowledgeMovedReparse(
 	knowledge *types.Knowledge,
 	source, target *types.KnowledgeBase,
 ) error {
-	// The processing worker can already have updated the row after enqueue.
-	// Reload before checkpointing; never overwrite its parse status or metadata.
-	current, err := s.repo.GetKnowledgeByID(ctx, knowledge.TenantID, knowledge.ID)
-	if err != nil {
-		return err
+	// The processing worker can already have updated the row after enqueue
+	// (especially under Lite mode's in-process SyncTaskExecutor). Reload and
+	// retry the CAS checkpoint if the worker concurrently advanced parse_status.
+	var lastErr error
+	for range 5 {
+		current, err := s.repo.GetKnowledgeByID(ctx, knowledge.TenantID, knowledge.ID)
+		if err != nil {
+			return err
+		}
+		if err := validateTransferKnowledge(current, target); err != nil {
+			return err
+		}
+		state, err := transferState(current)
+		if err != nil {
+			return err
+		}
+		if !matchesTransfer(ctx, state, source, target, access.KBTransferMove, knowledge.ID, "reparse") {
+			return access.ErrForbidden
+		}
+		if state.Phase == "done" {
+			return nil
+		}
+		before := *current
+		after := *current
+		state.Phase = "done"
+		if err := setTransferState(&after, *state); err != nil {
+			return err
+		}
+		lastErr = s.repo.UpdateKnowledgeForTransfer(ctx, &before, &after)
+		if lastErr == nil {
+			return nil
+		}
 	}
-	if err := validateTransferKnowledge(current, target); err != nil {
-		return err
-	}
-	state, err := transferState(current)
-	if err != nil {
-		return err
-	}
-	if !matchesTransfer(ctx, state, source, target, access.KBTransferMove, knowledge.ID, "reparse") {
-		return access.ErrForbidden
-	}
-	if state.Phase == "done" {
-		return nil
-	}
-	before := *current
-	after := *current
-	state.Phase = "done"
-	if err := setTransferState(&after, *state); err != nil {
-		return err
-	}
-	return s.repo.UpdateKnowledgeForTransfer(ctx, &before, &after)
+	return lastErr
 }
 
 func (s *knowledgeService) preflightFAQClone(
@@ -492,6 +500,17 @@ func validateProcessingKnowledge(knowledge *types.Knowledge, tenant uint64, kbID
 	}
 	if state != nil && state.Operation == access.KBTransferMove && state.Phase == "moving" {
 		return fmt.Errorf("knowledge is being moved: %w", asynq.SkipRetry)
+	}
+	// Under Lite mode's SyncTaskExecutor, the target reparse worker can load
+	// the row before acknowledgeMovedReparse commits phase="done". Normalize
+	// the in-memory copy so full-row UpdateKnowledge saves never roll phase
+	// back to "reparse_pending" and block future moves.
+	if state != nil && state.Operation == access.KBTransferMove &&
+		state.Phase == "reparse_pending" && state.TargetKB == kbID {
+		state.Phase = "done"
+		if err := setTransferState(knowledge, *state); err != nil {
+			return fmt.Errorf("acknowledge processing metadata: %v: %w", err, asynq.SkipRetry)
+		}
 	}
 	return nil
 }

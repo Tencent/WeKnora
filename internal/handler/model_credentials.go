@@ -31,6 +31,20 @@ type modelCredentialsPutRequest struct {
 	AppSecret *string `json:"app_secret,omitempty"`
 }
 
+// Put godoc
+// @Summary      设置模型凭据
+// @Description  写入 api_key 或 app_secret；省略的字段保留原值
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                  true  "模型 ID"
+// @Param        request  body      map[string]interface{}  true  "{api_key?, app_secret?: string}"
+// @Success      200      {object}  handler.DataResponse{data=dto.CredentialsResponse}  "写入后的凭据状态"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      404      {object}  errors.AppError         "模型不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/{id}/credentials [put]
 func (h *ModelCredentialsHandler) Put(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")
@@ -84,6 +98,19 @@ func (h *ModelCredentialsHandler) Put(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
+// DeleteField godoc
+// @Summary      移除模型的单个凭据字段
+// @Description  删除指定字段的存储凭据；删除已为空的字段是幂等的
+// @Tags         模型管理
+// @Produce      json
+// @Param        id     path      string  true  "模型 ID"
+// @Param        field  path      string  true  "字段名（api_key | app_secret）"
+// @Success      204
+// @Failure      400  {object}  errors.AppError  "字段名非法"
+// @Failure      404  {object}  errors.AppError  "模型不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/{id}/credentials/{field} [delete]
 func (h *ModelCredentialsHandler) DeleteField(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")

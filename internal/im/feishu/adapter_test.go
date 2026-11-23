@@ -139,6 +139,57 @@ func TestParseCallbackGroupMentionGate(t *testing.T) {
 			}
 		})
 	}
+
+	body := `{"header":{"event_type":"im.message.receive_v1"},"event":{"message":{` +
+		`"message_id":"om_2","message_type":"text","chat_type":"group","chat_id":"oc_group",` +
+		`"content":"{\"text\":\"@_user_1 @_user_2 hello\"}",` +
+		`"mentions":[{"key":"@_user_1","name":"王五","mentioned_type":"user","id":{"open_id":"ou_person"}},` +
+		`{"key":"@_user_2","mentioned_type":"bot","id":{"open_id":"ou_this_bot"}}]}}}`
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	got, err := adapter.ParseCallback(ctx)
+	if err != nil || got == nil || got.Content != "@王五 hello" {
+		t.Fatalf("ParseCallback() = %+v, %v; want person mention before bot", got, err)
+	}
+}
+
+func TestParseCallbackResolvesDirectMentions(t *testing.T) {
+	adapter := &Adapter{region: RegionFeishu}
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name    string
+		msgType string
+		content string
+		want    string
+	}{
+		{"text", "text", `{"text":"@_user_1 能获取到信息吗？"}`, "@李朝盛 能获取到信息吗？"},
+		{"post", "post", `{"content":[[{"tag":"at","user_id":"ou_person"},` +
+			`{"tag":"text","text":" 能获取到信息吗？"}]]}`, "@李朝盛 能获取到信息吗？"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{
+				"header": map[string]any{"event_type": "im.message.receive_v1"},
+				"event": map[string]any{"message": map[string]any{
+					"message_id": "om_1", "message_type": tt.msgType, "chat_type": "p2p",
+					"content": tt.content,
+					"mentions": []map[string]any{{
+						"key": "@_user_1", "name": "李朝盛",
+						"mentioned_type": "user", "id": map[string]string{"open_id": "ou_person"},
+					}},
+				}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+			got, err := adapter.ParseCallback(ctx)
+			if err != nil || got == nil || got.Content != tt.want {
+				t.Fatalf("ParseCallback() = %+v, %v; want content %q", got, err, tt.want)
+			}
+		})
+	}
 }
 
 func TestImageCacheKey_StripsQuery(t *testing.T) {

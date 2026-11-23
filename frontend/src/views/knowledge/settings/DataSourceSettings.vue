@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useConnectorLabel } from '@/composables/useConnectorLabel'
@@ -56,6 +56,10 @@ async function loadList(silent = false) {
   try {
     const res = await listDataSources(props.kbId)
     dataSources.value = res?.data || res || []
+    if (editingDs.value) {
+      const updated = dataSources.value.find(d => d.id === editingDs.value?.id)
+      if (updated) editingDs.value = updated
+    }
     emit('count', dataSources.value.length)
 
     const hasRunningSync = dataSources.value.some(ds => ds.latest_sync_log?.status === 'running')
@@ -183,6 +187,9 @@ function onEditorSaved() {
 }
 
 onMounted(loadList)
+watch(logsVisible, (open, wasOpen) => {
+  if (!open && wasOpen) void loadList(true)
+})
 useAssistantDataChange(() => { void loadList(true) }, { areas: ['data_source'] })
 onBeforeUnmount(stopPolling)
 </script>

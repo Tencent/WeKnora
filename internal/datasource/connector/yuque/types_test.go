@@ -82,10 +82,11 @@ func TestV2Doc_Status_RejectsUnexpectedShapes(t *testing.T) {
 
 func TestParseYuqueConfig(t *testing.T) {
 	t.Run("valid full", func(t *testing.T) {
+		const baseURL = "https://" + testYuqueCustomHost
 		cfg, err := parseYuqueConfig(&types.DataSourceConfig{
 			Credentials: map[string]interface{}{
 				"api_token": "tok-123",
-				"base_url":  "https://company.yuque.com",
+				"base_url":  baseURL,
 			},
 		})
 		if err != nil {
@@ -94,8 +95,8 @@ func TestParseYuqueConfig(t *testing.T) {
 		if cfg.APIToken != "tok-123" {
 			t.Errorf("APIToken = %q, want tok-123", cfg.APIToken)
 		}
-		if cfg.BaseURL != "https://company.yuque.com" {
-			t.Errorf("BaseURL = %q", cfg.BaseURL)
+		if cfg.BaseURL != baseURL {
+			t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, baseURL)
 		}
 	})
 

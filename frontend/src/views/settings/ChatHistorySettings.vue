@@ -15,13 +15,14 @@
         <div class="setting-control">
           <t-switch
             v-model="localEnabled"
+            :disabled="controlsDisabled"
             @change="handleEnabledChange"
           />
         </div>
       </div>
 
       <!-- Embedding 模型选择 -->
-      <div v-if="localEnabled" class="setting-row">
+      <div v-if="localEnabled || localEmbeddingModelId" class="setting-row">
         <div class="setting-info">
           <label>{{ t('chatHistorySettings.embeddingModelLabel') }}</label>
           <p class="desc">{{ t('chatHistorySettings.embeddingModelDescription') }}</p>
@@ -33,7 +34,7 @@
           <ModelSelector
             model-type="Embedding"
             :selected-model-id="localEmbeddingModelId"
-            :disabled="modelLocked"
+            :disabled="modelLocked || controlsDisabled"
             @update:selected-model-id="handleModelChange"
           />
         </div>
@@ -43,7 +44,7 @@
     <!-- 统计信息 -->
     <div class="stats-section">
       <h3 class="stats-title">{{ t('chatHistorySettings.statsTitle') }}</h3>
-      <div v-if="stats && stats.enabled && stats.knowledge_base_id" class="stats-grid">
+      <div v-if="stats && stats.knowledge_base_id" class="stats-grid">
         <div class="stat-card">
           <div class="stat-value">{{ stats.indexed_message_count }}</div>
           <div class="stat-label">{{ t('chatHistorySettings.statsIndexedMessages') }}</div>
@@ -54,23 +55,54 @@
         <p class="stats-empty-desc">{{ t('chatHistorySettings.statsNotConfiguredDesc') }}</p>
       </div>
     </div>
+
+    <div v-if="stats?.knowledge_base_id" class="setting-row clear-index-row">
+      <div class="setting-info">
+        <label>{{ t('chatHistorySettings.clearIndexLabel') }}</label>
+        <p class="desc">{{ t('chatHistorySettings.clearIndexDescription') }}</p>
+      </div>
+      <div class="setting-control">
+        <t-button theme="danger" variant="outline" :disabled="controlsDisabled" @click="requestClearIndex">
+          {{ t('chatHistorySettings.clearIndexButton') }}
+        </t-button>
+      </div>
+    </div>
+
+    <t-dialog
+      v-model:visible="clearDialogVisible"
+      theme="warning"
+      :header="t('chatHistorySettings.clearIndexLabel')"
+      :body="t('chatHistorySettings.clearIndexConfirm')"
+      :confirm-btn="{ content: t('chatHistorySettings.clearIndexButton'), theme: 'danger', loading: isClearing }"
+      :cancel-btn="{ content: t('common.cancel'), disabled: isClearing }"
+      :close-btn="!isClearing"
+      :close-on-overlay-click="false"
+      :close-on-esc-keydown="!isClearing"
+      @confirm="clearIndex"
+      @cancel="closeClearDialog"
+      @close="closeClearDialog"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '@/stores/auth'
 import ModelSelector from '@/components/ModelSelector.vue'
 import {
   getTenantChatHistoryConfig,
   updateTenantChatHistoryConfig,
   getChatHistoryKBStats,
+  clearChatHistoryIndex,
   type ChatHistoryConfig,
   type ChatHistoryKBStats,
 } from '@/api/chat-history'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
+const canEdit = computed(() => authStore.canAccessAllTenants || authStore.hasRole('admin'))
 
 // Local state
 const localEnabled = ref(false)
@@ -78,45 +110,38 @@ const localEmbeddingModelId = ref('')
 const isInitializing = ref(true)
 const initialConfig = ref<ChatHistoryConfig | null>(null)
 const stats = ref<ChatHistoryKBStats | null>(null)
+const isSaving = ref(false)
+const isClearing = ref(false)
+const clearDialogVisible = ref(false)
+let mounted = true
+let saveTimer: number | null = null
 
 // Whether the embedding model is locked (has indexed messages — cannot change)
-const modelLocked = ref(false)
+const modelLocked = ref(true)
+const controlsDisabled = computed(() =>
+  !canEdit.value || !initialConfig.value || isInitializing.value ||
+  isSaving.value || isClearing.value || clearDialogVisible.value,
+)
+
+const applyConfig = (config: ChatHistoryConfig) => {
+  initialConfig.value = { ...config }
+  localEnabled.value = config.enabled || false
+  localEmbeddingModelId.value = config.embedding_model_id || ''
+}
+
+const applyStats = (data: ChatHistoryKBStats) => {
+  stats.value = data
+  modelLocked.value = data.has_indexed_messages === true
+}
 
 // Load tenant config
 const loadConfig = async () => {
   try {
     const response = await getTenantChatHistoryConfig()
-    if (response.data) {
-      const config = response.data
-      isInitializing.value = true
-
-      initialConfig.value = {
-        enabled: config.enabled || false,
-        embedding_model_id: config.embedding_model_id || '',
-      }
-
-      localEnabled.value = config.enabled || false
-      localEmbeddingModelId.value = config.embedding_model_id || ''
-
-      await nextTick()
-      await nextTick()
-      setTimeout(() => { isInitializing.value = false }, 100)
-    } else {
-      initialConfig.value = {
-        enabled: false,
-        embedding_model_id: '',
-      }
-      await nextTick()
-      setTimeout(() => { isInitializing.value = false }, 100)
-    }
+    if (mounted && response.data) applyConfig(response.data)
   } catch (error: any) {
     console.error('Failed to load chat history config:', error)
-    initialConfig.value = {
-      enabled: false,
-      embedding_model_id: '',
-    }
-    await nextTick()
-    setTimeout(() => { isInitializing.value = false }, 100)
+    if (mounted) MessagePlugin.error(t('chatHistorySettings.toasts.loadFailed'))
   }
 }
 
@@ -124,13 +149,14 @@ const loadConfig = async () => {
 const loadStats = async () => {
   try {
     const response = await getChatHistoryKBStats()
-    if (response.data) {
-      stats.value = response.data
-      // Lock model if there are indexed messages
-      modelLocked.value = response.data.has_indexed_messages === true
-    }
+    if (mounted && response.data) applyStats(response.data)
   } catch (error: any) {
     console.error('Failed to load chat history stats:', error)
+    // A failed count must not be interpreted as an empty index.
+    if (mounted) {
+      modelLocked.value = true
+      MessagePlugin.error(t('chatHistorySettings.toasts.loadFailed'))
+    }
   }
 }
 
@@ -145,8 +171,10 @@ const hasConfigChanged = (): boolean => {
 
 // Save config
 const saveConfig = async () => {
-  if (!hasConfigChanged()) return
+  if (controlsDisabled.value || !hasConfigChanged()) return
 
+  isSaving.value = true
+  let saved = false
   try {
     const config: ChatHistoryConfig = {
       enabled: localEnabled.value,
@@ -154,6 +182,7 @@ const saveConfig = async () => {
     }
 
     const response = await updateTenantChatHistoryConfig(config)
+    if (!mounted) return
 
     // Update initial config from response (includes auto-managed knowledge_base_id)
     if (response.data) {
@@ -165,22 +194,25 @@ const saveConfig = async () => {
       initialConfig.value = { ...config }
     }
 
+    saved = true
     MessagePlugin.success(t('chatHistorySettings.toasts.saveSuccess'))
-    // Refresh stats after save
-    loadStats()
+    await loadStats()
   } catch (error: any) {
     console.error('Failed to save chat history config:', error)
     const errorMessage = error?.message || 'Unknown error'
-    MessagePlugin.error(t('chatHistorySettings.toasts.saveFailed', { message: errorMessage }))
+    if (mounted) MessagePlugin.error(t('chatHistorySettings.toasts.saveFailed', { message: errorMessage }))
+  } finally {
+    isSaving.value = false
+    if (mounted && saved && hasConfigChanged()) debouncedSave()
   }
 }
 
 // Debounced save
-let saveTimer: number | null = null
 const debouncedSave = () => {
-  if (isInitializing.value) return
+  if (controlsDisabled.value) return
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = window.setTimeout(() => {
+    saveTimer = null
     saveConfig().catch(() => {})
   }, 500)
 }
@@ -188,15 +220,58 @@ const debouncedSave = () => {
 // Handlers
 const handleEnabledChange = () => debouncedSave()
 const handleModelChange = (modelId: string) => {
+  if (controlsDisabled.value || modelLocked.value) return
   localEmbeddingModelId.value = modelId
   debouncedSave()
 }
 
+const requestClearIndex = () => {
+  if (controlsDisabled.value || !stats.value?.knowledge_base_id) return
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = null
+  clearDialogVisible.value = true
+}
+
+const closeClearDialog = () => {
+  if (isClearing.value) return
+  clearDialogVisible.value = false
+  if (hasConfigChanged()) debouncedSave()
+}
+
+const clearIndex = async () => {
+  if (!canEdit.value || !clearDialogVisible.value || isClearing.value || isSaving.value) return
+  isClearing.value = true
+  try {
+    const response = await clearChatHistoryIndex()
+    if (!mounted) return
+    applyStats(response.data)
+    applyConfig({
+      enabled: response.data.enabled,
+      embedding_model_id: response.data.embedding_model_id || '',
+      knowledge_base_id: response.data.knowledge_base_id,
+    })
+    clearDialogVisible.value = false
+    MessagePlugin.success(t('chatHistorySettings.toasts.clearSuccess'))
+  } catch (error: any) {
+    if (!mounted) return
+    MessagePlugin.error(t('chatHistorySettings.toasts.clearFailed', { message: error?.message || '' }))
+    // Cleanup may have paused indexing or removed some entries before failing.
+    // Refresh that persisted state instead of restoring a stale enabled draft.
+    await Promise.all([loadConfig(), loadStats()])
+  } finally {
+    isClearing.value = false
+  }
+}
+
 // Init
 onMounted(async () => {
-  isInitializing.value = true
-  await loadConfig()
-  await loadStats()
+  await Promise.all([loadConfig(), loadStats()])
+  if (mounted) isInitializing.value = false
+})
+
+onBeforeUnmount(() => {
+  mounted = false
+  if (saveTimer) clearTimeout(saveTimer)
 })
 </script>
 
@@ -232,6 +307,16 @@ onMounted(async () => {
 
 .setting-control {
   .setting-control();
+}
+
+.clear-index-row {
+  margin-top: 20px;
+  flex-wrap: wrap;
+  gap: 16px;
+
+  .setting-info {
+    flex-basis: 320px;
+  }
 }
 
 // Stats section

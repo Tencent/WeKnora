@@ -1,4 +1,4 @@
-import { useRouter } from 'vue-router'
+import { isNavigationFailure, NavigationFailureType, useRouter } from 'vue-router'
 import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -26,15 +26,20 @@ export function useStartChat() {
     const q = (query || '').trim()
     if (!q) return
 
-    if (kbIds.length > 0) {
-      settingsStore.selectKnowledgeBases(kbIds)
-    }
-    for (const fid of fileIds) {
-      settingsStore.addFile(fid)
-    }
+    settingsStore.prepareNewChatReferences(kbIds, fileIds)
+    const references = settingsStore._pendingNewChatReferences
 
-    menuStore.setPrefillQuery(q)
-    router.push('/platform/creatChat')
+    // Route-update hooks clear the old draft, so deliver text after navigation.
+    // A duplicated navigation still targets the composer already on this page.
+    void router.push('/platform/creatChat').then((failure) => {
+      if (router.currentRoute.value.path === '/platform/creatChat' &&
+        (!failure || isNavigationFailure(failure, NavigationFailureType.duplicated))) {
+        menuStore.setPrefillQuery(q)
+      }
+    }).finally(() => {
+      // A newer search may have replaced this navigation's handoff.
+      if (settingsStore._pendingNewChatReferences === references) settingsStore.consumeNewChatReferences()
+    })
   }
 
   return { startChat }
