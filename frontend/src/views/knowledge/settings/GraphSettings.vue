@@ -722,7 +722,7 @@ onMounted(async () => {
     margin-bottom: 4px;
 
     .required {
-      color: var(--td-error-color, #e34d59);
+      color: var(--td-error-color);
       margin-left: 2px;
     }
   }
