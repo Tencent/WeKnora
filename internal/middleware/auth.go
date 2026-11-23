@@ -553,17 +553,21 @@ func attachAPIKeyAuthContext(
 		user.TenantID = tenantID
 		authSource = types.AuthSourceAPIPlatformKey
 	} else {
-		user, err = userService.GetUserByTenantID(c.Request.Context(), tenantID)
-		if err != nil || user == nil {
-			user = &types.User{
-				ID:       fmt.Sprintf("system-%d", tenantID),
-				Username: fmt.Sprintf("system-%d", tenantID),
-				Email:    fmt.Sprintf("system-%d@api-key.local", tenantID),
-				TenantID: tenantID,
-				IsActive: true,
-			}
-			logger.Infof(c.Request.Context(),
-				"No user found for tenant %d via API key, using synthetic system user %s", tenantID, user.ID)
+		// A tenant-scoped API key does not act on behalf of any particular
+		// member. Resolving the first member by tenant (GetUserByTenantID)
+		// previously attached an arbitrary real user here, which downstream
+		// creator-recording logic then persisted as CreatorID — so a KB
+		// created with a workspace API key was mis-attributed to whichever
+		// member happened to be the tenant's earliest-created account. Always
+		// use the synthetic system identity so such resources stay
+		// tenant-owned (CreatorID == ""), matching the design note in
+		// CreateKnowledgeBase.
+		user = &types.User{
+			ID:       fmt.Sprintf("system-%d", tenantID),
+			Username: fmt.Sprintf("system-%d", tenantID),
+			Email:    fmt.Sprintf("system-%d@api-key.local", tenantID),
+			TenantID: tenantID,
+			IsActive: true,
 		}
 
 		var principalErr error

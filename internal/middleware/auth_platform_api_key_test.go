@@ -60,6 +60,36 @@ func TestPlatformAPIKeyIdentityIsStableAcrossTenants(t *testing.T) {
 	}
 }
 
+func TestAttachTenantAPIKeyUsesSyntheticUser(t *testing.T) {
+	// A tenant-scoped (non-platform) API key must not resolve to an arbitrary
+	// real member. Downstream creator-recording skips synthetic users so the
+	// resource stays tenant-owned; a real member here would be mis-attributed
+	// as CreatorID. Regression for the "workspace API key mis-attributes KB
+	// creator" bug.
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/knowledge-bases", nil)
+	key := &types.TenantAPIKey{
+		ID:        12,
+		ScopeType: types.APIKeyScopeTenant,
+		FullAccess: true,
+	}
+	attachAPIKeyAuthContext(c, &fakeTenantService{tenant: &types.Tenant{ID: 42}}, nil, 42, key)
+	if c.IsAborted() {
+		t.Fatal("tenant API key context unexpectedly aborted")
+	}
+	user, ok := c.Request.Context().Value(types.UserContextKey).(*types.User)
+	if !ok || user == nil {
+		t.Fatalf("user = %#v, ok=%v", user, ok)
+	}
+	if user.ID != "system-42" || user.TenantID != 42 {
+		t.Fatalf("user = %#v, want synthetic system-42 with tenant 42", user)
+	}
+	if !types.IsSyntheticUserID(user.ID) {
+		t.Fatalf("IsSyntheticUserID(%q) = false, want true", user.ID)
+	}
+}
+
 func TestAttachTargetedPlatformAPIKeyKeepsPlatformPrincipal(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
