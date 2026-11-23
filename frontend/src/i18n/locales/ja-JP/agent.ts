@@ -1913,9 +1913,6 @@ export default {
       feishuAPIBaseURLHint: '任意。サーバが直接インターネットに接続できる場合は空欄のままにしてください。Feishuへのアクセスにプロキシが必要な場合は、リバースプロキシのURL（例: nginx、http://host:port）を入力してください。内部ネットワークのアドレスの場合は、ホスト名をSSRF_WHITELIST環境変数に追加してください。',
       fileKnowledgeBase: 'ファイル保存先ナレッジベース',
       fileKnowledgeBasePlaceholder: 'ナレッジベースを選択（任意）',
-      shareOriginals: '引用元ファイルの共有',
-      shareOriginalsHint: 'リンクを受け取った人は1時間以内に元のファイルをダウンロードできます。このワークスペースが所有し、エージェントが検索できるナレッジベースを1つ選択してください。',
-      saveOriginalSharing: '共有設定を保存',
       fileKnowledgeBaseHint: '設定すると、ユーザが送信したファイルがこのナレッジベースに自動的に保存されます',
       sessionMode: 'セッションモード',
       sessionModeUser: 'ユーザ単位（デフォルト）',
@@ -1945,6 +1942,9 @@ export default {
       sectionSession: 'セッション',
       sectionCallback: 'コールバックURL',
       sectionKnowledge: 'ファイル保存',
+      shareOriginals: '引用元ファイルの共有',
+      shareOriginalsHint: 'リンクを受け取った人は1時間以内に元のファイルをダウンロードできます。このワークスペースが所有し、エージェントが検索できるナレッジベースを1つ選択してください。',
+      saveOriginalSharing: '共有設定を保存',
       sectionStatus: 'ステータス'
     },
     agentType: {

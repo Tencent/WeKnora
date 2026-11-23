@@ -846,9 +846,6 @@ export default {
       feishuAPIBaseURLHint: '可选。若服务器能直连外网则留空；若需通过代理才能访问飞书，填写反向代理地址（如 nginx，http://host:port）。内网地址需将域名加入 SSRF_WHITELIST 环境变量',
       fileKnowledgeBase: '文件保存知识库',
       fileKnowledgeBasePlaceholder: '选择知识库（可选）',
-      shareOriginals: '引用原文件免登录下载',
-      shareOriginalsHint: '持有链接的人可在一小时内下载原件。请选择一个本工作区拥有且智能体可以检索的知识库。',
-      saveOriginalSharing: '保存分享设置',
       fileKnowledgeBaseHint: '配置后，用户发送的文件将自动保存到该知识库中',
       sessionMode: '会话模式',
       sessionModeUser: '按用户（默认）',
@@ -878,6 +875,9 @@ export default {
       sectionSession: '会话设置',
       sectionCallback: '回调地址',
       sectionKnowledge: '文件存储',
+      shareOriginals: '引用原文件免登录下载',
+      shareOriginalsHint: '持有链接的人可在一小时内下载原件。请选择一个本工作区拥有且智能体可以检索的知识库。',
+      saveOriginalSharing: '保存分享设置',
       sectionStatus: '运行状态'
     },
     embed: {

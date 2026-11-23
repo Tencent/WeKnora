@@ -846,9 +846,6 @@ export default {
       feishuAPIBaseURLHint: '선택 사항. 서버가 외부 인터넷에 직접 연결 가능하면 비워두세요. 프록시를 통해서만 접근 가능한 경우 역방향 프록시 URL(예: nginx, http://host:port)을 입력하세요. 내부 네트워크 주소는 SSRF_WHITELIST 환경 변수에 호스트명을 추가하세요.',
       fileKnowledgeBase: '파일 저장 지식 베이스',
       fileKnowledgeBasePlaceholder: '지식 베이스 선택 (선택 사항)',
-      shareOriginals: '인용된 원본 파일 공유',
-      shareOriginalsHint: '링크를 가진 사람은 한 시간 동안 원본을 다운로드할 수 있습니다. 이 워크스페이스가 소유하고 에이전트가 검색할 수 있는 지식 베이스 하나를 선택하세요.',
-      saveOriginalSharing: '공유 설정 저장',
       fileKnowledgeBaseHint: '설정 시 사용자가 보낸 파일이 자동으로 해당 지식 베이스에 저장됩니다',
       sessionMode: '세션 모드',
       sessionModeUser: '사용자별 (기본)',
@@ -878,6 +875,9 @@ export default {
       sectionSession: '세션 설정',
       sectionCallback: '콜백 URL',
       sectionKnowledge: '파일 저장',
+      shareOriginals: '인용된 원본 파일 공유',
+      shareOriginalsHint: '링크를 가진 사람은 한 시간 동안 원본을 다운로드할 수 있습니다. 이 워크스페이스가 소유하고 에이전트가 검색할 수 있는 지식 베이스 하나를 선택하세요.',
+      saveOriginalSharing: '공유 설정 저장',
       sectionStatus: '실행 상태'
     },
     embed: {
