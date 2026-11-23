@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -1993,8 +1994,11 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 	if len(indexInfoToUpdate) > 0 {
 		logger.Debugf(ctx, "incrementalIndexFAQEntry: updating %d index entries (skipped %d unchanged)",
 			len(indexInfoToUpdate), 1+newCount-len(indexInfoToUpdate))
-		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoToUpdate); err != nil {
-			return err
+		indexCtx, cancelIndex := context.WithTimeout(ctx, api.DefaultJSONTimeout)
+		indexErr := retrieveEngine.BatchIndex(indexCtx, embeddingModel, indexInfoToUpdate)
+		cancelIndex()
+		if indexErr != nil {
+			return indexErr
 		}
 	} else {
 		logger.Debugf(ctx, "incrementalIndexFAQEntry: all %d entries unchanged, skipping index update", 1+newCount)
@@ -2080,8 +2084,14 @@ func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 
 	// 批量索引（这里可能是性能瓶颈）
 	batchIndexStartTime := time.Now()
-	if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo); err != nil {
-		return err
+	// Asynq already sets a two-hour task deadline, so the API's fallback
+	// alone cannot bound a stalled embedding. Cap this batch (including its
+	// retries) without canceling the task context used to record failures.
+	indexCtx, cancelIndex := context.WithTimeout(ctx, api.DefaultJSONTimeout)
+	indexErr := retrieveEngine.BatchIndex(indexCtx, embeddingModel, indexInfo)
+	cancelIndex()
+	if indexErr != nil {
+		return indexErr
 	}
 	batchIndexDuration := time.Since(batchIndexStartTime)
 	var avgPerEntry time.Duration
