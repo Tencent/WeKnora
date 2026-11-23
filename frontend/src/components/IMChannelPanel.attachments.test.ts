@@ -8,7 +8,7 @@ function panel(t: TestContext, knowledgeBaseId = '') {
   const warnings: string[] = []
   const channel = {
     id: 'channel', agent_id: 'agent', name: 'Bot', platform: 'feishu', mode: 'websocket',
-    output_mode: 'stream', enabled: true, knowledge_base_id: knowledgeBaseId, credentials: {},
+    output_mode: 'stream', enabled: true, knowledge_base_id: knowledgeBaseId, credentials_configured: true, credentials: {},
   }
   const resources = {
     agents: [], rawKnowledgeBases: [], ensureAgents() {}, ensureKnowledgeBases() {},
@@ -38,8 +38,8 @@ function panel(t: TestContext, knowledgeBaseId = '') {
 test('turning off saving clears the existing destination on update', async t => {
   const { vm, channel, updates } = panel(t, 'kb-a')
   await vm.editChannel(channel)
-  assert.equal(vm.saveAttachments, true)
-  vm.saveAttachments = false
+  assert.equal(vm.formData.save_attachments, true)
+  vm.formData.save_attachments = false
   await vm.handleSave()
   assert.equal(updates[0].knowledge_base_id, '')
 })
@@ -48,8 +48,8 @@ test('a new channel saves attachments only after a destination is selected', asy
   const { vm, updates, warnings } = panel(t)
   vm.openCreate()
   vm.formData.target_agent_id = 'agent'
-  assert.equal(vm.saveAttachments, false)
-  vm.saveAttachments = true
+  assert.equal(vm.formData.save_attachments, false)
+  vm.formData.save_attachments = true
   vm.wizardStep = 2
   await vm.handleDrawerConfirm()
   assert.equal(vm.wizardStep, 2)
@@ -69,7 +69,7 @@ test('opening a new form resets the preceding channel’s setting', async t => {
   await flush()
   vm.openCreate()
   vm.formData.target_agent_id = 'agent'
-  assert.equal(vm.saveAttachments, false)
+  assert.equal(vm.formData.save_attachments, false)
   await vm.handleSave()
   assert.equal(updates[0].knowledge_base_id, '')
 })

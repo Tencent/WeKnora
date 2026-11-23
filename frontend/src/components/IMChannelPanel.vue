@@ -235,10 +235,10 @@
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionKnowledge') }}</h4>
           <div class="form-item">
             <label class="form-label" for="im-save-attachments">{{ $t('agentEditor.im.saveAttachments') }}</label>
-            <t-switch id="im-save-attachments" v-model="saveAttachments" :aria-label="$t('agentEditor.im.saveAttachments')" />
+            <t-switch id="im-save-attachments" v-model="formData.save_attachments" :aria-label="$t('agentEditor.im.saveAttachments')" />
             <p class="form-desc">{{ $t('agentEditor.im.fileKnowledgeBaseHint') }}</p>
           </div>
-          <div v-if="saveAttachments" class="form-item">
+          <div v-if="formData.save_attachments" class="form-item">
             <label class="form-label">{{ $t('agentEditor.im.fileKnowledgeBase') }}</label>
             <t-select v-model="formData.knowledge_base_id"
               :placeholder="$t('agentEditor.im.fileKnowledgeBasePlaceholder')" clearable filterable>
@@ -653,7 +653,6 @@ const channels = computed(() => {
 });
 const loading = ref(false);
 const saving = ref(false);
-const saveAttachments = ref(false);
 const showCreateDialog = ref(false);
 const editingChannel = ref<IMChannel | null>(null);
 const editingEnabled = ref(true);
@@ -712,7 +711,7 @@ const drawerTitle = computed(() => {
 });
 
 function validateWizardStep(step: number): boolean {
-  if (step === 2 && saveAttachments.value && !normalizeOptionalString(formData.value.knowledge_base_id)) {
+  if (step === 2 && formData.value.save_attachments && !normalizeOptionalString(formData.value.knowledge_base_id)) {
     MessagePlugin.warning(t('agentEditor.im.fileKnowledgeBasePlaceholder'));
     return false;
   }
@@ -757,6 +756,7 @@ const formData = ref({
   mode: 'websocket' as 'webhook' | 'websocket' | 'longpoll',
   output_mode: 'stream' as 'stream' | 'full',
   locale: '' as IMLocale,
+  save_attachments: false,
   session_mode: 'user' as 'user' | 'thread',
   knowledge_base_id: '',
   credentials: defaultCredentials(),
@@ -1003,7 +1003,6 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     MessagePlugin.error(t('common.operationFailed'));
     return;
   }
-  saveAttachments.value = Boolean(fullChannel.knowledge_base_id);
   editingChannel.value = fullChannel;
   editingEnabled.value = fullChannel.enabled;
   channelNameTouched.value = true;
@@ -1014,6 +1013,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     mode: fullChannel.mode,
     output_mode: fullChannel.output_mode,
     locale: fullChannel.locale || '',
+    save_attachments: Boolean(fullChannel.knowledge_base_id),
     session_mode: fullChannel.session_mode || 'user',
     knowledge_base_id: fullChannel.knowledge_base_id || '',
     credentials: { ...fullChannel.credentials },
@@ -1023,7 +1023,6 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
 }
 
 function resetForm() {
-  saveAttachments.value = false;
   editingChannel.value = null;
   editingEnabled.value = true;
   wizardStep.value = 0;
@@ -1040,6 +1039,7 @@ function resetForm() {
     mode: 'websocket',
     output_mode: 'stream',
     locale: '',
+    save_attachments: false,
     session_mode: 'user',
     knowledge_base_id: '',
     credentials: defaultCredentials(),
@@ -1051,7 +1051,7 @@ async function handleSave() {
     wizardStep.value = 2;
     return;
   }
-  const knowledgeBaseId = saveAttachments.value ? normalizeOptionalString(formData.value.knowledge_base_id) : '';
+  if (!formData.value.save_attachments) formData.value.knowledge_base_id = '';
   saving.value = true;
   try {
     // For WeChat, validate that credentials are bound
@@ -1076,7 +1076,7 @@ async function handleSave() {
         output_mode: formData.value.output_mode,
         locale: formData.value.locale,
         session_mode: formData.value.session_mode,
-        knowledge_base_id: knowledgeBaseId,
+        knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
         enabled: editingEnabled.value,
         ...(formData.value.target_agent_id ? { agent_id: formData.value.target_agent_id } : {}),
@@ -1095,7 +1095,7 @@ async function handleSave() {
         output_mode: formData.value.output_mode,
         locale: formData.value.locale,
         session_mode: formData.value.session_mode,
-        knowledge_base_id: knowledgeBaseId,
+        knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
       });
       MessagePlugin.success(t('common.createSuccess'));
