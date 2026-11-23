@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -35,28 +34,20 @@ type replayedBody struct {
 // loggerResponseBodyWriter 自定义ResponseWriter用于捕获响应内容（用于logger中间件）
 type loggerResponseBodyWriter struct {
 	gin.ResponseWriter
-	body      *bytes.Buffer
-	truncated bool
+	body *bytes.Buffer
 }
 
-// Write 重写Write方法，同时写入buffer和原始writer
-// 限制buffer大小，避免SSE等流式响应导致内存无限增长
-// 截断点回退到字符边界，避免把多字节字符切成一半
+// Write 重写Write方法，同时写入buffer和原始writer。
+// 限制buffer大小，避免SSE等流式响应导致内存无限增长。
+// 这里只做字节上限，字符边界留到写日志时统一处理：按块回退会让被丢弃的字节
+// 无法被后续写入补齐，同一份响应会因 Write 的切分方式不同而记录出不同内容。
 func (r *loggerResponseBodyWriter) Write(b []byte) (int, error) {
-	if r.body.Len() < maxBodySize {
-		remaining := maxBodySize - r.body.Len()
-		if len(b) <= remaining {
+	if room := maxBodySize + 1 - r.body.Len(); room > 0 {
+		if len(b) <= room {
 			r.body.Write(b)
 		} else {
-			r.truncated = true
-			end := remaining
-			for end > 0 && !utf8.RuneStart(b[end]) {
-				end--
-			}
-			r.body.Write(b[:end])
+			r.body.Write(b[:room])
 		}
-	} else {
-		r.truncated = true
 	}
 	return r.ResponseWriter.Write(b)
 }
@@ -273,8 +264,8 @@ func Logger() gin.HandlerFunc {
 			} else if strings.Contains(contentType, "application/json") ||
 				strings.Contains(contentType, "text/") {
 				bodyBytes := responseBody.Bytes()
-				if responseWriter.truncated {
-					responseBodyStr = string(bodyBytes) + bodyTruncatedMarker
+				if len(bodyBytes) > maxBodySize {
+					responseBodyStr = common.TruncateUTF8Bytes(string(bodyBytes), maxBodySize) + bodyTruncatedMarker
 				} else {
 					responseBodyStr = string(bodyBytes)
 				}

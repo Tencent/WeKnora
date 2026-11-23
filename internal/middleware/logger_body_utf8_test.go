@@ -65,3 +65,47 @@ func TestLoggerKeepsMultiByteCharactersInResponseBody(t *testing.T) {
 		t.Fatalf("oversized response body must carry the truncation marker")
 	}
 }
+
+// The captured response must be byte-contiguous across Write calls. Cutting to
+// a rune boundary inside each call drops bytes that a later call cannot bring
+// back, so the same response logs differently depending on how the handler
+// splits its writes.
+func TestLoggerCapturesResponseBodyAcrossWritesContiguously(t *testing.T) {
+	prefix := strings.Repeat("x", maxBodySize-1)
+	full := []byte(prefix + "界" + "Z")
+	runeStart := len(prefix)
+
+	// Same bytes, two write layouts: the rune is whole in the first call, or
+	// split between the calls.
+	layouts := map[string]int{
+		"whole_rune_in_first_write": runeStart + len("界"),
+		"rune_split_across_writes":  runeStart + 1,
+	}
+	for name, cut := range layouts {
+		t.Run(name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			var logBuf bytes.Buffer
+			logger.SetOutput(&logBuf)
+			t.Cleanup(func() { logger.SetOutput(os.Stdout) })
+
+			r := gin.New()
+			r.Use(Logger())
+			r.GET("/api/v1/stream", func(c *gin.Context) {
+				c.Header("Content-Type", "application/json")
+				_, _ = c.Writer.Write(full[:cut])
+				_, _ = c.Writer.Write(full[cut:])
+			})
+
+			r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/stream", nil))
+
+			out := logBuf.String()
+			want := prefix + bodyTruncatedMarker
+			if !strings.Contains(out, want) {
+				t.Fatalf("response body preview must keep the %d captured bytes before the marker", len(prefix))
+			}
+			if strings.Contains(out, "\uFFFD") {
+				t.Fatalf("access log contains a replacement character")
+			}
+		})
+	}
+}
