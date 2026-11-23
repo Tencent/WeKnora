@@ -847,7 +847,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 					})
 				}
 				changed, affectedType, additionFailed, updateDeferred, reduceErr = s.reduceSlugUpdates(
-					pageCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
+					pageCtx, chatModel, payload.KnowledgeBaseID, slug, updates,
+					payload.TenantID, batchCtx, kidToWikiSpan)
 				// 归并失败交给下方统一分类；这里仅返回获取锁的错误。
 				return nil
 			})

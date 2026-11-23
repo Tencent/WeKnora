@@ -26,7 +26,7 @@ func TestWikiPageCheckpointRollsBackPageAndRevisionOnProgressFailure(t *testing.
 	require.NoError(t, db.Callback().Update().Before("gorm:update").
 		Register("test:fail_checkpoint", func(tx *gorm.DB) {
 			if tx.Statement.Table == "task_pending_ops" {
-				tx.AddError(wantErr)
+				_ = tx.AddError(wantErr)
 			}
 		}))
 	ctx := types.WithWikiPageCheckpoint(context.Background(), types.WikiPageCheckpoint{
@@ -72,7 +72,7 @@ func TestWikiPageCheckpointCreateAndMetaRollback(t *testing.T) {
 			require.NoError(t, db.Callback().Update().Before("gorm:update").
 				Register("test:fail_checkpoint", func(tx *gorm.DB) {
 					if tx.Statement.Table == "task_pending_ops" {
-						tx.AddError(wantErr)
+						_ = tx.AddError(wantErr)
 					}
 				}))
 			ctx := types.WithWikiPageCheckpoint(context.Background(), types.WikiPageCheckpoint{
