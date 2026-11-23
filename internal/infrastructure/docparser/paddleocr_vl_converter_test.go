@@ -20,68 +20,120 @@ import (
 func TestPaddleOCRVLReadersPreservePageBounds(t *testing.T) {
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1,localhost")
 	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
-	pages := []paddleOCRVLPage{
-		paddleOCRVLTestPage(t, "# Repeated heading\n\nfirst body\n\n"+
-			"<table><tr><th>项目</th><th>值</th></tr><tr><td>甲</td><td>42</td></tr></table>",
-			"first body", "unmatched layout"),
-		paddleOCRVLTestPage(t, "\n "),
-		paddleOCRVLTestPage(t, "# Repeated heading\n\nthird body", "Repeated heading", "third body"),
-	}
-	for _, mode := range []string{"local", "cloud"} {
-		t.Run(mode, func(t *testing.T) {
-			var server *httptest.Server
-			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_, _ = io.Copy(io.Discard, r.Body)
-				w.Header().Set("Content-Type", "application/json")
-				switch r.URL.Path {
-				case "/layout-parsing":
-					var response paddleOCRVLResponse
-					response.Result.LayoutParsingResults = pages
-					_ = json.NewEncoder(w).Encode(response)
-				case "/jobs":
-					_, _ = io.WriteString(w, `{"data":{"jobId":"test"}}`)
-				case "/jobs/test":
-					_ = json.NewEncoder(w).Encode(map[string]interface{}{
-						"data": map[string]interface{}{
-							"state": "done", "resultUrl": map[string]string{"jsonUrl": server.URL + "/results"},
-						},
-					})
-				case "/results":
-					for _, page := range pages {
-						var line paddleOCRVLCloudResultLine
-						line.Result.LayoutParsingResults = []paddleOCRVLPage{page}
-						_ = json.NewEncoder(w).Encode(line)
+	for _, tt := range []struct {
+		name, fileType string
+		pages          []paddleOCRVLPage
+		check          func(*testing.T, *types.ReadResult)
+	}{
+		{
+			name: "page bounds", fileType: "pdf",
+			pages: []paddleOCRVLPage{
+				paddleOCRVLTestPage(t, "# Repeated heading\n\nfirst body\n\n"+
+					"<table><tr><th>项目</th><th>值</th></tr><tr><td>甲</td><td>42</td></tr></table>",
+					"first body", "unmatched layout"),
+				paddleOCRVLTestPage(t, "\n "),
+				paddleOCRVLTestPage(t, "# Repeated heading\n\nthird body", "Repeated heading", "third body"),
+			},
+			check: func(t *testing.T, result *types.ReadResult) {
+				require.Len(t, result.SourceBlocks, 5)
+				paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "first body", 1, true)
+				paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "42", 1, false)
+				paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "third body", 3, true)
+				require.Equal(t, 3, result.SourceBlocks[3].Locator.Page)
+				require.Equal(t, []float64{0.1, 0.1, 0.9, 0.2}, result.SourceBlocks[3].Locator.BBox)
+			},
+		},
+		{
+			name: "numbered headings stay page local", fileType: "pdf",
+			pages: []paddleOCRVLPage{
+				paddleOCRVLTestPage(t, "1. Summary\n\n<table><tr><td>other cell</td></tr></table>",
+					"Summary", "other cell"),
+				paddleOCRVLTestPage(t, "# Summary", "Summary"),
+			},
+			check: func(t *testing.T, result *types.ReadResult) {
+				paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "1. Summary", 1, true)
+				paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "other cell", 1, true)
+				paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "# Summary", 2, true)
+			},
+		},
+		{
+			name: "image table aligns after normalization", fileType: "pdf",
+			pages: []paddleOCRVLPage{
+				paddleOCRVLTestPage(t, `<table><tr><td><img src="x.png" alt="profile"/></td></tr></table>`,
+					"profile"),
+			},
+			check: func(t *testing.T, result *types.ReadResult) {
+				require.Contains(t, result.MarkdownContent, "![profile](x.png)")
+				paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "profile", 1, true)
+				for _, block := range result.SourceBlocks {
+					if len(block.Locator.BBox) > 0 {
+						require.Equal(t, []float64{0.1, 0.1, 0.9, 0.2}, block.Locator.BBox)
 					}
-				default:
-					http.NotFound(w, r)
 				}
-			}))
-			defer server.Close()
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			req := &types.ReadRequest{FileName: "test.pdf", FileType: "pdf", FileContent: []byte("test")}
-			var result *types.ReadResult
-			var err error
-			if mode == "local" {
-				reader := NewPaddleOCRVLReader(map[string]string{"paddleocr_vl_endpoint": server.URL})
-				result, err = reader.Read(ctx, req)
-			} else {
-				reader := NewPaddleOCRVLCloudReader(map[string]string{
-					"paddleocr_vl_cloud_base_url": server.URL + "/jobs", "paddleocr_vl_cloud_token": "test-token",
-				})
-				result, err = reader.Read(ctx, req)
-			}
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			require.Empty(t, result.Error)
-			require.NotContains(t, result.MarkdownContent, "<table>")
-			require.Len(t, result.SourceBlocks, 5)
-			paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "first body", 1, true)
-			paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "42", 1, false)
-			paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "third body", 3, true)
-			require.Equal(t, 3, result.SourceBlocks[3].Locator.Page)
-			require.Equal(t, []float64{0.1, 0.1, 0.9, 0.2}, result.SourceBlocks[3].Locator.BBox)
-		})
+			},
+		},
+		{
+			name: "original image prefix keeps offsets", fileType: "png",
+			pages: []paddleOCRVLPage{paddleOCRVLTestPage(t, "图像正文", "图像正文")},
+			check: func(t *testing.T, result *types.ReadResult) {
+				require.Len(t, result.ImageRefs, 1)
+				paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "图像正文", 1, true)
+			},
+		},
+	} {
+		for _, mode := range []string{"local", "cloud"} {
+			t.Run(tt.name+"/"+mode, func(t *testing.T) {
+				var server *httptest.Server
+				server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = io.Copy(io.Discard, r.Body)
+					w.Header().Set("Content-Type", "application/json")
+					switch r.URL.Path {
+					case "/layout-parsing":
+						var response paddleOCRVLResponse
+						response.Result.LayoutParsingResults = tt.pages
+						_ = json.NewEncoder(w).Encode(response)
+					case "/jobs":
+						_, _ = io.WriteString(w, `{"data":{"jobId":"test"}}`)
+					case "/jobs/test":
+						_ = json.NewEncoder(w).Encode(map[string]interface{}{
+							"data": map[string]interface{}{
+								"state": "done", "resultUrl": map[string]string{"jsonUrl": server.URL + "/results"},
+							},
+						})
+					case "/results":
+						for _, page := range tt.pages {
+							var line paddleOCRVLCloudResultLine
+							line.Result.LayoutParsingResults = []paddleOCRVLPage{page}
+							_ = json.NewEncoder(w).Encode(line)
+						}
+					default:
+						http.NotFound(w, r)
+					}
+				}))
+				defer server.Close()
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				req := &types.ReadRequest{
+					FileName: "test." + tt.fileType, FileType: tt.fileType, FileContent: []byte("test"),
+				}
+				var result *types.ReadResult
+				var err error
+				if mode == "local" {
+					reader := NewPaddleOCRVLReader(map[string]string{"paddleocr_vl_endpoint": server.URL})
+					result, err = reader.Read(ctx, req)
+				} else {
+					reader := NewPaddleOCRVLCloudReader(map[string]string{
+						"paddleocr_vl_cloud_base_url": server.URL + "/jobs", "paddleocr_vl_cloud_token": "test-token",
+					})
+					result, err = reader.Read(ctx, req)
+				}
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Empty(t, result.Error)
+				require.NotContains(t, result.MarkdownContent, "<table>")
+				tt.check(t, result)
+			})
+		}
 	}
 }
 

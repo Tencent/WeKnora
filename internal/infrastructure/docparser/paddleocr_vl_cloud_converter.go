@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -87,12 +87,16 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 		return nil, fmt.Errorf("PaddleOCR-VL Cloud fetch results: %w", err)
 	}
 
-	originalMarkdown := mdContent
 	sourceBlocks := paddleOCRVLSourceBlocks(pages, req.FileType)
-	mdContent = NormalizeHTMLTables(mdContent)
-
 	imageRefs := c.downloadImages(mdContent, imagesURL)
+	originalLength := utf8.RuneCountInString(mdContent)
 	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
+	// The original image reference only prepends text; do not realign pages.
+	prefixLength := utf8.RuneCountInString(mdContent) - originalLength
+	for i := range sourceBlocks {
+		sourceBlocks[i].Start += prefixLength
+		sourceBlocks[i].End += prefixLength
+	}
 
 	logger.Infof(context.Background(), "[PaddleOCR-VL Cloud] Parsed successfully, markdown=%d chars, images=%d",
 		len(mdContent), len(imageRefs))
@@ -100,7 +104,7 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
-		SourceBlocks:    sourceloc.RemapBlocks(sourceBlocks, originalMarkdown, mdContent),
+		SourceBlocks:    sourceBlocks,
 	}, nil
 }
 
@@ -312,6 +316,8 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 			continue
 		}
 		for _, p := range parsed.Result.LayoutParsingResults {
+			// Normalize before matching, preserving each page's text bounds.
+			p.Markdown.Text = NormalizeHTMLTables(p.Markdown.Text)
 			pages = append(pages, p)
 			if t := strings.TrimSpace(p.Markdown.Text); t != "" {
 				texts = append(texts, p.Markdown.Text)

@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -63,17 +63,16 @@ func (c *PaddleOCRVLReader) Read(ctx context.Context, req *types.ReadRequest) (*
 		return nil, fmt.Errorf("PaddleOCR-VL layout-parsing: %w", err)
 	}
 
-	originalMarkdown := mdContent
 	sourceBlocks := paddleOCRVLSourceBlocks(pages, req.FileType)
-
-	// PaddleOCR-VL renders tables as styled HTML (per-cell text-align), which
-	// wastes tokens and defeats the chunker's table-protection logic. Convert
-	// them to Markdown tables (or strip layout attributes when conversion is
-	// not possible) before downstream processing.
-	mdContent = NormalizeHTMLTables(mdContent)
-
 	imageRefs, mdContent := c.processImages(mdContent, imagesB64)
+	originalLength := utf8.RuneCountInString(mdContent)
 	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
+	// The original image reference only prepends text; do not realign pages.
+	prefixLength := utf8.RuneCountInString(mdContent) - originalLength
+	for i := range sourceBlocks {
+		sourceBlocks[i].Start += prefixLength
+		sourceBlocks[i].End += prefixLength
+	}
 
 	logger.Infof(context.Background(), "[PaddleOCR-VL] Parsed successfully, markdown=%d chars, images=%d",
 		len(mdContent), len(imageRefs))
@@ -81,7 +80,7 @@ func (c *PaddleOCRVLReader) Read(ctx context.Context, req *types.ReadRequest) (*
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
-		SourceBlocks:    sourceloc.RemapBlocks(sourceBlocks, originalMarkdown, mdContent),
+		SourceBlocks:    sourceBlocks,
 	}, nil
 }
 
@@ -197,7 +196,11 @@ func (c *PaddleOCRVLReader) callLayoutParsing(
 	// Merge per-page markdown and image dicts into one document.
 	texts := make([]string, 0, len(pages))
 	images := make(map[string]string)
-	for _, p := range pages {
+	for i := range pages {
+		p := &pages[i]
+		// Normalize before matching so converted image alt text is visible,
+		// while all layout matches remain confined to their original page.
+		p.Markdown.Text = NormalizeHTMLTables(p.Markdown.Text)
 		if t := strings.TrimSpace(p.Markdown.Text); t != "" {
 			texts = append(texts, p.Markdown.Text)
 		}

@@ -63,8 +63,9 @@ func paddleOCRVLPageUnits(pageNumber int, page paddleOCRVLPage) []sourceloc.Unit
 
 // paddleOCRVLSourceBlocks aligns each page independently, so repeated text
 // and omitted layout blocks cannot affect another page's matches. Unmatched
-// markdown has a known page but no reliable box. Offsets follow the readers'
-// nonempty-page join; callers remap these blocks after rewriting the markdown.
+// markdown has a known page but no reliable box. Readers normalize each page
+// before alignment; offsets follow their nonempty-page join without a global
+// realignment that could confuse repeated text across page boundaries.
 func paddleOCRVLSourceBlocks(pages []paddleOCRVLPage, fileType string) []types.SourceBlock {
 	ft := strings.ToLower(strings.TrimPrefix(fileType, "."))
 	if ft != "pdf" && !IsImageFormat(ft) {
