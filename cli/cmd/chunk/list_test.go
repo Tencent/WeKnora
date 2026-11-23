@@ -21,6 +21,7 @@ type listCall struct {
 }
 
 type fakeListSvc struct {
+	types   []string
 	calls   []listCall
 	pages   [][]sdk.Chunk
 	totals  []int64
@@ -28,7 +29,8 @@ type fakeListSvc struct {
 	callIdx int
 }
 
-func (f *fakeListSvc) ListKnowledgeChunks(_ context.Context, docID string, page, pageSize int, _ ...string) ([]sdk.Chunk, int64, error) {
+func (f *fakeListSvc) ListKnowledgeChunks(_ context.Context, docID string, page, pageSize int, types ...string) ([]sdk.Chunk, int64, error) {
+	f.types = types
 	f.calls = append(f.calls, listCall{docID, page, pageSize})
 	defer func() { f.callIdx++ }()
 	if f.callIdx >= len(f.pages) {
@@ -139,8 +141,10 @@ func TestList_JSON_EmitsTotalCount(t *testing.T) {
 		totals: []int64{7},
 		errs:   []error{nil},
 	}
-	opts := &ListOptions{DocID: "d1", Limit: 50, PageSize: 50}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	opts := &ListOptions{DocID: "d1", Limit: 50, PageSize: 50, Types: []string{"summary", "image_ocr"}}
+	format := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+	require.NoError(t, runList(context.Background(), opts, format, svc))
+	assert.Equal(t, opts.Types, svc.types)
 	var env struct {
 		Meta struct {
 			Count      *int `json:"count"`

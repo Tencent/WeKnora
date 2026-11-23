@@ -43,6 +43,7 @@ type ListOptions struct {
 	// DocID scopes the listing to a single knowledge document (SDK
 	// `knowledge_id`). The chunks SDK does not expose a KB-wide route.
 	DocID string
+	Types []string
 	// PageSize is the server batch size (1..1000, default 50).
 	PageSize int
 	// Limit caps the client-side accumulated slice (1..10000, default 50).
@@ -55,7 +56,8 @@ type ListOptions struct {
 
 const chunkListLong = `List chunks under a document in stored order.
 
-'chunk list --doc D' enumerates ALL chunks of document D in ChunkIndex
+'chunk list --doc D' lists the default text chunks. Use --type to inspect
+other representations such as summary or image_ocr. Results use ChunkIndex
 order (the per-doc ordinal assigned at ingest time). This is the
 admin/debug surface for RAG retrieval — see what the chunking pipeline
 produced, audit content, find a chunk id to view/delete.
@@ -104,6 +106,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 			return runList(c.Context(), opts, fopts, cli)
 		},
 	}
+	cmd.Flags().StringArrayVar(&opts.Types, "type", nil, "Chunk type to inspect (repeatable; server default when omitted)")
 	cmd.Flags().StringVar(&opts.DocID, "doc", "", "Document id (SDK knowledge_id) to enumerate chunks for")
 	_ = cmd.MarkFlagRequired("doc")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", defaultLimit, "Maximum results to return — client-side cap; meta.has_more/total_count report truncation (1..10000)")
@@ -150,7 +153,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	if opts.AllPages {
 		accum := make([]sdk.Chunk, 0)
 		for page := 1; ; page++ {
-			chunks, total, err := svc.ListKnowledgeChunks(ctx, opts.DocID, page, opts.PageSize)
+			chunks, total, err := svc.ListKnowledgeChunks(ctx, opts.DocID, page, opts.PageSize, opts.Types...)
 			if err != nil {
 				return cmdutil.WrapHTTP(err, "list chunks for doc %s", opts.DocID)
 			}
@@ -167,7 +170,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		}
 		items = accum
 	} else {
-		chunks, total, err := svc.ListKnowledgeChunks(ctx, opts.DocID, 1, opts.PageSize)
+		chunks, total, err := svc.ListKnowledgeChunks(ctx, opts.DocID, 1, opts.PageSize, opts.Types...)
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "list chunks for doc %s", opts.DocID)
 		}
