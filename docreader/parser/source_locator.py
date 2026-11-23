@@ -11,6 +11,7 @@ the origin at its top-left corner, so viewers can draw it at any zoom.
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from collections import Counter
 import statistics
 import unicodedata
@@ -149,12 +150,15 @@ def locate_lines(
     hits: List[Optional[int]] = []
     ends: List[Optional[int]] = []
     cursor = 0
-    counts = Counter(normalize(line) for line in line_texts)
+    keys = [normalize(line) for line in line_texts]
+    counts = Counter(keys)
     occurrences = {key: _numeric_safe_matches(norm, key) for key in counts}
-    for idx, line in enumerate(line_texts):
-        key = normalize(line)
-        if len(unicodedata.normalize("NFC", key)) < _MIN_KEY_CHARS or len(occurrences[key]) != counts[key] or (
-            _key_weight(key) < _SHORT_KEY_WEIGHT and len(occurrences[key]) > 1
+    for idx, key in enumerate(keys):
+        matches = occurrences[key]
+        if (
+            len(unicodedata.normalize("NFC", key)) < _MIN_KEY_CHARS
+            or len(matches) != counts[key]
+            or (_key_weight(key) < _SHORT_KEY_WEIGHT and len(matches) > 1)
         ):
             hits.append(None)
             ends.append(None)
@@ -166,11 +170,12 @@ def locate_lines(
                 cursors.insert(0, column)
         at = -1
         for start_at in cursors:
-            at = next((hit for hit in occurrences[key] if start_at <= hit <= start_at + _SEARCH_WINDOW), -1)
-            if at >= 0:
+            match_index = bisect_left(matches, start_at)
+            if match_index < len(matches) and matches[match_index] <= start_at + _SEARCH_WINDOW:
+                at = matches[match_index]
                 break
         if at < 0:
-            at = occurrences[key][0] if len(occurrences[key]) == 1 else -1
+            at = matches[0] if len(matches) == 1 else -1
             if at < 0:
                 hits.append(None)
                 ends.append(None)

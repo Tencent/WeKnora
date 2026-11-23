@@ -23,6 +23,19 @@ class LocateLinesTest(unittest.TestCase):
         self.assertEqual(hits[3], text.rindex("正文"))
         self.assertIsNone(hits[4])
 
+    def test_repeated_lines_keep_order_and_respect_the_search_window(self):
+        line = "Repeated source text"
+        repeated = (line + "\n") * 100
+        self.assertEqual(
+            locate_lines(repeated, [line] * 100),
+            list(range(0, len(repeated), len(line) + 1)),
+        )
+
+        # Multiple occurrences outside the window are ambiguous, so neither
+        # can use the fallback for a unique match.
+        distant = "x" * 6001 + "\n" + line + "\n" + line
+        self.assertEqual(locate_lines(distant, [line, line]), [None, None])
+
 
 class PageGeometryTest(unittest.TestCase):
     def test_flips_to_top_left_origin(self):
