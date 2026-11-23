@@ -29,7 +29,9 @@ type fakeListSvc struct {
 	callIdx int
 }
 
-func (f *fakeListSvc) ListKnowledgeChunks(_ context.Context, docID string, page, pageSize int, types ...string) ([]sdk.Chunk, int64, error) {
+func (f *fakeListSvc) ListKnowledgeChunks(
+	_ context.Context, docID string, page, pageSize int, types ...string,
+) ([]sdk.Chunk, int64, error) {
 	f.types = types
 	f.calls = append(f.calls, listCall{docID, page, pageSize})
 	defer func() { f.callIdx++ }()

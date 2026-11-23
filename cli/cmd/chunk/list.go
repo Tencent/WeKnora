@@ -106,7 +106,8 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 			return runList(c.Context(), opts, fopts, cli)
 		},
 	}
-	cmd.Flags().StringArrayVar(&opts.Types, "type", nil, "Chunk type to inspect (repeatable; server default when omitted)")
+	cmd.Flags().StringArrayVar(&opts.Types, "type", nil,
+		"Chunk type to inspect (repeatable; server default when omitted)")
 	cmd.Flags().StringVar(&opts.DocID, "doc", "", "Document id (SDK knowledge_id) to enumerate chunks for")
 	_ = cmd.MarkFlagRequired("doc")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", defaultLimit, "Maximum results to return — client-side cap; meta.has_more/total_count report truncation (1..10000)")
