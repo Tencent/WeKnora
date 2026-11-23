@@ -29,7 +29,10 @@ func TestFAQImportProgressUnmarshalsServerFields(t *testing.T) {
 		"merged_count": 1,
 		"added_count": 341,
 		"merge_details": [
-			{"index": 3, "standard_question": "q", "answer_changed": true, "new_similar_count": 2, "new_negative_count": 1}
+			{
+				"index": 3, "standard_question": "q", "answer_changed": true,
+				"new_similar_count": 2, "new_negative_count": 1
+			}
 		],
 		"next_entry_index": 342,
 		"import_mode": "append",
@@ -49,7 +52,8 @@ func TestFAQImportProgressUnmarshalsServerFields(t *testing.T) {
 	}
 
 	if got.PartialFailedCount != 3 {
-		t.Errorf("PartialFailedCount = %d, want 3 (partial failures must not read as full success)", got.PartialFailedCount)
+		t.Errorf("PartialFailedCount = %d, want 3 (partial failures must not read as full success)",
+			got.PartialFailedCount)
 	}
 	if len(got.ValidEntryIndices) != 3 || got.ValidEntryIndices[2] != 2 {
 		t.Errorf("ValidEntryIndices = %v, want [0 1 2]", got.ValidEntryIndices)
@@ -67,8 +71,10 @@ func TestFAQImportProgressUnmarshalsServerFields(t *testing.T) {
 		t.Fatalf("MergeDetails = %v, want 1 entry", got.MergeDetails)
 	}
 	d := got.MergeDetails[0]
-	if d.Index != 3 || d.StandardQuestion != "q" || !d.AnswerChanged || d.NewSimilarCount != 2 || d.NewNegativeCount != 1 {
-		t.Errorf("MergeDetails[0] = %+v, want {Index:3 StandardQuestion:q AnswerChanged:true NewSimilarCount:2 NewNegativeCount:1}", d)
+	if d.Index != 3 || d.StandardQuestion != "q" || !d.AnswerChanged ||
+		d.NewSimilarCount != 2 || d.NewNegativeCount != 1 {
+		t.Errorf("MergeDetails[0] = %+v, want {Index:3 StandardQuestion:q "+
+			"AnswerChanged:true NewSimilarCount:2 NewNegativeCount:1}", d)
 	}
 	if got.NextEntryIndex != 342 {
 		t.Errorf("NextEntryIndex = %d, want 342", got.NextEntryIndex)
@@ -78,7 +84,11 @@ func TestFAQImportProgressUnmarshalsServerFields(t *testing.T) {
 // The issue's own sample response carries "partial_failed_count": null.
 // Unmarshalling null into the new int field must not error (it reads as 0).
 func TestFAQImportProgressNullPartialFailedCount(t *testing.T) {
-	const payload = `{"task_id": "task-1", "status": "completed", "total": 342, "success_count": 342, "failed_count": 0, "partial_failed_count": null, "valid_entry_indices": [0, 1, 2], "added_count": 342, "next_entry_index": 0}`
+	const payload = `{
+		"task_id": "task-1", "status": "completed", "total": 342,
+		"success_count": 342, "failed_count": 0, "partial_failed_count": null,
+		"valid_entry_indices": [0, 1, 2], "added_count": 342, "next_entry_index": 0
+	}`
 
 	var got FAQImportProgress
 	if err := json.Unmarshal([]byte(payload), &got); err != nil {
