@@ -21,6 +21,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/Tencent/WeKnora/internal/types"
 	e2b "github.com/matiasinsaurralde/go-e2b"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -405,6 +406,81 @@ func TestE2BRemoteClientProviderAndCapabilities(t *testing.T) {
 		SupportsTerminals:             true,
 		SupportsDesktop:               true,
 	}, client.Capabilities())
+}
+
+func TestE2BRemoteClientControlPlaneBearerFallback(t *testing.T) {
+	const apiKey = "control-plane-key"
+	var catalogCalls, createCalls atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var call int32
+		switch req.URL.Path {
+		case "/templates":
+			call = catalogCalls.Add(1)
+			assert.Equal(t, http.MethodGet, req.Method)
+		case "/sandboxes":
+			call = createCalls.Add(1)
+			assert.Equal(t, http.MethodPost, req.Method)
+			var body struct {
+				TemplateID string `json:"templateID"`
+			}
+			assert.NoError(t, json.NewDecoder(req.Body).Decode(&body))
+			assert.Equal(t, "template-a", body.TemplateID)
+		default:
+			http.NotFound(w, req)
+			return
+		}
+		assert.Equal(t, apiKey, req.Header.Get("X-API-Key"))
+		if call == 1 {
+			assert.Empty(t, req.Header.Get("Authorization"))
+			writeJSON(w, http.StatusUnauthorized, map[string]any{
+				"code": 401, "message": "authorization header is missing",
+			})
+			return
+		}
+		assert.Equal(t, "Bearer "+apiKey, req.Header.Get("Authorization"))
+		if req.URL.Path == "/templates" {
+			writeJSON(w, http.StatusOK, []map[string]string{{"templateID": "template-a"}})
+		} else {
+			writeJSON(w, http.StatusCreated, map[string]string{"sandboxID": "sandbox-a"})
+		}
+	}))
+	t.Cleanup(provider.Close)
+	client, err := NewE2BRemoteClient(&Config{E2BAPIURL: provider.URL, E2BAPIKey: apiKey})
+	require.NoError(t, err)
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, "template-a", templates[0].ID)
+	handle, err := client.Create(context.Background(), RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+	require.Equal(t, "sandbox-a", handle.ID())
+	require.Equal(t, int32(2), catalogCalls.Load())
+	require.Equal(t, int32(2), createCalls.Load())
+}
+
+func TestE2BRemoteClientDoesNotRetryBearerOutsideControlPlane(t *testing.T) {
+	var otherCalls atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		otherCalls.Add(1)
+		assert.Empty(t, req.Header.Get("Authorization"))
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"code": 401, "message": "authorization header is missing",
+		})
+	}))
+	t.Cleanup(other.Close)
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		http.Redirect(w, req, other.URL+req.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(provider.Close)
+
+	client, err := NewE2BRemoteClient(&Config{E2BAPIURL: provider.URL, E2BAPIKey: "control-plane-key"})
+	require.NoError(t, err)
+	err = client.Health(context.Background())
+	var remoteErr *RemoteError
+	require.ErrorAs(t, err, &remoteErr)
+	require.Equal(t, RemoteErrorKindAuthentication, remoteErr.Kind)
+	require.Contains(t, remoteErr.Message, "authorization header is missing")
+	require.Equal(t, int32(1), otherCalls.Load())
 }
 
 func TestE2BRemoteClientCreateSnapshot(t *testing.T) {

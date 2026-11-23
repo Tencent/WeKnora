@@ -5,12 +5,14 @@
 package sandbox
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -106,6 +108,12 @@ func newE2BRemoteClient(
 	// would register tokens that no HTTP stack consults. A pool-built split
 	// that already owns the same registry is left as-is.
 	transport = attachInboundTokenTransport(transport, inboundTokens)
+	// Resolve the same defaults as the SDK so the auth fallback can be scoped
+	// to the actual control-plane endpoint, including environment overrides.
+	apiBaseURL := cmp.Or(strings.TrimSpace(cfg.E2BAPIURL), os.Getenv("E2B_API_URL"), e2b.DefaultAPIBaseURL)
+	if endpoint, err := url.Parse(apiBaseURL); err == nil && endpoint.Host != "" {
+		transport = &e2bControlPlaneAuthTransport{next: transport, endpoint: endpoint}
+	}
 	// Every E2B client speaks to envd through the compatibility shim, whether
 	// or not a gateway is configured: the two details it rewrites belong to the
 	// envd protocol itself, not to any one deployment. See envd_compat_transport.go.
@@ -119,7 +127,7 @@ func newE2BRemoteClient(
 	}
 	client, err := e2b.NewClient(e2b.ClientConfig{
 		APIKey:        cfg.E2BAPIKey,
-		APIBaseURL:    strings.TrimSpace(cfg.E2BAPIURL),
+		APIBaseURL:    apiBaseURL,
 		SandboxDomain: strings.TrimSpace(cfg.E2BSandboxDomain),
 		HTTPClient:    httpClient,
 	})
