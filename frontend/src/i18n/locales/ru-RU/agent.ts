@@ -864,6 +864,8 @@ export default {
       sectionChannel: 'Информация о канале',
       sectionConnection: 'Подключение',
       sectionCredentials: 'Учётные данные платформы',
+      replaceCredentialsHint: 'При сохранении заменяются все учётные данные. Заново укажите необязательные параметры, которые хотите сохранить.',
+      missingCredentials: 'Заполните обязательные поля учётных данных: {fields}',
       selectPlatform: 'Выберите платформу',
       selectPlatformDesc: 'Выберите платформу обмена сообщениями для подключения',
       enabled: 'Включить канал',

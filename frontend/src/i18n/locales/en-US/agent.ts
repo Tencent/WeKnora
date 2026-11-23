@@ -1931,6 +1931,8 @@ export default {
       sectionChannel: 'Channel info',
       sectionConnection: 'Connection',
       sectionCredentials: 'Platform credentials',
+      replaceCredentialsHint: 'Saving replaces all stored credential fields. Re-enter any optional settings you want to keep.',
+      missingCredentials: 'Enter the required credentials: {fields}',
       selectPlatform: 'Select platform',
       selectPlatformDesc: 'Choose the messaging platform to connect',
       enabled: 'Enable channel',

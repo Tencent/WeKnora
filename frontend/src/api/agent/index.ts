@@ -363,8 +363,10 @@ export interface IMChannel {
   updated_at?: string;
 }
 
+export type IMChannelSummary = Omit<IMChannel, 'credentials'> & { credentials_configured: boolean };
+
 export function listIMChannels(agentId: string) {
-  return get<{ data: IMChannel[] }>(`/api/v1/agents/${agentId}/im-channels`);
+  return get<{ data: IMChannelSummary[] }>(`/api/v1/agents/${agentId}/im-channels`);
 }
 
 // Tenant-wide overview row. Credentials are intentionally omitted — use

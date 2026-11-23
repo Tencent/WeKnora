@@ -1931,6 +1931,8 @@ export default {
       sectionChannel: 'チャネル情報',
       sectionConnection: '接続',
       sectionCredentials: 'プラットフォームの認証情報',
+      replaceCredentialsHint: '保存すると認証情報一式が置き換わります。保持する任意設定も再入力してください。',
+      missingCredentials: '必須の認証情報を入力してください：{fields}',
       selectPlatform: 'プラットフォームを選択',
       selectPlatformDesc: '接続するメッセージングプラットフォームを選択します',
       enabled: 'チャネルを有効化',

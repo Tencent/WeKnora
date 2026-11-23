@@ -864,6 +864,8 @@ export default {
       sectionChannel: '채널 정보',
       sectionConnection: '연결 설정',
       sectionCredentials: '플랫폼 자격 증명',
+      replaceCredentialsHint: '저장하면 기존 인증 정보 전체가 교체됩니다. 유지할 선택 설정도 다시 입력하세요.',
+      missingCredentials: '필수 인증 정보를 입력하세요: {fields}',
       selectPlatform: '플랫폼 선택',
       selectPlatformDesc: '연결할 메시징 플랫폼을 선택하세요',
       enabled: '채널 활성화',

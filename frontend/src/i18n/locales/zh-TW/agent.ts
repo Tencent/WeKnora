@@ -864,6 +864,8 @@ export default {
       sectionChannel: '通路資訊',
       sectionConnection: '連結設定',
       sectionCredentials: '平台憑證',
+      replaceCredentialsHint: '儲存後將取代整組憑證。請重新填寫要保留的選用設定。',
+      missingCredentials: '請填寫必要的憑證欄位：{fields}',
       selectPlatform: '選擇平台',
       selectPlatformDesc: '選擇要接入的即時通訊平台',
       enabled: '啟用通路',

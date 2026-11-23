@@ -864,6 +864,8 @@ export default {
       sectionChannel: '渠道信息',
       sectionConnection: '连接设置',
       sectionCredentials: '平台凭证',
+      replaceCredentialsHint: '保存后将替换整组凭据。请重新填写需要保留的可选设置。',
+      missingCredentials: '请填写必需的凭据字段：{fields}',
       selectPlatform: '选择平台',
       selectPlatformDesc: '选择要接入的即时通讯平台',
       enabled: '启用渠道',
