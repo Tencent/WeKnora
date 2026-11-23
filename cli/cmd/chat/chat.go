@@ -45,6 +45,7 @@ var chatFields = []string{
 }
 
 type Options struct {
+	ModelID   string
 	Query     string
 	KBID      string
 	SessionID string
@@ -110,6 +111,7 @@ both flags for the complete projected stream.`,
 		},
 	}
 	cmdutil.AddKBFlag(cmd)
+	cmd.Flags().StringVar(&opts.ModelID, "model-id", "", "Chat model ID for this question (overrides the default)")
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.Reference, "reference", false, "Include indexed references in JSON/text output")
 	cmd.Flags().BoolVar(&opts.Verbose, "verbose", false, "Include reasoning, tools, and lifecycle events in JSON/text output")
@@ -205,6 +207,7 @@ func runChatNDJSON(ctx context.Context, opts *Options, sessionID string, svc Cha
 	req := &sdk.KnowledgeQARequest{
 		Query:            opts.Query,
 		KnowledgeBaseIDs: []string{opts.KBID},
+		SummaryModelID:   opts.ModelID,
 		AgentEnabled:     false,
 		WebSearchEnabled: false,
 		Channel:          "api",
@@ -229,6 +232,7 @@ func runChatText(ctx context.Context, opts *Options, sessionID string, autoCreat
 	req := &sdk.KnowledgeQARequest{
 		Query:            opts.Query,
 		KnowledgeBaseIDs: []string{opts.KBID},
+		SummaryModelID:   opts.ModelID,
 		AgentEnabled:     false,
 		WebSearchEnabled: false,
 		Channel:          "api",
@@ -286,6 +290,7 @@ func runChatJSON(ctx context.Context, opts *Options, fopts *cmdutil.FormatOption
 	req := &sdk.KnowledgeQARequest{
 		Query:            opts.Query,
 		KnowledgeBaseIDs: []string{opts.KBID},
+		SummaryModelID:   opts.ModelID,
 		AgentEnabled:     false,
 		WebSearchEnabled: false,
 		Channel:          "api",
