@@ -135,6 +135,7 @@ func TestFetch_DuplicateURL_Maps_resource_already_exists(t *testing.T) {
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, cmdutil.CodeResourceAlreadyExists, typed.Code)
+	assert.Equal(t, map[string]string{"knowledge_id": "doc_existing"}, typed.Detail)
 }
 
 func TestFetch_ServerError_Wraps(t *testing.T) {

@@ -133,13 +133,14 @@ func TestUpload_HTTPError_409Conflict(t *testing.T) {
 func TestUpload_DuplicateFileMaps_resource_already_exists(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	path := writeTempFile(t, "dup.md")
-	svc := &fakeUploadSvc{err: sdk.ErrDuplicateFile}
+	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_existing"}, err: sdk.ErrDuplicateFile}
 	err := runUpload(context.Background(), &UploadOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, cmdutil.CodeResourceAlreadyExists, typed.Code)
+	assert.Equal(t, map[string]string{"knowledge_id": "doc_existing"}, typed.Detail)
 }
 
 func TestValidateUploadPath_NotFound(t *testing.T) {

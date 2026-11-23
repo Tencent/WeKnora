@@ -307,10 +307,17 @@ func runUpload(ctx context.Context, opts *UploadOptions, fopts *cmdutil.FormatOp
 			// SDK returns sentinel without an "HTTP error <status>:" prefix
 			// (the duplicate is detected by file hash, not by status code),
 			// so WrapHTTP would misclassify it as network.error.
-			return cmdutil.Wrapf(cmdutil.CodeResourceAlreadyExists, err,
-				"file already uploaded to this knowledge base")
+			return existingDocumentError(err, k, "file already uploaded to this knowledge base")
 		}
 		return cmdutil.WrapHTTP(err, "upload %s", path)
 	}
 	return renderUploadSuccess(k, fopts, "Uploaded", opts.Name, path)
+}
+
+func existingDocumentError(cause error, k *sdk.Knowledge, message string) *cmdutil.Error {
+	err := cmdutil.Wrapf(cmdutil.CodeResourceAlreadyExists, cause, "%s", message)
+	if k != nil && k.ID != "" {
+		err.WithDetail(map[string]string{"knowledge_id": k.ID})
+	}
+	return err
 }
