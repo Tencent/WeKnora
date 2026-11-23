@@ -415,7 +415,10 @@ func TestCarryTrailingHeadings(t *testing.T) {
 func TestCarryTrailingHeadings_LeavesChunksAlone(t *testing.T) {
 	cases := map[string][]Chunk{
 		// would exceed the budget of the receiving chunk
-		"over budget": {{Content: "a\n\n## H\n", Start: 0, End: 8}, {Content: strings.Repeat("b", 10), Start: 8, End: 18}},
+		"over budget": {
+			{Content: "a\n\n## H\n", Start: 0, End: 8},
+			{Content: strings.Repeat("b", 10), Start: 8, End: 18},
+		},
 		// overlapping (not adjacent) chunks are never touched
 		"overlap": {{Content: "a\n\n## H\n", Start: 0, End: 8}, {Content: "## H\nbody", Start: 4, End: 13}},
 		// a chunk that is only a heading is not emptied
