@@ -587,7 +587,10 @@ func ValidateStdioCommand(command string) error {
 
 	// Check against whitelist
 	if !AllowedStdioCommands[baseCommand] {
-		return fmt.Errorf("command '%s' is not in the allowed list. Allowed commands: %s", baseCommand, allowedStdioCommandsString())
+		return fmt.Errorf(
+			"command '%s' is not in the allowed list. Allowed commands: %s",
+			baseCommand, allowedStdioCommandsString(),
+		)
 	}
 
 	// Additional check: command should not contain path traversal

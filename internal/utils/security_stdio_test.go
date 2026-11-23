@@ -92,7 +92,10 @@ func TestAllowedStdioCommandsString(t *testing.T) {
 	// Sorted, comma-separated, and covers every whitelist entry.
 	names := strings.Split(got, ", ")
 	if len(names) != len(AllowedStdioCommands) {
-		t.Fatalf("allowedStdioCommandsString() = %q lists %d names, want %d", got, len(names), len(AllowedStdioCommands))
+		t.Fatalf(
+			"allowedStdioCommandsString() = %q lists %d names, want %d",
+			got, len(names), len(AllowedStdioCommands),
+		)
 	}
 	for _, name := range names {
 		if !AllowedStdioCommands[name] {
