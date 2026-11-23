@@ -290,6 +290,8 @@ export default {
     upload: '파일 업로드'
   },
   common: {
+    quickUse: '바로 사용',
+    quickUseResource: '{name}(으)로 대화 시작',
     add: '추가',
     me: '나',
     confirm: '확인',

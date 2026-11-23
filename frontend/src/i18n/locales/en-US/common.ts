@@ -355,6 +355,8 @@ export default {
     sharedTooltip: 'Accessed from an external workspace via a shared space'
   },
   common: {
+    quickUse: 'Quick use',
+    quickUseResource: 'Start a chat with {name}',
     add: 'Add',
     me: 'Me',
     confirm: 'Confirm',

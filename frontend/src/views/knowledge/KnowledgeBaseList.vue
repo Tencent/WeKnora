@@ -257,6 +257,7 @@
                 <div v-if="!authStore.isLiteMode && showKbOriginBadge(kb)" class="bottom-right">
                   <ResourceOriginBadge :variant="kbOriginVariant(kb)" :creator-name="kb.creator_name" />
                 </div>
+                <ResourceQuickUse :knowledge-base-id="kb.id" :resource-name="kb.name" :disabled="!isInitialized(kb)" />
               </div>
             </div>
 
@@ -335,6 +336,7 @@
                     </div>
                   </t-tooltip>
                 </div>
+                <ResourceQuickUse :knowledge-base-id="kb.id" :resource-name="kb.name" />
               </div>
             </div>
           </template>
@@ -490,6 +492,7 @@
                 <div v-if="!authStore.isLiteMode && showKbOriginBadge(kb)" class="bottom-right">
                   <ResourceOriginBadge :variant="kbOriginVariant(kb)" :creator-name="kb.creator_name" />
                 </div>
+                <ResourceQuickUse :knowledge-base-id="kb.id" :resource-name="kb.name" :disabled="!isInitialized(kb)" />
               </div>
             </div>
           </template>
@@ -589,6 +592,7 @@
                     </div>
                   </div>
                 </div>
+                <ResourceQuickUse :knowledge-base-id="shared.knowledge_base.id" :resource-name="shared.knowledge_base.name" />
               </div>
             </div>
           </template>
@@ -731,6 +735,7 @@ import KbWikiBadge from './components/KbWikiBadge.vue'
 import KbTypeAvatar from './components/KbTypeAvatar.vue'
 import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
+import ResourceQuickUse from '@/components/ResourceQuickUse.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
 import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
 import { permissionCanManageKB } from '@/utils/kbPermission'
