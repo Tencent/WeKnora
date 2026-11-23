@@ -58,10 +58,13 @@ func (c *PaddleOCRVLReader) Read(ctx context.Context, req *types.ReadRequest) (*
 	logger.Infof(context.Background(), "[PaddleOCR-VL] Parsing file=%s size=%d via %s",
 		req.FileName, len(content), c.endpoint)
 
-	mdContent, imagesB64, layoutUnits, err := c.callLayoutParsing(ctx, req, content)
+	mdContent, imagesB64, pages, err := c.callLayoutParsing(ctx, req, content)
 	if err != nil {
 		return nil, fmt.Errorf("PaddleOCR-VL layout-parsing: %w", err)
 	}
+
+	originalMarkdown := mdContent
+	sourceBlocks := paddleOCRVLSourceBlocks(pages, req.FileType)
 
 	// PaddleOCR-VL renders tables as styled HTML (per-cell text-align), which
 	// wastes tokens and defeats the chunker's table-protection logic. Convert
@@ -78,7 +81,7 @@ func (c *PaddleOCRVLReader) Read(ctx context.Context, req *types.ReadRequest) (*
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
-		SourceBlocks:    paddleOCRVLSourceBlocks(mdContent, layoutUnits, req.FileType),
+		SourceBlocks:    sourceloc.RemapBlocks(sourceBlocks, originalMarkdown, mdContent),
 	}, nil
 }
 
@@ -139,7 +142,7 @@ type paddleOCRVLResponse struct {
 
 func (c *PaddleOCRVLReader) callLayoutParsing(
 	ctx context.Context, req *types.ReadRequest, content []byte,
-) (string, map[string]string, []sourceloc.Unit, error) {
+) (string, map[string]string, []paddleOCRVLPage, error) {
 	payload := paddleOCRVLRecognitionParams(c.useSeal, c.useChart)
 	payload["file"] = base64.StdEncoding.EncodeToString(content)
 	payload["fileType"] = fileTypeCode(req)
@@ -194,9 +197,7 @@ func (c *PaddleOCRVLReader) callLayoutParsing(
 	// Merge per-page markdown and image dicts into one document.
 	texts := make([]string, 0, len(pages))
 	images := make(map[string]string)
-	var units []sourceloc.Unit
-	for i, p := range pages {
-		units = append(units, paddleOCRVLPageUnits(i+1, p)...)
+	for _, p := range pages {
 		if t := strings.TrimSpace(p.Markdown.Text); t != "" {
 			texts = append(texts, p.Markdown.Text)
 		}
@@ -208,7 +209,7 @@ func (c *PaddleOCRVLReader) callLayoutParsing(
 	}
 
 	logger.Infof(context.Background(), "[PaddleOCR-VL] parsed %d page(s), images=%d", len(pages), len(images))
-	return strings.Join(texts, "\n\n"), images, units, nil
+	return strings.Join(texts, "\n\n"), images, pages, nil
 }
 
 // processImages decodes the inline base64 images returned by PaddleOCR-VL and

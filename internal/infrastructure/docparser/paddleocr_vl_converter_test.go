@@ -2,6 +2,7 @@ package docparser
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -10,9 +11,78 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
+
+func TestPaddleOCRVLReadersPreservePageBounds(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1,localhost")
+	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
+	pages := []paddleOCRVLPage{
+		paddleOCRVLTestPage(t, "# Repeated heading\n\nfirst body\n\n<table><tr><th>项目</th><th>值</th></tr><tr><td>甲</td><td>42</td></tr></table>",
+			"first body", "unmatched layout"),
+		paddleOCRVLTestPage(t, "\n "),
+		paddleOCRVLTestPage(t, "# Repeated heading\n\nthird body", "Repeated heading", "third body"),
+	}
+	for _, mode := range []string{"local", "cloud"} {
+		t.Run(mode, func(t *testing.T) {
+			var server *httptest.Server
+			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/layout-parsing":
+					var response paddleOCRVLResponse
+					response.Result.LayoutParsingResults = pages
+					_ = json.NewEncoder(w).Encode(response)
+				case "/jobs":
+					_, _ = io.WriteString(w, `{"data":{"jobId":"test"}}`)
+				case "/jobs/test":
+					_ = json.NewEncoder(w).Encode(map[string]interface{}{
+						"data": map[string]interface{}{
+							"state": "done", "resultUrl": map[string]string{"jsonUrl": server.URL + "/results"},
+						},
+					})
+				case "/results":
+					for _, page := range pages {
+						var line paddleOCRVLCloudResultLine
+						line.Result.LayoutParsingResults = []paddleOCRVLPage{page}
+						_ = json.NewEncoder(w).Encode(line)
+					}
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			req := &types.ReadRequest{FileName: "test.pdf", FileType: "pdf", FileContent: []byte("test")}
+			var result *types.ReadResult
+			var err error
+			if mode == "local" {
+				reader := NewPaddleOCRVLReader(map[string]string{"paddleocr_vl_endpoint": server.URL})
+				result, err = reader.Read(ctx, req)
+			} else {
+				reader := NewPaddleOCRVLCloudReader(map[string]string{
+					"paddleocr_vl_cloud_base_url": server.URL + "/jobs", "paddleocr_vl_cloud_token": "test-token",
+				})
+				result, err = reader.Read(ctx, req)
+			}
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Empty(t, result.Error)
+			require.NotContains(t, result.MarkdownContent, "<table>")
+			require.Len(t, result.SourceBlocks, 5)
+			paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "first body", 1, true)
+			paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "42", 1, false)
+			paddleOCRVLTestLocator(t, result.MarkdownContent, result.SourceBlocks, "third body", 3, true)
+			require.Equal(t, 3, result.SourceBlocks[3].Locator.Page)
+			require.Equal(t, []float64{0.1, 0.1, 0.9, 0.2}, result.SourceBlocks[3].Locator.BBox)
+		})
+	}
+}
 
 func TestPaddleOCRVLTimeoutConfig(t *testing.T) {
 	for _, tt := range []struct {

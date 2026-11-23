@@ -29,7 +29,7 @@ type paddleOCRVLLayout struct {
 }
 
 // paddleOCRVLPageUnits lists a page's layout blocks, each boxed in page
-// fractions, for aligning against the merged markdown. Without layout
+// fractions, for aligning against that page's markdown. Without layout
 // blocks the page's markdown paragraphs are listed with the page alone.
 func paddleOCRVLPageUnits(pageNumber int, page paddleOCRVLPage) []sourceloc.Unit {
 	pageOnly := types.SourceLocator{Type: types.SourceLocatorPDF, Page: pageNumber}
@@ -61,14 +61,48 @@ func paddleOCRVLPageUnits(pageNumber int, page paddleOCRVLPage) []sourceloc.Unit
 	return units
 }
 
-// paddleOCRVLSourceBlocks aligns layout units against the final markdown
-// for file types a viewer shows page by page.
-func paddleOCRVLSourceBlocks(markdown string, units []sourceloc.Unit, fileType string) []types.SourceBlock {
+// paddleOCRVLSourceBlocks aligns each page independently, so repeated text
+// and omitted layout blocks cannot affect another page's matches. Unmatched
+// markdown has a known page but no reliable box. Offsets follow the readers'
+// nonempty-page join; callers remap these blocks after rewriting the markdown.
+func paddleOCRVLSourceBlocks(pages []paddleOCRVLPage, fileType string) []types.SourceBlock {
 	ft := strings.ToLower(strings.TrimPrefix(fileType, "."))
 	if ft != "pdf" && !IsImageFormat(ft) {
 		return nil
 	}
-	return sourceloc.Align(markdown, units)
+	var blocks []types.SourceBlock
+	offset := 0
+	for i, page := range pages {
+		if strings.TrimSpace(page.Markdown.Text) == "" {
+			continue
+		}
+		if offset > 0 {
+			offset += 2 // strings.Join(texts, "\n\n")
+		}
+		runes := []rune(page.Markdown.Text)
+		appendGap := func(start, end int) {
+			if strings.TrimSpace(string(runes[start:end])) != "" {
+				blocks = append(blocks, types.SourceBlock{
+					Start: offset + start,
+					End:   offset + end,
+					Locator: types.SourceLocator{
+						Type: types.SourceLocatorPDF, Page: i + 1, Mapping: "exact",
+					},
+				})
+			}
+		}
+		end := 0
+		for _, block := range sourceloc.Align(page.Markdown.Text, paddleOCRVLPageUnits(i+1, page)) {
+			appendGap(end, block.Start)
+			end = block.End
+			block.Start += offset
+			block.End += offset
+			blocks = append(blocks, block)
+		}
+		appendGap(end, len(runes))
+		offset += len(runes)
+	}
+	return blocks
 }
 
 func clampUnit(v float64) float64 {
