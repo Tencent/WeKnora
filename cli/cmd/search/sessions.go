@@ -3,7 +3,6 @@ package search
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -98,7 +97,7 @@ to stop after one page.`,
 		UsedFor:       "Find chat sessions by title or description (client-side case-insensitive substring match). Results come with meta.count; use --limit to cap and --all-pages=false to stop after one page.",
 		RequiredFlags: []string{"<query> (positional)"},
 		Examples:      []string{`weknora search sessions "onboarding" --format json`},
-		Output:   "envelope.data is an array of Session objects with id, title, updated_at; meta.count is the returned count; meta.has_more=true if more matched than --limit",
+		Output:        "envelope.data is an array of Session objects with id, title, updated_at; meta.count is the returned count; meta.has_more=true if more matched than --limit",
 	})
 	return cmd
 }
@@ -139,7 +138,7 @@ func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, fopts *
 		}
 	}
 done:
-	sortSessionsByRecency(matches)
+	// GetSessionsByTenant already orders by updated_at descending across pages.
 	truncated := opts.Limit > 0 && len(matches) > opts.Limit
 	if truncated {
 		matches = matches[:opts.Limit]
@@ -173,14 +172,4 @@ done:
 // lowercased by caller).
 func matchSession(s sdk.Session, needle string) bool {
 	return text.ContainsFold(needle, s.Title, s.Description)
-}
-
-// sortSessionsByRecency sorts in place by UpdatedAt desc. Server returns
-// strings; we compare lexically - RFC3339 timestamps sort correctly that
-// way, and a stable order is enough for output determinism even if a
-// non-conforming string slips through.
-func sortSessionsByRecency(items []sdk.Session) {
-	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].UpdatedAt > items[j].UpdatedAt
-	})
 }
