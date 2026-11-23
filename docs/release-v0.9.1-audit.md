@@ -15,7 +15,7 @@
 | 官网图文、升级与回退 | [v0.9.1 版本说明](../website-docs/07-releases/v0.9.1.md) |
 | 给用户群、GitHub Release、社区跟帖 | [公告正文](release-v0.9.1-announcement.md) |
 | 英文变化记录 | [CHANGELOG](../CHANGELOG.md) |
-| 首页三个产品场景 | [官网首页](../website-docs/homepage/app/page.tsx) |
+| 首页四个产品场景 | [官网首页](../website-docs/homepage/app/page.tsx) |
 | README 入口 | [中文](../README_CN.md) · [English](../README.md) · [日本語](../README_JA.md) · [한국어](../README_KO.md) |
 | 独立官网包和部署步骤 | 运行 `npm run package:site` 得到 `website-docs/releases/weknora-site-v0.9.1.tar.gz`。[部署指南](../website-docs/README.md) |
 
@@ -25,20 +25,22 @@
 | --- | --- | --- |
 | 语音输入 | 普通聊天复用智能体的「语音上传」和 ASR 模型配置。按住录音，松开转写，编辑后由用户发送 | [#4804](https://github.com/Tencent/WeKnora/pull/4804) |
 | 图像与搜索 | 编辑已有 OCR 和说明，按 PDF 原页排列，通过 API 以图查询，搜索命中定位到原文，引用显示知识库 | [#4942](https://github.com/Tencent/WeKnora/pull/4942) · [#4649](https://github.com/Tencent/WeKnora/pull/4649) · [#4823](https://github.com/Tencent/WeKnora/pull/4823) · [#5177](https://github.com/Tencent/WeKnora/pull/5177) · [#5343](https://github.com/Tencent/WeKnora/pull/5343) |
-| 桌面与登录 | 支持会话隔离桌面的沙箱中，同一会话的桌面和智能体共用浏览器。个人凭据保险库和安全表单负责处理登录信息。Lite 可以按会话启用模型审查，工作区外的写入授权绑定文件与内容 | [#4785](https://github.com/Tencent/WeKnora/pull/4785) · [#5035](https://github.com/Tencent/WeKnora/pull/5035) · [#5047](https://github.com/Tencent/WeKnora/pull/5047) · [#5050](https://github.com/Tencent/WeKnora/pull/5050) |
+| 桌面与登录 | 支持会话隔离桌面的沙箱中，同一会话的桌面和智能体共用浏览器。Lite 可以按会话启用模型审查，工作区外的写入授权绑定文件与内容 | [#4785](https://github.com/Tencent/WeKnora/pull/4785) · [#5035](https://github.com/Tencent/WeKnora/pull/5035) · [#5050](https://github.com/Tencent/WeKnora/pull/5050) |
+| 个人凭据保险库 | 每人每个空间单独保存网站登录信息。默认仅用一次，用户也可保存并在同站点再次请求登录时主动选用。密码加密保存，填写范围受这条凭据和本次请求共同限制 | [#5047](https://github.com/Tencent/WeKnora/pull/5047) |
 | 知识库与 Wiki | 批量重解析保留旧索引到读取结束、开始替换分块时。重处理会保留 Wiki 来源，支持关闭自动生成，问题生成模型可单独配置 | [#5024](https://github.com/Tencent/WeKnora/pull/5024) · [#5186](https://github.com/Tencent/WeKnora/pull/5186) · [#4707](https://github.com/Tencent/WeKnora/pull/4707) · [#4718](https://github.com/Tencent/WeKnora/pull/4718) |
 | 数据源 | 新增 Nextcloud 的 WebDAV 同步，Confluence 处理附件与表格，Notion 改善嵌套内容读取 | [#4601](https://github.com/Tencent/WeKnora/pull/4601) · [#4953](https://github.com/Tencent/WeKnora/pull/4953) · [#4795](https://github.com/Tencent/WeKnora/pull/4795) · [#5042](https://github.com/Tencent/WeKnora/pull/5042) |
 | 文件选择与访客 | 提及文件可按目录浏览。嵌入访客能在当前浏览器续聊，签名访客可删除自己的会话 | [#4700](https://github.com/Tencent/WeKnora/pull/4700) · [#4631](https://github.com/Tencent/WeKnora/pull/4631) · [#5715](https://github.com/Tencent/WeKnora/pull/5715) |
 | 运维、部署与官网 | 开启自动迁移时按实际向量维度在后台建 HNSW 索引，另有文档进度、连接池、Helm Pod 注解、子路径部署、构建版本展示、社区案例 | [#3364](https://github.com/Tencent/WeKnora/pull/3364) · [#4732](https://github.com/Tencent/WeKnora/pull/4732) · [#4349](https://github.com/Tencent/WeKnora/pull/4349) · [#5159](https://github.com/Tencent/WeKnora/pull/5159) · [#4977](https://github.com/Tencent/WeKnora/pull/4977) · [#4769](https://github.com/Tencent/WeKnora/pull/4769) · [#4902](https://github.com/Tencent/WeKnora/pull/4902) |
 
-官网首页、版本图文、四种语言 README 和群公告突出语音输入、会话浏览器和知识检索。以图检索属于 API，全局搜索展示命中原文。已有功能的小项改动归入英文变更记录和各自的使用手册。
+官网首页、版本图文、四种语言 README 和群公告突出语音输入、会话浏览器、个人凭据保险库和知识检索。以图检索属于 API，全局搜索展示命中原文。已有功能的小项改动归入英文变更记录和各自的使用手册。
 
 ## 配图与视频
 
-五张 PNG 均来自候选版 Vue 前端，演示账号、域名和资料使用虚构的「周末读书会」数据。每张原图为 **1920 × 1056**，官网和文档引用的同名文件逐字节一致。
+七张 PNG 均来自候选版 Vue 前端，演示账号、域名和资料使用虚构的「周末读书会」数据。每张原图为 **1920 × 1056**，官网和文档引用的同名文件逐字节一致。
 
 - [按住录音](../website-docs/public/screenshots/release-v091-voice.png)与[可编辑的草稿](../website-docs/public/screenshots/release-v091-dictation.png)展示同一次操作的前后状态。真实浏览器使用测试麦克风录制，实际生成并上传 WAV。本地接口返回示例转写，已确认文字留在输入框，没有发起聊天请求。
 - [安全登录表单](../website-docs/public/screenshots/release-v091-login.png)展示当前任务请求登录的域名和表单。演示只展示填写入口。
+- [选用账号](../website-docs/public/screenshots/release-v091-vault-fill.png)和[个人保险库](../website-docs/public/screenshots/release-v091-vault.png)使用同一个虚构账号。在真实候选前端选中已保存的账号并点击「填写」，本地测试接口收到条目 ID，未收到密码。真实第三方站点的登录仍在封版验收范围内。
 - [全局搜索](../website-docs/public/screenshots/release-v091-search.png)与[定位原文](../website-docs/public/screenshots/release-v091-source.png)来自同一次点击，展示报名截止时间及上下文。以图检索的接口条件在相邻正文中说明。
 
 视频区继续提供一个播放器，默认 v0.9.0 英文片，可切换原有产品全览。v0.9.0 版本页、成片、字幕和封面继续使用原路径。
@@ -59,11 +61,11 @@
 | 检查 | 结果 |
 | --- | --- |
 | 前端 | Node 24 下类型检查与生产构建通过。单测 2,891 项通过，1 项跳过。 |
-| 官网与嵌入文档 | 检查 83 篇 Markdown 的 420 个内部链接、60 幅 Mermaid 图。静态站 86 页、442 个本地路由或资源检查通过。助手内置文档解析和引用锚点测试通过。 |
+| 官网与嵌入文档 | 检查 83 篇 Markdown 的 422 个内部链接、60 幅 Mermaid 图。静态站 86 页、446 个本地路由或资源检查通过。助手内置文档解析和引用锚点测试通过。 |
 | 首页与历史影片 | 浏览器集成测试通过，覆盖发布区导航、旧影片播放与切换、同标签页返回、移动端菜单。静态包内原片与仓库中的 v0.9.0 视频校验值相同。 |
 | 版本与部署 | 核对应用与官网 VERSION、两个 npm 包及其锁文件、四种语言 README 链接。Helm 3.19.0 lint 和 12 项 chart 测试通过，默认三个应用镜像均为 `v0.9.1`，显式标签可覆盖。Compose 渲染出 app、ui、docreader、sandbox 的同版镜像名。镜像发布后还需实际拉取。 |
-| 重点能力 | 语音录制与快捷键、WAV 编码、来源定位及搜索反馈的 50 项前端测试通过。Go 回归覆盖转写所用模型、共享智能体所属空间、以图检索、重解析替换时机与 PostgreSQL HNSW 索引。前轮另覆盖数据源、凭据、Wiki 配置和模型厂商注册表。 |
-| 交付包 | 检查静态 tar.gz 的新旧发布页、原视频、五张图及对应首页副本。检查公告中的版本链接与 5 个公开锚点，逐行核对两份 TSV 与 Git 输出一致。 |
+| 重点能力 | 语音录制与快捷键、WAV 编码、来源定位及搜索反馈的 50 项前端测试通过。Go 回归覆盖转写所用模型、共享智能体所属空间、以图检索、重解析替换时机与 PostgreSQL HNSW 索引。本轮另有 7 项凭据表单前端用例通过，Go 用例覆盖加密存取、归属、域名交集、仅用一次和选用已存账号。前轮另覆盖数据源、Wiki 配置和模型厂商注册表。 |
+| 交付包 | 检查静态 tar.gz 的新旧发布页、原视频、七张图及对应首页副本。检查公告中的版本链接与 6 个公开锚点，逐行核对两份 TSV 与 Git 输出一致。 |
 
 ## 文档核对范围
 

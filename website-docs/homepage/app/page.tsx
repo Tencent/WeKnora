@@ -47,9 +47,17 @@ const releaseSlides = [
   },
   {
     name: "沙箱浏览器", icon: "browser", title: "你完成登录，智能体接着操作",
-    description: "在会话的沙箱桌面登录网站，智能体就能接着用同一个浏览器办事。需要填写账号密码时，也可以通过对话中的安全表单提交。",
+    description: "在当前会话的沙箱桌面登录网站，再回到对话，智能体就能接着用刚才的页面办事。不同会话各自保留自己的桌面和登录状态。",
     image: "release-v091-login", alt: "在读书会报名对话里为指定网站填写安全登录表单",
     link: guide("07-releases/v0.9.1") + "#sandbox",
+  },
+  {
+    name: "凭据保险库", icon: "shield", title: "下次登录，直接选已保存的账号",
+    description: "常用网站的账号可以存进个人保险库。智能体请求登录时，你选择账号、核对域名，再点「填写」。在设置里可以更换密码、调整允许的域名或删除账号。",
+    shots: [
+      { label: "选用账号", icon: "browser", image: "release-v091-vault-fill", alt: "登录表单已选中读书会账号，等待用户确认填写" },
+      { label: "管理凭据", icon: "shield", image: "release-v091-vault", alt: "个人凭据保险库列出读书会账号及允许填入的域名" },
+    ], link: guide("07-releases/v0.9.1") + "#vault",
   },
   {
     name: "知识检索", icon: "search", title: "从搜索结果跳到原文段落",
@@ -97,7 +105,7 @@ export default function Home() {
     <Header />
     <main id="main">
       <section className={`${s.shell} ${s.hero}`} aria-labelledby="hero-title">
-        <a href="#release" className={s.releaseLink}><span>v0.9.1</span> 语音输入 · 沙箱浏览器 · 知识检索 <Icon name="arrow" /></a>
+        <a href="#release" className={s.releaseLink}><span>v0.9.1</span> 语音输入 · 沙箱浏览器 · 凭据保险库 · 知识检索 <Icon name="arrow" /></a>
         <div className={s.heroGrid}>
           <h1 id="hero-title">帮你找到答案，<br /><em>并将知识付诸实践。</em></h1>
           <div className={s.heroAside}>
@@ -123,7 +131,7 @@ export default function Home() {
         </article>)}</div>
       </div></section>
       <section id="release" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="release-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>v0.9.1</p><h2 id="release-title">语音输入、沙箱浏览器与知识检索</h2></div><a className={s.textLink} href={guide("07-releases/v0.9.1")}>完整图文与升级说明 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><div><p className={s.eyebrow}>v0.9.1</p><h2 id="release-title">语音输入、沙箱浏览器、凭据保险库与知识检索</h2></div><a className={s.textLink} href={guide("07-releases/v0.9.1")}>完整图文与升级说明 <Icon name="arrow" /></a></div>
         <ProductGallery id="release-gallery" label="v0.9.1" slides={releaseSlides} layout="compact" />
         <div className={s.releaseExtras}><span>部署与维护</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link) + item.anchor}>{item.name} <Icon name="arrow" /></a>)}</div>
       </div></section>

@@ -9,7 +9,8 @@ Changes since v0.9.0. [Release and upgrade guide](./website-docs/07-releases/v0.
 ### Chat and agent tools
 
 - Dictate in the chat composer. Enable audio uploads and choose a speech recognition model for the agent, hold the microphone button to speak, then edit the transcript before sending (#4804).
-- Give each supported sandbox session its own desktop and browser. You can sign in on the desktop and the agent can continue on the same page. Secure forms and a per-user encrypted vault handle credentials for selected domains (#4785, #5035, #5047). Lite can use model review for host tool calls in a session and bind out-of-workspace write approvals to a specific file and its proposed contents (#5050).
+- Give each supported sandbox session its own desktop and browser. You can sign in on the desktop and the agent can continue on the same page (#4785, #5035). Lite can use model review for host tool calls in a session and bind out-of-workspace write approvals to a specific file and its proposed contents (#5050).
+- Add a personal credential vault for sandbox website logins. Use a login once, or save it and choose it when the same site asks again. Passwords are encrypted at rest. A saved login can fill only HTTPS pages on domains allowed by both the entry and the current request (#5047).
 
 ### Knowledge and search
 

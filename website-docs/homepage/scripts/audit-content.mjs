@@ -35,10 +35,10 @@ for (const term of ['/docs/_home/product/wiki-browser.png', '/docs/_home/product
 }
 // Release highlights and enduring capabilities must survive independently.
 const release = html.match(/<section id="release"[\s\S]*?<\/section>/)?.[0];
-for (const term of ['语音输入', '沙箱浏览器', '知识检索', '文档重建与向量索引', '升级须知', '07-releases/v0.9.1.html#voice']) {
+for (const term of ['语音输入', '沙箱浏览器', '凭据保险库', '知识检索', '文档重建与向量索引', '升级须知', '07-releases/v0.9.1.html#voice']) {
   assert.ok(release?.includes(term), `Missing release highlight: ${term}`);
 }
-for (const shot of ['release-v091-voice', 'release-v091-dictation', 'release-v091-login', 'release-v091-search', 'release-v091-source']) {
+for (const shot of ['release-v091-voice', 'release-v091-dictation', 'release-v091-login', 'release-v091-vault-fill', 'release-v091-vault', 'release-v091-search', 'release-v091-source']) {
   assert.ok(release.includes(`src="/docs/_home/product/${shot}.png"`), `Missing release screenshot: ${shot}`);
 }
 const browser = html.match(/<section id="agent-workflow"[\s\S]*?<\/section>/)?.[0];

@@ -169,7 +169,8 @@ All options, hardware requirements and deployment topologies: [Installation guid
 ### v0.9.1 <sub>· [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1)</sub>
 
 - **[Voice input](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#voice)** Enable audio uploads and choose a speech recognition model for the agent. Hold the microphone to dictate, then edit the transcript before sending.
-- **[Sandbox browser handoff](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** Sign in on the session desktop and let the agent continue on the same page. Secure forms can save credentials for selected domains.
+- **[Sandbox browser handoff](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** Sign in on the session desktop and let the agent continue on the same page.
+- **[Personal credential vault](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#vault)** Store a site login for later, or use it once. When the same site asks again, pick the saved account, check the domain and confirm the fill.
 - **[Image queries and passage search](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** Use an image to find similar pictures through the retrieval API. In global search, open a matching passage directly in the original document. Answer citations name the source knowledge base.
 - **[Upgrade guide](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)** Back up the database, file storage and encryption key before upgrading.
 

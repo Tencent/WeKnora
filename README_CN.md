@@ -169,7 +169,8 @@ docker compose up -d    # 用新镜像重建容器
 ### v0.9.1 <sub>· [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1)</sub>
 
 - **[聊天语音输入](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#voice)** 给智能体开启「语音上传」、配好语音识别模型，按住麦克风说话，松开后可以编辑文字再发送。
-- **[沙箱浏览器](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** 你在会话桌面登录网站后，智能体可以继续操作同一页面。安全表单支持按域名保存个人凭据。
+- **[沙箱浏览器](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** 你在会话桌面登录网站后，智能体可以继续操作同一页面。
+- **[个人凭据保险库](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#vault)** 常用网站的账号可以加密保存。下次请求登录时，选中账号并确认域名即可填写。临时账号可以仅用一次。
 - **[以图检索与原文定位](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** 通过检索 API 用图片查找相似图片。在全局搜索里点开命中的片段即可读到原文，回答引用也会标出来源知识库。
 - **[升级须知](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)** 更新前备份数据库、文件存储和加密密钥。
 

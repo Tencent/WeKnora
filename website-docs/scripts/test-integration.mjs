@@ -92,15 +92,21 @@ try {
   assert.equal(context.pages().length, 1);
 
   // Navigation to the current release feature docs, returning through the explicit home link.
-  await page.locator('#release').getByRole('button', { name: '语音输入 按住说话，改好文字再发送', exact: true }).click();
-  await page.locator('#release a[href="/docs/07-releases/v0.9.1.html#voice"]').click();
-  await page.waitForSelector('.VPDoc #voice');
-  assert.equal(new URL(page.url()).pathname, '/docs/07-releases/v0.9.1.html');
-  assert.equal(new URL(page.url()).hash, '#voice');
-  assert.match(await page.locator('.VPDoc #voice').innerText(), /按住说话/);
-  await page.locator('.wk-brand').click();
-  await homepage();
-  assert.equal(context.pages().length, 1);
+  for (const feature of [
+    { button: '语音输入 按住说话，改好文字再发送', anchor: 'voice', heading: '按住说话' },
+    { button: '凭据保险库 下次登录，直接选已保存的账号', anchor: 'vault', heading: '个人凭据保险库' },
+  ]) {
+    await page.locator('#release').getByRole('button', { name: feature.button, exact: true }).click();
+    const destination = '/docs/07-releases/v0.9.1.html#' + feature.anchor;
+    await page.locator('#release a[href="' + destination + '"]').click();
+    const heading = page.locator('.VPDoc #' + feature.anchor);
+    await heading.waitFor();
+    assert.equal(new URL(page.url()).pathname + new URL(page.url()).hash, destination);
+    assert.ok((await heading.innerText()).includes(feature.heading));
+    await page.locator('.wk-brand').click();
+    await homepage();
+    assert.equal(context.pages().length, 1);
+  }
 
   // Release and overview films share a player and load only after a playback gesture.
   const releaseFilm = page.getByRole('button', { name: /^v0\.9\.0 工作助手/ });

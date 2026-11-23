@@ -169,7 +169,8 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 ### v0.9.1 <sub>· [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1)</sub>
 
 - **[チャットの音声入力](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#voice)** エージェントで音声アップロードを有効にし、音声認識モデルを選択します。マイクを押しながら話し、離すと入力欄に文字が入ります。送信前に編集できます。
-- **[サンドボックスのブラウザー](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** セッションのデスクトップでサイトにログインすると、エージェントが同じページで作業を続けられます。専用フォームで入力した認証情報はドメインを指定して保存できます。
+- **[サンドボックスのブラウザー](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** セッションのデスクトップでサイトにログインすると、エージェントが同じページで作業を続けられます。
+- **[認証情報の保管庫](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#vault)** サイトのログイン情報は一度だけ使うことも、個人の保管庫に保存することもできます。次回は保存したアカウントを選び、ドメインを確認して入力します。
 - **[画像検索と原文への移動](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** 検索 API に画像を渡して類似画像を探せます。グローバル検索ではヒットした箇所を原文で直接開けます。回答の引用には出典のナレッジベース名が表示されます。
 - **[アップグレード手順](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)** 更新前にデータベース、ファイルストレージ、暗号化キーをバックアップしてください。
 
