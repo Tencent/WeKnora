@@ -21,7 +21,7 @@ type listCall struct {
 }
 
 type fakeListSvc struct {
-	types   []string
+	types   [][]string
 	calls   []listCall
 	pages   [][]sdk.Chunk
 	totals  []int64
@@ -32,7 +32,7 @@ type fakeListSvc struct {
 func (f *fakeListSvc) ListKnowledgeChunks(
 	_ context.Context, docID string, page, pageSize int, types ...string,
 ) ([]sdk.Chunk, int64, error) {
-	f.types = types
+	f.types = append(f.types, types)
 	f.calls = append(f.calls, listCall{docID, page, pageSize})
 	defer func() { f.callIdx++ }()
 	if f.callIdx >= len(f.pages) {
@@ -96,8 +96,9 @@ func TestList_AllPages_StopsOnTotalExhausted(t *testing.T) {
 		totals: []int64{3, 3},
 		errs:   []error{nil, nil},
 	}
-	opts := &ListOptions{DocID: "doc_abc", AllPages: true, PageSize: 2, Limit: 1000}
+	opts := &ListOptions{DocID: "doc_abc", AllPages: true, PageSize: 2, Limit: 1000, Types: []string{"summary"}}
 	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	assert.Equal(t, [][]string{opts.Types, opts.Types}, svc.types)
 	// After page 2: page*pageSize=4 >= total=3 → stop. No 3rd request.
 	assert.Equal(t, 2, len(svc.calls), "must stop when total exhausted, no extra empty probe")
 }
@@ -146,7 +147,7 @@ func TestList_JSON_EmitsTotalCount(t *testing.T) {
 	opts := &ListOptions{DocID: "d1", Limit: 50, PageSize: 50, Types: []string{"summary", "image_ocr"}}
 	format := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
 	require.NoError(t, runList(context.Background(), opts, format, svc))
-	assert.Equal(t, opts.Types, svc.types)
+	assert.Equal(t, [][]string{opts.Types}, svc.types)
 	var env struct {
 		Meta struct {
 			Count      *int `json:"count"`
