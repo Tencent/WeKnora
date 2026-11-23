@@ -19,7 +19,9 @@ type faqTimeoutEngine struct {
 	succeed bool
 }
 
-func (e *faqTimeoutEngine) BatchIndex(ctx context.Context, _ embedding.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType) error {
+func (e *faqTimeoutEngine) BatchIndex(
+	ctx context.Context, _ embedding.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType,
+) error {
 	e.ctx = ctx
 	if e.succeed {
 		return nil
@@ -55,9 +57,11 @@ func TestFAQIndexOperationBudget(t *testing.T) {
 						engine := &faqTimeoutEngine{succeed: tc.succeed}
 						store := "faq-timeout-store"
 						svc := &knowledgeService{
-							retrieveEngine: &fakeFanoutRegistry{byStore: map[string]interfaces.RetrieveEngineService{store: engine}},
-							ownership:      &fakeOwnership{owned: map[string]uint64{store: 7}},
-							repo:           &parentChildKnowledgeRepo{},
+							retrieveEngine: &fakeFanoutRegistry{
+								byStore: map[string]interfaces.RetrieveEngineService{store: engine},
+							},
+							ownership: &fakeOwnership{owned: map[string]uint64{store: 7}},
+							repo:      &parentChildKnowledgeRepo{},
 						}
 						ctx := types.WithExecutionTenant(context.Background(), 7)
 						ctx = context.WithValue(ctx, types.TenantInfoContextKey, &types.Tenant{ID: 7})
@@ -68,14 +72,18 @@ func TestFAQIndexOperationBudget(t *testing.T) {
 						}
 						kb := &types.KnowledgeBase{ID: "kb", TenantID: 7, VectorStoreID: &store}
 						knowledge := &types.Knowledge{ID: "faq"}
-						chunk := &types.Chunk{ID: "one", KnowledgeID: "faq", KnowledgeBaseID: "kb", Content: "new question"}
+						chunk := &types.Chunk{
+							ID: "one", KnowledgeID: "faq", KnowledgeBaseID: "kb", Content: "new question",
+						}
 						start := time.Now()
 						var err error
 						if incremental {
 							err = svc.incrementalIndexFAQEntry(ctx, kb, knowledge, chunk, parentChildEmbedder{},
 								"old question", nil, nil, &types.FAQChunkMetadata{StandardQuestion: "new question"})
 						} else {
-							err = svc.indexFAQChunks(ctx, kb, knowledge, []*types.Chunk{chunk}, parentChildEmbedder{}, false, false)
+							err = svc.indexFAQChunks(
+								ctx, kb, knowledge, []*types.Chunk{chunk}, parentChildEmbedder{}, false, false,
+							)
 						}
 						if tc.succeed {
 							require.NoError(t, err)
@@ -86,7 +94,8 @@ func TestFAQIndexOperationBudget(t *testing.T) {
 						require.NotNil(t, engine.ctx)
 						require.Error(t, engine.ctx.Err(), "operation child must be canceled on return")
 						if tc.parent == 0 || tc.parent > tc.want {
-							require.NoError(t, ctx.Err(), "task context must remain usable for failure progress and cleanup")
+							require.NoError(t, ctx.Err(),
+								"task context must remain usable for failure progress and cleanup")
 						}
 					})
 				})
