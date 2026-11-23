@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 import subprocess
@@ -23,7 +24,10 @@ def detect_excel_format(content: bytes) -> str | None:
 
     from pandas.io.excel._base import inspect_excel_format
 
-    ext = inspect_excel_format(content_or_path=content)
+    # pandas 3 refuses raw bytes ("Expected file path name or file-like
+    # object"), and setup.py only floors pandas at 2.x, so the workbook has to
+    # travel as a file-like object the newer versions still accept.
+    ext = inspect_excel_format(content_or_path=io.BytesIO(content))
     if ext in ("xlsx", "xls", "xlsb", "ods"):
         return ext
     if ext == "zip":
