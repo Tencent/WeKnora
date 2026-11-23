@@ -135,6 +135,13 @@ type TaskPendingOpsKnowledgeBaseGuard interface {
 	EnqueueIfKnowledgeBaseActive(ctx context.Context, op *types.TaskPendingOp) (accepted bool, err error)
 }
 
+// TaskPendingOpsKnowledgeBaseBatchGuard persists one queue lane atomically,
+// checking knowledge-base and tenant liveness once for the entire batch.
+// A failed insert must roll back every row in the batch.
+type TaskPendingOpsKnowledgeBaseBatchGuard interface {
+	EnqueueBatchIfKnowledgeBaseActive(ctx context.Context, ops []*types.TaskPendingOp) (accepted bool, err error)
+}
+
 // TaskPendingOpsTenantLiveness reports whether a tenant is still alive (not
 // soft-deleted). Wiki task consumers use it to guarantee a deleted tenant
 // never triggers new model requests: the check runs at task entry (ingest

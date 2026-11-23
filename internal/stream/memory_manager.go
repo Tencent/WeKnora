@@ -114,6 +114,11 @@ func (m *MemoryStreamManager) GetEvents(
 	sessionID, messageID string,
 	fromOffset int,
 ) ([]interfaces.StreamEvent, int, error) {
+	// A negative offset has no meaning; treat it as "from the start"
+	// instead of panicking on the slice below.
+	if fromOffset < 0 {
+		fromOffset = 0
+	}
 	stream := m.getStream(sessionID, messageID)
 	if stream == nil {
 		// Stream doesn't exist yet
@@ -174,6 +179,11 @@ func (m *MemoryStreamManager) GetSteerEvents(
 	sessionID, messageID string,
 	fromOffset int,
 ) ([]interfaces.StreamEvent, int, error) {
+	// A negative offset has no meaning; treat it as "from the start"
+	// instead of panicking on the slice below.
+	if fromOffset < 0 {
+		fromOffset = 0
+	}
 	stream := m.getStream(sessionID, messageID)
 	if stream == nil {
 		return []interfaces.StreamEvent{}, fromOffset, nil

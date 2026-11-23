@@ -93,9 +93,23 @@ func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
 	return "(in_links IS NULL OR in_links IN ('[]'::JSONB, 'null'::JSONB))"
 }
 
-// Create inserts a new wiki page record
+// Create inserts a page only while its knowledge base is active.
 func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) error {
-	return r.db.WithContext(ctx).Create(page).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// An in-flight Wiki worker may finish after the KB cleanup has run.
+		// Serialize the active check and insert against the KB soft-delete.
+		var kb types.KnowledgeBase
+		err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Select("id").
+			Where("id = ? AND tenant_id = ?", page.KnowledgeBaseID, page.TenantID).
+			Take(&kb).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrKnowledgeBaseNotFound
+		}
+		if err != nil {
+			return err
+		}
+		return tx.Create(page).Error
+	})
 }
 
 // Update updates an existing wiki page record with optimistic locking.
