@@ -65,7 +65,8 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 			return runSearch(c.Context(), opts, fopts, cli)
 		},
 	}
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 20, "Maximum results to return — server-side limit (1..200; default 20 mirrors the server default)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 20,
+		"Maximum results to return — server-side limit (1..200; default 20 mirrors the server default)")
 	cmd.Flags().StringVar(&opts.Mode, "mode", "", "Search mode: keyword | vector | hybrid (omit for server default: hybrid)")
 	cmd.Flags().StringArrayVar(&opts.SessionIDs, "session", nil, "Restrict search to these session ids (repeatable)")
 	cmdutil.AddFormatFlag(cmd, messageSearchFields...)
