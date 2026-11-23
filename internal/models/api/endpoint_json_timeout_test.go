@@ -97,8 +97,11 @@ func TestPostJSONWithRetryCancelsBudgetAfterSuccess(t *testing.T) {
 	ep := Endpoint{Client: &http.Client{
 		Transport: jsonTimeoutTransport(func(req *http.Request) (*http.Response, error) {
 			requestCtx = req.Context()
-			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header),
-				Body: io.NopCloser(strings.NewReader(`{"ok":true}`))}, nil
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+			}, nil
 		}),
 	}}
 	var out struct{ OK bool }
