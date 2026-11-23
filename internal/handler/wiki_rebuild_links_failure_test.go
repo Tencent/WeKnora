@@ -28,7 +28,6 @@ func newRebuildLinksHandler(t *testing.T) (*gin.Engine, *gorm.DB, interfaces.Wik
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
 
-	ctx := context.Background()
 	repo := repository.NewWikiPageRepository(db)
 	now := time.Now()
 	for _, page := range []*types.WikiPage{
@@ -42,7 +41,7 @@ func newRebuildLinksHandler(t *testing.T) (*gin.Engine, *gorm.DB, interfaces.Wik
 		page.Version = 1
 		page.CreatedAt = now
 		page.UpdatedAt = now
-		require.NoError(t, repo.Create(ctx, page))
+		require.NoError(t, db.Create(page).Error)
 	}
 
 	handler := &WikiPageHandler{

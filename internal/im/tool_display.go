@@ -616,6 +616,55 @@ func imIntField(data map[string]interface{}, key string) int {
 	}
 }
 
+// imSearchFileCount is the number of distinct documents in a search payload.
+// kb_counts is keyed by knowledge base id, so its length is not a file count.
+// search_knowledge stores results as []map[string]interface{} and the IM event
+// keeps that value; a JSON replay is []interface{}. A blank knowledge_id falls
+// back to the title. Web pages (chunk_type web_search) are not files.
+func imSearchFileCount(data map[string]interface{}) int {
+	if data == nil {
+		return 0
+	}
+	seen := make(map[string]struct{})
+	switch results := data["results"].(type) {
+	case []map[string]interface{}:
+		for _, row := range results {
+			imSearchRememberFile(seen, row)
+		}
+	case []interface{}:
+		for _, item := range results {
+			row, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			imSearchRememberFile(seen, row)
+		}
+	}
+	return len(seen)
+}
+
+func imSearchRememberFile(seen map[string]struct{}, row map[string]interface{}) {
+	if row == nil {
+		return
+	}
+	if chunkType, _ := row["chunk_type"].(string); chunkType == "web_search" {
+		return
+	}
+	key := strings.TrimSpace(imMapString(row, "knowledge_id"))
+	if key == "" {
+		key = strings.TrimSpace(imMapString(row, "knowledge_title"))
+	}
+	if key == "" {
+		return
+	}
+	seen[key] = struct{}{}
+}
+
+func imMapString(row map[string]interface{}, key string) string {
+	s, _ := row[key].(string)
+	return s
+}
+
 func imKnowledgeSearchSummary(data map[string]interface{}) string {
 	if data == nil {
 		return ""
@@ -630,8 +679,8 @@ func imKnowledgeSearchSummary(data map[string]interface{}) string {
 	if source == imRetrievalSourceWeb || (webCount > 0 && docCount == 0) {
 		return fmt.Sprintf("找到 %d 条网页", count)
 	}
-	if kbCounts, ok := data["kb_counts"].(map[string]interface{}); ok && len(kbCounts) > 0 {
-		return fmt.Sprintf("找到 %d 个结果，来自 %d 个文件", count, len(kbCounts))
+	if files := imSearchFileCount(data); files > 0 {
+		return fmt.Sprintf("找到 %d 个结果，来自 %d 个文件", count, files)
 	}
 	if source == imRetrievalSourceMixed && docCount > 0 && webCount > 0 {
 		return fmt.Sprintf("找到 %d 个结果（%d 篇文档，%d 条网页）", count, docCount, webCount)

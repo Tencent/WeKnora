@@ -356,18 +356,24 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, err
 	}
 
-	queryOutput := t.formatQueryResults(results, input.SQL)
-	logger.Infof(ctx, "[Tool][DataAnalysis] Completed execution query, total %d rows for session %s", len(results), t.sessionID)
+	warnings := checkQueryResultConsistency(input.SQL, results)
+	queryOutput := t.formatQueryResults(results, input.SQL, warnings)
+	logger.Infof(ctx, "[Tool][DataAnalysis] Completed execution query, total %d rows for session %s",
+		len(results), t.sessionID)
+	data := map[string]interface{}{
+		"rows":         results,
+		"row_count":    len(results),
+		"query":        input.SQL,
+		"display_type": ToolDataAnalysis,
+		"session_id":   t.sessionID,
+	}
+	if len(warnings) > 0 {
+		data["warnings"] = warnings
+	}
 	return &types.ToolResult{
 		Success: true,
 		Output:  queryOutput,
-		Data: map[string]interface{}{
-			"rows":         results,
-			"row_count":    len(results),
-			"query":        input.SQL,
-			"display_type": ToolDataAnalysis,
-			"session_id":   t.sessionID,
-		},
+		Data:    data,
 	}, nil
 }
 
@@ -492,7 +498,9 @@ func (t *DataAnalysisTool) executeSingleQuery(
 }
 
 // formatQueryResults formats query results into JSONL format (one JSON object per line)
-func (t *DataAnalysisTool) formatQueryResults(results []map[string]string, query string) string {
+func (t *DataAnalysisTool) formatQueryResults(
+	results []map[string]string, query string, warnings []string,
+) string {
 	var output strings.Builder
 
 	output.WriteString("=== DuckDB Query Results ===\n\n")
@@ -516,6 +524,13 @@ func (t *DataAnalysisTool) formatQueryResults(results []map[string]string, query
 		// Remove the trailing newline added by Encode
 		recordStr := strings.Trim(string(recordBytes), "\n")
 		output.WriteString(fmt.Sprintf("record %d: %s\n", i+1, recordStr))
+	}
+
+	if len(warnings) > 0 {
+		output.WriteString("\n=== Consistency Warnings ===\n\n")
+		for _, warning := range warnings {
+			output.WriteString("- " + warning + "\n")
+		}
 	}
 
 	return output.String()
@@ -639,7 +654,23 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 			}
 		}
 
-		createTableSQL := buildExcelCreateTableSQL(tableName, filename, sheetNames)
+		var sheetRanges map[string]string
+		if len(sheetNames) > 0 {
+			detected, err := detectExcelSheetRanges(ctx, filename, sheetNames)
+			switch {
+			case err != nil && ctx.Err() != nil:
+				return nil, fmt.Errorf("inspect Excel headers: %w", err)
+			case err != nil:
+				logger.Warnf(ctx,
+					"[Tool][DataAnalysis] Could not inspect headers of '%s' (session=%s): %v. Using default range.",
+					filename, t.sessionID, err,
+				)
+			default:
+				sheetRanges = detected
+			}
+		}
+
+		createTableSQL := buildExcelCreateTableSQLWithRanges(tableName, filename, sheetNames, sheetRanges)
 
 		if _, err := t.db.ExecContext(ctx, createTableSQL); err != nil {
 			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from Excel (sheets=%v): %v", sheetNames, err)
@@ -719,23 +750,33 @@ func (t *DataAnalysisTool) listExcelSheetsFromSpatial(ctx context.Context, filen
 // LoadFromExcel. Exposed at package level (lower-case) to make it trivially
 // testable without a live DuckDB connection.
 func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) string {
+	return buildExcelCreateTableSQLWithRanges(tableName, filename, sheetNames, nil)
+}
+
+// buildExcelCreateTableSQLWithRanges builds the CREATE TABLE statement for
+// LoadFromExcel, applying an explicit per-sheet cell range (e.g. "A2:D") only
+// to sheets where header detection found leading banner/note rows above the
+// real header (#5627). Sheets without a range keep the legacy SQL verbatim.
+func buildExcelCreateTableSQLWithRanges(
+	tableName, filename string, sheetNames []string, sheetRanges map[string]string,
+) string {
 	escFile := sqlSingleQuoteEscape(filename)
 
 	// Without an explicit sheet selection, retain the default read_xlsx SQL form.
 	if len(sheetNames) == 0 {
-		return fmt.Sprintf(
-			"CREATE TABLE \"%s\" AS SELECT * FROM read_xlsx('%s', header=true, all_varchar=true)",
-			tableName, escFile,
-		)
+		readExpr := buildExcelReadXLSXCall(escFile, "", sheetRanges[""])
+		return fmt.Sprintf("CREATE TABLE \"%s\" AS SELECT * FROM %s", tableName, readExpr)
 	}
 
 	// Single sheet: keep it simple but still tag the source for consistency
 	// with the multi-sheet path.
 	if len(sheetNames) == 1 {
-		escSheet := sqlSingleQuoteEscape(sheetNames[0])
+		sheet := sheetNames[0]
+		escSheet := sqlSingleQuoteEscape(sheet)
+		readExpr := buildExcelReadXLSXCall(escFile, escSheet, sheetRanges[sheet])
 		return fmt.Sprintf(
-			"CREATE TABLE \"%s\" AS SELECT *, '%s' AS %s FROM read_xlsx('%s', sheet = '%s', header=true, all_varchar=true)",
-			tableName, escSheet, excelSheetNameColumn, escFile, escSheet,
+			"CREATE TABLE \"%s\" AS SELECT *, '%s' AS %s FROM %s",
+			tableName, escSheet, excelSheetNameColumn, readExpr,
 		)
 	}
 
@@ -745,9 +786,10 @@ func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) s
 	parts := make([]string, 0, len(sheetNames))
 	for _, sheet := range sheetNames {
 		escSheet := sqlSingleQuoteEscape(sheet)
+		readExpr := buildExcelReadXLSXCall(escFile, escSheet, sheetRanges[sheet])
 		parts = append(parts, fmt.Sprintf(
-			"SELECT *, '%s' AS %s FROM read_xlsx('%s', sheet = '%s', header=true, all_varchar=true)",
-			escSheet, excelSheetNameColumn, escFile, escSheet,
+			"SELECT *, '%s' AS %s FROM %s",
+			escSheet, excelSheetNameColumn, readExpr,
 		))
 	}
 	return fmt.Sprintf(
@@ -755,6 +797,25 @@ func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) s
 		tableName,
 		strings.Join(parts, "\nUNION ALL BY NAME\n"),
 	)
+}
+
+func buildExcelReadXLSXCall(escFile, escSheet, cellRange string) string {
+	args := make([]string, 0, 6)
+	args = append(args, fmt.Sprintf("'%s'", escFile))
+	if escSheet != "" {
+		args = append(args, fmt.Sprintf("sheet = '%s'", escSheet))
+	}
+	if cellRange != "" {
+		args = append(args, fmt.Sprintf("range = '%s'", sqlSingleQuoteEscape(cellRange)))
+	}
+	args = append(args, "header=true", "all_varchar=true")
+	if cellRange != "" {
+		// DuckDB sets stop_at_empty=false whenever range is explicit, which
+		// would emit trailing NULL rows up to Excel's 1M-row limit for open
+		// ranges like "A2:D".
+		args = append(args, "stop_at_empty=true")
+	}
+	return fmt.Sprintf("read_xlsx(%s)", strings.Join(args, ", "))
 }
 
 // LoadFromKnowledge loads data from a Knowledge entity into a DuckDB table and returns the table schema.
@@ -1009,7 +1070,33 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 		}
 	}
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if tenant == nil {
+	if kb != nil && kb.TenantID > 0 && (tenant == nil || tenant.ID != kb.TenantID) {
+		// A shared KB is read in the viewer's request context, but its storage
+		// backend is scoped to the KB owner's tenant. Resolve storage with the
+		// owner tenant without changing the caller's authorization context.
+		ownerTenantID := kb.TenantID
+		tenant = &types.Tenant{ID: ownerTenantID}
+		if t.tenantService != nil {
+			resolvedTenant, err := t.tenantService.GetTenantByID(ctx, ownerTenantID)
+			if err != nil {
+				logger.Warnf(ctx,
+					"[Tool][DataAnalysis][storage] get KB owner tenant failed: "+
+						"session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d err=%v",
+					t.sessionID, knowledge.ID, kbID, ownerTenantID, err)
+			} else if resolvedTenant != nil && resolvedTenant.ID == ownerTenantID {
+				tenant = resolvedTenant
+			} else {
+				logger.Warnf(ctx,
+					"[Tool][DataAnalysis][storage] KB owner tenant lookup returned no matching tenant: "+
+						"session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d",
+					t.sessionID, knowledge.ID, kbID, ownerTenantID)
+			}
+		}
+		logger.Infof(ctx,
+			"[Tool][DataAnalysis][storage] resolving KB storage as owner tenant: "+
+				"session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d",
+			t.sessionID, knowledge.ID, kbID, ownerTenantID)
+	} else if tenant == nil {
 		tenantID := uint64(0)
 		if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
 			tenantID = tid
