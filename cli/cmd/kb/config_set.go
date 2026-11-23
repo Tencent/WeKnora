@@ -143,7 +143,7 @@ func runConfigSet(ctx context.Context, opts *ConfigSetOptions, fopts *cmdutil.Fo
 	var meta *output.Meta
 	if err != nil || result == nil {
 		// The write succeeded. Distinguish requested IDs from verified model names.
-		meta = &output.Meta{Hint: "Configuration saved; read-back unavailable. Model labels below are the submitted IDs."}
+		meta = &output.Meta{Hint: "Configuration saved; read-back unavailable. Showing submitted model IDs."}
 		result = &sdk.KBModelConfigView{
 			RetrievalReady: opts.EmbeddingModel != "",
 			Embedding:      sdk.ModelSlotView{Configured: opts.EmbeddingModel != "", ModelName: opts.EmbeddingModel},
