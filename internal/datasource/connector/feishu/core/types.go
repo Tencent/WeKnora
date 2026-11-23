@@ -297,6 +297,9 @@ type DriveFile struct {
 	// be doc/sheet/mindnote/bitable/file/docx (Feishu does not allow shortcuts to
 	// folders, verified) - see ADR-0002 / glossary shortcut entry.
 	ShortcutInfo *driveShortcutInfo `json:"shortcut_info,omitempty"`
+	// ShortcutToken retains the original shortcut entry token after
+	// ExpandDriveShortcut replaces Token with ShortcutInfo.TargetToken.
+	ShortcutToken string `json:"-"`
 }
 
 // driveShortcutInfo is the target metadata of a Drive shortcut.

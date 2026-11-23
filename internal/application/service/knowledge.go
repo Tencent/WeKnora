@@ -88,6 +88,10 @@ type knowledgeService struct {
 	// youtubeSource fetches YouTube playlists and transcripts. Nil uses the
 	// shared yt-dlp client configured from YOUTUBE_* env vars.
 	youtubeSource youTubeSource
+
+	// In-memory transfer progress fallbacks for Lite / Desktop mode (no Redis)
+	memKBCloneProgress       sync.Map // taskID -> memProgressEntry[types.KBCloneProgress]
+	memKnowledgeMoveProgress sync.Map // taskID -> memProgressEntry[types.KnowledgeMoveProgress]
 }
 
 const (
@@ -262,12 +266,13 @@ func finalizeSubtaskDetached(
 	knowledgeID, source string,
 	retErr error,
 	superseded, final bool,
+	parseAttempt int,
 ) {
 	willDrain := repo != nil && knowledgeID != "" && !superseded && (retErr == nil || final)
 	if !willDrain {
 		return
 	}
-	if err := releaseSubtaskSlot(ctx, repo, knowledgeID); err != nil {
+	if err := releaseSubtaskSlot(ctx, repo, knowledgeID, parseAttempt); err != nil {
 		logger.Errorf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v; "+
 			"row will be left to the housekeeping sweep", source, knowledgeID, err)
 	}
@@ -286,12 +291,14 @@ const (
 // releaseSubtaskSlot releases one finalizing slot on a context detached from
 // the caller's cancellation (see finalizeSubtaskDetached), retrying transient
 // failures within finalizeSubtaskDetachedTimeout.
-func releaseSubtaskSlot(ctx context.Context, repo interfaces.KnowledgeRepository, knowledgeID string) error {
+func releaseSubtaskSlot(
+	ctx context.Context, repo interfaces.KnowledgeRepository, knowledgeID string, parseAttempt int,
+) error {
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 	defer cancel()
 	var lastErr error
 	for attempt := 1; attempt <= subtaskSlotReleaseAttempts; attempt++ {
-		_, _, err := repo.FinalizeSubtask(dctx, knowledgeID)
+		_, _, err := repo.FinalizeSubtask(dctx, knowledgeID, parseAttempt)
 		if err == nil {
 			return nil
 		}

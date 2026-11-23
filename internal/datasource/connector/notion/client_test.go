@@ -352,16 +352,19 @@ func TestClientQueryDatabaseAll(t *testing.T) {
 var _ = time.Now
 
 func TestDownloadFile_RejectsLoopbackURL(t *testing.T) {
+	const apiHost = "notion.example"
+	// Permit client setup without DNS while leaving the attachment host blocked.
+	t.Setenv("SSRF_WHITELIST", apiHost)
 	secutils.ResetSSRFWhitelistForTest()
 	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
 
-	client, err := newClient("test-token", "https://api.notion.com")
+	client, err := newClient("test-token", "https://"+apiHost)
 	if err != nil {
 		t.Fatalf("newClient: %v", err)
 	}
 	_, err = client.DownloadFile(context.Background(), "http://127.0.0.1/secret")
-	if err == nil {
-		t.Fatal("expected loopback attachment URL to be rejected")
+	if err == nil || !strings.HasPrefix(err.Error(), "attachment URL rejected:") {
+		t.Fatalf("expected SSRF validation to reject the loopback attachment URL, got %v", err)
 	}
 }
 

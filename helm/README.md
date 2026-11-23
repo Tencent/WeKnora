@@ -458,7 +458,7 @@ kubectl logs -n weknora -l app.kubernetes.io/component=frontend -f
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/Tencent/WeKnora/blob/main/CONTRIBUTING.md) in the main repository.
+See the [Contributing section](https://github.com/Tencent/WeKnora/blob/main/README.md#contributing) of the main README.
 
 ## References
 

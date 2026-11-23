@@ -450,6 +450,7 @@ function openEdit(ep: McpEndpoint, step: 0 | 1 = 0, token = '') {
 function goToWizardStep(step: number) {
   if (step < 0 || step >= stepTitles.value.length) return
   if (step > 0 && !editing.value) return
+  if (step === 0 && wizardStep.value !== 0) void loadOptions()
   wizardStep.value = step
 }
 

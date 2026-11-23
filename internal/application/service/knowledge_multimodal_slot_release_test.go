@@ -23,6 +23,7 @@ type slotReleaseEnqueuer struct {
 	failAt          map[int]bool
 	imageSeen       int
 	imageEnqueued   int
+	imageTasks      []*asynq.Task
 	postProcess     int
 	onImageEnqueued func()
 }
@@ -36,6 +37,7 @@ func (e *slotReleaseEnqueuer) Enqueue(task *asynq.Task, _ ...asynq.Option) (*asy
 			return nil, errors.New("queue write refused")
 		}
 		e.imageEnqueued++
+		e.imageTasks = append(e.imageTasks, task)
 		if e.onImageEnqueued != nil {
 			e.onImageEnqueued()
 		}
@@ -168,7 +170,7 @@ func mustGet(t *testing.T, mr *miniredis.Miniredis, key string) string {
 	return value
 }
 
-// failingDecrByHook fails the first `failures` DECRBY commands, so a test can
+// failingDecrByHook fails the first `failures` counter commands, so a test can
 // drive the release retry deterministically instead of racing miniredis.
 type failingDecrByHook struct {
 	failures int
@@ -185,7 +187,7 @@ func (h *failingDecrByHook) ProcessPipelineHook(
 
 func (h *failingDecrByHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 	return func(ctx context.Context, cmd redis.Cmder) error {
-		if cmd.Name() == "decrby" {
+		if cmd.Name() == "decrby" || cmd.Name() == "evalsha" {
 			h.calls++
 			if h.calls <= h.failures {
 				err := errors.New("redis unavailable")
@@ -234,19 +236,21 @@ func TestEnqueueImageMultimodalTasksGivesUpSlotReleaseAfterRetries(t *testing.T)
 		"must not finalize on a counter the release could not settle")
 }
 
-// The fan-out can be reached with an already-cancelled context (graceful
-// shutdown). The nothing-enqueued branch still has to clear the seeded key, or
-// it lingers for its full 24h TTL; asynq's Enqueue takes no context, so
-// post-process still goes out.
+// Cancellation after seeding must not skip the shortfall release or leave
+// the drained counter behind. The surviving image has already finished.
 func TestEnqueueImageMultimodalTasksClearsCounterOnCancelledContext(t *testing.T) {
 	mr, rdb := newSlotReleaseRedis(t)
-	enqueuer := &slotReleaseEnqueuer{failAt: map[int]bool{0: true, 1: true}}
+	enqueuer := &slotReleaseEnqueuer{failAt: map[int]bool{1: true}}
 	svc := &knowledgeService{task: enqueuer, redisClient: rdb}
 	knowledge, kb, images, chunks := slotReleaseFixture(2)
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	defer cancel()
+	enqueuer.onImageEnqueued = func() {
+		require.NoError(t, rdb.Decr(context.Background(), multimodalPendingKey(knowledge.ID)).Err())
+		cancel()
+	}
 
-	svc.enqueueImageMultimodalTasks(ctx, knowledge, kb, images, chunks, nil)
+	require.NoError(t, svc.enqueueImageMultimodalTasks(ctx, knowledge, kb, images, chunks, nil))
 
 	require.False(t, mr.Exists(multimodalPendingKey(knowledge.ID)),
 		"seeded counter must be cleared on a detached context")
