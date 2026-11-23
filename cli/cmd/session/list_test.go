@@ -19,6 +19,7 @@ import (
 
 // fakeListService scripts a GetSessionsByTenant response.
 type fakeListService struct {
+	opts        []sdk.SessionListOptions
 	items       []sdk.Session
 	total       int
 	err         error
@@ -27,8 +28,9 @@ type fakeListService struct {
 }
 
 func (f *fakeListService) GetSessionsByTenant(
-	_ context.Context, page, pageSize int, _ ...sdk.SessionListOptions,
+	_ context.Context, page, pageSize int, opts ...sdk.SessionListOptions,
 ) ([]sdk.Session, int, error) {
+	f.opts = opts
 	f.gotPage = page
 	f.gotPageSize = pageSize
 	return f.items, f.total, f.err
@@ -316,4 +318,14 @@ func TestList_JSON_TotalCount_Zero_Present(t *testing.T) {
 	body := out.String()
 	assert.Contains(t, body, `"total_count":0`, "zero server total must serialize as 0 on empty list")
 	assert.Contains(t, body, `"count":0`, "empty list must report count:0, not omit it")
+}
+
+func TestListAssistantHistory(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	for _, all := range []bool{false, true} {
+		svc := &fakeListService{}
+		opts := &ListOptions{Assistant: true, AllPages: all, Limit: 30, PageSize: 30}
+		require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+		assert.Equal(t, []sdk.SessionListOptions{{Kind: "assistant"}}, svc.opts)
+	}
 }
