@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -590,6 +591,12 @@ func (r *wikiPendingRepoForCleanupTest) PeekBatch(
 	return nil, nil
 }
 
+func (r *wikiPendingRepoForCleanupTest) PeekBatchByKey(
+	ctx context.Context, taskType, scope, scopeID string, limit int,
+) ([]*types.TaskPendingOp, error) {
+	return r.PeekBatch(ctx, taskType, scope, scopeID, limit)
+}
+
 func (r *wikiPendingRepoForCleanupTest) ClaimBatch(
 	context.Context,
 	string,
@@ -599,6 +606,10 @@ func (r *wikiPendingRepoForCleanupTest) ClaimBatch(
 	time.Time,
 ) ([]*types.TaskPendingOp, error) {
 	return nil, nil
+}
+
+func (r *wikiPendingRepoForCleanupTest) UpdatePayload(context.Context, int64, json.RawMessage) error {
+	return nil
 }
 
 func (r *wikiPendingRepoForCleanupTest) ReleaseByIDs(ctx context.Context, _ []int64) error {

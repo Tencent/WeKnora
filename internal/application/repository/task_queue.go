@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -239,6 +240,22 @@ func (r *taskPendingOpsRepository) PeekBatch(
 	return ops, nil
 }
 
+// PeekBatchByKey expands the selected document keys in one read. A newer
+// operation must be visible alongside its retry even when limit is one.
+func (r *taskPendingOpsRepository) PeekBatchByKey(
+	ctx context.Context, taskType, scope, scopeID string, limit int,
+) ([]*types.TaskPendingOp, error) {
+	queue := func() *gorm.DB {
+		return r.db.WithContext(ctx).Model(&types.TaskPendingOp{}).
+			Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID)
+	}
+	keys := queue().Select("dedup_key").Group("dedup_key").
+		Order("MIN(fail_count) ASC, MIN(id) ASC").Limit(max(1, min(limit, 1000)))
+	var ops []*types.TaskPendingOp
+	err := queue().Where("dedup_key IN (?)", keys).Order("id ASC").Find(&ops).Error
+	return ops, err
+}
+
 // ClaimBatch atomically claims eligible rows for the tuple, grouped by
 // dedup_key. `limit` counts DISTINCT dedup_keys (i.e. documents), NOT rows:
 // ALL eligible rows sharing a chosen dedup_key are claimed together and
@@ -395,6 +412,11 @@ FOR UPDATE SKIP LOCKED`
 		return nil, err
 	}
 	return claimed, nil
+}
+
+func (r *taskPendingOpsRepository) UpdatePayload(ctx context.Context, id int64, payload json.RawMessage) error {
+	return r.db.WithContext(ctx).Model(&types.TaskPendingOp{}).
+		Where("id = ?", id).Update("payload", payload).Error
 }
 
 // ReleaseByIDs clears claimed_at for the given rows, returning them to the

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -9,13 +10,16 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/alicebob/miniredis/v2"
+	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -392,6 +396,55 @@ func (*wikiPageRetryChunks) ListChunksByParentIDs(context.Context, uint64, []str
 	return nil, nil
 }
 
+// The source-ref queries in the production wiki repository use PostgreSQL
+// JSON operators. Adapt those reads to SQLite while keeping the real page
+// writes and reading back their persisted source refs and summary bodies.
+type wikiPageRetrySourceLookup struct {
+	interfaces.WikiPageService
+	db *gorm.DB
+}
+
+func (s wikiPageRetrySourceLookup) ListPagesBySourceRef(
+	ctx context.Context, kbID, knowledgeID string,
+) ([]*types.WikiPage, error) {
+	var pages []*types.WikiPage
+	err := s.db.WithContext(ctx).
+		Where("knowledge_base_id = ?", kbID).
+		Where("EXISTS (SELECT 1 FROM json_each(source_refs) WHERE value = ? OR instr(value, ?) = 1)",
+			knowledgeID, knowledgeID+"|").
+		Find(&pages).Error
+	return pages, err
+}
+
+func (s wikiPageRetrySourceLookup) ListSlugsBySourceRef(
+	ctx context.Context, kbID, knowledgeID string,
+) ([]string, error) {
+	pages, err := s.ListPagesBySourceRef(ctx, kbID, knowledgeID)
+	var slugs []string
+	for _, page := range pages {
+		slugs = append(slugs, page.Slug)
+	}
+	return slugs, err
+}
+
+func (s wikiPageRetrySourceLookup) ListSummariesByKnowledgeIDs(
+	ctx context.Context, kbID string, knowledgeIDs []string,
+) (map[string]string, error) {
+	summaries := make(map[string]string)
+	for _, id := range knowledgeIDs {
+		pages, err := s.ListPagesBySourceRef(ctx, kbID, id)
+		if err != nil {
+			return nil, err
+		}
+		for _, page := range pages {
+			if page.PageType == types.WikiPageTypeSummary && page.Status != types.WikiPageStatusArchived {
+				summaries[id] = page.Content
+			}
+		}
+	}
+	return summaries, nil
+}
+
 func newWikiPageRetryBatch(
 	t *testing.T, rdb *redis.Client,
 ) (*wikiIngestService, *gorm.DB, *wikiPageRetryStore, *wikiPageRetryModel, *wikiPageRetryChunks) {
@@ -577,4 +630,235 @@ func TestWikiPageRetryCancellationClosesPersistedPageSpan(t *testing.T) {
 			require.Contains(t, pageSpans[0].ErrorDetail, context.Canceled.Error())
 		})
 	}
+}
+
+func enqueueWikiRetryReparse(t *testing.T, svc *wikiIngestService, db *gorm.DB) {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, db.AutoMigrate(&types.KnowledgeProcessingSpan{}))
+	require.NoError(t, db.Create(&types.KnowledgeProcessingSpan{
+		KnowledgeID: "k-1", Attempt: 2, Name: "postprocess",
+	}).Error)
+	require.NoError(t, db.Exec("UPDATE knowledges SET parse_status = ?, pending_subtasks_count = 1 WHERE id = ?",
+		types.ParseStatusFinalizing, "k-1").Error)
+	op, err := newWikiIngestPendingOp(withAttempt(ctx, 2), 7, "kb-1", "k-1")
+	require.NoError(t, err)
+	require.NoError(t, svc.pendingRepo.Enqueue(ctx, op))
+}
+
+func TestWikiIngestResumesPendingSlugs(t *testing.T) {
+	for _, mode := range []string{"lite", "redis"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			var rdb *redis.Client
+			if mode == "redis" {
+				server := miniredis.RunT(t)
+				rdb = redis.NewClient(&redis.Options{Addr: server.Addr()})
+				t.Cleanup(func() { _ = rdb.Close() })
+			}
+			svc, db, store, model, chunks := newWikiPageRetryBatch(t, rdb)
+			store.WikiPageService = wikiPageRetrySourceLookup{store.WikiPageService, db}
+			task := seedWikiLookupTask(t, svc, db, "kb-1", "k-1")
+			store.beforeWrite = func(_ context.Context, page *types.WikiPage, call int) error {
+				if page.Slug == "entity/alpha" && (call == 1 || call == 3) {
+					return errors.New("temporary alpha page write failure")
+				}
+				return nil
+			}
+			require.NoError(t, svc.Handle(ctx, task))
+			var pending []types.TaskPendingOp
+			require.NoError(t, db.Where("task_type = ?", wikiTaskType).Find(&pending).Error)
+			require.Len(t, pending, 1)
+			require.Equal(t, 1, pending[0].FailCount)
+			require.Nil(t, pending[0].ClaimedAt)
+			betaBefore, err := store.GetPageBySlug(ctx, "kb-1", "entity/beta")
+			require.NoError(t, err)
+			require.Contains(t, betaBefore.Content, "NEW_CONTRIBUTION")
+			require.Equal(t, 1, store.count("entity/beta"))
+			knowledge, err := svc.knowledgeRepo.GetKnowledgeByIDOnly(ctx, "k-1")
+			require.NoError(t, err)
+			require.Equal(t, 1, knowledge.PendingSubtasksCount)
+
+			require.NoError(t, svc.Handle(ctx, task))
+			assert.EqualValues(t, 1, chunks.reads.Load(), "retry must reuse the queued map output")
+			for _, purpose := range []string{"wiki_candidate_slug", "wiki_summary", "wiki_chunk_citation"} {
+				assert.Equal(t, 1, model.count(purpose), purpose)
+			}
+			assert.Equal(t, 1, model.count("wiki_page_modify:entity/beta"), "retry must not rewrite the successful sibling")
+			assert.Equal(t, 1, store.count("entity/beta"), "successful sibling write count")
+			betaAfter, err := store.GetPageBySlug(ctx, "kb-1", "entity/beta")
+			require.NoError(t, err)
+			assert.Equal(t, betaBefore.Content, betaAfter.Content)
+			assert.Equal(t, betaBefore.SourceRefs, betaAfter.SourceRefs)
+			assert.Equal(t, 2, store.count("entity/alpha"))
+			count, err := svc.pendingRepo.PendingCount(ctx, wikiTaskType, wikiTaskScope, "kb-1")
+			require.NoError(t, err)
+			require.Zero(t, count)
+			knowledge, err = svc.knowledgeRepo.GetKnowledgeByIDOnly(ctx, "k-1")
+			require.NoError(t, err)
+			require.Equal(t, types.ParseStatusCompleted, knowledge.ParseStatus)
+
+			assert.Zero(t, store.count("summary/k-1"), "a successful summary should not be rewritten on retry")
+
+			// A fresh parse still replaces its old contribution. Its own
+			// partial retry must keep the replacement's original before-image
+			// even though the summary page was already updated by that parse.
+			summary, err := store.GetPageBySlug(ctx, "kb-1", "summary/k-1")
+			require.NoError(t, err)
+			summary.Content = "ORIGINAL_SUMMARY"
+			_, err = store.WikiPageService.UpdatePage(ctx, summary)
+			require.NoError(t, err)
+			enqueueWikiRetryReparse(t, svc, db)
+			require.NoError(t, svc.Handle(ctx, task))
+			knowledge, err = svc.knowledgeRepo.GetKnowledgeByIDOnly(ctx, "k-1")
+			require.NoError(t, err)
+			assert.Equal(t, types.ParseStatusFinalizing, knowledge.ParseStatus)
+			assert.Equal(t, 1, knowledge.PendingSubtasksCount)
+
+			require.NoError(t, svc.Handle(ctx, task))
+			knowledge, err = svc.knowledgeRepo.GetKnowledgeByIDOnly(ctx, "k-1")
+			require.NoError(t, err)
+			assert.Equal(t, types.ParseStatusCompleted, knowledge.ParseStatus)
+			assert.Zero(t, knowledge.PendingSubtasksCount)
+			assert.EqualValues(t, 2, chunks.reads.Load())
+			assert.Equal(t, 2, store.count("entity/beta"))
+			assert.Equal(t, 4, store.count("entity/alpha"))
+			betaPrompts := model.captured("wiki_page_modify:entity/beta")
+			require.GreaterOrEqual(t, len(betaPrompts), 2)
+			assert.Contains(t, betaPrompts[1], "<deleted_documents>")
+			assert.Contains(t, betaPrompts[1], "<new_information>")
+			alphaPrompts := model.captured("wiki_page_modify:entity/alpha")
+			require.Len(t, alphaPrompts, 4)
+			for _, prompt := range alphaPrompts[2:] {
+				assert.Contains(t, prompt, "<deleted_documents>")
+				assert.Contains(t, prompt, "ORIGINAL_SUMMARY")
+				assert.Contains(t, prompt, "<new_information>")
+			}
+		})
+	}
+}
+
+func TestWikiIngestResumesPendingRetracts(t *testing.T) {
+	ctx := context.Background()
+	svc, db, store, model, chunks := newWikiPageRetryBatch(t, nil)
+	store.WikiPageService = wikiPageRetrySourceLookup{store.WikiPageService, db}
+	for _, slug := range []string{"entity/alpha", "entity/beta"} {
+		page, err := store.GetPageBySlug(ctx, "kb-1", slug)
+		require.NoError(t, err)
+		page.SourceRefs = types.StringArray{"deleted-source", "remaining-source"}
+		_, err = store.WikiPageService.UpdatePage(ctx, page)
+		require.NoError(t, err)
+	}
+	// Explicit slugs survive in the original retract payload even after the
+	// successfully rewritten sibling no longer carries the deleted source ref.
+	data, err := json.Marshal(WikiPendingOp{
+		Op: WikiOpRetract, KnowledgeID: "deleted-source", DocTitle: "Deleted document",
+		PageSlugs: []string{"entity/alpha", "entity/beta"},
+	})
+	require.NoError(t, err)
+	require.NoError(t, svc.pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+		TenantID: 7, TaskType: wikiTaskType, Scope: wikiTaskScope, ScopeID: "kb-1",
+		Op: WikiOpRetract, DedupKey: "deleted-source", Payload: data,
+	}))
+	raw, err := json.Marshal(WikiIngestPayload{TenantID: 7, KnowledgeBaseID: "kb-1"})
+	require.NoError(t, err)
+	task := asynq.NewTask(types.TypeWikiIngest, raw)
+	store.beforeWrite = func(_ context.Context, page *types.WikiPage, call int) error {
+		if page.Slug == "entity/alpha" && call == 1 {
+			return errors.New("temporary retract write failure")
+		}
+		return nil
+	}
+	require.NoError(t, svc.Handle(ctx, task))
+	var pending []types.TaskPendingOp
+	require.NoError(t, db.Where("task_type = ?", wikiTaskType).Find(&pending).Error)
+	require.Len(t, pending, 1)
+	require.Equal(t, 1, pending[0].FailCount)
+	require.NoError(t, svc.Handle(ctx, task))
+	assert.Zero(t, chunks.reads.Load())
+	assert.Equal(t, 1, model.count("wiki_page_modify:entity/beta"), "retry must not repeat a successful retract")
+	assert.Equal(t, 1, store.count("entity/beta"))
+	assert.Equal(t, 2, store.count("entity/alpha"))
+	for _, slug := range []string{"entity/alpha", "entity/beta"} {
+		page, err := store.GetPageBySlug(ctx, "kb-1", slug)
+		require.NoError(t, err)
+		assert.Equal(t, types.StringArray{"remaining-source"}, page.SourceRefs)
+	}
+	count, err := svc.pendingRepo.PendingCount(ctx, wikiTaskType, wikiTaskScope, "kb-1")
+	require.NoError(t, err)
+	require.Zero(t, count)
+}
+
+func TestWikiIngestBusySlugPreservesRetryBudget(t *testing.T) {
+	ctx := context.Background()
+	server := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	// Advance through the production lock timeout without a wall-clock wait.
+	synctest.Test(t, func(t *testing.T) {
+		svc, db, store, model, chunks := newWikiPageRetryBatch(t, rdb)
+		store.WikiPageService = wikiPageRetrySourceLookup{store.WikiPageService, db}
+		require.NoError(t, db.AutoMigrate(&types.TaskDeadLetter{}))
+		svc.deadLetterRepo = apprepo.NewTaskDeadLetterRepository(db)
+		task := seedWikiLookupTask(t, svc, db, "kb-1", "k-1")
+		require.NoError(t, db.Model(&types.TaskPendingOp{}).Where("task_type = ?", wikiTaskType).
+			Update("fail_count", wikiMaxFailRetries).Error)
+		lockKey := wikiSlugLockPrefix + "kb-1:entity/alpha"
+		require.NoError(t, server.Set(lockKey, "held"))
+
+		require.NoError(t, svc.Handle(ctx, task))
+		var pending []types.TaskPendingOp
+		require.NoError(t, db.Where("task_type = ?", wikiTaskType).Find(&pending).Error)
+		require.Len(t, pending, 1, "a busy lock cannot dead-letter the operation")
+		assert.Equal(t, wikiMaxFailRetries, pending[0].FailCount)
+		assert.Nil(t, pending[0].ClaimedAt)
+		assert.Zero(t, store.count("entity/alpha"))
+		assert.Equal(t, 1, store.count("entity/beta"))
+		knowledge, err := svc.knowledgeRepo.GetKnowledgeByIDOnly(ctx, "k-1")
+		require.NoError(t, err)
+		assert.Equal(t, types.ParseStatusFinalizing, knowledge.ParseStatus)
+		var deadLetters int64
+		require.NoError(t, db.Model(&types.TaskDeadLetter{}).Count(&deadLetters).Error)
+		assert.Zero(t, deadLetters)
+
+		server.Del(lockKey)
+		require.NoError(t, svc.Handle(ctx, task))
+		assert.EqualValues(t, 1, chunks.reads.Load())
+		assert.Equal(t, 1, model.count("wiki_summary"))
+		assert.Equal(t, 1, store.count("entity/alpha"))
+		assert.Equal(t, 1, store.count("entity/beta"))
+		count, err := svc.pendingRepo.PendingCount(ctx, wikiTaskType, wikiTaskScope, "kb-1")
+		require.NoError(t, err)
+		assert.Zero(t, count)
+		knowledge, err = svc.knowledgeRepo.GetKnowledgeByIDOnly(ctx, "k-1")
+		require.NoError(t, err)
+		assert.Equal(t, types.ParseStatusCompleted, knowledge.ParseStatus)
+	})
+}
+
+func TestWikiIngestNewAttemptSupersedesReduceRetry(t *testing.T) {
+	ctx := context.Background()
+	svc, db, store, model, chunks := newWikiPageRetryBatch(t, nil)
+	store.WikiPageService = wikiPageRetrySourceLookup{store.WikiPageService, db}
+	svc.kbService.(*wikiLookupKBService).kb.WikiConfig.IngestBatchSize = 1
+	task := seedWikiLookupTask(t, svc, db, "kb-1", "k-1")
+	store.beforeWrite = func(_ context.Context, page *types.WikiPage, call int) error {
+		if page.Slug == "entity/alpha" && call == 1 {
+			return errors.New("temporary alpha page write failure")
+		}
+		return nil
+	}
+	require.NoError(t, svc.Handle(ctx, task))
+	enqueueWikiRetryReparse(t, svc, db)
+
+	require.NoError(t, svc.Handle(ctx, task))
+	assert.EqualValues(t, 2, chunks.reads.Load())
+	assert.Equal(t, 2, store.count("entity/beta"), "new attempt must replace the successful page")
+	prompts := model.captured("wiki_page_modify:entity/beta")
+	require.Len(t, prompts, 2)
+	assert.Contains(t, prompts[1], "<deleted_documents>")
+	assert.Contains(t, prompts[1], "<new_information>")
+	count, err := svc.pendingRepo.PendingCount(ctx, wikiTaskType, wikiTaskScope, "kb-1")
+	require.NoError(t, err)
+	assert.Zero(t, count, "the superseded retry must not survive the new attempt")
 }
