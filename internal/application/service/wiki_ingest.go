@@ -1425,6 +1425,8 @@ type docIngestResult struct {
 // free; the cache is per-batch and goroutine-local-via-mutex (sync.Map
 // would also work but mutex keeps the surface small).
 type WikiBatchContext struct {
+	MaxPagesPerIngest int
+
 	// SlugTitle resolves a slug to its current title (or "" if missing).
 	// Backed by ListBySlugs; cache is populated as callers ask, so we
 	// only pay for the slugs we actually look at.

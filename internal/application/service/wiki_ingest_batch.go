@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -236,12 +237,15 @@ func (s *wikiIngestService) newWikiBatchContext(
 	granularity := types.WikiExtractionStandard
 	contentInstructions := ""
 	extractionInstructions := ""
+	maxPagesPerIngest := 0
 	if wikiConfig != nil {
 		granularity = wikiConfig.ExtractionGranularity.Normalize()
 		contentInstructions = wikiConfig.ContentInstructions
 		extractionInstructions = wikiConfig.ExtractionInstructions
+		maxPagesPerIngest = wikiConfig.MaxPagesPerIngest
 	}
 	return &WikiBatchContext{
+		MaxPagesPerIngest: maxPagesPerIngest,
 		SlugTitle: func(ctx context.Context, slug string) string {
 			m := resolveSlugs(ctx, []string{slug})
 			return m[slug]
@@ -1620,13 +1624,41 @@ func (s *wikiIngestService) mapOneDocument(
 	// reflected in summaryExtractedPages tracking.
 	slugItems = make(map[string]extractedItem, len(extractedEntities)+len(extractedConcepts))
 	for _, item := range extractedEntities {
-		if item.Slug != "" && item.Name != "" {
+		if item.Slug != "" {
 			slugItems[item.Slug] = item
 		}
 	}
 	for _, item := range extractedConcepts {
-		if item.Slug != "" && item.Name != "" {
+		if item.Slug != "" {
 			slugItems[item.Slug] = item
+		}
+	}
+
+	// Reserve one slot for the required document summary. Choose the same
+	// slugs for identical candidates regardless of model or map iteration order.
+	if limit := batchCtx.MaxPagesPerIngest; limit > 0 && len(slugItems) >= limit {
+		slugs := make([]string, 0, len(slugItems))
+		for slug := range slugItems {
+			slugs = append(slugs, slug)
+		}
+		sort.Strings(slugs)
+		omitted := slugs[limit-1:]
+		liveTitles := batchCtx.SlugTitleMany(ctx, omitted)
+		summaryContent, _ = rewriteMarkdownWikiLinks(summaryContent, func(link markdownWikiLink) string {
+			_, skipped := slices.BinarySearch(omitted, link.slug)
+			if !skipped || liveTitles[link.slug] != "" {
+				return summaryContent[link.start:link.end]
+			}
+			if link.display != "" {
+				return link.display
+			}
+			if title := slugItems[link.slug].Name; title != "" {
+				return title
+			}
+			return link.slug
+		})
+		for _, slug := range omitted {
+			delete(slugItems, slug)
 		}
 	}
 
@@ -1636,11 +1668,9 @@ func (s *wikiIngestService) mapOneDocument(
 	// trace output and finalize processing.
 	extractedPages := make([]wikiIngestPageRef, 0, len(slugItems)+1)
 	for slug, item := range slugItems {
-		title := item.Name
-		if title == "" {
-			title = slug
+		if item.Name != "" {
+			extractedPages = append(extractedPages, wikiIngestPageRef{Slug: slug, Title: item.Name})
 		}
-		extractedPages = append(extractedPages, wikiIngestPageRef{Slug: slug, Title: title})
 	}
 
 	// Count total distinct chunks cited across all slugs for logging.
@@ -1702,7 +1732,7 @@ func (s *wikiIngestService) mapOneDocument(
 
 	// Entities
 	for _, item := range extractedEntities {
-		if item.Slug != "" {
+		if _, selected := slugItems[item.Slug]; selected {
 			updates = append(updates, SlugUpdate{
 				Slug:         item.Slug,
 				Type:         types.WikiPageTypeEntity,
@@ -1719,7 +1749,7 @@ func (s *wikiIngestService) mapOneDocument(
 
 	// Concepts
 	for _, item := range extractedConcepts {
-		if item.Slug != "" {
+		if _, selected := slugItems[item.Slug]; selected {
 			updates = append(updates, SlugUpdate{
 				Slug:         item.Slug,
 				Type:         types.WikiPageTypeConcept,
