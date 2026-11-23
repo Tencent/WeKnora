@@ -70,15 +70,23 @@ func TestKeyringStore_Ref(t *testing.T) {
 // A backend that never answers must not hold the command: the probe gives up
 // after keyringProbeTimeout and falls back to the file store.
 func TestNewBestEffortStoreFallsBackWhenTheProbeHangs(t *testing.T) {
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-
 	prev := keyringGet
-	keyringGet = func(service, user string) (string, error) {
+	release := make(chan struct{})
+	probeReturned := make(chan struct{})
+	// Restore the seam only after the probe has returned. The probe goroutine
+	// reads keyringGet when it starts, which can happen after the timeout branch
+	// has already returned, so an unsequenced restore is a data race.
+	t.Cleanup(func() {
+		close(release)
+		<-probeReturned
+		keyringGet = prev
+	})
+
+	keyringGet = func(_, _ string) (string, error) {
+		defer close(probeReturned)
 		<-release
 		return "", keyring.ErrNotFound
 	}
-	t.Cleanup(func() { keyringGet = prev })
 
 	type result struct {
 		store Store
