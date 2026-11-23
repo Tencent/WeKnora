@@ -334,7 +334,7 @@
               </div>
               <template v-if="formData.mode === 'webhook'">
                 <div class="form-item">
-                  <label class="form-label">Verification Token</label>
+                  <label class="form-label required">Verification Token</label>
                   <t-input v-model="formData.credentials.verification_token" placeholder="Verification Token" />
                 </div>
                 <div class="form-item">
@@ -390,9 +390,9 @@
               </div>
               <template v-if="formData.mode === 'webhook'">
                 <div class="form-item">
-                  <label class="form-label">Secret Token</label>
+                  <label class="form-label required">Secret Token</label>
                   <t-input v-model="formData.credentials.secret_token" type="password"
-                    placeholder="Secret Token (optional)" />
+                    placeholder="Secret Token" />
                 </div>
               </template>
             </template>
@@ -507,8 +507,8 @@
                   </a>
                 </p>
               </div>
-              <div class="form-item">
-                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaSecret') }}</label>
+              <div v-if="formData.mode === 'webhook'" class="form-item">
+                <label class="form-label required">{{ $t('agentEditor.im.yunzhijiaSecret') }}</label>
                 <t-input v-model="formData.credentials.secret" type="password"
                   :placeholder="$t('agentEditor.im.yunzhijiaSecretPlaceholder')" />
                 <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaSecretHint') }}</p>
@@ -1087,7 +1087,7 @@ async function handleSave() {
         mattermost: ['site_url', 'bot_token', 'outgoing_token'],
         wechat: ['bot_token', 'ilink_bot_id'],
         qqbot: ['app_id', 'client_secret'],
-        yunzhijia: ['send_msg_url', 'secret'],
+        yunzhijia: mode === 'webhook' ? ['send_msg_url', 'secret'] : ['send_msg_url'],
       };
       const missing = requiredFields[platform].filter(key => !String(credentials[key] || '').trim());
       if (missing.length) {

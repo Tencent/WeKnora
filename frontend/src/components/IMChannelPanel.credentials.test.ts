@@ -81,3 +81,27 @@ test('an unbound WeChat channel still requires QR binding', async t => {
   assert.equal(updates.length, 0)
   assert.deepEqual(warnings, ['agentEditor.im.wechatScanBind'])
 })
+
+for (const { platform, credentials, signingField } of [
+  { platform: 'feishu', credentials: { app_id: 'id', app_secret: 'key' }, signingField: 'verification_token' },
+  { platform: 'lark', credentials: { app_id: 'id', app_secret: 'key' }, signingField: 'verification_token' },
+  { platform: 'telegram', credentials: { bot_token: 'token' }, signingField: 'secret_token' },
+  { platform: 'yunzhijia', credentials: { send_msg_url: 'https://www.yunzhijia.com/robot?yzjtoken=fixture' }, signingField: 'secret' },
+]) {
+  for (const mode of ['websocket', 'webhook']) {
+    test(`replacing ${platform} credentials in ${mode} mode follows its callback signing requirements`, async t => {
+      const { vm, channel, updates } = panel(t)
+      await vm.editChannel({ ...channel, platform, mode })
+      vm.toggleCredentialReplacement()
+      Object.assign(vm.formData.credentials, credentials)
+      await vm.handleSave()
+      if (mode === 'webhook') {
+        assert.equal(updates.length, 0)
+        vm.formData.credentials[signingField] = 'verification-value'
+        await vm.handleSave()
+      }
+      assert.equal(updates.length, 1)
+      assert.equal(Object.hasOwn(updates[0].credentials as object, signingField), mode === 'webhook')
+    })
+  }
+}
