@@ -233,6 +233,8 @@
       <div v-else-if="wizardStep === 2" class="im-step-body">
         <section class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionKnowledge') }}</h4>
+          <IMOriginalSharing v-if="editingChannel && formData.platform === 'feishu' && authStore.hasRole('admin')"
+            :key="editingChannel.id" :channel-id="editingChannel.id" :knowledge-bases="knowledgeBases" />
           <div class="form-item">
             <label class="form-label">{{ $t('agentEditor.im.fileKnowledgeBase') }}</label>
             <t-select v-model="formData.knowledge_base_id"
@@ -601,6 +603,7 @@ import { useChatResourcesStore } from '@/stores/chatResources';
 import type { IMChannel } from '@/api/agent';
 import { useAuthStore } from '@/stores/auth';
 import SettingDrawer from '@/components/settings/SettingDrawer.vue';
+import IMOriginalSharing from '@/components/IMOriginalSharing.vue';
 import IntegrationsAgentFilter from '@/components/IntegrationsAgentFilter.vue';
 import wecomLogo from '@/assets/img/im/wecom.svg';
 import feishuLogo from '@/assets/img/im/feishu.svg';

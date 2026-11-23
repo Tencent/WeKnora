@@ -488,3 +488,96 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 		}
 	}()
 }
+
+func (h *IMHandler) originalSharingChannel(c *gin.Context) *im.IMChannel {
+	ctx := c.Request.Context()
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		c.Status(http.StatusUnauthorized)
+		return nil
+	}
+	ch, err := h.imService.GetChannelByIDAndTenant(c.Param("id"), tenantID)
+	if err != nil || ch.Platform != string(im.PlatformFeishu) {
+		c.Status(http.StatusNotFound)
+		return nil
+	}
+	return ch
+}
+
+// GetIMOriginalSharing godoc
+// @Summary Get the knowledge base selected for sharing cited originals
+// @Tags IM
+// @Produce json
+// @Param id path string true "Feishu channel ID"
+// @Success 200 {object} map[string]string "knowledge_base_id is empty when disabled"
+// @Security Bearer
+// @Router /im-channels/{id}/original-sharing [get]
+func (h *IMHandler) GetIMOriginalSharing(c *gin.Context) {
+	ch := h.originalSharingChannel(c)
+	if ch == nil {
+		return
+	}
+	id, err := h.imService.OriginalSharingKB(c.Request.Context(), ch)
+	if err != nil {
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"knowledge_base_id": id})
+}
+
+// IMOriginalSharingRequest selects a KB or revokes the existing share with an empty ID.
+type IMOriginalSharingRequest struct {
+	KnowledgeBaseID *string `json:"knowledge_base_id" binding:"required"`
+}
+
+// SetIMOriginalSharing godoc
+// @Summary Delegate original-file sharing for one workspace-owned knowledge base
+// @Description Requires an active workspace administrator.
+// @Description Pass an empty knowledge_base_id to revoke outstanding links.
+// @Tags IM
+// @Accept json
+// @Param id path string true "Feishu channel ID"
+// @Param sharing body IMOriginalSharingRequest true "Knowledge base to share"
+// @Success 204 "Updated"
+// @Security Bearer
+// @Router /im-channels/{id}/original-sharing [put]
+func (h *IMHandler) SetIMOriginalSharing(c *gin.Context) {
+	ch := h.originalSharingChannel(c)
+	if ch == nil {
+		return
+	}
+	ctx := c.Request.Context()
+	var req IMOriginalSharingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+	if err := h.imService.ConfigureOriginalSharing(ctx, ch, *req.KnowledgeBaseID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// IMOriginalDownloadPage godoc
+// @Summary Open the cited-original download confirmation
+// @Tags IM
+// @Produce html
+// @Success 200 {string} string "Download confirmation form"
+// @Router /im/citation-download [get]
+func (h *IMHandler) IMOriginalDownloadPage(c *gin.Context) {
+	h.imService.ServeOriginalDownload(c.Writer, c.Request)
+}
+
+// IMOriginalDownload godoc
+// @Summary Redeem a one-hour grant for a cited original
+// @Tags IM
+// @Accept x-www-form-urlencoded
+// @Produce application/octet-stream
+// @Param token formData string true "Grant from the link fragment"
+// @Success 200 {file} file "Original file"
+// @Failure 404 "Invalid, expired or revoked grant"
+// @Router /im/citation-download [post]
+func (h *IMHandler) IMOriginalDownload(c *gin.Context) {
+	h.imService.ServeOriginalDownload(c.Writer, c.Request)
+}

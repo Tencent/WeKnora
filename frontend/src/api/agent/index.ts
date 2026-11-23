@@ -394,6 +394,14 @@ export function createIMChannel(agentId: string, data: Partial<IMChannel>) {
   return post<{ data: IMChannel }>(`/api/v1/agents/${agentId}/im-channels`, data);
 }
 
+export function getIMOriginalSharing(id: string) {
+  return get<{ knowledge_base_id: string }>(`/api/v1/im-channels/${id}/original-sharing`);
+}
+
+export function setIMOriginalSharing(id: string, knowledgeBaseId: string) {
+  return put(`/api/v1/im-channels/${id}/original-sharing`, { knowledge_base_id: knowledgeBaseId });
+}
+
 export function updateIMChannel(id: string, data: Partial<IMChannel>) {
   return put<{ data: IMChannel }>(`/api/v1/im-channels/${id}`, data);
 }

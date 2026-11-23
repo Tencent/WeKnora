@@ -303,6 +303,8 @@ func RegisterEmbedChannelRoutes(r *gin.RouterGroup, embedHandler *handler.EmbedC
 func RegisterIMRoutes(r *gin.Engine, imHandler *handler.IMHandler) {
 	im := r.Group("/api/v1/im")
 	{
+		im.GET("/citation-download", imHandler.IMOriginalDownloadPage)
+		im.POST("/citation-download", imHandler.IMOriginalDownload)
 		im.GET("/callback/:channel_id", imHandler.IMCallback)
 		im.POST("/callback/:channel_id", imHandler.IMCallback)
 	}
@@ -325,6 +327,8 @@ func RegisterIMChannelRoutes(r *gin.RouterGroup, imHandler *handler.IMHandler, g
 	channels := g.apiKeyGroup(r.Group("/im-channels"), apiKeyManageChannels(apiKeyFullAccess()))
 	{
 		channels.GET("", g.Viewer(), imHandler.ListAllIMChannels)
+		channels.GET("/:id/original-sharing", g.Admin(), imHandler.GetIMOriginalSharing)
+		channels.PUT("/:id/original-sharing", g.Admin(), imHandler.SetIMOriginalSharing)
 		channels.PUT("/:id", g.Admin(), imHandler.UpdateIMChannel)
 		channels.DELETE("/:id", g.Admin(), imHandler.DeleteIMChannel)
 		channels.POST("/:id/toggle", g.Admin(), imHandler.ToggleIMChannel)

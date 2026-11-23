@@ -1956,6 +1956,10 @@ func (s *Service) persistIMLastRequestState(ctx context.Context, sessionID, agen
 // It is called by qaQueue workers and must not block indefinitely.
 func (s *Service) executeQARequest(req *qaRequest) {
 	ctx := req.ctx
+	if req.channel != nil && req.channel.Platform == string(PlatformFeishu) {
+		scope := originalChannel{id: req.channel.ID, agentID: req.channel.AgentID}
+		ctx = context.WithValue(ctx, originalChannelKey{}, scope)
+	}
 	defer req.cancel()
 
 	// Track in-flight request so /stop can cancel it.
@@ -2908,6 +2912,7 @@ loop:
 	}
 	answer := resolvedAnswer
 	finalErr := qaErr
+	refs := append([]*types.SearchResult(nil), assistantMsg.KnowledgeReferences...)
 	noVisibleContent := !streamedAny && strings.TrimSpace(resolvedAnswer) == ""
 	authServices := append([]imMCPAuthService(nil), mcpAuthServices...)
 	bufMu.Unlock()
@@ -2929,6 +2934,9 @@ loop:
 		answer = appendIMAuthNotice(answer, notice)
 	}
 
+	if finalErr == nil && !noVisibleContent {
+		finalDisplay += s.originalDownloadLinks(outCtx, resolvedAnswer, refs)
+	}
 	finalizeErr := streamer.FinalizeStream(outCtx, msg, streamID, finalDisplay)
 	if finalizeErr != nil {
 		logger.Warnf(ctx, "[IM] FinalizeStream failed: %v", finalizeErr)
@@ -3156,6 +3164,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	answerMu.Lock()
 	answer := answerBuilder.String()
 	qaError := qaErr
+	refs := append([]*types.SearchResult(nil), assistantMsg.KnowledgeReferences...)
 	authServices := append([]imMCPAuthService(nil), mcpAuthServices...)
 	answerMu.Unlock()
 
@@ -3177,6 +3186,9 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	}
 
 	// Return raw answer — callers apply cleanIMContent with the appropriate FileService.
+	if qaError == nil {
+		answer += s.originalDownloadLinks(ctx, answer, refs)
+	}
 	return answer, nil
 }
 

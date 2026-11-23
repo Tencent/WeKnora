@@ -5014,6 +5014,80 @@
                 ]
             }
         },
+        "/im-channels/{id}/original-sharing": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "IM"
+                ],
+                "summary": "Get the knowledge base selected for sharing cited originals",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Feishu channel ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "knowledge_base_id is empty when disabled",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ]
+            },
+            "put": {
+                "description": "Requires an active workspace administrator.\nPass an empty knowledge_base_id to revoke outstanding links.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "IM"
+                ],
+                "summary": "Delegate original-file sharing for one workspace-owned knowledge base",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Feishu channel ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Knowledge base to share",
+                        "name": "sharing",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.IMOriginalSharingRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Updated"
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ]
+            }
+        },
         "/im-channels/{id}/toggle": {
             "post": {
                 "description": "切换指定 IM 渠道的启用状态",
@@ -5153,6 +5227,57 @@
                             "type": "object",
                             "additionalProperties": true
                         }
+                    }
+                }
+            }
+        },
+        "/im/citation-download": {
+            "get": {
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "IM"
+                ],
+                "summary": "Open the cited-original download confirmation",
+                "responses": {
+                    "200": {
+                        "description": "Download confirmation form",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/x-www-form-urlencoded"
+                ],
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "IM"
+                ],
+                "summary": "Redeem a one-hour grant for a cited original",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Grant from the link fragment",
+                        "name": "token",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Original file",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "404": {
+                        "description": "Invalid, expired or revoked grant"
                     }
                 }
             }
@@ -40222,6 +40347,17 @@
                 "success": {
                     "type": "boolean",
                     "example": true
+                }
+            }
+        },
+        "internal_handler.IMOriginalSharingRequest": {
+            "type": "object",
+            "required": [
+                "knowledge_base_id"
+            ],
+            "properties": {
+                "knowledge_base_id": {
+                    "type": "string"
                 }
             }
         },
