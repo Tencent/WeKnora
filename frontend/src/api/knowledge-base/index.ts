@@ -650,7 +650,10 @@ export function batchDeleteKnowledge(kbId: string, ids: string[]) {
   return post(`/api/v1/knowledge/batch-delete`, { kb_id: kbId, ids });
 }
 
-export function downKnowledgeDetails(id: string) {
+export function downKnowledgeDetails(id: string, readerKBId?: string) {
+  if (readerKBId) {
+    return getDown(`/api/v1/knowledge-bases/${encodeURIComponent(readerKBId)}/knowledge/${encodeURIComponent(id)}/reader-download`);
+  }
   return getDown(`/api/v1/knowledge/${id}/download`);
 }
 

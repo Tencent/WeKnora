@@ -377,6 +377,11 @@ const canDownloadKnowledge = computed(() => {
   return !permission || permission === 'owner' || permission === 'admin' || permission === 'editor';
 });
 
+// The KB detail response includes this caller-specific grant only for explicitly enabled KBs.
+const readerDownloadKBId = computed(() => kbInfo.value?.id === kbId.value && kbInfo.value?.reader_download_enabled
+  && !canDownloadKnowledge.value ? kbId.value : undefined);
+const canDownloadSingle = computed(() => canDownloadKnowledge.value || !!readerDownloadKBId.value);
+
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
 let { cardList, total, moreIndex, details, getKnowled, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
 
@@ -2374,7 +2379,7 @@ const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
 const downloadKnowledge = async (item: KnowledgeCard) => {
   if (!item?.id) return;
   try {
-    const file = await downKnowledgeDetails(item.id);
+    const file = await downKnowledgeDetails(item.id, readerDownloadKBId.value);
     const objectUrl = URL.createObjectURL(file);
     const link = document.createElement('a');
     const fileName = resolveKnowledgeDownloadFileName(item);
@@ -2745,7 +2750,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     :selected-ids="selectedIds"
                     :batch-mode="batchMode"
                     :can-edit="canEdit"
-                    :can-download="canDownloadKnowledge"
+                    :can-download="canDownloadKnowledge" :can-download-single="canDownloadSingle"
                     :can-mutate-knowledge="canMutateKnowledge"
                     :trace-available-by-id="traceAvailableById"
                     :move-menu-mode="moveMenuMode"
@@ -2772,7 +2777,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                   <DocumentListView :kb-id="kbId" :items="cardList" :folder-options="folderOptions"
                     :sub-folders="visibleSubFolders"
                     :selected-ids="selectedIds"
-                    :can-edit="canEdit" :can-download="canDownloadKnowledge" :can-mutate-knowledge="canMutateKnowledge"
+                    :can-edit="canEdit" :can-download="canDownloadKnowledge" :can-download-single="canDownloadSingle" :can-mutate-knowledge="canMutateKnowledge"
                     :trace-visible-ids="traceAvailableById"
                     :move-menu-mode="moveMenuMode"
                     :move-target-kbs="moveTargetKbs"
@@ -2831,7 +2836,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
       <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
-        :canDownloadKB="canDownloadKnowledge" :kbId="kbId"
+        :canDownloadKB="canDownloadSingle" :reader-download-kb-id="readerDownloadKBId" :kbId="kbId"
         @closeDoc="closeDoc" @getDoc="getDoc" @summaryStateChange="syncDocumentSummaryState">
       </DocContent>
     </div>
