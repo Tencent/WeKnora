@@ -26,8 +26,7 @@ const modes = [
   { number: "03", icon: "wiki", label: "Wiki", title: "把文档整理成 Wiki", description: "从原始文档生成相互链接的 Wiki 页面与知识图谱，支持浏览、编辑和版本回滚。", tags: ["自动组织", "知识图谱", "版本回滚"], link: "03-features/14-wiki", related: [] },
 ];
 const releaseExtras = [
-  { name: "按住说话与嵌入聊天", link: "07-releases/v0.9.1", anchor: "#chat" },
-  { name: "文档重解析", link: "07-releases/v0.9.1", anchor: "#knowledge" },
+  { name: "文档重建与向量索引", link: "07-releases/v0.9.1", anchor: "#knowledge" },
   { name: "升级须知", link: "07-releases/v0.9.1", anchor: "#upgrade-notes" },
 ];
 
@@ -38,10 +37,28 @@ const withAvailability = (slide: SlideSource): GallerySlide => {
   return { name: slide.name, icon: slide.icon, title: slide.title, description: slide.description, link: slide.link, external: slide.external, shots: shots.map(shot => ({ ...shot, available: productShotExists(`${homeAssets}/product/${shot.image}.png`) })) };
 };
 const releaseSlides = [
-  { name: "画廊校对", icon: "search", image: "release-v091-gallery", title: "对照原图改正识别文字", description: "在画廊中修订已有的图片说明和 OCR 文字。PDF 图片可按原文页码排序，全局搜索可以直接跳到命中的原文段落。", alt: "在读书会统计图旁编辑图中文字", link: guide("07-releases/v0.9.1") + "#images" },
-  { name: "沙箱登录", icon: "shield", image: "release-v091-vault", title: "登录后把同一个浏览器交给智能体", description: "你可以在会话桌面登录，也可以通过安全表单填写账号密码。需要再次登录时，可以从个人凭据保险库选用允许在该域名使用的账号。", alt: "个人凭据保险库展示示例账号及其允许的域名", link: guide("07-releases/v0.9.1") + "#sandbox" },
-  { name: "手动维护 Wiki", icon: "wiki", image: "release-v091-wiki", title: "由你决定何时更新 Wiki", description: "关闭自动生成后，导入文档时会保留人工整理的页面。团队仍能浏览、编辑并回滚 Wiki。", alt: "保留 Wiki 索引并关闭自动生成页面的知识库设置", link: guide("03-features/14-wiki") },
-  { name: "Nextcloud 同步", icon: "sources", image: "release-v091-nextcloud", title: "选择要同步的目录和文件", description: "通过 WebDAV 连接 Nextcloud，把选中的资料同步到知识库，随后手动或按计划获取更新。Confluence 也支持导入页面附件。", alt: "选择读书会 Nextcloud 中需要同步的目录", link: guide("03-features/26-nextcloud") },
+  {
+    name: "语音输入", icon: "mic", title: "按住说话，改好文字再发送",
+    description: "给智能体开启「语音上传」、选好语音识别模型，就可以对着输入框说话。松开麦克风，文字会出现在光标处，你可以改人名、补日期，再发出去。",
+    shots: [
+      { label: "按住录音", icon: "mic", image: "release-v091-voice", alt: "读书会对话的输入框正在录音，麦克风旁显示已录时长" },
+      { label: "编辑文字", icon: "file", image: "release-v091-dictation", alt: "口述的活动报名问题已经转成文字，停留在待发送的输入框中" },
+    ], link: guide("07-releases/v0.9.1") + "#voice",
+  },
+  {
+    name: "沙箱浏览器", icon: "browser", title: "你完成登录，智能体接着操作",
+    description: "在会话的沙箱桌面登录网站，智能体就能接着用同一个浏览器办事。需要填写账号密码时，也可以通过对话中的安全表单提交。",
+    image: "release-v091-login", alt: "在读书会报名对话里为指定网站填写安全登录表单",
+    link: guide("07-releases/v0.9.1") + "#sandbox",
+  },
+  {
+    name: "知识检索", icon: "search", title: "从搜索结果跳到原文段落",
+    description: "点开全局搜索命中的文档片段，直接读到对应的上下文。回答引用也会标出来源知识库。做系统集成时，还可以通过检索 API 上传一张图，查找相似图片。",
+    shots: [
+      { label: "全局搜索", icon: "search", image: "release-v091-search", alt: "全局搜索列出包含活动报名要求的文档片段" },
+      { label: "命中原文", icon: "file", image: "release-v091-source", alt: "读书会手册在命中片段处展开，报名截止时间已高亮" },
+    ], link: guide("07-releases/v0.9.1") + "#images",
+  },
 ].map(withAvailability);
 const browserSlides = [
   { name: "执行任务", icon: "browser", title: "在自己的浏览器里完成任务",
@@ -80,7 +97,7 @@ export default function Home() {
     <Header />
     <main id="main">
       <section className={`${s.shell} ${s.hero}`} aria-labelledby="hero-title">
-        <a href="#release" className={s.releaseLink}><span>v0.9.1</span> 画廊校对 · 沙箱登录 · Nextcloud 同步 <Icon name="arrow" /></a>
+        <a href="#release" className={s.releaseLink}><span>v0.9.1</span> 语音输入 · 沙箱浏览器 · 知识检索 <Icon name="arrow" /></a>
         <div className={s.heroGrid}>
           <h1 id="hero-title">帮你找到答案，<br /><em>并将知识付诸实践。</em></h1>
           <div className={s.heroAside}>
@@ -106,9 +123,9 @@ export default function Home() {
         </article>)}</div>
       </div></section>
       <section id="release" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="release-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>v0.9.1</p><h2 id="release-title">画廊校对、沙箱登录与知识库同步</h2></div><a className={s.textLink} href={guide("07-releases/v0.9.1")}>完整图文与升级说明 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><div><p className={s.eyebrow}>v0.9.1</p><h2 id="release-title">语音输入、沙箱浏览器与知识检索</h2></div><a className={s.textLink} href={guide("07-releases/v0.9.1")}>完整图文与升级说明 <Icon name="arrow" /></a></div>
         <ProductGallery id="release-gallery" label="v0.9.1" slides={releaseSlides} layout="compact" />
-        <div className={s.releaseExtras}><span>本次更新还包括</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link) + item.anchor}>{item.name} <Icon name="arrow" /></a>)}</div>
+        <div className={s.releaseExtras}><span>部署与维护</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link) + item.anchor}>{item.name} <Icon name="arrow" /></a>)}</div>
       </div></section>
       <section id="agent-workflow" className={`${s.chapter}`} data-tone="base" aria-labelledby="agent-workflow-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>03 / YOUR LOCAL BROWSER</p><h2 id="agent-workflow-title">让智能体操作你自己的浏览器</h2></div><a className={s.textLink} href={guide("05-clients/09-local-browser")}>连接本机浏览器 <Icon name="arrow" /></a></div>

@@ -168,11 +168,10 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 
 ### v0.9.1 <sub>· [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1)</sub>
 
-- **[画像検索と OCR 修正](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** 検索 API で類似画像を探し、ギャラリーで OCR テキストや画像の説明を修正できます。全文検索から該当箇所へ直接移動できます。
-- **[サンドボックスへのログイン](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** セッションのデスクトップでログインすると、エージェントが同じブラウザーで作業を続けます。認証情報はドメインを指定して個人用の保管庫に保存できます。
-- **[再解析と Wiki](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#knowledge)** 文書の再解析中も従来の内容を検索できます。Wiki は自動生成を停止して手動で管理できます。
-- **[Nextcloud と Confluence](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sources)** Nextcloud の選択フォルダーを同期し、Confluence の添付ファイルや表を取り込めます。
-- **[アップグレード手順](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)** 更新前にデータベース、ファイルストレージ、暗号鍵をバックアップしてください。
+- **[チャットの音声入力](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#voice)** エージェントで音声アップロードを有効にし、音声認識モデルを選択します。マイクを押しながら話し、離すと入力欄に文字が入ります。送信前に編集できます。
+- **[サンドボックスのブラウザー](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** セッションのデスクトップでサイトにログインすると、エージェントが同じページで作業を続けられます。専用フォームで入力した認証情報はドメインを指定して保存できます。
+- **[画像検索と原文への移動](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** 検索 API に画像を渡して類似画像を探せます。グローバル検索ではヒットした箇所を原文で直接開けます。回答の引用には出典のナレッジベース名が表示されます。
+- **[アップグレード手順](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)** 更新前にデータベース、ファイルストレージ、暗号化キーをバックアップしてください。
 
 ### v0.9.0 <sub>· 2026-10-29 · [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
 

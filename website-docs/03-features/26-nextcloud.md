@@ -20,7 +20,7 @@
 
 <Screenshot src="/screenshots/datasource-nextcloud.png" caption="使用示例账号填写 Nextcloud 连接信息" />
 
-<Screenshot src="/screenshots/release-v091-nextcloud.png" caption="在读书会演示知识库中选择需要同步的目录" />
+<Screenshot src="/screenshots/datasource-nextcloud-resources.png" caption="选择要从 Nextcloud 同步到知识库的文件或目录" />
 
 账号需要能够列举选中范围内的每个目录。连接器从账号向知识库单向同步，支持通过 WebDAV 读取的内容。公开分享链接和端到端加密的内容不在此范围。
 

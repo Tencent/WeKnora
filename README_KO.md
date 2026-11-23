@@ -178,10 +178,9 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 
 ### v0.9.1 <sub>· [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1)</sub>
 
-- **[이미지 검색과 OCR 수정](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** 검색 API로 유사한 이미지를 찾고 갤러리에서 OCR 텍스트와 설명을 수정할 수 있습니다. 전체 검색에서 원문의 해당 구절로 바로 이동할 수 있습니다.
-- **[샌드박스 로그인](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** 세션 데스크톱에서 로그인하면 에이전트가 같은 브라우저에서 작업을 이어갑니다. 개인 보관함에 도메인을 지정하여 로그인 정보를 저장할 수 있습니다.
-- **[문서 재분석과 Wiki](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#knowledge)** 문서를 재분석하는 동안에도 기존 내용을 검색할 수 있습니다. Wiki 자동 생성을 끄고 직접 관리할 수 있습니다.
-- **[Nextcloud 및 Confluence](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sources)** 선택한 Nextcloud 폴더를 동기화하고 Confluence 페이지의 첨부 파일과 표를 가져올 수 있습니다.
+- **[채팅 음성 입력](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#voice)** 에이전트에서 오디오 업로드를 켜고 음성 인식 모델을 선택하세요. 마이크를 누른 채 말하고 손을 떼면 입력창에 텍스트가 나타납니다. 보내기 전에 고칠 수 있습니다.
+- **[샌드박스 브라우저](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** 세션 데스크톱에서 사이트에 로그인하면 에이전트가 같은 페이지에서 작업을 이어갑니다. 보안 양식에 입력한 로그인 정보는 사용할 도메인을 지정해 저장할 수 있습니다.
+- **[이미지 검색과 원문 바로가기](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** 검색 API에 이미지를 보내 비슷한 이미지를 찾을 수 있습니다. 통합 검색에서 일치하는 구절을 누르면 원문의 해당 위치가 열립니다. 답변의 인용에는 출처 지식 베이스가 표시됩니다.
 - **[업그레이드 안내](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)** 업데이트 전에 데이터베이스, 파일 저장소, 암호화 키를 백업하세요.
 
 ### v0.9.0 <sub>· 2026-10-29 · [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>

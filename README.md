@@ -168,11 +168,10 @@ All options, hardware requirements and deployment topologies: [Installation guid
 
 ### v0.9.1 <sub>· [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1)</sub>
 
-- **[Image search and corrections](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** Query by image through the retrieval API, correct OCR or captions in the gallery, and jump to matching source passages.
-- **[Sandbox sign-in](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** Sign in on the session desktop and hand the same browser back to the agent. A personal vault can save credentials for specified domains.
-- **[Document and Wiki updates](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#knowledge)** Existing content stays searchable during reparse. Wiki pages can be maintained manually.
-- **[Nextcloud and Confluence](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sources)** Sync selected Nextcloud folders, import Confluence attachments, and retain table structure.
-- **[Upgrade guide](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)** Back up the database and the encryption key before updating.
+- **[Voice input](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#voice)** Enable audio uploads and choose a speech recognition model for the agent. Hold the microphone to dictate, then edit the transcript before sending.
+- **[Sandbox browser handoff](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** Sign in on the session desktop and let the agent continue on the same page. Secure forms can save credentials for selected domains.
+- **[Image queries and passage search](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** Use an image to find similar pictures through the retrieval API. In global search, open a matching passage directly in the original document. Answer citations name the source knowledge base.
+- **[Upgrade guide](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)** Back up the database, file storage and encryption key before upgrading.
 
 ### v0.9.0 <sub>· 2026-10-29 · [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
 
