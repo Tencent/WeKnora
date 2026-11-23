@@ -97,7 +97,8 @@ to stop after one page.`,
 		UsedFor:       "Find chat sessions by title or description (client-side case-insensitive substring match). Results come with meta.count; use --limit to cap and --all-pages=false to stop after one page.",
 		RequiredFlags: []string{"<query> (positional)"},
 		Examples:      []string{`weknora search sessions "onboarding" --format json`},
-		Output:        "envelope.data is an array of Session objects with id, title, updated_at; meta.count is the returned count; meta.has_more=true if more matched than --limit",
+		Output: "envelope.data is an array of Session objects with id, title, updated_at; " +
+			"meta.count is the returned count; meta.has_more=true if more matched than --limit",
 	})
 	return cmd
 }
