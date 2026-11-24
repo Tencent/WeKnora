@@ -45,7 +45,6 @@ import (
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
-	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
 	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
@@ -182,8 +181,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewAuthTokenRepository))
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(repository.NewModelCatalogRepository))
-	must(container.Provide(neo4jRepo.NewNeo4jRepository))
-	must(container.Provide(neo4jRepo.NewGraphSearchRepository))
+	must(container.Provide(initGraphRepositories))
 	must(container.Provide(repository.NewGraphSearchEvidenceRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
@@ -1968,8 +1966,8 @@ func initOllamaService() (*ollama.OllamaService, error) {
 
 func initNeo4jClient() (neo4j.Driver, error) {
 	ctx := context.Background()
-	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
-		logger.Debugf(ctx, "NOT SUPPORT RETRIEVE GRAPH")
+	if config.GraphBackend() != config.GraphBackendNeo4j {
+		logger.Debugf(ctx, "Neo4j graph backend is not selected")
 		return nil, nil
 	}
 	uri := os.Getenv("NEO4J_URI")

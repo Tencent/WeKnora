@@ -143,8 +143,8 @@ spec:
               value: {{ .Values.app.env.WEKNORA_SANDBOX_DOCKER_ENABLED | default "false" | quote }}
             {{- if .Values.neo4j.enabled }}
             # Neo4j configuration (for GraphRAG)
-            # NEO4J_ENABLE 是知识图谱的唯一开关（Go 代码认它，不认 ENABLE_GRAPH_RAG）。
-            # neo4j.enabled=true 时自动注入，无需用户单独设置。
+            # Legacy Neo4j selection; GRAPH_BACKEND in app.extraEnv overrides it.
+            # For Hologres, disable this sidecar and supply graph settings via extraEnv.
             - name: NEO4J_ENABLE
               value: "true"
             - name: NEO4J_URI
