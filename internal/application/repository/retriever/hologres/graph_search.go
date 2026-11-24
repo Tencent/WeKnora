@@ -15,6 +15,7 @@ const (
 	chatMaxRows  = 2000
 )
 
+// SearchNode returns scoped one-hop graph data for chat retrieval.
 func (r *Repository) SearchNode(ctx context.Context, ns types.NameSpace, names []string) (*types.GraphData, error) {
 	if r.db == nil {
 		return nil, nil
@@ -32,7 +33,10 @@ func (r *Repository) SearchNode(ctx context.Context, ns types.NameSpace, names [
 	return candidates.Graph, nil
 }
 
-func (r *Repository) SearchGraph(ctx context.Context, ns types.NameSpace, query string) (*types.GraphSearchCandidates, error) {
+// SearchGraph returns bounded public candidates within one knowledge base.
+func (r *Repository) SearchGraph(
+	ctx context.Context, ns types.NameSpace, query string,
+) (*types.GraphSearchCandidates, error) {
 	if r.db == nil {
 		return nil, nil
 	}
@@ -77,7 +81,7 @@ func (r *Repository) searchSQL(ns types.NameSpace, terms []string, public bool) 
 	if len(marks) == 0 {
 		return "", nil, fmt.Errorf("empty graph entity queries")
 	}
-	maxSeeds, maxRows, seedProbe, rowProbe := chatMaxSeeds, chatMaxRows, chatMaxSeeds, chatMaxRows
+	maxSeeds, seedProbe, rowProbe := chatMaxSeeds, chatMaxSeeds, chatMaxRows
 	degree := ` AND EXISTS (SELECT 1 FROM ` + r.relations + ` e
 		JOIN scoped_nodes a ON a.id = e.start_id JOIN scoped_nodes b ON b.id = e.end_id
 		WHERE (e.start_id = n.id OR e.end_id = n.id)
@@ -88,8 +92,8 @@ func (r *Repository) searchSQL(ns types.NameSpace, terms []string, public bool) 
 	// output function to serialize objects and lists as JSON text.
 	projection := func(alias string) string { return `ag_catalog.agtype_out(` + alias + `.properties)::text` }
 	if public {
-		maxSeeds, maxRows = types.GraphSearchMaxSeeds, types.GraphSearchMaxRows
-		seedProbe, rowProbe = maxSeeds+1, maxRows+1
+		maxSeeds = types.GraphSearchMaxSeeds
+		seedProbe, rowProbe = maxSeeds+1, types.GraphSearchMaxRows+1
 		degree = "" // Public queries must preserve isolated entity seeds.
 		relationValue = `left(ag_catalog.agtype_object_field_text(edge_properties, 'rel_type'), 129)`
 		projection = func(alias string) string {
@@ -103,24 +107,30 @@ func (r *Repository) searchSQL(ns types.NameSpace, terms []string, public bool) 
 	query := `WITH scoped_nodes AS (
 		SELECT id, properties FROM ` + r.entities + ` n WHERE ` + scopePredicate("n", ns.Knowledge != "") + `
 	), matched AS (
-		SELECT n.*, CASE WHEN ag_catalog.agtype_object_field_text(n.properties, 'name') IN (` + strings.Join(marks, ",") + `) THEN 0 ELSE 1 END AS match_rank
+		SELECT n.*, CASE WHEN ag_catalog.agtype_object_field_text(n.properties, 'name')
+			IN (` + strings.Join(marks, ",") + `) THEN 0 ELSE 1 END AS match_rank
 		FROM scoped_nodes n WHERE (` + strings.Join(contains, " OR ") + `)` + degree + `
 	), seeds AS (
 		SELECT id, properties, row_number() OVER (ORDER BY match_rank,
 			char_length(ag_catalog.agtype_object_field_text(properties, 'name')),
-			ag_catalog.agtype_object_field_text(properties, 'name'), ag_catalog.agtype_object_field_text(properties, 'kg'), id) AS seed_index
+			ag_catalog.agtype_object_field_text(properties, 'name'),
+			ag_catalog.agtype_object_field_text(properties, 'kg'), id) AS seed_index
 		FROM matched ORDER BY match_rank, char_length(ag_catalog.agtype_object_field_text(properties, 'name')),
-			ag_catalog.agtype_object_field_text(properties, 'name'), ag_catalog.agtype_object_field_text(properties, 'kg'), id
+			ag_catalog.agtype_object_field_text(properties, 'name'),
+			ag_catalog.agtype_object_field_text(properties, 'kg'), id
 		LIMIT ` + fmt.Sprint(seedProbe) + `
 	), selected_seeds AS (
 		SELECT * FROM seeds WHERE seed_index <= ` + fmt.Sprint(maxSeeds) + `
 	), edges AS (
 		SELECT e.id AS edge_id, e.start_id, e.end_id, e.properties AS edge_properties,
 			CASE WHEN t.seed_index IS NULL OR s.seed_index <= t.seed_index THEN a.id ELSE b.id END AS node_id,
-			CASE WHEN t.seed_index IS NULL OR s.seed_index <= t.seed_index THEN ` + projection("a") + ` ELSE ` + projection("b") + ` END AS node_payload,
+			CASE WHEN t.seed_index IS NULL OR s.seed_index <= t.seed_index
+				THEN ` + projection("a") + ` ELSE ` + projection("b") + ` END AS node_payload,
 			CASE WHEN t.seed_index IS NULL OR s.seed_index <= t.seed_index THEN b.id ELSE a.id END AS neighbor_id,
-			CASE WHEN t.seed_index IS NULL OR s.seed_index <= t.seed_index THEN ` + projection("b") + ` ELSE ` + projection("a") + ` END AS neighbor_payload,
-			LEAST(COALESCE(s.seed_index, ` + fmt.Sprint(maxSeeds+1) + `), COALESCE(t.seed_index, ` + fmt.Sprint(maxSeeds+1) + `)) AS seed_index
+			CASE WHEN t.seed_index IS NULL OR s.seed_index <= t.seed_index
+				THEN ` + projection("b") + ` ELSE ` + projection("a") + ` END AS neighbor_payload,
+			LEAST(COALESCE(s.seed_index, ` + fmt.Sprint(maxSeeds+1) + `),
+				COALESCE(t.seed_index, ` + fmt.Sprint(maxSeeds+1) + `)) AS seed_index
 		FROM ` + r.relations + ` e
 		JOIN scoped_nodes a ON a.id = e.start_id JOIN scoped_nodes b ON b.id = e.end_id
 		LEFT JOIN selected_seeds s ON s.id = e.start_id LEFT JOIN selected_seeds t ON t.id = e.end_id
@@ -136,11 +146,15 @@ func (r *Repository) searchSQL(ns types.NameSpace, terms []string, public bool) 
 
 func edgeScope(edge, source, target string) string {
 	return `ag_catalog.agtype_object_field_text(` + edge + `.properties, 'kb') = $1
-		AND ag_catalog.agtype_object_field_text(` + edge + `.properties, 'kg') = ag_catalog.agtype_object_field_text(` + source + `.properties, 'kg')
-		AND ag_catalog.agtype_object_field_text(` + source + `.properties, 'kg') = ag_catalog.agtype_object_field_text(` + target + `.properties, 'kg')`
+		AND ag_catalog.agtype_object_field_text(` + edge + `.properties, 'kg') =
+			ag_catalog.agtype_object_field_text(` + source + `.properties, 'kg')
+		AND ag_catalog.agtype_object_field_text(` + source + `.properties, 'kg') =
+			ag_catalog.agtype_object_field_text(` + target + `.properties, 'kg')`
 }
 
-func (r *Repository) search(ctx context.Context, ns types.NameSpace, terms []string, public bool) (*types.GraphSearchCandidates, error) {
+func (r *Repository) search(
+	ctx context.Context, ns types.NameSpace, terms []string, public bool,
+) (*types.GraphSearchCandidates, error) {
 	query, args, err := r.searchSQL(ns, terms, public)
 	if err != nil {
 		return nil, err
@@ -151,7 +165,7 @@ func (r *Repository) search(ctx context.Context, ns types.NameSpace, terms []str
 	if err != nil {
 		return nil, fmt.Errorf("query Hologres graph: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Preserve any query or decoding error.
 	out := &types.GraphSearchCandidates{Graph: &types.GraphData{}, TruncationReasons: []string{}}
 	seenNodes, seenEdges := map[string]bool{}, map[string]bool{}
 	nodeNames := map[string]string{}
@@ -160,7 +174,10 @@ func (r *Repository) search(ctx context.Context, ns types.NameSpace, terms []str
 		var kind int
 		var rank int64
 		var nodeID, payload, neighborID, neighborPayload, edgeID, sourceID, targetID, relationType string
-		if err := rows.Scan(&kind, &rank, &nodeID, &payload, &neighborID, &neighborPayload, &edgeID, &sourceID, &targetID, &relationType); err != nil {
+		if err := rows.Scan(
+			&kind, &rank, &nodeID, &payload, &neighborID, &neighborPayload,
+			&edgeID, &sourceID, &targetID, &relationType,
+		); err != nil {
 			return nil, fmt.Errorf("decode graph query row: %w", err)
 		}
 		if kind == 0 {
@@ -199,7 +216,8 @@ func (r *Repository) search(ctx context.Context, ns types.NameSpace, terms []str
 			seenNodes[neighborID] = true
 			nodeNames[neighborID] = node.Name
 		}
-		if edgeID == "" || sourceID == "" || targetID == "" || relationType == "" || !seenNodes[sourceID] || !seenNodes[targetID] {
+		if edgeID == "" || sourceID == "" || targetID == "" || relationType == "" ||
+			!seenNodes[sourceID] || !seenNodes[targetID] {
 			return nil, fmt.Errorf("invalid graph relationship endpoints")
 		}
 		if (sourceID != nodeID || targetID != neighborID) && (sourceID != neighborID || targetID != nodeID) {
@@ -239,8 +257,9 @@ func decodeNode(id, payload string, ns types.NameSpace, public bool) (*types.Gra
 		}
 		// Projections are written bounded. Reject external data violating that
 		// contract, rather than returning unlimited data or guessing a total.
-		if utf8.RuneCountInString(p.Name) > types.GraphSearchMaxNameRunes+1 || utf8.RuneCountInString(p.Knowledge) > 129 ||
-			len(p.Chunks) > types.GraphSearchMaxEvidence+1 || len(p.Attributes) > types.GraphSearchMaxAttributes+1 {
+		if utf8.RuneCountInString(p.Name) > types.GraphSearchMaxNameRunes+1 ||
+			utf8.RuneCountInString(p.Knowledge) > 129 || len(p.Chunks) > types.GraphSearchMaxEvidence+1 ||
+			len(p.Attributes) > types.GraphSearchMaxAttributes+1 {
 			return nil, fmt.Errorf("unbounded AGE graph projection")
 		}
 		for _, c := range p.Chunks {
@@ -272,5 +291,7 @@ func decodeNode(id, payload string, ns types.NameSpace, public bool) (*types.Gra
 	if p.Attributes == nil {
 		p.Attributes = []string{}
 	}
-	return &types.GraphNode{ID: id, Name: p.Name, KnowledgeID: p.Knowledge, Chunks: p.Chunks, Attributes: p.Attributes}, nil
+	return &types.GraphNode{
+		ID: id, Name: p.Name, KnowledgeID: p.Knowledge, Chunks: p.Chunks, Attributes: p.Attributes,
+	}, nil
 }

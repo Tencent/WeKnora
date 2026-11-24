@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
+// DefaultGraph is the dedicated AGE graph name used when none is configured.
 const DefaultGraph = "weknora_graph"
 
 var graphIdentifier = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
@@ -28,6 +29,7 @@ type Config struct {
 	AutoCreate bool
 }
 
+// ConfigFromEnv reads and validates the dedicated Hologres graph configuration.
 func ConfigFromEnv() (Config, error) {
 	cfg := Config{
 		DSN:   strings.TrimSpace(os.Getenv("HOLOGRES_GRAPH_DSN")),
@@ -71,19 +73,20 @@ func Open(ctx context.Context, cfg Config) (*Repository, error) {
 	db.SetConnMaxLifetime(30 * time.Minute)
 	repo, err := NewRepository(db, cfg.Graph)
 	if err != nil {
-		db.Close()
+		_ = db.Close() // Preserve the initialization error if cleanup also fails.
 		return nil, err
 	}
 	if err = db.PingContext(ctx); err == nil {
 		err = repo.EnsureSchema(ctx, cfg.AutoCreate)
 	}
 	if err != nil {
-		db.Close()
+		_ = db.Close() // Preserve the initialization error if cleanup also fails.
 		return nil, fmt.Errorf("initialize Hologres graph backend: %w", err)
 	}
 	return repo, nil
 }
 
+// Close releases the dedicated Hologres graph connection pool.
 func (r *Repository) Close() error {
 	if r == nil || r.db == nil {
 		return nil
@@ -100,12 +103,12 @@ func (r *Repository) beginWrite(ctx context.Context) (*sql.Conn, *sql.Tx, error)
 		return nil, nil, err
 	}
 	if _, err = conn.ExecContext(ctx, "SET hg_experimental_enable_transaction = on"); err != nil {
-		conn.Close()
+		_ = conn.Close() // Preserve the setup error if cleanup also fails.
 		return nil, nil, fmt.Errorf("enable Hologres mixed-DML transactions: %w", err)
 	}
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close() // Preserve the setup error if cleanup also fails.
 		return nil, nil, err
 	}
 	return conn, tx, nil

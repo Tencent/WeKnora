@@ -11,11 +11,15 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // Run only against a Hologres V5+ TEST database with AGE DDL/DML permissions:
-// WEKNORA_HOLOGRES_TEST_DSN='postgresql://...' go test ./internal/application/repository/retriever/hologres -run Integration -v
+//
+//	WEKNORA_HOLOGRES_TEST_DSN='postgresql://...' \
+//	  go test ./internal/application/repository/retriever/hologres -run Integration -v
+//
 // Each run creates its own uniquely named graph, never DefaultGraph.
 // Set WEKNORA_HOLOGRES_TEST_KEEP_GRAPH=true to retain inspection fixtures.
 // Deletion assertions still run; the basic fixtures are restored afterward.
@@ -31,25 +35,25 @@ func liveRepository(t *testing.T) (*Repository, context.Context) {
 	repo, err := Open(ctx, cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		defer repo.Close()
+		defer func() { assert.NoError(t, repo.Close()) }()
 		cleanupCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 		defer stop()
 		if os.Getenv("WEKNORA_HOLOGRES_TEST_KEEP_GRAPH") == "true" {
 			var nodes, relations int
-			require.NoError(t, repo.db.QueryRowContext(cleanupCtx, `SELECT count(*) FROM `+repo.entities).Scan(&nodes))
-			require.NoError(t, repo.db.QueryRowContext(cleanupCtx, `SELECT count(*) FROM `+repo.relations).Scan(&relations))
+			require.NoError(t, repo.db.QueryRowContext(cleanupCtx,
+				`SELECT count(*) FROM `+repo.entities).Scan(&nodes))
+			require.NoError(t, repo.db.QueryRowContext(cleanupCtx,
+				`SELECT count(*) FROM `+repo.relations).Scan(&relations))
 			t.Logf("retained AGE graph=%s; nodes=%d; relations=%d", cfg.Graph, nodes, relations)
 			return
 		}
 		_, err := repo.db.ExecContext(cleanupCtx, `CALL ag_catalog.hg_age_drop_graph($1, true)`, cfg.Graph)
-		if err != nil {
-			t.Errorf("drop disposable AGE graph %s: %v", cfg.Graph, err)
-		}
+		assert.NoError(t, err, "drop disposable AGE graph %s", cfg.Graph)
 		var remaining int
-		checkErr := repo.db.QueryRowContext(cleanupCtx, `SELECT count(*) FROM hologres.hg_ag_label WHERE graph = $1`, cfg.Graph).Scan(&remaining)
-		if checkErr != nil || remaining != 0 {
-			t.Errorf("test graph cleanup verification: remaining=%d, error=%v", remaining, checkErr)
-		}
+		checkErr := repo.db.QueryRowContext(cleanupCtx,
+			`SELECT count(*) FROM hologres.hg_ag_label WHERE graph = $1`, cfg.Graph).Scan(&remaining)
+		assert.NoError(t, checkErr, "test graph cleanup verification")
+		assert.Zero(t, remaining, "test graph cleanup verification")
 		t.Logf("cleanup verified for %s", cfg.Graph)
 	})
 	var version string
@@ -105,7 +109,9 @@ func TestHologresIntegration(t *testing.T) {
 		}
 	}
 
-	require.NoError(t, repo.AddGraph(ctx, doc1, []*types.GraphData{{Node: []*types.GraphNode{{Name: "Isolated", Chunks: []string{"c1"}}}}}))
+	require.NoError(t, repo.AddGraph(ctx, doc1, []*types.GraphData{
+		{Node: []*types.GraphNode{{Name: "Isolated", Chunks: []string{"c1"}}}},
+	}))
 	public, err := repo.SearchGraph(ctx, types.NameSpace{KnowledgeBase: kb}, "Isolated")
 	require.NoError(t, err)
 	require.Len(t, public.Graph.Node, 1)
@@ -139,34 +145,41 @@ func TestHologresIntegration(t *testing.T) {
 			require.NoError(t, repo.AddGraph(ctx, doc1, []*types.GraphData{graph(chunk)}))
 		}
 		require.NoError(t, repo.AddGraph(ctx, doc2, []*types.GraphData{graph("c2")}))
-		require.NoError(t, repo.AddGraph(ctx, doc1, []*types.GraphData{{Node: []*types.GraphNode{{Name: "Isolated", Chunks: []string{"c1"}}}}}))
+		require.NoError(t, repo.AddGraph(ctx, doc1, []*types.GraphData{
+			{Node: []*types.GraphNode{{Name: "Isolated", Chunks: []string{"c1"}}}},
+		}))
 	}
 }
 
 // Bulk fixtures exercise database-side search/delete limits without thousands
 // of single-entity network round trips. Ingestion itself is tested via AddGraph.
-func seedLiveNodes(t *testing.T, ctx context.Context, repo *Repository, ns types.NameSpace, count int, prefix string) {
+func seedLiveNodes(ctx context.Context, t *testing.T, repo *Repository, ns types.NameSpace, count int, prefix string) {
 	t.Helper()
 	values, args := []string{}, []any{}
 	for i := 0; i < count; i++ {
-		p := nodeProperties{Name: fmt.Sprintf("%s%04d", prefix, i), KB: ns.KnowledgeBase, Knowledge: ns.Knowledge, Chunks: []string{"c1"}}
+		p := nodeProperties{
+			Name: fmt.Sprintf("%s%04d", prefix, i), KB: ns.KnowledgeBase,
+			Knowledge: ns.Knowledge, Chunks: []string{"c1"},
+		}
 		payload, err := p.encode()
 		require.NoError(t, err)
 		args = append(args, string(payload))
 		values = append(values, fmt.Sprintf("(CAST($%d AS ag_catalog.agtype))", len(args)))
 	}
-	_, err := repo.db.ExecContext(ctx, `INSERT INTO `+repo.entities+` (properties) VALUES `+strings.Join(values, ","), args...)
+	_, err := repo.db.ExecContext(ctx,
+		`INSERT INTO `+repo.entities+` (properties) VALUES `+strings.Join(values, ","), args...)
 	require.NoError(t, err)
 }
 
-func liveCount(t *testing.T, ctx context.Context, repo *Repository, table string, ns types.NameSpace) int {
+func liveCount(ctx context.Context, t *testing.T, repo *Repository, table string, ns types.NameSpace) int {
 	t.Helper()
 	var count int
 	args := []any{ns.KnowledgeBase}
 	if ns.Knowledge != "" {
 		args = append(args, ns.Knowledge)
 	}
-	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT count(*) FROM `+table+` WHERE `+scopePredicate("", ns.Knowledge != ""), args...).Scan(&count))
+	require.NoError(t, repo.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM `+table+` WHERE `+scopePredicate("", ns.Knowledge != ""), args...).Scan(&count))
 	return count
 }
 
@@ -189,7 +202,7 @@ func TestHologresIntegrationMatrix(t *testing.T) {
 		for i := 0; i < 4; i++ {
 			conn, err := repo.db.Conn(ctx)
 			require.NoError(t, err)
-			t.Cleanup(func() { conn.Close() })
+			t.Cleanup(func() { assert.NoError(t, conn.Close()) })
 			var searchPath, timeout string
 			require.NoError(t, conn.QueryRowContext(ctx, "SHOW search_path").Scan(&searchPath))
 			require.NoError(t, conn.QueryRowContext(ctx, "SHOW statement_timeout").Scan(&timeout))
@@ -265,7 +278,8 @@ func TestHologresIntegrationMatrix(t *testing.T) {
 			for _, name := range []string{"xRank", "Ranker", "Rank"} {
 				g.Node = append(g.Node, &types.GraphNode{Name: name})
 			}
-			require.NoError(t, repo.AddGraph(ctx, types.NameSpace{KnowledgeBase: kb, Knowledge: doc}, []*types.GraphData{g}))
+			require.NoError(t, repo.AddGraph(ctx,
+				types.NameSpace{KnowledgeBase: kb, Knowledge: doc}, []*types.GraphData{g}))
 		}
 		out, err := repo.SearchGraph(ctx, types.NameSpace{KnowledgeBase: kb}, "Rank")
 		require.NoError(t, err)
@@ -281,10 +295,11 @@ func TestHologresIntegrationMatrix(t *testing.T) {
 
 	t.Run("seed_caps_and_edge_dedup_before_budget", func(t *testing.T) {
 		ns := types.NameSpace{KnowledgeBase: "seed-cap", Knowledge: "doc"}
-		seedLiveNodes(t, ctx, repo, ns, chatMaxSeeds+5, "Seed")
+		seedLiveNodes(ctx, t, repo, ns, chatMaxSeeds+5, "Seed")
 		props, _ := json.Marshal(map[string]string{"kb": ns.KnowledgeBase, "kg": ns.Knowledge, "rel_type": "SELF"})
 		_, err := repo.db.ExecContext(ctx, `INSERT INTO `+repo.relations+` (start_id,end_id,properties)
-			SELECT id,id,CAST($2 AS ag_catalog.agtype) FROM `+repo.entities+` WHERE ag_catalog.agtype_object_field_text(properties,'kb')=$1`, ns.KnowledgeBase, string(props))
+			SELECT id,id,CAST($2 AS ag_catalog.agtype) FROM `+repo.entities+`
+			WHERE ag_catalog.agtype_object_field_text(properties,'kb')=$1`, ns.KnowledgeBase, string(props))
 		require.NoError(t, err)
 		out, err := repo.SearchGraph(ctx, types.NameSpace{KnowledgeBase: ns.KnowledgeBase}, "Seed")
 		require.NoError(t, err)
@@ -303,16 +318,21 @@ func TestHologresIntegrationMatrix(t *testing.T) {
 		require.NoError(t, repo.AddGraph(ctx, ns, []*types.GraphData{g}))
 		values, args := []string{}, []any{ns.KnowledgeBase}
 		for i := 0; i < chatMaxRows+1; i++ {
-			props, _ := json.Marshal(map[string]string{"kb": ns.KnowledgeBase, "kg": ns.Knowledge, "rel_type": fmt.Sprintf("TYPE_%04d", i)})
+			props, _ := json.Marshal(map[string]string{
+				"kb": ns.KnowledgeBase, "kg": ns.Knowledge, "rel_type": fmt.Sprintf("TYPE_%04d", i),
+			})
 			args = append(args, string(props))
 			values = append(values, fmt.Sprintf("(CAST($%d AS ag_catalog.agtype))", len(args)))
 		}
 		_, err := repo.db.ExecContext(ctx, `INSERT INTO `+repo.relations+` (start_id,end_id,properties)
-			SELECT s.id,t.id,v.p FROM `+repo.entities+` s, `+repo.entities+` t, (VALUES `+strings.Join(values, ",")+`) AS v(p)
-			WHERE ag_catalog.agtype_object_field_text(s.properties,'kb')=$1 AND ag_catalog.agtype_object_field_text(t.properties,'kb')=$1
-			AND ag_catalog.agtype_object_field_text(s.properties,'name')='Hub' AND ag_catalog.agtype_object_field_text(t.properties,'name')='Peer'`, args...)
+			SELECT s.id,t.id,v.p FROM `+repo.entities+` s, `+repo.entities+` t,
+				(VALUES `+strings.Join(values, ",")+`) AS v(p)
+			WHERE ag_catalog.agtype_object_field_text(s.properties,'kb')=$1
+				AND ag_catalog.agtype_object_field_text(t.properties,'kb')=$1
+			AND ag_catalog.agtype_object_field_text(s.properties,'name')='Hub'
+				AND ag_catalog.agtype_object_field_text(t.properties,'name')='Peer'`, args...)
 		require.NoError(t, err)
-		require.Equal(t, chatMaxRows+1, liveCount(t, ctx, repo, repo.relations, ns))
+		require.Equal(t, chatMaxRows+1, liveCount(ctx, t, repo, repo.relations, ns))
 		out, err := repo.SearchGraph(ctx, types.NameSpace{KnowledgeBase: ns.KnowledgeBase}, "Hub")
 		require.NoError(t, err)
 		require.Len(t, out.Graph.Relation, types.GraphSearchMaxRows)
@@ -334,7 +354,10 @@ func TestHologresIntegrationMatrix(t *testing.T) {
 		for i := 0; i < 30; i++ {
 			n.Attributes = append(n.Attributes, strings.Repeat("🌏", 1200))
 		}
-		g := &types.GraphData{Node: []*types.GraphNode{n}, Relation: []*types.GraphRelation{{Node1: name, Node2: name, Type: strings.Repeat("型", 200)}}}
+		g := &types.GraphData{
+			Node:     []*types.GraphNode{n},
+			Relation: []*types.GraphRelation{{Node1: name, Node2: name, Type: strings.Repeat("型", 200)}},
+		}
 		require.NoError(t, repo.AddGraph(ctx, ns, []*types.GraphData{g}))
 		out, err := repo.SearchGraph(ctx, types.NameSpace{KnowledgeBase: ns.KnowledgeBase}, "Long")
 		require.NoError(t, err)
@@ -363,7 +386,10 @@ func TestHologresIntegrationMatrix(t *testing.T) {
 			go func(i int) {
 				defer workers.Done()
 				<-start
-				g := &types.GraphData{Node: []*types.GraphNode{{Name: "Concurrent", Chunks: []string{fmt.Sprint(i)}}}, Relation: []*types.GraphRelation{{Node1: "Concurrent", Node2: "Concurrent", Type: "SELF"}}}
+				g := &types.GraphData{
+					Node:     []*types.GraphNode{{Name: "Concurrent", Chunks: []string{fmt.Sprint(i)}}},
+					Relation: []*types.GraphRelation{{Node1: "Concurrent", Node2: "Concurrent", Type: "SELF"}},
+				}
 				errs <- repo.AddGraph(ctx, ns, []*types.GraphData{g})
 			}(i)
 		}
@@ -382,8 +408,8 @@ func TestHologresIntegrationMatrix(t *testing.T) {
 			want = append(want, fmt.Sprint(i))
 		}
 		require.ElementsMatch(t, want, out.Node[0].Chunks)
-		require.Equal(t, 1, liveCount(t, ctx, repo, repo.entities, ns))
-		require.Equal(t, 1, liveCount(t, ctx, repo, repo.relations, ns))
+		require.Equal(t, 1, liveCount(ctx, t, repo, repo.entities, ns))
+		require.Equal(t, 1, liveCount(ctx, t, repo, repo.relations, ns))
 	})
 
 	t.Run("server_error_rolls_back_entities_and_updates", func(t *testing.T) {
@@ -392,14 +418,17 @@ func TestHologresIntegrationMatrix(t *testing.T) {
 		require.NoError(t, repo.AddGraph(ctx, ns, []*types.GraphData{baseline}))
 		broken := *repo
 		broken.relations = `"` + repo.graph + `"."missing_edge_label"`
-		g := &types.GraphData{Node: []*types.GraphNode{{Name: "Existing", Chunks: []string{"must-rollback"}}, {Name: "New"}}, Relation: []*types.GraphRelation{{Node1: "Existing", Node2: "New", Type: "FAIL"}}}
+		g := &types.GraphData{
+			Node:     []*types.GraphNode{{Name: "Existing", Chunks: []string{"must-rollback"}}, {Name: "New"}},
+			Relation: []*types.GraphRelation{{Node1: "Existing", Node2: "New", Type: "FAIL"}},
+		}
 		require.Error(t, broken.AddGraph(ctx, ns, []*types.GraphData{g}))
-		require.Equal(t, 1, liveCount(t, ctx, repo, repo.entities, ns))
+		require.Equal(t, 1, liveCount(ctx, t, repo, repo.entities, ns))
 		out, err := repo.SearchGraph(ctx, types.NameSpace{KnowledgeBase: ns.KnowledgeBase}, "Existing")
 		require.NoError(t, err)
 		require.Equal(t, []string{"original"}, out.Graph.Node[0].Chunks)
 		require.Error(t, repo.AddGraph(ctx, ns, []*types.GraphData{g, nil}))
-		require.Equal(t, 1, liveCount(t, ctx, repo, repo.entities, ns))
+		require.Equal(t, 1, liveCount(ctx, t, repo, repo.entities, ns))
 	})
 
 	t.Run("cancellation_pool_recovery_and_invalid_scope", func(t *testing.T) {
@@ -409,10 +438,12 @@ func TestHologresIntegrationMatrix(t *testing.T) {
 		out, err := repo.SearchNode(cancelled, ns, []string{"Acme"})
 		require.Error(t, err)
 		require.Nil(t, out)
-		require.Error(t, repo.AddGraph(cancelled, ns, []*types.GraphData{{Node: []*types.GraphNode{{Name: "Cancelled"}}}}))
+		require.Error(t, repo.AddGraph(cancelled, ns, []*types.GraphData{
+			{Node: []*types.GraphNode{{Name: "Cancelled"}}},
+		}))
 		require.Error(t, repo.DelGraph(cancelled, []types.NameSpace{ns}))
 		require.NoError(t, repo.db.PingContext(ctx))
-		require.Equal(t, 0, liveCount(t, ctx, repo, repo.entities, ns))
+		require.Equal(t, 0, liveCount(ctx, t, repo, repo.entities, ns))
 		_, err = repo.SearchGraph(ctx, ns, "Acme")
 		require.Error(t, err)
 		_, err = repo.SearchNode(ctx, types.NameSpace{}, []string{"Acme"})
@@ -425,10 +456,12 @@ func TestHologresIntegrationMatrix(t *testing.T) {
 	t.Run("batched_deletion_concurrency_and_other_kb_survival", func(t *testing.T) {
 		ns := types.NameSpace{KnowledgeBase: "delete-many", Knowledge: "doc"}
 		other := types.NameSpace{KnowledgeBase: "delete-other", Knowledge: "doc"}
-		seedLiveNodes(t, ctx, repo, ns, deleteBatchSize+5, "Delete")
-		seedLiveNodes(t, ctx, repo, other, 1, "Keep")
+		seedLiveNodes(ctx, t, repo, ns, deleteBatchSize+5, "Delete")
+		seedLiveNodes(ctx, t, repo, other, 1, "Keep")
 		props, _ := json.Marshal(map[string]string{"kb": ns.KnowledgeBase, "kg": ns.Knowledge, "rel_type": "SELF"})
-		_, err := repo.db.ExecContext(ctx, `INSERT INTO `+repo.relations+` (start_id,end_id,properties) SELECT id,id,CAST($2 AS ag_catalog.agtype) FROM `+repo.entities+` WHERE ag_catalog.agtype_object_field_text(properties,'kb')=$1`, ns.KnowledgeBase, string(props))
+		_, err := repo.db.ExecContext(ctx, `INSERT INTO `+repo.relations+` (start_id,end_id,properties)
+			SELECT id,id,CAST($2 AS ag_catalog.agtype) FROM `+repo.entities+`
+			WHERE ag_catalog.agtype_object_field_text(properties,'kb')=$1`, ns.KnowledgeBase, string(props))
 		require.NoError(t, err)
 		errs := make(chan error, 2)
 		var workers sync.WaitGroup
@@ -441,10 +474,10 @@ func TestHologresIntegrationMatrix(t *testing.T) {
 		for err := range errs {
 			require.NoError(t, err)
 		}
-		require.Equal(t, 0, liveCount(t, ctx, repo, repo.entities, ns))
-		require.Equal(t, 0, liveCount(t, ctx, repo, repo.relations, ns))
-		require.Equal(t, 1, liveCount(t, ctx, repo, repo.entities, other))
+		require.Equal(t, 0, liveCount(ctx, t, repo, repo.entities, ns))
+		require.Equal(t, 0, liveCount(ctx, t, repo, repo.relations, ns))
+		require.Equal(t, 1, liveCount(ctx, t, repo, repo.entities, other))
 		require.NoError(t, repo.DelGraph(ctx, []types.NameSpace{{KnowledgeBase: other.KnowledgeBase}}))
-		require.Equal(t, 0, liveCount(t, ctx, repo, repo.entities, other))
+		require.Equal(t, 0, liveCount(ctx, t, repo, repo.entities, other))
 	})
 }

@@ -14,21 +14,33 @@ import (
 )
 
 func queryRows() *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"kind", "seed_index", "node_id", "node_payload", "neighbor_id", "neighbor_payload", "edge_id", "source_id", "target_id", "relation_type"})
+	return sqlmock.NewRows([]string{
+		"kind", "seed_index", "node_id", "node_payload", "neighbor_id", "neighbor_payload",
+		"edge_id", "source_id", "target_id", "relation_type",
+	})
 }
 
-func nodePayload(name, doc, chunk string, public bool) string {
-	p := nodeProperties{Name: name, KB: "kb", Knowledge: doc, Chunks: []string{chunk}, Attributes: []string{doc + " attribute"}}
+func nodePayload(t *testing.T, name, doc, chunk string, public bool) string {
+	t.Helper()
+	p := nodeProperties{
+		Name: name, KB: "kb", Knowledge: doc, Chunks: []string{chunk}, Attributes: []string{doc + " attribute"},
+	}
 	if public {
-		p.encode()
-		data, _ := json.Marshal(p.Projection)
+		_, err := p.encode()
+		require.NoError(t, err)
+		data, err := json.Marshal(p.Projection)
+		require.NoError(t, err)
 		return string(data)
 	}
-	data, _ := json.Marshal(p)
+	data, err := json.Marshal(p)
+	require.NoError(t, err)
 	return string(data)
 }
 
-func expectSearch(t *testing.T, repo *Repository, mock sqlmock.Sqlmock, ns types.NameSpace, terms []string, public bool, rows *sqlmock.Rows) {
+func expectSearch(
+	t *testing.T, repo *Repository, mock sqlmock.Sqlmock, ns types.NameSpace,
+	terms []string, public bool, rows *sqlmock.Rows,
+) {
 	t.Helper()
 	query, args, err := repo.searchSQL(ns, terms, public)
 	require.NoError(t, err)
@@ -45,10 +57,10 @@ func expectSearch(t *testing.T, repo *Repository, mock sqlmock.Sqlmock, ns types
 func TestSearchNodeDirectionSameNamedDocumentsAndSelfLoop(t *testing.T) {
 	repo, mock := testRepository(t)
 	ns := types.NameSpace{KnowledgeBase: "kb"}
-	a1 := nodePayload("Acme", "doc1", "c1", false)
-	b1 := nodePayload("Shanghai", "doc1", "c1", false)
-	a2 := nodePayload("Acme", "doc2", "c2", false)
-	b2 := nodePayload("Shanghai", "doc2", "c2", false)
+	a1 := nodePayload(t, "Acme", "doc1", "c1", false)
+	b1 := nodePayload(t, "Shanghai", "doc1", "c1", false)
+	a2 := nodePayload(t, "Acme", "doc2", "c2", false)
+	b2 := nodePayload(t, "Shanghai", "doc2", "c2", false)
 	rows := queryRows().
 		AddRow(1, 1, "b1", b1, "a1", a1, "r1", "a1", "b1", "LOCATED_IN").
 		AddRow(1, 2, "b2", b2, "a2", a2, "r2", "a2", "b2", "LOCATED_IN").
@@ -76,8 +88,9 @@ func TestSearchNodeDirectionSameNamedDocumentsAndSelfLoop(t *testing.T) {
 func TestPublicIsolatedEntitiesAndCandidateCaps(t *testing.T) {
 	repo, mock := testRepository(t)
 	ns := types.NameSpace{KnowledgeBase: "kb"}
-	isolated := nodePayload("Isolated", "doc", "c1", true)
-	expectSearch(t, repo, mock, ns, []string{"Isolated"}, true, queryRows().AddRow(0, 1, "a", isolated, "", "", "", "", "", ""))
+	isolated := nodePayload(t, "Isolated", "doc", "c1", true)
+	expectSearch(t, repo, mock, ns, []string{"Isolated"}, true,
+		queryRows().AddRow(0, 1, "a", isolated, "", "", "", "", "", ""))
 	out, err := repo.SearchGraph(context.Background(), ns, "Isolated")
 	require.NoError(t, err)
 	require.Len(t, out.Graph.Node, 1)
@@ -85,7 +98,7 @@ func TestPublicIsolatedEntitiesAndCandidateCaps(t *testing.T) {
 
 	seeds := queryRows()
 	for i := 0; i <= types.GraphSearchMaxSeeds; i++ {
-		seeds.AddRow(0, i+1, fmt.Sprint(i), nodePayload("Cap", "doc", "c1", true), "", "", "", "", "", "")
+		seeds.AddRow(0, i+1, fmt.Sprint(i), nodePayload(t, "Cap", "doc", "c1", true), "", "", "", "", "", "")
 	}
 	expectSearch(t, repo, mock, ns, []string{"Cap"}, true, seeds)
 	out, err = repo.SearchGraph(context.Background(), ns, "Cap")
@@ -94,7 +107,7 @@ func TestPublicIsolatedEntitiesAndCandidateCaps(t *testing.T) {
 	require.Equal(t, []string{"candidate_seeds"}, out.TruncationReasons)
 
 	edges := queryRows()
-	p := nodePayload("Hub", "doc", "c1", true)
+	p := nodePayload(t, "Hub", "doc", "c1", true)
 	for i := 0; i <= types.GraphSearchMaxRows; i++ {
 		edges.AddRow(1, 1, "hub", p, "hub", p, fmt.Sprint(i), "hub", "hub", "SELF")
 	}
@@ -108,7 +121,7 @@ func TestPublicIsolatedEntitiesAndCandidateCaps(t *testing.T) {
 func TestQueryFailureNeverReturnsSuccessfulPartialGraph(t *testing.T) {
 	repo, mock := testRepository(t)
 	ns := types.NameSpace{KnowledgeBase: "kb"}
-	p := nodePayload("Acme", "doc", "c1", true)
+	p := nodePayload(t, "Acme", "doc", "c1", true)
 	rows := queryRows().AddRow(0, 1, "a", p, "", "", "", "", "", "").AddRow(0, 2, "b", p, "", "", "", "", "", "")
 	rows.RowError(1, errors.New("stream interrupted"))
 	expectSearch(t, repo, mock, ns, []string{"Acme"}, true, rows)
@@ -132,7 +145,8 @@ func TestRejectInvalidScopesAndMalformedData(t *testing.T) {
 	require.Error(t, err)
 	_, err = repo.SearchGraph(context.Background(), types.NameSpace{KnowledgeBase: "kb"}, " ")
 	require.Error(t, err)
-	_, err = decodeNode("a", nodePayload("Acme", "doc2", "c2", false), types.NameSpace{KnowledgeBase: "kb", Knowledge: "doc1"}, false)
+	_, err = decodeNode("a", nodePayload(t, "Acme", "doc2", "c2", false),
+		types.NameSpace{KnowledgeBase: "kb", Knowledge: "doc1"}, false)
 	require.Error(t, err)
 	for _, payload := range []string{"null", `{"name":17}`, `{"name":"Acme","knowledge_id":"doc","chunks":[17]}`} {
 		_, err := decodeNode("a", payload, types.NameSpace{KnowledgeBase: "kb"}, true)

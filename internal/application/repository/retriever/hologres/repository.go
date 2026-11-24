@@ -36,6 +36,7 @@ var (
 	_ interfaces.GraphSearchRepository   = (*Repository)(nil)
 )
 
+// NewRepository binds fixed AGE labels to a validated graph identifier.
 func NewRepository(db *sql.DB, graph string) (*Repository, error) {
 	if !graphIdentifier.MatchString(graph) {
 		return nil, fmt.Errorf("invalid Hologres graph identifier")
@@ -51,7 +52,7 @@ func NewRepository(db *sql.DB, graph string) (*Repository, error) {
 // be explicitly enabled; production can provision labels with a separate role.
 func (r *Repository) EnsureSchema(ctx context.Context, create bool) error {
 	if r.db == nil {
-		return fmt.Errorf("Hologres graph connection is not configured")
+		return fmt.Errorf("hologres graph connection is not configured")
 	}
 	var exists bool
 	if err := r.db.QueryRowContext(ctx,
@@ -65,7 +66,8 @@ func (r *Repository) EnsureSchema(ctx context.Context, create bool) error {
 		if _, err := r.db.ExecContext(ctx, `CALL ag_catalog.hg_age_create_graph($1)`, r.graph); err != nil {
 			// A second application instance may have provisioned it concurrently.
 			if checkErr := r.db.QueryRowContext(ctx,
-				`SELECT EXISTS (SELECT 1 FROM hologres.hg_ag_label WHERE graph = $1)`, r.graph).Scan(&exists); checkErr != nil || !exists {
+				`SELECT EXISTS (SELECT 1 FROM hologres.hg_ag_label WHERE graph = $1)`, r.graph,
+			).Scan(&exists); checkErr != nil || !exists {
 				return fmt.Errorf("create AGE graph: %w", err)
 			}
 		}
@@ -84,8 +86,12 @@ func (r *Repository) EnsureSchema(ctx context.Context, create bool) error {
 		if !create {
 			return fmt.Errorf("AGE label %q is missing", label.name)
 		}
-		if _, err := r.db.ExecContext(ctx, `CALL ag_catalog.`+label.procedure+`($1, $2)`, r.graph, label.name); err != nil {
-			if checkErr := r.db.QueryRowContext(ctx, check, r.graph, label.name, label.kind).Scan(&exists); checkErr != nil || !exists {
+		if _, err := r.db.ExecContext(ctx,
+			`CALL ag_catalog.`+label.procedure+`($1, $2)`, r.graph, label.name,
+		); err != nil {
+			if checkErr := r.db.QueryRowContext(ctx,
+				check, r.graph, label.name, label.kind,
+			).Scan(&exists); checkErr != nil || !exists {
 				return fmt.Errorf("create AGE label %q: %w", label.name, err)
 			}
 		}
@@ -111,11 +117,11 @@ type nodeProjection struct {
 	Attributes []string `json:"attributes"`
 }
 
-func clip(text string, max int) string {
-	if utf8.RuneCountInString(text) <= max {
+func clip(text string, limit int) string {
+	if utf8.RuneCountInString(text) <= limit {
 		return text
 	}
-	return string([]rune(text)[:max])
+	return string([]rune(text)[:limit])
 }
 
 func boundedList(values []string, maxItems, maxRunes int) []string {
@@ -144,8 +150,10 @@ func validText(value string) bool {
 }
 
 func validateNamespace(ns types.NameSpace, documentRequired bool) error {
-	if ns.KnowledgeBase == "" || !validText(ns.KnowledgeBase) || !validText(ns.Knowledge) || (documentRequired && ns.Knowledge == "") {
-		return fmt.Errorf("graph operations require a valid knowledge base%s", map[bool]string{true: " and document", false: ""}[documentRequired])
+	if ns.KnowledgeBase == "" || !validText(ns.KnowledgeBase) || !validText(ns.Knowledge) ||
+		(documentRequired && ns.Knowledge == "") {
+		return fmt.Errorf("graph operations require a valid knowledge base%s",
+			map[bool]string{true: " and document", false: ""}[documentRequired])
 	}
 	return nil
 }
@@ -165,7 +173,9 @@ func prepareGraph(ns types.NameSpace, graph *types.GraphData) ([]*nodeProperties
 		if p := byName[name]; p != nil {
 			return p, nil
 		}
-		p := &nodeProperties{Name: name, KB: ns.KnowledgeBase, Knowledge: ns.Knowledge, Chunks: []string{}, Attributes: []string{}}
+		p := &nodeProperties{
+			Name: name, KB: ns.KnowledgeBase, Knowledge: ns.Knowledge, Chunks: []string{}, Attributes: []string{},
+		}
 		byName[name] = p
 		return p, nil
 	}
@@ -225,6 +235,7 @@ func unionStrings(a, b []string) []string {
 	return out
 }
 
+// AddGraph atomically merges each graph while preserving AGE identities and provenance.
 func (r *Repository) AddGraph(ctx context.Context, ns types.NameSpace, graphs []*types.GraphData) error {
 	if r.db == nil {
 		return nil // Match the disabled Neo4j adapter.
@@ -250,15 +261,17 @@ func (r *Repository) AddGraph(ctx context.Context, ns types.NameSpace, graphs []
 	return nil
 }
 
-func (r *Repository) addGraph(ctx context.Context, ns types.NameSpace, graph *types.GraphData, nodes []*nodeProperties) error {
+func (r *Repository) addGraph(
+	ctx context.Context, ns types.NameSpace, graph *types.GraphData, nodes []*nodeProperties,
+) error {
 	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
 	conn, tx, err := r.beginWrite(ctx)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	defer tx.Rollback()
+	defer func() { _ = conn.Close() }()
+	defer func() { _ = tx.Rollback() }() // Preserve the operation error; committed transactions are already closed.
 
 	// The first table access takes Hologres's transaction table lock. Later
 	// reads see this transaction's writes; concurrent graph writers serialize.
@@ -278,14 +291,18 @@ func (r *Repository) addGraph(ctx context.Context, ns types.NameSpace, graph *ty
 			return err
 		}
 		if stored != nil {
-			_, err = tx.ExecContext(ctx, `UPDATE `+r.entities+` SET properties = CAST($1 AS ag_catalog.agtype) WHERE id::text = $2`, string(payload), stored.id)
+			_, err = tx.ExecContext(ctx, `UPDATE `+r.entities+`
+				SET properties = CAST($1 AS ag_catalog.agtype) WHERE id::text = $2`, string(payload), stored.id)
 			ids[p.Name] = stored.id
 		} else {
 			// IDs are generated by AGE. Never supply a Neo4j or application ID.
-			_, err = tx.ExecContext(ctx, `INSERT INTO `+r.entities+` (properties) VALUES (CAST($1 AS ag_catalog.agtype))`, string(payload))
+			_, err = tx.ExecContext(ctx, `INSERT INTO `+r.entities+`
+				(properties) VALUES (CAST($1 AS ag_catalog.agtype))`, string(payload))
 			if err == nil {
 				var id string // Keep AGE identities out of floating-point JSON decoding.
-				err = tx.QueryRowContext(ctx, `SELECT id::text FROM `+r.entities+` WHERE `+scopePredicate("", true)+` AND ag_catalog.agtype_object_field_text(properties, 'name') = $3`, ns.KnowledgeBase, ns.Knowledge, p.Name).Scan(&id)
+				err = tx.QueryRowContext(ctx, `SELECT id::text FROM `+r.entities+` WHERE `+scopePredicate("", true)+`
+					AND ag_catalog.agtype_object_field_text(properties, 'name') = $3`,
+					ns.KnowledgeBase, ns.Knowledge, p.Name).Scan(&id)
 				if err == nil && id == "" {
 					err = fmt.Errorf("empty AGE identity")
 				}
@@ -324,18 +341,23 @@ type storedNode struct {
 	props nodeProperties
 }
 
-func (r *Repository) loadNodes(ctx context.Context, tx *sql.Tx, ns types.NameSpace, nodes []*nodeProperties) (map[string]*storedNode, error) {
+func (r *Repository) loadNodes(
+	ctx context.Context, tx *sql.Tx, ns types.NameSpace, nodes []*nodeProperties,
+) (map[string]*storedNode, error) {
 	args := []any{ns.KnowledgeBase, ns.Knowledge}
 	marks := make([]string, len(nodes))
 	for i, node := range nodes {
 		marks[i] = fmt.Sprintf("$%d", len(args)+1)
 		args = append(args, node.Name)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id::text, ag_catalog.agtype_out(properties)::text FROM `+r.entities+` WHERE `+scopePredicate("", true)+` AND ag_catalog.agtype_object_field_text(properties, 'name') IN (`+strings.Join(marks, ",")+`)`, args...)
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id::text, ag_catalog.agtype_out(properties)::text FROM `+r.entities+`
+		WHERE `+scopePredicate("", true)+`
+		AND ag_catalog.agtype_object_field_text(properties, 'name') IN (`+strings.Join(marks, ",")+`)`, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }() // Preserve any query or decoding error.
 	out := map[string]*storedNode{}
 	for rows.Next() {
 		var node storedNode
@@ -346,7 +368,8 @@ func (r *Repository) loadNodes(ctx context.Context, tx *sql.Tx, ns types.NameSpa
 		if err := json.Unmarshal([]byte(payload), &node.props); err != nil {
 			return nil, fmt.Errorf("decode stored graph entity: %w", err)
 		}
-		if node.id == "" || node.props.Name == "" || node.props.KB != ns.KnowledgeBase || node.props.Knowledge != ns.Knowledge {
+		if node.id == "" || node.props.Name == "" || node.props.KB != ns.KnowledgeBase ||
+			node.props.Knowledge != ns.Knowledge {
 			return nil, fmt.Errorf("invalid stored graph entity scope")
 		}
 		if out[node.props.Name] != nil {
@@ -368,6 +391,7 @@ func scopePredicate(alias string, document bool) string {
 	return query
 }
 
+// DelGraph removes scoped entities and attached edges in bounded transactions.
 func (r *Repository) DelGraph(ctx context.Context, namespaces []types.NameSpace) error {
 	if r.db == nil {
 		return nil
@@ -403,13 +427,14 @@ func (r *Repository) deleteBatch(ctx context.Context, ns types.NameSpace) (int, 
 	if err != nil {
 		return 0, err
 	}
-	defer conn.Close()
-	defer tx.Rollback()
+	defer func() { _ = conn.Close() }()
+	defer func() { _ = tx.Rollback() }() // Preserve the operation error; committed transactions are already closed.
 	args := []any{ns.KnowledgeBase}
 	if ns.Knowledge != "" {
 		args = append(args, ns.Knowledge)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id::text FROM `+r.entities+` WHERE `+scopePredicate("", ns.Knowledge != "")+` ORDER BY id LIMIT 1000`, args...)
+	rows, err := tx.QueryContext(ctx, `SELECT id::text FROM `+r.entities+`
+		WHERE `+scopePredicate("", ns.Knowledge != "")+` ORDER BY id LIMIT 1000`, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -417,13 +442,13 @@ func (r *Repository) deleteBatch(ctx context.Context, ns types.NameSpace) (int, 
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close() // Preserve the scan error if cleanup also fails.
 			return 0, err
 		}
 		ids = append(ids, id)
 	}
 	err = rows.Err()
-	rows.Close()
+	_ = rows.Close() // Preserve the iteration error if cleanup also fails.
 	if err != nil {
 		return 0, err
 	}
@@ -437,7 +462,8 @@ func (r *Repository) deleteBatch(ctx context.Context, ns types.NameSpace) (int, 
 	list := strings.Join(marks, ",")
 	// SQL DELETE does not cascade. Remove all attached edges, even malformed
 	// cross-scope edges, while leaving their other endpoints untouched.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM `+r.relations+` WHERE start_id::text IN (`+list+`) OR end_id::text IN (`+list+`)`, ids...); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM `+r.relations+`
+		WHERE start_id::text IN (`+list+`) OR end_id::text IN (`+list+`)`, ids...); err != nil {
 		return 0, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM `+r.entities+` WHERE id::text IN (`+list+`)`, ids...); err != nil {
