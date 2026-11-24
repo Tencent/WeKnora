@@ -42,8 +42,15 @@
       </div>
     </div>
 
-    <button v-if="currentGroupType === 'file' && browserKnowledgeBases?.length" type="button"
-      class="mention-browse-entry" @click="openFileBrowser">{{ $t('mentionBrowser.browse') }} <t-icon name="chevron-right" /></button>
+    <div v-if="currentGroupType === 'file' && browserKnowledgeBases?.length" class="mention-browse-bar">
+      <button type="button" class="mention-row mention-browse-entry" @click="openFileBrowser">
+        <span class="mention-row__icon mention-browse-entry__icon">
+          <t-icon name="folder-open" />
+        </span>
+        <span class="mention-row__name">{{ $t('mentionBrowser.browse') }}</span>
+        <t-icon class="mention-row__arrow" name="chevron-right" />
+      </button>
+    </div>
     <div class="mention-list" ref="listRef" @scroll="onScroll">
       <!-- 根层级：分组入口 -->
       <template v-if="isRootView">
@@ -326,10 +333,21 @@ watch([browsingFiles, () => props.visible, () => props.style], (_, __, onCleanup
   const viewport = window.visualViewport;
   const fit = () => {
     if (disposed || !browsingFiles.value || !props.visible || !menuRef.value) return;
-    browserMenuStyle.value = fitBrowserViewport(menuRef.value.getBoundingClientRect(), {
+    const zoom = getRootZoom();
+    const rect = menuRef.value.getBoundingClientRect();
+    const parsedLeft = Number.parseFloat(String(props.style?.left ?? ''));
+    const parsedTop = Number.parseFloat(String(props.style?.top ?? ''));
+    const parsedBottom = Number.parseFloat(String(props.style?.bottom ?? ''));
+    const width = rect.width || 300 * zoom;
+    const left = Number.isFinite(parsedLeft) ? parsedLeft * zoom : rect.left;
+    const hasBottomAnchor = Number.isFinite(parsedBottom) && props.style?.bottom !== 'auto';
+    const anchor = hasBottomAnchor
+      ? { left, top: rect.top, width, bottom: window.innerHeight - parsedBottom * zoom, layoutHeight: window.innerHeight }
+      : { left, top: Number.isFinite(parsedTop) ? parsedTop * zoom : rect.top, width };
+    browserMenuStyle.value = fitBrowserViewport(anchor, {
       left: viewport?.offsetLeft || 0, top: viewport?.offsetTop || 0,
       width: viewport?.width || window.innerWidth, height: viewport?.height || window.innerHeight,
-    }, getRootZoom());
+    }, zoom);
   };
   onCleanup(() => {
     disposed = true;
@@ -405,7 +423,7 @@ const visibleItems = computed(() => visibleGroups.value.flatMap(group => group.v
 // 菜单贴着输入框向上展开，结果条数变化会让顶边上下跳；搜索期间高度只增不减
 const stableMinHeight = ref(0);
 const stableHeightStyle = computed(() => (
-  !isRootView.value && stableMinHeight.value ? { minHeight: `${stableMinHeight.value}px` } : undefined
+  !browsingFiles.value && !isRootView.value && stableMinHeight.value ? { minHeight: `${stableMinHeight.value}px` } : undefined
 ));
 
 watch(
@@ -683,8 +701,26 @@ const scrollToRow = (index: number) => {
 </script>
 
 <style scoped>
-.mention-browse-entry { flex-shrink: 0; display: flex; justify-content: space-between; border: 0; padding: 8px; background: transparent; color: var(--td-brand-color); cursor: pointer; font: inherit; }
-.mention-browse-entry:focus-visible { outline: 2px solid var(--td-brand-color); }
+.mention-browse-bar {
+  flex-shrink: 0;
+  padding-bottom: 2px;
+  margin-bottom: 2px;
+  border-bottom: .5px solid var(--td-component-stroke);
+}
+
+.mention-browse-entry {
+  color: var(--td-brand-color);
+  font-weight: 500;
+}
+
+.mention-browse-entry__icon {
+  color: var(--td-brand-color);
+}
+
+.mention-browse-entry:focus-visible {
+  outline: 1.5px solid var(--td-brand-color);
+  outline-offset: -1.5px;
+}
 /* 与输入框内其他下拉（推理强度、模型选择）保持同一套尺寸 */
 .mention-menu {
   position: fixed;
