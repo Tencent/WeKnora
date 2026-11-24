@@ -147,7 +147,9 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	}
 
 	tw := tabwriter.NewWriter(iostreams.IO.Out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tCONTENTS\tUPDATED")
+	if _, err := fmt.Fprintln(tw, "ID\tNAME\tCONTENTS\tUPDATED"); err != nil {
+		return err
+	}
 	now := time.Now()
 	for _, kb := range items {
 		name := text.Truncate(40, kb.Name)
