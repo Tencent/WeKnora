@@ -2,13 +2,14 @@ package doc
 
 import (
 	"context"
-	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
