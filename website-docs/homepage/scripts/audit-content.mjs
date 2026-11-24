@@ -41,6 +41,16 @@ for (const term of ['语音输入', '沙箱浏览器', '凭据保险库', '知�
 for (const shot of ['release-v091-voice', 'release-v091-dictation', 'release-v091-login', 'release-v091-vault-fill', 'release-v091-vault', 'release-v091-search', 'release-v091-source']) {
   assert.ok(release.includes(`src="/docs/_home/product/${shot}.png"`), `Missing release screenshot: ${shot}`);
 }
+for (const { id, guides, images } of [
+  { id: 'work-assistant', guides: ['26-weknora-assistant.html', '26-weknora-assistant.html#collaboration'], images: ['assistant-overview', 'assistant-release-guide', 'agent-collaboration'] },
+  { id: 'automations', guides: ['27-automations.html', '28-agent-permissions.html'], images: ['automation-conversation', 'automation-setup', 'assistant-permissions'] },
+]) {
+  const section = html.match(new RegExp(`<section id="${id}"[\\s\\S]*?</section>`))?.[0];
+  assert.ok(section && !release.includes(`id="${id}"`), `Missing independent product section: ${id}`);
+  assert.ok(capabilities.includes(`href="#${id}"`), `Missing product overview link: #${id}`);
+  for (const guide of guides) assert.ok(section.includes(`href="/docs/03-features/${guide}"`), `Missing guide in ${id}: ${guide}`);
+  for (const image of images) assert.ok(section.includes(`src="/docs/_home/product/${image}.png"`), `Missing screenshot in ${id}: ${image}`);
+}
 const browser = html.match(/<section id="agent-workflow"[\s\S]*?<\/section>/)?.[0];
 assert.ok(browser?.includes('/docs/_home/product/local-browser-task.png') && browser.includes('BrowserSkill'), 'Keep the local browser showcase outside the release section');
 for (const asset of ['browser-connection.png', 'browserskill.png']) {

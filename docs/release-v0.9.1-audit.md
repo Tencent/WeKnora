@@ -15,7 +15,7 @@
 | 官网图文、升级与回退 | [v0.9.1 版本说明](../website-docs/07-releases/v0.9.1.md) |
 | 给用户群、GitHub Release、社区跟帖 | [公告正文](release-v0.9.1-announcement.md) |
 | 英文变化记录 | [CHANGELOG](../CHANGELOG.md) |
-| 首页四个产品场景 | [官网首页](../website-docs/homepage/app/page.tsx) |
+| 首页当版四项重点与常设产品介绍 | [官网首页](../website-docs/homepage/app/page.tsx) |
 | README 入口 | [中文](../README_CN.md) · [English](../README.md) · [日本語](../README_JA.md) · [한국어](../README_KO.md) |
 | 独立官网包和部署步骤 | 运行 `npm run package:site` 得到 `website-docs/releases/weknora-site-v0.9.1.tar.gz`。[部署指南](../website-docs/README.md) |
 
@@ -32,7 +32,13 @@
 | 文件选择与访客 | 提及文件可按目录浏览。嵌入访客能在当前浏览器续聊，签名访客可删除自己的会话 | [#4700](https://github.com/Tencent/WeKnora/pull/4700) · [#4631](https://github.com/Tencent/WeKnora/pull/4631) · [#5715](https://github.com/Tencent/WeKnora/pull/5715) |
 | 运维、部署与官网 | 开启自动迁移时按实际向量维度在后台建 HNSW 索引，另有文档进度、连接池、Helm Pod 注解、子路径部署、构建版本展示、社区案例 | [#3364](https://github.com/Tencent/WeKnora/pull/3364) · [#4732](https://github.com/Tencent/WeKnora/pull/4732) · [#4349](https://github.com/Tencent/WeKnora/pull/4349) · [#5159](https://github.com/Tencent/WeKnora/pull/5159) · [#4977](https://github.com/Tencent/WeKnora/pull/4977) · [#4769](https://github.com/Tencent/WeKnora/pull/4769) · [#4902](https://github.com/Tencent/WeKnora/pull/4902) |
 
-官网首页、版本图文、四种语言 README 和群公告突出语音输入、会话浏览器、个人凭据保险库和知识检索。以图检索属于 API，全局搜索展示命中原文。已有功能的小项改动归入英文变更记录和各自的使用手册。
+官网首页、版本图文、四种语言 README 和群公告突出语音输入、会话浏览器、个人凭据保险库和知识检索。以图检索属于 API，全局搜索展示命中原文。画廊校对、Nextcloud 同步、手动维护 Wiki 等改动列在[其他更新](../website-docs/07-releases/v0.9.1.md#other-changes)，也收录在 GitHub Release 正文和英文变更记录中。
+
+## 首页常设能力
+
+对照 v0.9.0 标签，原首页在当版更新区展示工作助手、多智能体协作、自动化、执行权限与审批。替换这个区域后，视频和 Agent 概览里的文档入口仍在，四项图文失去了展示位置。[v0.9.0 首页原稿](https://github.com/Tencent/WeKnora/blob/v0.9.0/website-docs/homepage/app/page.tsx)
+
+首页现有两个常设入口，可以从「产品能力」的 Agent 卡片进入。工作助手与多智能体协作（`#work-assistant`）展示当前页面上的任务和子任务结果。自动化任务与执行审批（`#automations`）展示对话排程、手工设定和审批。六张截图沿用 v0.9.0 原图。沙箱按用户复用与后台命令、文档解析和飞书 / Lark 同步分别由对应产品章节介绍。
 
 ## 配图与视频
 
@@ -61,11 +67,11 @@
 | 检查 | 结果 |
 | --- | --- |
 | 前端 | Node 24 下类型检查与生产构建通过。单测 2,891 项通过，1 项跳过。 |
-| 官网与嵌入文档 | 检查 83 篇 Markdown 的 422 个内部链接、60 幅 Mermaid 图。静态站 86 页、446 个本地路由或资源检查通过。助手内置文档解析和引用锚点测试通过。 |
-| 首页与历史影片 | 浏览器集成测试通过，覆盖发布区导航、旧影片播放与切换、同标签页返回、移动端菜单。静态包内原片与仓库中的 v0.9.0 视频校验值相同。 |
+| 官网与嵌入文档 | 检查 83 篇 Markdown 的 429 个内部链接、60 幅 Mermaid 图。静态站 86 页、452 个本地路由或资源检查通过。助手内置文档解析和引用锚点测试通过。 |
+| 首页与历史影片 | 浏览器集成测试通过，覆盖发布区、两个常设章节的入口与详情跳转、旧影片播放与切换、同标签页返回、移动端菜单。静态包内原片与仓库中的 v0.9.0 视频校验值相同。 |
 | 版本与部署 | 核对应用与官网 VERSION、两个 npm 包及其锁文件、四种语言 README 链接。Helm 3.19.0 lint 和 12 项 chart 测试通过，默认三个应用镜像均为 `v0.9.1`，显式标签可覆盖。Compose 渲染出 app、ui、docreader、sandbox 的同版镜像名。镜像发布后还需实际拉取。 |
 | 重点能力 | 语音录制与快捷键、WAV 编码、来源定位及搜索反馈的 50 项前端测试通过。Go 回归覆盖转写所用模型、共享智能体所属空间、以图检索、重解析替换时机与 PostgreSQL HNSW 索引。本轮另有 7 项凭据表单前端用例通过，Go 用例覆盖加密存取、归属、域名交集、仅用一次和选用已存账号。前轮另覆盖数据源、Wiki 配置和模型厂商注册表。 |
-| 交付包 | 检查静态 tar.gz 的新旧发布页、原视频、七张图及对应首页副本。检查公告中的版本链接与 6 个公开锚点，逐行核对两份 TSV 与 Git 输出一致。 |
+| 交付包 | 检查静态 tar.gz 的新旧发布页、原视频、七张本版图及对应首页副本，核对六张常设章节图片与 v0.9.0 标签一致。检查公告中的版本链接与 7 个公开锚点，逐行核对两份 TSV 与 Git 输出一致。 |
 
 ## 文档核对范围
 

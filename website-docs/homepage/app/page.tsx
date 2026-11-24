@@ -16,12 +16,13 @@ const guide = (path: string) => `${docs}${path}.html`;
 const modes = [
   { number: "01", icon: "search", label: "RAG", title: "回答有据可查", description: "通过语义与关键词检索文字，结合多模态 Embedding 查找图片。点击回答中的引用，可以直接定位原文核对。", tags: ["混合检索", "多模态 Embedding", "原文引用定位"], link: "03-features/05-retrieval-engines", related: [
     { label: "图文检索", href: guide("03-features/02-knowledge-base") + "#multimodal-embedding" },
+    { label: "文档解析与 OCR", href: guide("03-features/03-document-parsing") },
     { label: "引用与来源", href: guide("03-features/18-chat-experience") },
   ] },
   { number: "02", icon: "agent", label: "Agent", title: "用知识和工具完成任务", description: "按需阅读附件中的正文与图片，检索知识，调用 MCP 工具与技能。在沙箱或本机浏览器中执行任务，对话中可追加要求、分叉或回滚。", tags: ["附件按需读取", "多步推理", "技能与沙箱", "本机浏览器", "MCP 工具", "长期记忆"], link: "03-features/07-agent", related: [
     { label: "附件与对话", href: guide("03-features/18-chat-experience") },
-    { label: "工作助手与多智能体协作", href: guide("03-features/26-weknora-assistant") },
-    { label: "自动化", href: guide("03-features/27-automations") },
+    { label: "工作助手与多智能体协作", href: "#work-assistant" },
+    { label: "自动化与执行审批", href: "#automations" },
   ] },
   { number: "03", icon: "wiki", label: "Wiki", title: "把文档整理成 Wiki", description: "从原始文档生成相互链接的 Wiki 页面与知识图谱，支持浏览、编辑和版本回滚。", tags: ["自动组织", "知识图谱", "版本回滚"], link: "03-features/14-wiki", related: [] },
 ];
@@ -68,6 +69,38 @@ const releaseSlides = [
     ], link: guide("07-releases/v0.9.1") + "#images",
   },
 ].map(withAvailability);
+const assistantSlides = [
+  {
+    name: "WeKnora 助手", icon: "agent", title: "在当前页面直接请助手办事",
+    description: "在知识库页面请助手把活动资料整理成筹备清单，或在设置页询问模型怎么配置。助手能查阅产品文档，也能按你的权限创建智能体、整理知识。",
+    shots: [
+      { label: "任务协助", icon: "agent", image: "assistant-overview", alt: "助手在读书会知识库旁，根据活动资料整理筹备建议" },
+      { label: "产品问答", icon: "file", image: "assistant-release-guide", alt: "助手查阅产品文档，回答用户关于版本功能的问题" },
+    ], link: guide("03-features/26-weknora-assistant"),
+  },
+  {
+    name: "多智能体协作", icon: "channels", title: "把搜集、整理和核对分给不同智能体",
+    description: "多个子任务可以并行处理。打开子任务能查看各自的对话、进度和结果，再回到主对话读汇总。",
+    image: "agent-collaboration", alt: "主对话中列出分别处理读书会资料的子任务和结果",
+    link: guide("03-features/26-weknora-assistant") + "#collaboration",
+  },
+].map(withAvailability);
+const automationSlides = [
+  {
+    name: "自动化", icon: "history", title: "让任务按计划运行",
+    description: "告诉助手「每周一汇总活动资料」，或在表单里设定时间、时区和重复频率。任务按创建者的权限运行，每次的结果都能从运行记录里找到。",
+    shots: [
+      { label: "对话设置", icon: "agent", image: "automation-conversation", alt: "在对话中安排自动化任务并核对执行计划" },
+      { label: "手动设置", icon: "history", image: "automation-setup", alt: "自动化表单中的重复频率、时区及后续运行时间" },
+    ], link: guide("03-features/27-automations"),
+  },
+  {
+    name: "执行权限与审批", icon: "shield", title: "修改前看清操作，再决定是否批准",
+    description: "在允许的范围内选择只读、修改前确认或自动执行。删除等高影响操作始终需要批准。定时任务遇到审批会暂停，等你处理。",
+    image: "assistant-permissions", alt: "审批卡片展示将要修改的文档和新标题，等待用户决定",
+    link: guide("03-features/28-agent-permissions"),
+  },
+].map(withAvailability);
 const browserSlides = [
   { name: "执行任务", icon: "browser", title: "在自己的浏览器里完成任务",
     description: "让智能体打开网页、查询信息、填写表单。任务过程实时可见，可随时暂停；遇到登录或验证码时由你接手，完成后继续。",
@@ -91,11 +124,11 @@ const wikiSlides = [
   { name: "版本历史", icon: "history", image: "wiki-revision-history", title: "随时编辑，改动可回溯", description: "直接修订页面，也可让智能体协助维护。查看版本差异，必要时恢复到历史内容。", alt: "Wiki 版本历史：年假页面的历史版本列表、内容差异和回滚入口" },
 ].map(withAvailability);
 const sandboxSlides = [
-  { name: "会话级沙箱", icon: "sandbox", image: "skill-sandbox-chat", title: "在同一沙箱中继续执行任务", description: "支持 Docker、E2B、Cube。同一会话的多轮任务共用一个工作区，生成的文件可预览和下载；macOS Lite 还可绑定本机项目目录。", alt: "WeKnora 实际界面：智能体根据知识库生成 Word 文档，并在对话旁打开产物预览", link: guide("03-features/22-skills-sandbox") },
+  { name: "会话级沙箱", icon: "sandbox", image: "skill-sandbox-chat", title: "在同一沙箱中继续执行任务", description: "同一会话的多轮任务共用工作区，生成的文件可预览和下载。远程部署也可让同一用户复用一台沙箱，各会话保留各自的工作目录。macOS Lite 可绑定本机项目目录。", alt: "智能体根据知识库生成 Word 文档，并在对话旁打开预览", link: guide("03-features/22-skills-sandbox") },
   { name: "图形桌面与终端", icon: "monitor", shots: [
     { label: "图形桌面", icon: "monitor", image: "sandbox-desktop", alt: "WeKnora 实际界面：对话右侧沙箱面板的桌面页签，显示沙箱内的 XFCE 图形桌面与文件管理器" },
     { label: "交互终端", icon: "terminal", image: "sandbox-terminal", alt: "WeKnora 实际界面：对话右侧的沙箱终端，列出工作区 output 目录中生成的 Word 文件" },
-  ], title: "打开桌面和终端，看清每一步", description: "在对话旁连接 Docker、E2B 或 Cube 的交互终端；使用 E2B、Cube 的桌面模板时，还可打开图形桌面并亲自操作。", link: guide("03-features/22-skills-sandbox") },
+  ], title: "打开桌面和终端，看清每一步", description: "Docker、E2B 和 Cube 支持交互终端。智能体的长命令可在后台运行，稍后查看输出或取消。使用 E2B 或 Cube 的桌面模板，还能打开图形桌面亲自操作。", link: guide("03-features/22-skills-sandbox") },
   { name: "技能目录", icon: "skills", image: "skill-catalog", title: "安装、管理和复用技能", description: "从 ClawHub、SkillHub、Git 或 ZIP 安装技能，在空间内管理和复用；macOS Lite 也支持安装并运行本机技能。", alt: "WeKnora 实际界面：工具箱的技能管理页，列出 docx、pptx、pdf 技能及其安装到的沙箱", link: guide("03-features/22-skills-sandbox") },
 ].map(withAvailability);
 
@@ -135,6 +168,14 @@ export default function Home() {
         <ProductGallery id="release-gallery" label="v0.9.1" slides={releaseSlides} layout="compact" />
         <div className={s.releaseExtras}><span>部署与维护</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link) + item.anchor}>{item.name} <Icon name="arrow" /></a>)}</div>
       </div></section>
+      <section id="work-assistant" className={s.chapter} data-tone="base" aria-labelledby="work-assistant-title"><div className={s.shell}>
+        <div className={s.sectionHeading}><h2 id="work-assistant-title">工作助手与多智能体协作</h2><a className={s.textLink} href={guide("03-features/26-weknora-assistant")}>工作助手指南 <Icon name="arrow" /></a></div>
+        <ProductGallery id="assistant-gallery" label="工作助手与多智能体协作" slides={assistantSlides} layout="compact" />
+      </div></section>
+      <section id="automations" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="automations-title"><div className={s.shell}>
+        <div className={s.sectionHeading}><h2 id="automations-title">自动化任务与执行审批</h2><a className={s.textLink} href={guide("03-features/27-automations")}>自动化指南 <Icon name="arrow" /></a></div>
+        <ProductGallery id="automation-gallery" label="自动化任务与执行审批" slides={automationSlides} layout="compact" />
+      </div></section>
       <section id="agent-workflow" className={`${s.chapter}`} data-tone="base" aria-labelledby="agent-workflow-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>03 / YOUR LOCAL BROWSER</p><h2 id="agent-workflow-title">让智能体操作你自己的浏览器</h2></div><a className={s.textLink} href={guide("05-clients/09-local-browser")}>连接本机浏览器 <Icon name="arrow" /></a></div>
         <ProductGallery id="browser-gallery" label="本机浏览器" slides={browserSlides} layout="compact" />
@@ -157,7 +198,7 @@ export default function Home() {
       <section id="ecosystem" className={s.chapter} data-tone="base" aria-labelledby="ecosystem-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>07 / INTEGRATIONS</p><h2 id="ecosystem-title">数据源与工具集成</h2></div><p>同步飞书、Confluence、GitLab 等平台的资料，<br />通过 IM、浏览器插件、MCP Server 或 API 查询和使用。</p></div>
         <div className={s.ecosystem}>
-          <div className={s.ecosystemColumn}><Icon name="sources" /><h3>导入与同步资料</h3><p>上传文件、导入网页，或连接外部数据源。Seafile 等目录型数据源支持按目录同步与增量更新。</p><div className={s.integrations}>{dataSources.map(item => <span key={item.name}><IntegrationMark item={item} /></span>)}</div><div className={s.slideLinks}><a className={s.textLink} href={guide("03-features/10-datasource")}>数据源集成 <Icon name="arrow" /></a><a className={s.textLink} href={guide("03-features/25-seafile")}>连接 Seafile <Icon name="arrow" /></a></div></div>
+          <div className={s.ecosystemColumn}><Icon name="sources" /><h3>导入与同步资料</h3><p>上传文件、导入网页，或连接外部数据源。飞书 / Lark 可同步云文档中的表格和附件，Seafile 支持按目录增量同步。</p><div className={s.integrations}>{dataSources.map(item => <span key={item.name}><IntegrationMark item={item} /></span>)}</div><div className={s.slideLinks}><a className={s.textLink} href={guide("03-features/10-datasource")}>数据源集成 <Icon name="arrow" /></a><a className={s.textLink} href={guide("03-features/24-feishu-drive")}>连接飞书 / Lark <Icon name="arrow" /></a><a className={s.textLink} href={guide("03-features/25-seafile")}>连接 Seafile <Icon name="arrow" /></a></div></div>
           <div className={s.ecosystemCore}><BrandLogo /><span>团队知识库与智能体</span><div>理解 · 检索 · 推理 · 行动</div></div>
           <div className={s.ecosystemColumn}><Icon name="channels" /><h3>在常用工具中访问</h3><p>支持 IM 问答、浏览器插件、MCP 客户端和开发工具集成。</p><div className={s.integrations}>{clients.map(item => <span key={item.name}><IntegrationMark item={item} /></span>)}</div><a className={s.textLink} href={guide("03-features/12-im-integration")}>客户端与渠道 <Icon name="arrow" /></a><div className={s.mcpEntry}><h4>通过 MCP Server 共享知识</h4><p>让 Claude、Cursor 等 AI 工具连接团队知识库，直接检索资料和提问。</p><a className={s.textLink} href={guide("03-features/08-mcp")}>配置 MCP 端点 <Icon name="arrow" /></a></div></div>
         </div>

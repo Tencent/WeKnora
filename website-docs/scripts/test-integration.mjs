@@ -108,6 +108,25 @@ try {
     assert.equal(context.pages().length, 1);
   }
 
+  // The product overview links to enduring features independently of the current release.
+  for (const feature of [
+    { id: 'work-assistant', button: /^多智能体协作 /, image: 'agent-collaboration', guide: '26-weknora-assistant.html#collaboration' },
+    { id: 'automations', button: /^执行权限与审批 /, image: 'assistant-permissions', guide: '28-agent-permissions.html' },
+  ]) {
+    await page.locator(`#capabilities a[href="#${feature.id}"]`).click();
+    const section = page.locator('#' + feature.id);
+    await section.getByRole('button', { name: feature.button }).click();
+    assert.equal(new URL(page.url()).hash, '#' + feature.id);
+    assert.equal(await section.locator('figure [aria-hidden="false"] img').getAttribute('src'), '/docs/_home/product/' + feature.image + '.png');
+    const destination = '/docs/03-features/' + feature.guide;
+    await section.locator(`a[href="${destination}"]`).click();
+    await page.waitForSelector('.VPDoc h1');
+    const url = new URL(page.url());
+    assert.equal(url.pathname + url.hash, destination);
+    await page.locator('.wk-brand').click();
+    await homepage();
+  }
+
   // Release and overview films share a player and load only after a playback gesture.
   const releaseFilm = page.getByRole('button', { name: /^v0\.9\.0 工作助手/ });
   const overviewFilm = page.getByRole('button', { name: /^WeKnora 产品全览/ });

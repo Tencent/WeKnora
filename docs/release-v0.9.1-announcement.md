@@ -37,6 +37,8 @@ WeKnora v0.9.1 · Voice input, sandbox browsers, credential vault and image sear
 
 During a batch reparse, existing content stays searchable while queued and while the document is being read. Old chunks are cleared when index replacement starts. On PostgreSQL, automatic migrations can build HNSW indexes on demand for embedding dimensions such as 1536 and 3072.
 
+You can also correct OCR text and captions in the gallery, maintain Wiki pages manually, sync selected Nextcloud files and folders, and import Confluence attachments. [Other updates](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#other-changes)
+
 Back up your database, storage and configuration before upgrading. PostgreSQL advances from migration 134 to 137 and SQLite from 51 to 53. Keep the same 32-byte `SYSTEM_AES_KEY` when using the personal vault. [Upgrade guide](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes) · [English changelog](https://github.com/Tencent/WeKnora/blob/v0.9.1/CHANGELOG.md)
 
 ### 中文
@@ -47,6 +49,8 @@ Back up your database, storage and configuration before upgrading. PostgreSQL ad
 - **搜索可以直达原文。** 点击全局搜索里命中的文档片段，就能核对上下文。回答引用会标出来源知识库。启用了图片向量索引的知识库还支持通过检索 API 以图查图。
 
 批量重解析排队和读取文档时仍可检索旧内容，开始替换索引时会清理旧分块。PostgreSQL 开启自动迁移后，会为实际使用的向量维度按需创建 HNSW 索引。
+
+画廊支持校对图片说明和 OCR 文字，Wiki 可以手动维护。数据源新增 Nextcloud 文件和目录同步，Confluence 支持导入页面附件。[其他更新](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#other-changes)
 
 从 v0.9.0 升级前请备份数据库、文件存储与部署配置。使用凭据库时保留原有加密密钥。[完整图文与升级步骤](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1) · [本版提交对比](https://github.com/Tencent/WeKnora/compare/v0.9.0...v0.9.1)
 
