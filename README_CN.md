@@ -172,6 +172,7 @@ docker compose up -d    # 用新镜像重建容器
 - **[沙箱浏览器](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** 你在会话桌面登录网站后，智能体可以继续操作同一页面。
 - **[个人凭据保险库](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#vault)** 常用网站的账号可以加密保存。下次请求登录时，选中账号并确认域名即可填写。临时账号可以仅用一次。
 - **[以图检索与原文定位](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** 通过检索 API 用图片查找相似图片。在全局搜索里点开命中的片段即可读到原文，回答引用也会标出来源知识库。
+- **[资料与 Wiki 进度](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#document-progress)** 系统管理员可以逐份查看资料入库和 Wiki 整理状态、追查失败原因，单独或分批安排 Wiki 待办。
 - **[升级须知](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)** 更新前备份数据库、文件存储和加密密钥。
 
 ### v0.9.0 <sub>· 2026-10-29 · [版本说明](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>

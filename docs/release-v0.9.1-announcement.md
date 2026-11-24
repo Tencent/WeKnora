@@ -11,6 +11,8 @@
 3. **个人凭据保险库。** 常用网站的账号可以存一次。下次智能体请求登录，选中已保存的账号、核对域名、点「填写」就行。临时账号可以选「仅用一次」。
 4. **查资料更容易找到出处。** 在全局搜索中点击命中的片段，直接跳到原文对应位置。跨库问答的引用会标出来源知识库。开发者还可以通过检索 API 传一张图，查找知识库里的相似图片。
 
+系统管理员现在可以在任务队列里查看每份资料是否已入库、Wiki 整理到了哪一步，也可以把积压的 Wiki 待办按批次安排处理。[资料与 Wiki 进度](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#document-progress)
+
 从 v0.9.0 升级前，请先备份数据库、文件存储和部署配置。图文里也写清了批量重解析时旧内容会保留到哪一步，以及 PostgreSQL 如何为实际使用的向量维度建索引。[图文与升级说明](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1) · [GitHub Release](https://github.com/Tencent/WeKnora/releases/tag/v0.9.1)
 
 使用 Compose 完整部署时，换到 v0.9.1 对应的部署文件，在 `.env` 中设置 `WEKNORA_VERSION=v0.9.1`，再执行下面两行。其他部署组合沿用原来的 profile。
@@ -34,6 +36,7 @@ WeKnora v0.9.1 · Voice input, sandbox browsers, credential vault and image sear
 - **Sign in and let the agent continue.** On supported sandbox desktops, you and the agent share a browser within the session. Sign in on the desktop and the agent can continue on the same page.
 - **Personal credential vault.** Use a login once or save it in your workspace's personal vault. The next time that site asks you to sign in, pick a saved account, check the domain and confirm the fill. You can change passwords, edit allowed domains or delete entries in Settings.
 - **Search with an image or jump to a passage.** The retrieval API accepts an image, with optional text, for knowledge bases with image embeddings. In the web app, click a matching passage in global search to open it in the source document. Answer citations identify the source knowledge base.
+- **Track document and Wiki progress.** In Task Queue, system administrators can see which documents have finished ingestion and which are still waiting for Wiki processing. Inspect past failures or schedule pending Wiki work for one document or a batch of up to 100.
 
 During a batch reparse, existing content stays searchable while queued and while the document is being read. Old chunks are cleared when index replacement starts. On PostgreSQL, automatic migrations can build HNSW indexes on demand for embedding dimensions such as 1536 and 3072.
 
@@ -47,6 +50,7 @@ Back up your database, storage and configuration before upgrading. PostgreSQL ad
 - **你和智能体可以接着用同一个沙箱浏览器。** 在当前会话的桌面上登录网站，智能体随后可以继续操作。
 - **个人凭据保险库。** 登录表单默认「仅用一次」，也可以保存常用账号。下次登录同一站点时，由你选用账号并确认填写。密码加密保存，可以在设置中更换密码、调整允许填入的域名或删除条目。
 - **搜索可以直达原文。** 点击全局搜索里命中的文档片段，就能核对上下文。回答引用会标出来源知识库。启用了图片向量索引的知识库还支持通过检索 API 以图查图。
+- **按资料查看入库和 Wiki 进度。** 系统管理员可以在任务队列里搜索资料、查看处理阶段和失败历史，也可以单独或分批安排已有的 Wiki 待办，每批最多 100 份。
 
 批量重解析排队和读取文档时仍可检索旧内容，开始替换索引时会清理旧分块。PostgreSQL 开启自动迁移后，会为实际使用的向量维度按需创建 HNSW 索引。
 

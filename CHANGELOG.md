@@ -17,7 +17,8 @@ Changes since v0.9.0. [Release and upgrade guide](./website-docs/07-releases/v0.
 - Use an image on its own or alongside text in the knowledge-search API when the knowledge base has compatible image embeddings (#4823).
 - Correct existing OCR text and captions from the image gallery, and order PDF figures by source page (#4942, #4649).
 - Open a global search result at the matching passage and see the source knowledge base in a citation. Parent-aware retrieval can count hits under the same parent as a single top-K slot (#5177, #5343, #4740).
-- Keep existing content searchable while a batch reparse is queued and while the document is being read. Reading failures preserve that content. Old chunks are cleared when index replacement starts (#5024). Wiki sources persist during reprocessing, and document processing records show progress and past failures (#5186, #4732).
+- Keep existing content searchable while a batch reparse is queued and while the document is being read. Reading failures preserve that content. Old chunks are cleared when index replacement starts (#5024). Wiki sources persist during reprocessing (#5186).
+- System administrators can track ingestion and Wiki progress separately for each document in Task Queue. Search by document or knowledge base, inspect processing stages and past failures, and schedule pending Wiki work for one document or a batch of up to 100 (#4732, #5895).
 - Maintain Wiki pages manually, select a separate model for question generation, and parse XLSX with a compatible self-hosted MinerU service (#4707, #4718, #5039).
 
 ### Integrations and other changes

@@ -172,6 +172,7 @@ All options, hardware requirements and deployment topologies: [Installation guid
 - **[Sandbox browser handoff](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** Sign in on the session desktop and let the agent continue on the same page.
 - **[Personal credential vault](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#vault)** Store a site login for later, or use it once. When the same site asks again, pick the saved account, check the domain and confirm the fill.
 - **[Image queries and passage search](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** Use an image to find similar pictures through the retrieval API. In global search, open a matching passage directly in the original document. Answer citations name the source knowledge base.
+- **[Document and Wiki progress](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#document-progress)** System administrators can check ingestion and Wiki status for each document, inspect past failures, and schedule pending Wiki work individually or in batches.
 - **[Upgrade guide](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)** Back up the database, file storage and encryption key before upgrading.
 
 ### v0.9.0 <sub>· 2026-10-29 · [release notes](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>

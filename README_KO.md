@@ -182,6 +182,7 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 - **[샌드박스 브라우저](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** 세션 데스크톱에서 사이트에 로그인하면 에이전트가 같은 페이지에서 작업을 이어갑니다.
 - **[개인 자격 증명 보관함](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#vault)** 사이트 로그인 정보를 한 번만 사용하거나 보관함에 저장할 수 있습니다. 다음에는 저장한 계정을 선택하고 도메인을 확인한 뒤 입력을 승인하세요.
 - **[이미지 검색과 원문 바로가기](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** 검색 API에 이미지를 보내 비슷한 이미지를 찾을 수 있습니다. 통합 검색에서 일치하는 구절을 누르면 원문의 해당 위치가 열립니다. 답변의 인용에는 출처 지식 베이스가 표시됩니다.
+- **[자료 수집 및 Wiki 진행 상황](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#document-progress)** 시스템 관리자는 자료별 수집 상태와 Wiki 처리 상태, 이전 실패 원인을 확인하고 대기 중인 Wiki 작업을 개별 또는 일괄로 시작할 수 있습니다.
 - **[업그레이드 안내](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)** 업데이트 전에 데이터베이스, 파일 저장소, 암호화 키를 백업하세요.
 
 ### v0.9.0 <sub>· 2026-10-29 · [릴리스 노트](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>

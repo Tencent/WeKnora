@@ -28,6 +28,7 @@ const modes = [
   { icon: "wiki", label: "Wiki", title: "把文档整理成 Wiki", description: "从原始文档生成相互链接的 Wiki 页面与知识图谱，支持浏览、编辑和版本回滚。", tags: ["自动组织", "知识图谱", "版本回滚"], link: "03-features/14-wiki", related: [] },
 ];
 const releaseExtras = [
+  { name: "资料与 Wiki 进度", link: "07-releases/v0.9.1", anchor: "#document-progress" },
   { name: "文档重建与向量索引", link: "07-releases/v0.9.1", anchor: "#knowledge" },
   { name: "升级须知", link: "07-releases/v0.9.1", anchor: "#upgrade-notes" },
 ];

@@ -377,3 +377,4 @@ fc39b1ff21b27c2ac3d101b4435c173215dd2fed	2026-11-23	fix(kb): persist the default
 f59bc1cc3a246865c205c2ba746b41f7664cbfac	2026-11-23	fix(service): make IsImageType case-insensitive like IsAudioType/IsVideoType (#5371)
 6087a8e1f69e93108551de0c96572639ebff03eb	2026-11-23	fix(knowledge): keep leading digits in generated questions (#5734)
 032c67f30d63f744ffa9131887c35f7d15121224	2026-11-23	fix(client): reject trailing data in JSON responses (#5751)
+89cb4ba6e41dc0ff3f614c03f6c84d5e55e7e0cb	2026-11-24	fix(system): refine document progress UI, refresh flow, and backend filters
