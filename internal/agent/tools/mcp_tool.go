@@ -483,12 +483,9 @@ func appendMCPStructuredContent(output string, content []mcp.ContentItem, struct
 		if item.Type != "text" {
 			continue
 		}
-		var fallback any
-		if json.Unmarshal([]byte(item.Text), &fallback) == nil {
-			canonical, _ := json.Marshal(fallback)
-			if bytes.Equal(canonical, payload) {
-				return output, nil
-			}
+		fallback, err := jsonschema.UnmarshalJSON(strings.NewReader(item.Text))
+		if err == nil && mcp.EqualJSONValues(fallback, structured) {
+			return output, nil
 		}
 	}
 	// The legacy extractor substitutes a success placeholder for empty content.
