@@ -23,28 +23,61 @@ ARG TARGETOS
 ARG TARGETARCH
 RUN bash scripts/build_browserskill.sh /opt/weknora/browserskill "${TARGETOS}/${TARGETARCH}"
 
-# Build stage
-FROM golang:1.26-bookworm AS builder
+FROM golang:1.26-bookworm AS build-base
 
 WORKDIR /app
 
-# 通过构建参数接收敏感信息
-ARG GOPRIVATE_ARG
-ARG GOPROXY_ARG
-ARG GOSUMDB_ARG=off
 ARG APK_MIRROR_ARG
-
-# 设置Go环境变量
-ENV GOPRIVATE=${GOPRIVATE_ARG}
-ENV GOPROXY=${GOPROXY_ARG}
-ENV GOSUMDB=${GOSUMDB_ARG}
 
 # Install dependencies
 RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
     apt-get update && \
-    apt-get install -y git build-essential libsqlite3-dev curl
+    apt-get install -y git build-essential libsqlite3-dev curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Link the anydoc parser engine (office docs converted in-process, no
+# Python docreader). Default on so Hub / compose images ship a working
+# engine; pass WITH_ANYDOC=0 to skip the Rust toolchain (~few minutes and
+# ~1 GB of build-stage layers).
+FROM build-base AS anydoc
+ARG WITH_ANYDOC=1
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:$PATH
+RUN if [ "$WITH_ANYDOC" = "1" ]; then \
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh && \
+        sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable && \
+        rm /tmp/rustup-init.sh; \
+    fi
+COPY scripts/build-anydoc-lib.sh ./scripts/
+COPY third_party/anydoc-go/Cargo.toml third_party/anydoc-go/Cargo.lock third_party/anydoc-go/build.rs third_party/anydoc-go/version.go ./third_party/anydoc-go/
+COPY third_party/anydoc-go/src/ ./third_party/anydoc-go/src/
+COPY third_party/anydoc-go/include/ ./third_party/anydoc-go/include/
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/third_party/anydoc-go/target \
+    set -eu; \
+    mkdir -p /anydoc-out; \
+    if [ "$WITH_ANYDOC" = "1" ]; then \
+        ./scripts/build-anydoc-lib.sh; \
+        crate=third_party/anydoc-go; \
+        mv "$crate/lib" "$crate/include" /anydoc-out/; \
+        rm -rf "$crate/patched-anydoc"; \
+    fi
+
+# Build stage
+FROM build-base AS builder
+
+# 通过构建参数接收敏感信息
+ARG GOPRIVATE_ARG
+ARG GOPROXY_ARG
+ARG GOSUMDB_ARG=off
+
+# 设置Go环境变量
+ENV GOPRIVATE=${GOPRIVATE_ARG}
+ENV GOPROXY=${GOPROXY_ARG}
+ENV GOSUMDB=${GOSUMDB_ARG}
 
 # Install migrate tool
 RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
@@ -58,6 +91,7 @@ COPY cmd/download cmd/download
 RUN go run cmd/download/duckdb/duckdb.go
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod bash ./scripts/copy-licenses.sh /license-bundle
+COPY --from=anydoc /anydoc-out/ ./third_party/anydoc-go/
 
 # Get version and commit info for build injection
 ARG VERSION_ARG
@@ -69,20 +103,7 @@ ENV VERSION=${VERSION_ARG}
 ENV COMMIT_ID=${COMMIT_ID_ARG}
 ENV BUILD_TIME=${BUILD_TIME_ARG}
 
-# Link the anydoc parser engine (office docs converted in-process, no
-# Python docreader). Default on so Hub / compose images ship a working
-# engine; pass WITH_ANYDOC=0 to skip the Rust toolchain (~few minutes and
-# ~1 GB of build-stage layers).
 ARG WITH_ANYDOC=1
-ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
-ENV PATH=/usr/local/cargo/bin:$PATH
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    if [ "$WITH_ANYDOC" = "1" ]; then \
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-            | sh -s -- -y --profile minimal --default-toolchain stable && \
-        ./scripts/build-anydoc-lib.sh; \
-    fi
 
 # Build the application with version info. Mount the Go build cache as well as
 # the module cache: `COPY . .` invalidates this layer on every source change,
@@ -101,17 +122,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     fi
 RUN --mount=type=cache,target=/go/pkg/mod cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
 
-# Final stage
-FROM debian:12.12-slim
+FROM debian:12.12-slim AS runtime-base
 
 WORKDIR /app
 
 ARG APK_MIRROR_ARG
-
-# Pairing derives the gateway URL from the user's page origin by default.
-ENV BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk \
-    BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.4.1.zip
-COPY --from=browserskill /opt/weknora/browserskill /opt/weknora/browserskill
 
 # Create a non-root user first
 RUN useradd -m -s /bin/bash appuser
@@ -145,6 +160,14 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
 # Create data directories and set permissions
 RUN mkdir -p /data/files && \
     chown -R appuser:appuser /app /data/files
+
+# Final stage
+FROM runtime-base
+
+# Pairing derives the gateway URL from the user's page origin by default.
+ENV BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk \
+    BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.4.1.zip
+COPY --from=browserskill /opt/weknora/browserskill /opt/weknora/browserskill
 
 # Copy migrate tool from builder stage
 COPY --from=builder /go/bin/migrate /usr/local/bin/
