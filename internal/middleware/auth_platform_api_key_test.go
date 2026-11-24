@@ -70,8 +70,8 @@ func TestAttachTenantAPIKeyUsesSyntheticUser(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/knowledge-bases", nil)
 	key := &types.TenantAPIKey{
-		ID:        12,
-		ScopeType: types.APIKeyScopeTenant,
+		ID:         12,
+		ScopeType:  types.APIKeyScopeTenant,
 		FullAccess: true,
 	}
 	attachAPIKeyAuthContext(c, &fakeTenantService{tenant: &types.Tenant{ID: 42}}, nil, 42, key)
