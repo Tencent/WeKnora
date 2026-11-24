@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -277,6 +279,69 @@ func TestResolveProcessConfig_ParserEngineRulesReplaced(t *testing.T) {
 	require.Len(t, eff.ChunkingConfig.ParserEngineRules, 1)
 	require.Equal(t, []string{"docx"}, eff.ChunkingConfig.ParserEngineRules[0].FileTypes)
 	require.Equal(t, "custom", eff.ChunkingConfig.ParserEngineRules[0].Engine)
+}
+
+func TestProcessParserRuleOverridesSurvivePersistence(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{ChunkingConfig: types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{
+			{FileTypes: []string{"pdf"}, Engine: "kb-pdf-parser"},
+			{FileTypes: []string{"pptx"}, Engine: "kb-pptx-parser"},
+		},
+	}}
+	for _, tc := range []struct {
+		name     string
+		request  string
+		pdf      string
+		pptx     string
+		ruleJSON string
+	}{
+		{
+			name: "omitted inherits knowledge base", request: `{"summary_enabled":false}`,
+			pdf: "kb-pdf-parser", pptx: "kb-pptx-parser",
+		},
+		{
+			name: "null inherits knowledge base", request: `{"parser_engine_rules":null}`,
+			pdf: "kb-pdf-parser", pptx: "kb-pptx-parser",
+		},
+		{
+			name: "empty clears all knowledge base rules", request: `{"parser_engine_rules":[]}`,
+			pdf: types.DefaultParserEngine("pdf"), pptx: types.DefaultParserEngine("pptx"),
+			ruleJSON: `"parser_engine_rules":[]`,
+		},
+		{
+			name: "nonempty replaces knowledge base rules", request: `{"parser_engine_rules":[{"file_types":[".PDF"],"engine":"selected"}]}`,
+			pdf: "selected", pptx: types.DefaultParserEngine("pptx"),
+			ruleJSON: `"parser_engine_rules":[{`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var overrides types.KnowledgeProcessOverrides
+			require.NoError(t, json.Unmarshal([]byte(tc.request), &overrides))
+
+			knowledge := &types.Knowledge{}
+			initial, err := ApplyKnowledgeProcessOverrides(
+				context.Background(), kb, knowledge, &overrides, []string{"pdf", "pptx"}, nil,
+			)
+			require.NoError(t, err)
+			meta := string(knowledge.Metadata)
+			if tc.ruleJSON == "" {
+				assert.NotContains(t, meta, `"parser_engine_rules"`)
+			} else {
+				assert.Contains(t, meta, tc.ruleJSON)
+			}
+
+			stored, err := knowledge.ProcessOverrides()
+			require.NoError(t, err)
+			reloaded := ResolveProcessConfig(kb, stored)
+			for _, config := range []types.EffectiveProcessConfig{initial, reloaded} {
+				assert.Equal(t, tc.pdf, config.ChunkingConfig.ResolveParserEngine("pdf"))
+				assert.Equal(t, tc.pptx, config.ChunkingConfig.ResolveParserEngine("pptx"))
+			}
+			assert.Equal(t, "kb-pdf-parser", kb.ChunkingConfig.ResolveParserEngine("pdf"))
+		})
+	}
 }
 
 func TestResolveProcessConfig_EnableMultimodelOverride(t *testing.T) {
