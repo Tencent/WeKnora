@@ -801,21 +801,22 @@ class Docx:
             )
 
         temp_file_path = self._prepare_document_sharing(binary)
+        try:
+            # Prepare multiprocess processing arguments
+            args_list = self._prepare_multiprocess_args(
+                pages_to_process,
+                from_page,
+                to_page,
+                doc_contains_images,
+                temp_file_path,
+            )
 
-        # Prepare multiprocess processing arguments
-        args_list = self._prepare_multiprocess_args(
-            pages_to_process,
-            from_page,
-            to_page,
-            doc_contains_images,
-            temp_file_path,
-        )
-
-        # Execute multiprocess tasks
-        self._execute_multiprocess_tasks(args_list, max_workers)
-
-        # Clean up temporary file
-        self._cleanup_temp_file(temp_file_path)
+            # Execute multiprocess tasks
+            self._execute_multiprocess_tasks(args_list, max_workers)
+        finally:
+            # A worker that dies takes the run with it; the copy of the whole
+            # document it was reading must not stay on disk after that.
+            self._cleanup_temp_file(temp_file_path)
 
     def _check_document_has_images(self):
         """Check if the document contains images
