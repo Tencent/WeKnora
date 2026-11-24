@@ -3,15 +3,50 @@ import type { MentionItem } from '../types/mention';
 
 export interface BrowserKnowledgeBase { id: string; name: string; orgName?: string }
 
-/** Reserve the browser's maximum height inside the visual viewport (including mobile zoom). */
-export function fitBrowserViewport(anchor: { left: number; top: number; width: number },
-  viewport: { left: number; top: number; width: number; height: number }, zoom = 1) {
-  const height = Math.min(360 * zoom, Math.max(0, viewport.height - 16));
-  const width = Math.min(anchor.width, Math.max(0, viewport.width - 16));
+/**
+ * Keep the directory browser anchored to the trigger without drifting when its
+ * content height changes, while clamping it inside the visual viewport
+ * (including mobile zoom and on-screen keyboards).
+ *
+ * When `anchor.bottom` (visual Y coordinate of the menu's bottom edge) is
+ * provided alongside `anchor.layoutHeight`, the menu stays bottom-anchored so
+ * it grows/shrinks upward from the chat input instead of floating above it.
+ */
+export function fitBrowserViewport(
+  anchor: { left: number; top: number; width: number; bottom?: number; layoutHeight?: number },
+  viewport: { left: number; top: number; width: number; height: number },
+  zoom = 1,
+) {
+  const margin = 8;
+  const maxWidth = Math.max(0, viewport.width - margin * 2);
+  const width = Math.min(anchor.width, maxWidth);
+  const left = Math.max(viewport.left + margin, Math.min(anchor.left, viewport.left + viewport.width - width - margin));
+  const maxViewportHeight = Math.max(0, viewport.height - margin * 2);
+
+  if (typeof anchor.bottom === 'number' && typeof anchor.layoutHeight === 'number') {
+    const minBottomY = viewport.top + margin;
+    const maxBottomY = viewport.top + viewport.height - margin;
+    const clampedBottomY = Math.max(minBottomY, Math.min(anchor.bottom, maxBottomY));
+    const availableAbove = Math.max(0, clampedBottomY - minBottomY);
+    const maxHeight = Math.min(360 * zoom, availableAbove, maxViewportHeight);
+    return {
+      left: `${left / zoom}px`,
+      top: 'auto',
+      bottom: `${(anchor.layoutHeight - clampedBottomY) / zoom}px`,
+      minHeight: '0',
+      maxHeight: `${maxHeight / zoom}px`,
+      maxWidth: `${maxWidth / zoom}px`,
+    };
+  }
+
+  const height = Math.min(360 * zoom, maxViewportHeight);
   return {
-    left: `${Math.max(viewport.left + 8, Math.min(anchor.left, viewport.left + viewport.width - width - 8)) / zoom}px`,
-    top: `${Math.max(viewport.top + 8, Math.min(anchor.top, viewport.top + viewport.height - height - 8)) / zoom}px`,
-    bottom: 'auto', minHeight: '0', maxHeight: `${height / zoom}px`, maxWidth: `${Math.max(0, viewport.width - 16) / zoom}px`,
+    left: `${left / zoom}px`,
+    top: `${Math.max(viewport.top + margin, Math.min(anchor.top, viewport.top + viewport.height - height - margin)) / zoom}px`,
+    bottom: 'auto',
+    minHeight: '0',
+    maxHeight: `${height / zoom}px`,
+    maxWidth: `${maxWidth / zoom}px`,
   };
 }
 
