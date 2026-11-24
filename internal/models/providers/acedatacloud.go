@@ -18,7 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-//go:embed assets/acedatacloud.png
+//go:embed assets/acedatacloud.svg
 var aceDataCloudIcon []byte
 
 // AceDataCloudID identifies Ace Data Cloud in the provider registry.

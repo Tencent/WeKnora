@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict'
 import { before, test } from 'node:test'
 
-import { MCP_SERVICE_PRESETS } from '../utils/mcpServicePresets.ts'
-
 import { findAuditActionDefaultRegistryMismatches } from './auditActionLocaleDefaults.ts'
 import { REGISTERED_AUDIT_ACTION_ENTRIES, KB_ACTIVITY_DETAIL_VALUES, KB_ACTIVITY_I18N_ROOTS, KB_ACTIVITY_OUTCOMES } from './auditActionRegistry.ts'
 import {
@@ -45,16 +43,6 @@ test('locale bundles expose the same translation keys', () => {
   }
 
   assert.deepEqual(mismatches, [], mismatches.slice(0, 20).join('\n'))
-})
-
-test('MCP service preset labels resolve in every split locale bundle', () => {
-  for (const [locale, bundle] of Object.entries(LOCALE_BUNDLES)) {
-    for (const preset of MCP_SERVICE_PRESETS) {
-      const message = getLocaleValueAtPath(bundle, preset.labelKey)
-      assert.ok(typeof message === 'string', `${locale}: missing ${preset.labelKey}`)
-      assert.ok(message.trim().length > 0, `${locale}: empty ${preset.labelKey}`)
-    }
-  }
 })
 
 test('critical runtime i18n trees are present', () => {

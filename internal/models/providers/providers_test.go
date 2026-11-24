@@ -2,10 +2,7 @@ package providers_test
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"image/png"
 	"strings"
 	"testing"
 
@@ -141,22 +138,11 @@ func TestAllVendorsRegistered(t *testing.T) {
 		if v.Name == "" {
 			t.Errorf("vendor %q: empty Name", id)
 		}
-		if id == providers.AceDataCloudID {
-			cfg, err := png.DecodeConfig(bytes.NewReader(v.Icon))
-			if err != nil || cfg.Width != 512 || cfg.Height != 512 {
-				t.Errorf("vendor %q: invalid official 512x512 PNG icon: %v", id, err)
-			}
-			sum := sha256.Sum256(v.Icon)
-			if hex.EncodeToString(sum[:]) != "3e2c6e2d1a61a549dae2374ec4444c77f4c2617c8f3772bdd4cd6e52bf20767e" {
-				t.Errorf("vendor %q: icon differs from the official brand asset", id)
-			}
-		} else {
-			if len(v.Icon) == 0 || !bytes.HasPrefix(bytes.TrimSpace(v.Icon), []byte("<svg")) {
-				t.Errorf("vendor %q: icon is empty or not an <svg> document", id)
-			}
-			if len(v.Icon) > 6*1024 {
-				t.Errorf("vendor %q: icon is %d bytes, over the 6 KB budget", id, len(v.Icon))
-			}
+		if len(v.Icon) == 0 || !bytes.HasPrefix(bytes.TrimSpace(v.Icon), []byte("<svg")) {
+			t.Errorf("vendor %q: icon is empty or not an <svg> document", id)
+		}
+		if len(v.Icon) > 6*1024 {
+			t.Errorf("vendor %q: icon is %d bytes, over the 6 KB budget", id, len(v.Icon))
 		}
 		if v.RequiresAuth && v.Auth == "" {
 			t.Errorf("vendor %q: RequiresAuth without Auth style", id)

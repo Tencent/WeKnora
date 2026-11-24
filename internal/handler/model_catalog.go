@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -31,7 +30,7 @@ type ModelProviderDTO struct {
 	Description  string            `json:"description" extensions:"x-agent,x-agent-detail"`
 	Descriptions map[string]string `json:"descriptions,omitempty"`
 	Website      string            `json:"website,omitempty"`
-	// Icon is an SVG or PNG data URI ready for <img src>.
+	// Icon is a data: URI (image/svg+xml;base64) ready for <img src>.
 	Icon         string                 `json:"icon,omitempty"`
 	API          api.API                `json:"api"`
 	Auth         providers.AuthStyle    `json:"auth"`
@@ -91,15 +90,11 @@ func modelTypeToFrontend(mt types.ModelType) string {
 	}
 }
 
-func iconDataURI(icon []byte) string {
-	if len(icon) == 0 {
+func iconDataURI(svg []byte) string {
+	if len(svg) == 0 {
 		return ""
 	}
-	mediaType := "image/svg+xml"
-	if bytes.HasPrefix(icon, []byte("\x89PNG\r\n\x1a\n")) {
-		mediaType = "image/png"
-	}
-	return "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(icon)
+	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(svg)
 }
 
 func providerDTO(v *modelruntime.Provider, modelType types.ModelType, includeModels bool) ModelProviderDTO {
