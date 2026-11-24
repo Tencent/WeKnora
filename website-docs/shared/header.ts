@@ -14,7 +14,7 @@ export type SiteNavItem = {
 
 export const siteNavigation: SiteNavItem[] = [
   { label: '产品能力', href: '/#capabilities', badge: '' },
-  { label: 'v0.9.0', href: '/#release', badge: 'NEW' },
+  { label: 'v0.9.1', href: '/#release', badge: 'NEW' },
   { label: '企业案例', href: '/#adopters', badge: '' },
   { label: '生态集成', href: '/#ecosystem', badge: '' },
   { label: '企业部署', href: '/#enterprise', badge: '' },

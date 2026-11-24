@@ -1,90 +1,68 @@
-# Nextcloud data source
+# Nextcloud 数据源
 
-The `nextcloud` connector imports selected folders and files from a Nextcloud account over WebDAV. It supports scheduled, incremental and resumable synchronization, including deletion reconciliation. See [Data source synchronization](10-datasource.md) for common scheduling and conflict settings.
+将 Nextcloud 的指定文件或目录通过 WebDAV 同步到知识库。可以按计划增量同步，任务中断后从已确认的进度继续。管理员可以决定源文件删除时是否同步删除知识库中的副本。[通用同步设置](10-datasource.md)
 
-<Screenshot src="/screenshots/datasource-nextcloud.png" caption="Nextcloud connection settings" hint="The real WeKnora component with example credentials and a stubbed API; the app password is masked." />
+## 准备账号和应用密码 {#account-and-app-password}
 
-## Account and app password
+1. 使用有权读取目标目录的账号登录 Nextcloud。
+2. 打开个人设置中的 **Security → Devices & sessions**，创建一个名为 WeKnora 的应用密码，并保存界面上显示的用户名和应用密码。密码只显示一次。
+3. 在 WeKnora 填入这一组凭据。使用双因素认证或外部登录的账号同样使用应用密码。需要轮换时，在 Nextcloud 的同一处撤销旧密码、生成新密码，再在 WeKnora 重新录入整组凭据。
 
-1. Sign in to Nextcloud with an account that can read the intended folders.
-2. Open **Personal settings → Security → Devices & sessions**, name a new app password (for example, `WeKnora`), and create it. Copy the generated username and app password; the password is displayed only once.
-3. Use those credentials in WeKnora. Use an app password rather than the account's login password, including when two-factor authentication or an external login provider is enabled. Revoke or rotate it from the same Nextcloud settings page.
+连接使用 HTTP Basic 认证，建议填写安装实例的正式 HTTPS 地址。WeKnora 的数据源凭据接口只返回配置状态。[Nextcloud 应用密码](https://docs.nextcloud.com/server/stable/user_manual/en/session_management.html) · [WebDAV 文件操作](https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html)
 
-The connector uses HTTP Basic authentication for both PROPFIND and GET requests. Use HTTPS for connections outside a trusted network. Credentials use the existing encrypted data-source credential JSON; API responses expose only whether credentials are configured. Replacing credentials requires entering the whole credential set again.
+## 在知识库选择同步范围 {#configure-in-weknora}
 
-Official references: [Nextcloud app passwords](https://docs.nextcloud.com/server/stable/user_manual/en/session_management.html) and [WebDAV file operations](https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html).
+1. 打开**知识库设置 → 数据源 → 添加**，选择 **Nextcloud**。
+2. 填写安装地址、用户名和应用密码。独立域名示例为 `https://nextcloud.example.com`，带子路径的部署可填 `https://nextcloud.example.com/cloud`。连接器会自行拼接账号的 WebDAV 路径。
+3. 测试连接，确认账号可以访问。可选填要包含或排除的扩展名，例如 `.pdf, .md`。大小写和开头的点均可忽略，排除规则优先。范围树可浏览所有支持的格式，过滤在同步时生效。
+4. 至少选择一个目录或文件。目录包含今后加入的子项，选中最上层的 **Nextcloud** 会覆盖整个账号。接口使用相对账号根目录的绝对路径，例如 `/docs`。多个重叠选择会合并。
+5. 设置同步计划、冲突策略与**同步删除**，先选择一个小目录手动同步，核对导入的文件和解析状态。
 
-## Configure in WeKnora
+<Screenshot src="/screenshots/datasource-nextcloud.png" caption="使用示例账号填写 Nextcloud 连接信息" />
 
-1. Open **Knowledge base settings → Data sources → Add**, then choose **Nextcloud**.
-2. Enter the installation's base URL, username and app password. Use `https://nextcloud.example.com`, or `https://nextcloud.example.com/cloud` for an installation with a path prefix. Do **not** append `/remote.php/dav`, `/files/alice`, or a folder path. The connector constructs `/remote.php/dav/files/{username}/` itself.
-3. Test the connection. This checks account access with a Depth-0 PROPFIND; it does not enumerate the account or download files.
-4. Optionally enter comma-separated include/exclude extensions, such as `.pdf, .md`. Matching is case-insensitive; a leading dot is optional. An empty include list allows all supported import formats, and exclusions take priority. These values live in `config.settings.include_extensions` and `config.settings.exclude_extensions`; the API also accepts arrays of strings.
-5. Expand the resource tree and select at least one folder or file. Select the top-level **Nextcloud** folder to sync the whole account. A selected folder includes future descendants; overlapping selections are collapsed. Resource IDs are absolute, decoded paths relative to the account root, such as `/docs`, not WebDAV URLs or numeric file IDs.
-6. Choose the sync schedule, conflict policy and **Sync deletions** setting. Save and manually sync a small folder first.
+<Screenshot src="/screenshots/datasource-nextcloud-resources.png" caption="选择要从 Nextcloud 同步到知识库的文件或目录" />
 
-<Screenshot src="/screenshots/datasource-nextcloud-resources.png" caption="Selecting a folder in the lazy resource tree" hint="Example folder data from a stubbed API; this screenshot does not demonstrate a live Nextcloud connection." />
+账号需要能够列举选中范围内的每个目录。连接器从账号向知识库单向同步，支持通过 WebDAV 读取的内容。公开分享链接和端到端加密的内容不在此范围。
 
-The account must have permission to list every directory in the selected scope. Public-share links, end-to-end encrypted content, activity feeds and two-way synchronization are outside this connector's scope.
+## 私网部署与访问控制 {#network-and-ssrf-protection}
 
-## Network and SSRF protection
+私有部署按服务端现有网络策略配置。在 `SSRF_WHITELIST` 中保留已有条目，按需加入自己的 Nextcloud 主机后重启后端。部署维护的附加条目也可使用 `SSRF_WHITELIST_EXTRA`。连接测试和文件读取均限定在配置的源站，请填写最终使用的主机、协议和端口。受反向代理保护的服务需保留 WebDAV 的 PROPFIND、Depth、身份认证和条件请求头。
 
-The base URL passes the upstream `utils.ValidateURLForSSRF` policy through `datasource.ValidateConnectorBaseURL`. Every request uses the shared SSRF-aware transport, dial checks and redirect policy. There is no connector-specific allowlist or bypass.
+## 增量同步和删除 {#incremental-synchronization-and-deletion}
 
-For a private/self-hosted deployment, an administrator must add the Nextcloud host to the existing **`SSRF_WHITELIST`** configuration and restart the backend. For example:
+每轮遍历所选范围，用 ETag、修改时间、大小及可用的 Nextcloud 文件 ID 识别变化。文件至少要有 ETag 或修改时间。未变化的文件跳过下载。下载会检查版本和字节数，校验通过后才记录进度。知识库在 `Nextcloud/` 下保留目录层级。
 
-```dotenv
-SSRF_WHITELIST=nextcloud.example.com
-```
-
-Preserve any other hosts already required by your deployment. The shared policy also supports `SSRF_WHITELIST_EXTRA` for deployment-managed additions. Both PROPFIND and downloads stay on the configured origin. Cross-origin redirects, including changes of scheme or port, are rejected even if the target is whitelisted; configure the canonical HTTPS installation URL directly. The connector never follows response hrefs as download URLs: it validates them and builds requests under the account's WebDAV root.
-
-## Incremental synchronization and deletion
-
-Each path has a cursor fingerprint containing the ETag, last-modified time, size and optional Nextcloud file ID. At least an ETag or last-modified time is required for files. Unchanged fingerprints skip downloads; each run still enumerates the complete selected scope because directory timestamps alone cannot establish which files were deleted.
-
-Downloads use `If-Match` for strong ETags, or `If-Unmodified-Since` for the last-modified fallback. Returned validators and byte counts must match the listing. Weak ETags or missing response validators require a second Depth-0 metadata check before the cursor acknowledges the file.
-
-| Source change | Result |
+| 源端变化 | 同步结果 |
 | --- | --- |
-| Added or modified file | Download and emit a new/updated item |
-| Unchanged file | Skip download |
-| Deleted file | Emit `IsDeleted` after a complete successful scan; the service applies **Sync deletions** |
-| Renamed, moved, or moved outside the selection | Import the new path if selected; reconcile the old path as a deletion |
-| Selected root removed or renamed | Stop the run without deletions; reselect the intended scope |
-| Selection or extension filters changed | Reconcile previously tracked paths outside the new scope as deletions |
-| Server or account changed | Reject the existing cursor; create a new data source |
-| App password rotated | Keep the cursor and source identities |
+| 新增或修改文件 | 下载并导入或更新 |
+| 删除文件 | 成功遍历整个范围后，按“同步删除”设置处理 |
+| 移动或重命名文件 | 如新路径仍在范围内则导入新路径，按删除处理旧路径 |
+| 选中的根目录被删除或改名 | 停止本轮，保留已有内容，请重新选择范围 |
+| 调整目录或扩展名过滤 | 已跟踪但不再属于新范围的路径按删除处理 |
+| 更换服务器或账号 | 新建数据源，原有同步进度属于原账号和实例 |
+| 轮换应用密码 | 保留同步进度及文件对应关系 |
 
-Knowledge files retain the account-relative hierarchy under `Nextcloud/`. Names are sanitized segment by segment while preserving supported extensions and non-ASCII names. Source identity includes the deployment/account scope and the original path, so identical content at two paths remains independent.
+同步进度按已确认项目保存。强制完整同步会重新下载文件，并保留之前用于核对删除的记录。列举目录失败或响应不完整会停止整轮的删除核对。个别文件读取失败会记录错误，后续同步可以重试。凭据失效会停止本轮任务，单次请求超时为 120 秒。
 
-The streaming interface holds one file body at a time. Checkpoints contain complete cursor snapshots, saved every 50 cursor mutations, before deletions and at completion. Interrupted runs resume from acknowledged items. Forced full sync re-downloads all files and preserves the prior deletion baseline across checkpoints and retries.
+关闭“同步删除”期间已记入进度的删除不会在重新开启时补删。移除数据源会保留已导入的知识。下载完成后还需查看文档的解析和索引状态。
 
-Directory failures, malformed or incomplete multistatus responses, and traversal-limit failures stop the run without deletion reconciliation. Per-file permission, missing-file, download, size and version errors produce localized error items; other files continue, and failed paths are retried next run. HTTP 401 stops the run as invalid credentials. Requests are bounded by a 120-second client timeout and the sync context; failed requests are retried on the next sync rather than in an unbounded request loop.
+## 文件格式与限制 {#formats-and-limits}
 
-As with other data sources, deletions observed while **Sync deletions** is disabled are removed from the cursor and are not retrospectively deleted when it is enabled again. Removing a data source does not clean up already imported knowledge. A successful connector download is distinct from downstream document parsing/indexing success.
+- 导入格式与知识库上传一致。图片和音频需要相应的知识库模型。扩展名过滤配置为 `config.settings.include_extensions` 和 `exclude_extensions`，API 也接受字符串数组。
+- 单文件默认最大 50 MiB，由 `MAX_FILE_SIZE_MB` 控制。提高限制时同步核对解析服务的 `DOCREADER_GRPC_MAX_FILE_SIZE_MB`。
+- 单次目录响应最多 32 MiB、10 万项，单轮遍历最多 100 万项、深度 256。超过限制可缩小所选目录。连接器使用 Depth 0 或 1 的 PROPFIND，依赖完整、有效的 WebDAV 响应。
+- 常见错误包括权限不足、文件消失、超出大小、空文件、下载时文件变化或网络策略拦截。具体状态见数据源的同步记录。
 
-## Formats and limits
+## 验证连接器 {#verification}
 
-- Supported extensions follow `internal/utils/import_filetypes.go`, the same list used for knowledge uploads. The picker always shows supported formats, so filters can be edited without saving them before browsing; include/exclude filters apply at sync time. Image/audio ingestion still requires the corresponding knowledge-base model configuration.
-- Files use `MAX_FILE_SIZE_MB` (default **50 MiB**). Oversized listed files are rejected before GET. Downloads read at most the limit plus one byte; an oversized or partial body is never ingested. Align the document parser's `DOCREADER_GRPC_MAX_FILE_SIZE_MB` when increasing this limit.
-- PROPFIND uses only **Depth 0 or 1**. WebDAV provides no standard PROPFIND pagination, so the connector accepts only complete responses: at most **32 MiB** and **100,000 entries** per listing, **1,000,000 listed entries** per run, and a traversed directory depth of **256**. Exceeding a limit fails the scan rather than silently truncating it. Select smaller folders if necessary.
-- Responses must use DAV namespaces and valid properties. Encoded paths are decoded exactly once; out-of-scope hrefs, duplicates, dot segments and incomplete responses are rejected. Reverse proxies must preserve PROPFIND, Depth, authentication and conditional request headers.
-
-Sync error codes are `nextcloud_permission_denied`, `nextcloud_not_found`, `nextcloud_file_too_large`, `nextcloud_empty_file`, `nextcloud_source_changed`, `nextcloud_invalid_response`, `nextcloud_ssrf_blocked`, and `nextcloud_fetch_failed`. Authentication errors and invalid configuration are reported at the data-source level. Server response bodies, request URLs and app passwords are never included in connector errors.
-
-## Verification
-
-Unit tests use an in-process WebDAV server and need no Nextcloud instance:
+运行连接器本地测试只需进程内的 WebDAV 测试服务。
 
 ```bash
 go test ./internal/datasource/connector/nextcloud -count=1
 ```
 
-The optional read-only live test is skipped unless **all four** variables are set: `NEXTCLOUD_LIVE_URL`, `NEXTCLOUD_LIVE_USER`, `NEXTCLOUD_LIVE_APP_PASSWORD`, and `NEXTCLOUD_LIVE_ROOT`. Configure them locally; do not commit credentials. The root must be a small test folder containing a supported, non-empty file. Private deployments still need the normal SSRF whitelist.
+真实服务的只读验证使用 `NEXTCLOUD_LIVE_URL`、`NEXTCLOUD_LIVE_USER`、`NEXTCLOUD_LIVE_APP_PASSWORD`、`NEXTCLOUD_LIVE_ROOT`。四项均配置时才运行。选择含有一个受支持非空文件的小目录，测试期间保持文件内容稳定。验证覆盖账号访问、范围列举、下载和下一轮增量跳过。
 
 ```bash
 go test ./internal/datasource/connector/nextcloud -run '^TestLive$' -count=1 -v
 ```
-
-It checks account access, lists the root, downloads one supported file and verifies that a second incremental run skips it. It never writes or deletes source content and does not print live credentials or filenames. Keep that file unchanged during the check.
