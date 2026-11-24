@@ -145,6 +145,7 @@ docker-build-app:
 		--build-arg COMMIT_ID_ARG="$$COMMIT_ID" \
 		--build-arg BUILD_TIME_ARG="$$BUILD_TIME" \
 		--build-arg WITH_ANYDOC=$${WITH_ANYDOC:-1} \
+		--build-arg APK_MIRROR_ARG="$${APK_MIRROR_ARG:-}" \
 		-f docker/Dockerfile.app -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 
 # Build docreader Docker image
