@@ -643,7 +643,8 @@ export default {
     daysAgo: '{n}日前',
     syncError: {
       dingtalk_document_failed: 'DingTalkドキュメントを読み取れません。アクセス権限を確認して同期を再試行してください。',
-      dingtalk_document_too_large: 'DingTalkファイルが64 MiBのダウンロード上限を超えたため、今回の同期ではスキップしました。圧縮または分割してください。',
+      dingtalk_document_too_large: 'DingTalkファイルがWeKnoraの同期ダウンロード上限（{code} MiB）を超えたため、今回はスキップしました。圧縮または分割してから再同期してください。',
+      dingtalk_rate_limited: '自動再試行後もDingTalk APIの呼び出し頻度制限が解除されませんでした。時間をおいて再試行してください。',
       dingtalk_resource_failed: 'DingTalkリソースを利用できません。アクセス権限と選択したリソースを確認して再試行してください。',
       deletion_lookup_failed: '削除前の項目の照会に失敗しました。サーバログを確認してください',
       deletion_failed: '削除に失敗しました。サーバログを確認してください',

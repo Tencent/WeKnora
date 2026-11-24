@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/hibiken/asynq"
 )
 
@@ -160,6 +161,12 @@ func (e *fakeTaskEnqueuer) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asy
 		}
 	}
 	return &asynq.TaskInfo{ID: "task-fake"}, nil
+}
+
+type schedulerEnqueueFunc func(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error)
+
+func (f schedulerEnqueueFunc) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+	return f(task, opts...)
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -462,6 +469,76 @@ func TestScheduler_TriggerSync_NotFound(t *testing.T) {
 	if enqueuer.count.Load() != 0 {
 		t.Error("should not enqueue for non-existent data source")
 	}
+}
+
+func TestScheduler_TriggerSync_DuplicateTaskIsCanceled(t *testing.T) {
+	repo := newFakeDataSourceRepo()
+	ds := &types.DataSource{ID: "ds-duplicate", TenantID: 1, Status: types.DataSourceStatusActive}
+	if err := repo.Create(context.Background(), ds); err != nil {
+		t.Fatal(err)
+	}
+	redis := asynq.RedisClientOpt{Addr: miniredis.RunT(t).Addr()}
+	firstClient, secondClient := asynq.NewClient(redis), asynq.NewClient(redis)
+	t.Cleanup(func() { _ = firstClient.Close() })
+	t.Cleanup(func() { _ = secondClient.Close() })
+
+	// Both replicas passed the running-log check before either log was visible.
+	firstLogs, secondLogs := newFakeSyncLogRepo(), newFakeSyncLogRepo()
+	NewScheduler(repo, firstLogs, firstClient).triggerSync(ds.ID, ds.TenantID)
+	firstLog := onlySchedulerSyncLog(t, firstLogs)
+	if firstLog.Status != types.SyncLogStatusRunning || firstLog.FinishedAt != nil {
+		t.Fatalf("winning sync log = %+v, want running", firstLog)
+	}
+
+	inspector := asynq.NewInspector(redis)
+	t.Cleanup(func() { _ = inspector.Close() })
+	pending, err := inspector.ListPendingTasks(types.QueueSync)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending tasks after first trigger = %d, error = %v, want 1 task", len(pending), err)
+	}
+	// Reuse the winning task ID to model the same cron minute at a wall-clock boundary.
+	secondEnqueue := schedulerEnqueueFunc(func(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+		return secondClient.Enqueue(task, append(opts, asynq.TaskID(pending[0].ID))...)
+	})
+	NewScheduler(repo, secondLogs, secondEnqueue).triggerSync(ds.ID, ds.TenantID)
+	secondLog := onlySchedulerSyncLog(t, secondLogs)
+	if secondLog.Status != types.SyncLogStatusCanceled || secondLog.FinishedAt == nil {
+		t.Fatalf("duplicate sync log = %+v, want finished and canceled", secondLog)
+	}
+	pending, err = inspector.ListPendingTasks(types.QueueSync)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending tasks after duplicate trigger = %d, error = %v, want 1 task", len(pending), err)
+	}
+}
+
+func TestScheduler_TriggerSync_EnqueueFailureIsFailed(t *testing.T) {
+	repo := newFakeDataSourceRepo()
+	ds := &types.DataSource{ID: "ds-enqueue-failure", TenantID: 1, Status: types.DataSourceStatusActive}
+	if err := repo.Create(context.Background(), ds); err != nil {
+		t.Fatal(err)
+	}
+	logs := newFakeSyncLogRepo()
+	enqueuer := schedulerEnqueueFunc(func(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error) {
+		return nil, context.DeadlineExceeded
+	})
+	NewScheduler(repo, logs, enqueuer).triggerSync(ds.ID, ds.TenantID)
+	log := onlySchedulerSyncLog(t, logs)
+	if log.Status != types.SyncLogStatusFailed ||
+		log.FinishedAt == nil ||
+		log.ErrorMessage != "enqueue failed: context deadline exceeded" {
+		t.Fatalf("sync log = %+v, want finished and failed with enqueue error", log)
+	}
+}
+
+func onlySchedulerSyncLog(t *testing.T, repo *fakeSyncLogRepo) *types.SyncLog {
+	t.Helper()
+	if len(repo.logs) != 1 {
+		t.Fatalf("got %d sync logs, want 1", len(repo.logs))
+	}
+	for _, log := range repo.logs {
+		return log
+	}
+	return nil
 }
 
 func (*fakeDataSourceRepo) PatchSyncSettings(context.Context, *types.DataSource, types.JSON, []string) error {

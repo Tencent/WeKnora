@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -865,6 +866,15 @@ func (c *Connector) sync(
 	}
 	workspaces, err := api.listWorkspaces(ctx)
 	if err != nil {
+		if errors.Is(err, errRateLimited) {
+			// A temporary throttle before discovery must leave the previous
+			// cursor and the next scheduled sync available for recovery.
+			items := make([]types.FetchedItem, 0, len(selected))
+			for _, resourceID := range selected {
+				items = append(items, failedResource(resourceID, err))
+			}
+			return items, nil, &datasource.PartialFetchError{}
+		}
 		return nil, nil, err
 	}
 	scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, selected, settings)
@@ -1567,6 +1577,8 @@ func trimSuffixFold(value, suffix string) (string, bool) {
 	return value[:len(value)-len(suffix)], true
 }
 
+const rateLimitedMessage = "DingTalk API rate limit reached; retry later"
+
 func failedDocument(
 	sourceResourceID string,
 	workspaceID string,
@@ -1575,34 +1587,47 @@ func failedDocument(
 ) types.FetchedItem {
 	reasonCode := "dingtalk_document_failed"
 	reason := "DingTalk document could not be read; retry on the next sync"
-	if errors.Is(err, errDocumentTooLarge) {
+	reasonValue := ""
+	switch {
+	case errors.Is(err, errDocumentTooLarge):
 		reasonCode = "dingtalk_document_too_large"
-		reason = "DingTalk file exceeds the 64 MiB download limit; skipped for this sync. Compress or split the file."
+		reasonValue = strconv.Itoa(maxDocumentBytes >> 20)
+		reason = "DingTalk file exceeds WeKnora's " + reasonValue + " MiB sync download limit. Compress or split it."
+	case errors.Is(err, errRateLimited):
+		reasonCode = "dingtalk_rate_limited"
+		reason = rateLimitedMessage
 	}
 	return types.FetchedItem{
 		ExternalID:       document.ID,
 		Title:            document.title(),
 		SourceResourceID: sourceResourceID,
 		Metadata: map[string]string{
-			"channel":           types.ChannelDingtalk,
-			"workspace_id":      workspaceID,
-			"node_id":           document.ID,
-			"error":             err.Error(),
-			"error_reason_code": reasonCode,
-			"error_reason":      reason,
+			"channel":                 types.ChannelDingtalk,
+			"workspace_id":            workspaceID,
+			"node_id":                 document.ID,
+			"error":                   err.Error(),
+			"error_reason_code":       reasonCode,
+			"error_reason_code_value": reasonValue,
+			"error_reason":            reason,
 		},
 	}
 }
 
 func failedResource(resourceID string, err error) types.FetchedItem {
+	reasonCode := "dingtalk_resource_failed"
+	reason := "DingTalk resource is unavailable; check access and the saved selection, then retry"
+	if errors.Is(err, errRateLimited) {
+		reasonCode = "dingtalk_rate_limited"
+		reason = rateLimitedMessage
+	}
 	return types.FetchedItem{
 		ExternalID:       "dingtalk-resource:" + resourceID,
 		SourceResourceID: resourceID,
 		Metadata: map[string]string{
 			"channel":           types.ChannelDingtalk,
 			"error":             err.Error(),
-			"error_reason_code": "dingtalk_resource_failed",
-			"error_reason":      "DingTalk resource is unavailable; check access and the saved selection, then retry",
+			"error_reason_code": reasonCode,
+			"error_reason":      reason,
 		},
 	}
 }

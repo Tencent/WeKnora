@@ -163,7 +163,11 @@ function formatSyncError(e: SyncItemError): string {
   let reason = ''
   if (e.code) {
     const key = `datasource.syncError.${e.code}`
-    const localised = t(key, (e.params || {}) as Record<string, unknown>)
+    // Older DingTalk sync logs were recorded under the 64 MiB limit.
+    const params = e.code === 'dingtalk_document_too_large'
+      ? { code: '64', ...e.params }
+      : (e.params || {})
+    const localised = t(key, params)
     reason = localised === key ? (e.message || e.code) : localised
   } else {
     reason = e.message || ''

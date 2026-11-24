@@ -907,7 +907,8 @@ export default {
     },
     syncError: {
       dingtalk_document_failed: '无法读取钉钉文档，请检查访问权限后重试同步。',
-      dingtalk_document_too_large: '钉钉文件超过 64 MiB 下载上限，本次已跳过，请压缩或拆分后再同步。',
+      dingtalk_document_too_large: '钉钉文件超过 WeKnora 的 {code} MiB 同步下载上限，本次已跳过，请压缩或拆分后再同步。',
+      dingtalk_rate_limited: '钉钉接口调用频率超限，自动重试后仍受限。请稍后再试。',
       dingtalk_resource_failed: '钉钉资源不可用，请检查访问权限和已选资源后重试。',
       deletion_lookup_failed: '删除前查找文档失败，请查看服务器日志',
       deletion_failed: '删除失败，请查看服务器日志',

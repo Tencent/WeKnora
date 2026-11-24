@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/datasource"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -160,6 +162,94 @@ func TestClientRefreshesUnauthorizedTokenAndRetriesRateLimit(t *testing.T) {
 			"requests token=%d workspace=%d nodes=%d waits=%d",
 			tokenRequests, workspaceRequests, nodeRequests, waits,
 		)
+	}
+}
+
+func TestListNodesClassifiesDingTalkRateLimits(t *testing.T) {
+	const qpsBody = `{"code":"Forbidden.AccessDenied.QpsLimitForApi"}`
+	for _, tc := range []struct {
+		name       string
+		status     int
+		body       string
+		retryAfter string
+		recovers   bool
+		cancel     bool
+		wantCalls  int
+		wantErr    error
+		minWait    time.Duration
+		maxWait    time.Duration
+	}{
+		{
+			name: "quota clears", status: http.StatusForbidden, body: qpsBody,
+			retryAfter: "2", recovers: true, wantCalls: 2, minWait: 2 * time.Second, maxWait: 2 * time.Second,
+		},
+		{
+			name: "quota persists without hint", status: http.StatusForbidden, body: qpsBody,
+			wantCalls: maxAttempts, wantErr: errRateLimited, minWait: time.Second, maxWait: 2250 * time.Millisecond,
+		},
+		{
+			name: "429 caps large retry hint", status: http.StatusTooManyRequests, body: `{"code":"TooManyRequests"}`,
+			retryAfter: "18446744073709551615", wantCalls: maxAttempts, wantErr: errRateLimited,
+			minWait: 30 * time.Second, maxWait: 30 * time.Second,
+		},
+		{
+			name: "access denied", status: http.StatusForbidden, body: `{"code":"Forbidden.AccessDenied"}`,
+			wantCalls: 1, wantErr: datasource.ErrInvalidCredentials,
+		},
+		{
+			name: "canceled during cooldown", status: http.StatusForbidden, body: qpsBody,
+			cancel: true, wantCalls: 1, wantErr: context.Canceled,
+			minWait: time.Second, maxWait: 1250 * time.Millisecond,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls, waits := 0, 0
+			client := &client{
+				baseURL: apiBaseURL, token: "cached", tokenExpiry: time.Now().Add(time.Hour),
+				http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					calls++
+					if r.URL.Path != "/v2.0/wiki/nodes" || r.Header.Get("x-acs-dingtalk-access-token") != "cached" {
+						t.Fatalf("unexpected retry request: %s %s", r.Method, r.URL.Path)
+					}
+					status, body := tc.status, tc.body
+					if tc.recovers && calls > 1 {
+						status, body = http.StatusOK, `{"nodes":[{"nodeId":"doc"}]}`
+					}
+					return &http.Response{
+						StatusCode: status, Header: http.Header{"Retry-After": {tc.retryAfter}},
+						Body: io.NopCloser(strings.NewReader(body)),
+					}, nil
+				})},
+				sleep: func(ctx context.Context, delay time.Duration) error {
+					waits++
+					if delay < tc.minWait || delay > tc.maxWait {
+						t.Errorf("retry delay %s outside %s..%s", delay, tc.minWait, tc.maxWait)
+					}
+					if tc.cancel {
+						cancel()
+						return sleepContext(ctx, delay)
+					}
+					return nil
+				},
+			}
+			nodes, err := client.listNodes(ctx, "root")
+			if !errors.Is(err, tc.wantErr) ||
+				(tc.wantErr == errRateLimited && errors.Is(err, datasource.ErrInvalidCredentials)) {
+				t.Fatalf("listNodes() error = %v, want %v", err, tc.wantErr)
+			}
+			if tc.recovers && (len(nodes) != 1 || nodes[0].ID != "doc") {
+				t.Fatalf("listNodes() recovered nodes = %#v", nodes)
+			}
+			wantWaits := tc.wantCalls - 1
+			if tc.cancel {
+				wantWaits++
+			}
+			if calls != tc.wantCalls || waits != wantWaits {
+				t.Fatalf("calls=%d waits=%d, want %d and %d", calls, waits, tc.wantCalls, wantWaits)
+			}
+		})
 	}
 }
 

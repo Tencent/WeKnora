@@ -214,6 +214,62 @@ func TestScopeResolutionCancellationDoesNotProduceCursor(t *testing.T) {
 	}
 }
 
+func TestExhaustedRateLimitPreservesSyncRecovery(t *testing.T) {
+	for _, stage := range []string{"workspaces", "scope", "document"} {
+		t.Run(stage, func(t *testing.T) {
+			ctx := context.Background()
+			c, api, cfg, a, _ := twoFolderFixture(t)
+			api.nodes["a"] = []node{syncDocument()}
+			_, cursor, err := c.FetchIncremental(ctx, cfg, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			api.nodes["a"][0].ModifiedTime = "r2"
+			limited := fmt.Errorf("DingTalk fixture: %w", errRateLimited)
+			switch stage {
+			case "workspaces":
+				api.workspaceErr = limited
+			case "scope":
+				api.nodeErrors["a"] = limited
+			case "document":
+				api.blockErrors["doc"] = limited
+			}
+
+			items, next, err := c.FetchIncremental(ctx, cfg, cursor)
+			var partial *datasource.PartialFetchError
+			wantFailures := 1
+			if stage == "workspaces" {
+				wantFailures = len(cfg.ResourceIDs)
+				if next != nil {
+					t.Fatal("failed discovery proposed a replacement cursor")
+				}
+				next = cursor
+			}
+			if !errors.As(err, &partial) || len(items) != wantFailures {
+				t.Fatalf("rate-limited sync: items=%#v error=%v", items, err)
+			}
+			assertNoDeletion(t, items)
+			for _, item := range items {
+				if item.Metadata["error_reason_code"] != "dingtalk_rate_limited" ||
+					item.Metadata["error_reason"] != rateLimitedMessage {
+					t.Fatalf("rate limit not surfaced: %#v", item)
+				}
+			}
+			state, err := decodeCursor(next)
+			if err != nil || state.Resources[a]["doc"] != "r1" {
+				t.Fatalf("rate limit advanced cursor: %#v, %v", state, err)
+			}
+			api.workspaceErr = nil
+			delete(api.nodeErrors, "a")
+			delete(api.blockErrors, "doc")
+			items, _, err = c.FetchIncremental(ctx, cfg, next)
+			if err != nil || len(items) != 1 || items[0].ExternalID != "doc" || len(items[0].Content) == 0 {
+				t.Fatalf("rate limit recovery: %#v, %v", items, err)
+			}
+		})
+	}
+}
+
 func TestFetchAllFromCursorReFetchesAndReconcilesDeletions(t *testing.T) {
 	c, api, cfg, _, _ := twoFolderFixture(t)
 	api.nodes["a"] = []node{syncDocument()}
@@ -266,6 +322,7 @@ func TestIncrementalOversizedFileDoesNotBlockHealthyDocuments(t *testing.T) {
 			byID[item.ExternalID] = item
 		}
 		if len(items) != 2 || byID["large"].Metadata["error_reason_code"] != "dingtalk_document_too_large" ||
+			byID["large"].Metadata["error_reason_code_value"] != "64" ||
 			len(byID["doc"].Content) == 0 {
 			t.Fatalf("unexpected items: %#v", items)
 		}
