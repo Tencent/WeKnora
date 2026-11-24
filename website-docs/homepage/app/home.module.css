@@ -13,6 +13,7 @@
   line-height: 1.75;
 }
 .site svg { flex-shrink: 0; }
+.site > main { counter-reset: home-section; }
 .site section[id], .videoFigure { scroll-margin-top: 105px; }
 .shell { width: calc(100% - 112px); max-width: 1600px; margin-inline: auto; }
 .skipLink { position: fixed; left: 20px; top: -100px; z-index: 30; padding: 12px 20px; background: var(--ink); color: var(--paper); }
@@ -28,6 +29,10 @@
 .hero h1 em { font-style: normal; color: var(--gold); }
 .heroAside { padding-bottom: 6px; }
 .eyebrow { font-family: ui-monospace, "SF Mono", monospace; color: var(--gold); font-size: 12px; letter-spacing: .14em; font-weight: 500; margin: 0 0 20px; }
+.chapterLabel::before {
+  counter-increment: home-section;
+  content: counter(home-section, decimal-leading-zero) " / ";
+}
 .heroDescription { font-size: clamp(16px, 1.32vw, 21px); line-height: 1.85; color: var(--soft); margin: 0; max-width: 550px; }
 .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
 .primary, .secondary { display: inline-flex; align-items: center; justify-content: center; gap: 28px; font-size: 15px; font-weight: 550; min-height: 49px; padding: 12px 23px; border: 1px solid var(--ink); border-radius: 3px; transition: background .2s, color .2s, transform .2s; }
@@ -297,7 +302,7 @@
 .site .chapter { padding-block: 48px; background: var(--paper); border: 0; }
 .site .chapterTint { background: var(--paper2); border-block: 1px solid var(--rule); }
 .chapter .sectionHeading { margin-bottom: 28px; }
-.chapter .eyebrow { margin-bottom: 12px; }
+.site .chapterLabel { margin-bottom: 12px; }
 .site .footer { border-top: 0; }
 @media (max-width: 700px) {
   .site .chapter { padding-block: 32px; }

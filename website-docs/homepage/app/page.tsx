@@ -7,6 +7,7 @@ import { homeAssets } from "../../shared/header";
 import { ProductGallery, type GalleryShot, type GallerySlide } from "./product-gallery";
 import { Header, ProductVideo } from "./interactive";
 import { AdopterShowcase } from "./adopter-showcase";
+import { ChapterHeading } from "./chapter-heading";
 import { clients, dataSources, modelProviders, IntegrationMark } from "./brands";
 import s from "./home.module.css";
 
@@ -153,9 +154,9 @@ export default function Home() {
       </section>
       <AdopterShowcase />
       <section id="capabilities" className={`${s.chapter}`} data-tone="base" aria-labelledby="capabilities-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><h2 id="capabilities-title">知识问答、任务执行与自动 Wiki</h2><p>查询资料用 RAG，处理多步任务用 Agent，<br />整理知识用 Wiki。三种能力共享同一知识库。</p></div>
-        <div className={s.modeGrid}>{modes.map(mode => <article className={s.mode} key={mode.label}>
-          <div className={s.modeTop}><Icon name={mode.icon} /><span>{mode.label.toUpperCase()}</span></div>
+        <div className={s.sectionHeading}><ChapterHeading id="capabilities-title" label="KNOWLEDGE AT WORK">知识问答、任务执行与自动 Wiki</ChapterHeading><p>查询资料用 RAG，处理多步任务用 Agent，<br />整理知识用 Wiki。三种能力共享同一知识库。</p></div>
+        <div className={s.modeGrid}>{modes.map((mode, index) => <article className={s.mode} key={mode.label}>
+          <div className={s.modeTop}><Icon name={mode.icon} /><span>{String(index + 1).padStart(2, "0")} / {mode.label.toUpperCase()}</span></div>
           <h3>{mode.title}</h3><p>{mode.description}</p><ul className={s.tags}>{mode.tags.map(tag => <li key={tag}>{tag}</li>)}</ul>
           <div className={s.slideLinks}>
             <a className={s.textLink} href={mode.label === "Wiki" ? "#wiki" : guide(mode.link)}>了解 {mode.label} <Icon name="arrow" /></a>
@@ -164,39 +165,39 @@ export default function Home() {
         </article>)}</div>
       </div></section>
       <section id="release" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="release-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>v0.9.1</p><h2 id="release-title">语音输入、沙箱浏览器、凭据保险库与知识检索</h2></div><a className={s.textLink} href={guide("07-releases/v0.9.1")}>完整图文与升级说明 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><ChapterHeading id="release-title" label="v0.9.1">语音输入、沙箱浏览器、凭据保险库与知识检索</ChapterHeading><a className={s.textLink} href={guide("07-releases/v0.9.1")}>完整图文与升级说明 <Icon name="arrow" /></a></div>
         <ProductGallery id="release-gallery" label="v0.9.1" slides={releaseSlides} layout="compact" />
         <div className={s.releaseExtras}><span>部署与维护</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link) + item.anchor}>{item.name} <Icon name="arrow" /></a>)}</div>
       </div></section>
       <section id="work-assistant" className={s.chapter} data-tone="base" aria-labelledby="work-assistant-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><h2 id="work-assistant-title">工作助手与多智能体协作</h2><a className={s.textLink} href={guide("03-features/26-weknora-assistant")}>工作助手指南 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><ChapterHeading id="work-assistant-title" label="ASSISTANT &amp; COLLABORATION">工作助手与多智能体协作</ChapterHeading><a className={s.textLink} href={guide("03-features/26-weknora-assistant")}>工作助手指南 <Icon name="arrow" /></a></div>
         <ProductGallery id="assistant-gallery" label="工作助手与多智能体协作" slides={assistantSlides} layout="compact" />
       </div></section>
       <section id="automations" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="automations-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><h2 id="automations-title">自动化任务与执行审批</h2><a className={s.textLink} href={guide("03-features/27-automations")}>自动化指南 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><ChapterHeading id="automations-title" label="AUTOMATION &amp; APPROVALS">自动化任务与执行审批</ChapterHeading><a className={s.textLink} href={guide("03-features/27-automations")}>自动化指南 <Icon name="arrow" /></a></div>
         <ProductGallery id="automation-gallery" label="自动化任务与执行审批" slides={automationSlides} layout="compact" />
       </div></section>
       <section id="agent-workflow" className={`${s.chapter}`} data-tone="base" aria-labelledby="agent-workflow-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><h2 id="agent-workflow-title">让智能体操作你自己的浏览器</h2><a className={s.textLink} href={guide("05-clients/09-local-browser")}>连接本机浏览器 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><ChapterHeading id="agent-workflow-title" label="YOUR LOCAL BROWSER">让智能体操作你自己的浏览器</ChapterHeading><a className={s.textLink} href={guide("05-clients/09-local-browser")}>连接本机浏览器 <Icon name="arrow" /></a></div>
         <ProductGallery id="browser-gallery" label="本机浏览器" slides={browserSlides} layout="compact" />
       </div></section>
       <section id="skills-sandbox" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="skills-sandbox-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><h2 id="skills-sandbox-title">智能体可以运行技能，也能生成文件。</h2><a className={s.textLink} href={guide("03-features/22-skills-sandbox")}>了解技能与沙箱 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><ChapterHeading id="skills-sandbox-title" label="SKILLS &amp; SANDBOX">智能体可以运行技能，也能生成文件。</ChapterHeading><a className={s.textLink} href={guide("03-features/22-skills-sandbox")}>了解技能与沙箱 <Icon name="arrow" /></a></div>
         <ProductGallery id="sandbox-gallery" label="技能与沙箱" slides={sandboxSlides} />
       </div></section>
       <section id="knowledge-gallery" className={s.chapter} data-tone="base" aria-labelledby="knowledge-gallery-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><h2 id="knowledge-gallery-title">用画廊浏览知识库里的图片</h2><a className={s.textLink} href={guide("03-features/02-knowledge-base") + "#image-gallery"}>了解知识库与画廊 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><ChapterHeading id="knowledge-gallery-title" label="KNOWLEDGE &amp; GALLERY">用画廊浏览知识库里的图片</ChapterHeading><a className={s.textLink} href={guide("03-features/02-knowledge-base") + "#image-gallery"}>了解知识库与画廊 <Icon name="arrow" /></a></div>
         <ProductGallery id="knowledge-gallery-views" label="知识库与画廊" slides={knowledgeSlides} layout="compact" />
       </div></section>
       <section id="wiki" className={`${s.chapter} ${s.chapterTint} ${s.wiki}`} data-tone="subtle" aria-labelledby="wiki-title"><div className={s.shell}>
         <div className={s.sectionHeading}>
-          <h2 id="wiki-title">把文档整理成可浏览的 Wiki。</h2>
+          <ChapterHeading id="wiki-title" label="AUTOMATIC WIKI">把文档整理成可浏览的 Wiki。</ChapterHeading>
           <a className={s.textLink} href={guide("03-features/14-wiki")}>了解 Wiki 的使用方式 <Icon name="arrow" /></a>
         </div>
         <ProductGallery id="wiki-gallery" label="Wiki" slides={wikiSlides} />
       </div></section>
       <section id="ecosystem" className={s.chapter} data-tone="base" aria-labelledby="ecosystem-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><h2 id="ecosystem-title">数据源与工具集成</h2><p>同步飞书、Confluence、GitLab 等平台的资料，<br />通过 IM、浏览器插件、MCP Server 或 API 查询和使用。</p></div>
+        <div className={s.sectionHeading}><ChapterHeading id="ecosystem-title" label="INTEGRATIONS">数据源与工具集成</ChapterHeading><p>同步飞书、Confluence、GitLab 等平台的资料，<br />通过 IM、浏览器插件、MCP Server 或 API 查询和使用。</p></div>
         <div className={s.ecosystem}>
           <div className={s.ecosystemColumn}><Icon name="sources" /><h3>导入与同步资料</h3><p>上传文件、导入网页，或连接外部数据源。飞书 / Lark 可同步云文档中的表格和附件，Seafile 支持按目录增量同步。</p><div className={s.integrations}>{dataSources.map(item => <span key={item.name}><IntegrationMark item={item} /></span>)}</div><div className={s.slideLinks}><a className={s.textLink} href={guide("03-features/10-datasource")}>数据源集成 <Icon name="arrow" /></a><a className={s.textLink} href={guide("03-features/24-feishu-drive")}>连接飞书 / Lark <Icon name="arrow" /></a><a className={s.textLink} href={guide("03-features/25-seafile")}>连接 Seafile <Icon name="arrow" /></a></div></div>
           <div className={s.ecosystemCore}><BrandLogo /><span>团队知识库与智能体</span><div>理解 · 检索 · 推理 · 行动</div></div>
@@ -205,11 +206,11 @@ export default function Home() {
         <div className={s.models}><span>模型由你选择 · 内置 31 家厂商 <a className={s.textLink} href={guide("03-features/06-models")}>查看全部 <Icon name="arrow" /></a></span>{modelProviders.map(item => <p key={item.name}><IntegrationMark item={item} /></p>)}</div>
       </div></section>
       <section id="enterprise" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="enterprise-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><h2 id="enterprise-title">私有化部署，<br />按团队需要管理权限。</h2><p>配置数据存储与成员权限，<br />查看操作记录和任务运行状态。</p></div>
+        <div className={s.sectionHeading}><ChapterHeading id="enterprise-title" label="BUILT FOR YOUR TEAM">私有化部署，<br />按团队需要管理权限。</ChapterHeading><p>配置数据存储与成员权限，<br />查看操作记录和任务运行状态。</p></div>
         <div className={s.enterpriseGrid}><article><Icon name="server" /><h3>部署与存储</h3><p>支持 Docker、Kubernetes 与 Helm，也提供 Lite 单机版和桌面应用。模型、向量数据库和存储后端可按需替换，支持本地推理。</p></article><article><Icon name="shield" /><h3>用户与资源权限</h3><p>集中创建和停用账号、设置管理员。通过空间角色、资源共享、API Key 范围和 OIDC 身份接入管理访问权限，也可限制服务只访问白名单域名。</p><a className={s.textLink} href={guide("03-features/20-platform-admin")}>平台用户管理 <Icon name="arrow" /></a></article><article><Icon name="trace" /><h3>审计与运行监控</h3><p>空间审计日志、运行时任务队列面板与 Langfuse 追踪，帮助团队定位问题、管理运行状态。</p></article></div>
       </div></section>
       <section id="get-started" className={`${s.chapter} ${s.closing}`} data-tone="base" aria-labelledby="closing-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><h2 id="closing-title">选择适合你的使用方式。</h2></div>
+        <div className={s.sectionHeading}><ChapterHeading id="closing-title" label="GET STARTED">选择适合你的使用方式。</ChapterHeading></div>
         <div className={s.startGrid}>
           <article className={s.startCard}>
             <div className={s.startLabel}><Image className={s.startBrand} src={`${homeAssets}/brands/wechat-dialog.png`} alt="微信对话开放平台 Logo" width={32} height={32} /><span>在线使用</span></div>
