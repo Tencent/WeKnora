@@ -480,7 +480,8 @@ func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOp
 			var nested struct {
 				Data pageData `json:"data"`
 			}
-			if nestedErr := json.Unmarshal(body, &nested); nestedErr == nil && nested.Data.PageSize > 0 && nested.Data.Data != nil {
+			nestedErr := json.Unmarshal(body, &nested)
+			if nestedErr == nil && nested.Data.PageSize > 0 && nested.Data.Data != nil {
 				pageResp = nested.Data
 				err = nil
 			}
