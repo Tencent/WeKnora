@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { homeAssets } from "../../shared/header";
 import { adopters, adopterIssue } from "./adopters";
+import { ChapterHeading } from "./chapter-heading";
 import { Icon } from "./ui";
 import s from "./home.module.css";
 import a from "./adopters.module.css";
@@ -38,11 +39,11 @@ export function AdopterShowcase() {
     onKeyDown={event => { if (event.key === "Escape") setActive(null); }}>
     <div ref={inner} className={`${s.shell} ${a.inner}`}>
       <div className={a.heading} onPointerEnter={event => { if (event.pointerType === "mouse") setActive(null); }}>
-        <h2 id="adopters-title">谁在使用 WeKnora</h2>
+        <ChapterHeading id="adopters-title" label="WHO USES WEKNORA">谁在使用 WeKnora</ChapterHeading>
         <a className={a.join} href={adopterIssue} target="_blank" rel="noreferrer">分享你的实践 <Icon name="arrow" /></a>
       </div>
       <div id="adopter-logos" className={a.viewport}>
-        <div className={a.track}>
+        <div className={a.track} style={{ animationDuration: `${adopters.length * 7.5}s` }}>
           {/* Equal-width copies make the linear animation loop without a jump. */}
           {[0, 1].map(copy => <ul className={a.group} key={copy} aria-hidden={copy === 1 ? true : undefined} aria-label={copy === 0 ? "使用 WeKnora 的团队与产品" : undefined}>
             {adopters.map((adopter, index) => <li key={adopter.name}>

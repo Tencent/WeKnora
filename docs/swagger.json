@@ -22243,7 +22243,7 @@
         },
         "/system/admin/users": {
             "get": {
-                "description": "Retrieve a paginated list of every user across tenants (SystemAdmin only).\nSupports `offset` (default 0) and `limit` (default 50, max 200).\nPassword/hashes are never serialised — only the redacted UserInfo shape.",
+                "description": "Retrieve a paginated list of every user across tenants (SystemAdmin only).\nSupports `offset` (default 0), `limit` (default 50, max 200), and optional `q`.\n`q` performs case-insensitive substring matching against username or email.\nPassword/hashes are never serialised — only the redacted UserInfo shape.",
                 "produces": [
                     "application/json"
                 ],
@@ -22252,6 +22252,13 @@
                 ],
                 "summary": "查询平台用户（List platform users）",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": true,
+                        "description": "Filter by username or email",
+                        "name": "q",
+                        "in": "query"
+                    },
                     {
                         "minimum": 0,
                         "type": "integer",
@@ -22296,7 +22303,7 @@
                     "root": "users",
                     "system_admin": true
                 },
-                "x-agent-hint": "Lists platform users across workspaces, including account enabled state and system administrator flag. Follow has_more using offset + limit. tenant_id is the home workspace, not a list of memberships. No search or role filter is supported: paginate before drawing conclusions."
+                "x-agent-hint": "Lists platform users across workspaces, including account enabled state and system administrator flag. q filters username or email (not role); follow has_more using offset + limit. tenant_id is the home workspace, not a list of memberships."
             }
         },
         "/system/admin/users/create": {

@@ -428,6 +428,7 @@ export default {
       baseUrlPlaceholder: 'например: https://api.openai.com/v1',
       baseUrlPlaceholderVllm: 'например: http://localhost:11434/v1',
       baseUrlPlaceholderAsr: 'например: https://api.openai.com/v1',
+      apiKey: 'API Key',
       apiKeyOptional: 'API Key (опционально)',
       apiKeyPlaceholder: 'Введите API Key',
       customHeadersLabel: 'Пользовательские заголовки запроса (опционально)',

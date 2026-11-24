@@ -273,6 +273,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	retractHandled := 0
 	followUpScheduled := false
 	totalPagesAffected := 0
+	finalizeRowsFailed := 0
 	docPreview := make([]string, 0, 6)
 	// Tunables resolved from KB.WikiConfig once we've loaded the KB.
 	// Captured up here so the deferred stats log can observe them
@@ -287,7 +288,10 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	defer func() {
 		logger.Infof(
 			ctx,
-			"wiki ingest stats: kb=%s tenant=%d retry=%d/%d status=%s elapsed=%s mode=%s pending_ops=%d ops(ingest=%d,retract=%d) ingest(success=%d,failed=%d) retract_handled=%d pages(total=%d) followup=%v tunables(batch=%d,map_par=%d,reduce_par=%d,max_inflight=%d) preview=%s",
+			"wiki ingest stats: kb=%s tenant=%d retry=%d/%d status=%s elapsed=%s mode=%s pending_ops=%d "+
+				"ops(ingest=%d,retract=%d) ingest(success=%d,failed=%d) retract_handled=%d pages(total=%d) "+
+				"finalize_rows_failed=%d followup=%v "+
+				"tunables(batch=%d,map_par=%d,reduce_par=%d,max_inflight=%d) preview=%s",
 			payload.KnowledgeBaseID,
 			payload.TenantID,
 			retryCount,
@@ -302,6 +306,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			ingestFailed,
 			retractHandled,
 			totalPagesAffected,
+			finalizeRowsFailed,
 			followUpScheduled,
 			loggedBatchSize,
 			loggedMapPar,
@@ -459,7 +464,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	if !gotSlot {
 		exitStatus = "inflight_cap"
 		logger.Infof(ctx, "wiki ingest: KB %s at in-flight cap (%d), rescheduling", payload.KnowledgeBaseID, maxInflight)
-		s.scheduleCappedRetry(ctx, payload)
+		// Keep the shared per-KB capped-retry task KB-scoped rather than
+		// pinning it to one operator-selected document.
+		retryPayload := payload
+		retryPayload.KnowledgeID = ""
+		s.scheduleCappedRetry(ctx, retryPayload)
 		return nil
 	}
 	defer releaseSlot()
@@ -506,7 +515,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// re-triggered afterwards — stranding the KB indefinitely. Schedule a
 		// coalesced recheck timed past the stale threshold so those rows are
 		// reclaimed automatically once eligible.
-		followUpScheduled = s.scheduleStaleClaimRecheck(ctx, payload)
+		recheckPayload := payload
+		recheckPayload.KnowledgeID = ""
+		followUpScheduled = s.scheduleStaleClaimRecheck(ctx, recheckPayload)
 		return nil
 	}
 
@@ -927,7 +938,22 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				})
 			}
 		}
-		s.enqueueFinalize(tailCtx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs)
+		var enqueueErr error
+		finalizeRowsFailed, enqueueErr = s.enqueueFinalize(
+			ctx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs)
+		if enqueueErr != nil {
+			exitStatus = "finalize_enqueue_failed"
+			failCtx, failCancel := wikiIngestCleanupContext(ctx)
+			for _, r := range docResults {
+				if r != nil && r.WikiSpan != nil {
+					s.tracker().FailSpan(failCtx, r.WikiSpan, "FINALIZE_ENQUEUE_FAILED", enqueueErr.Error(), enqueueErr)
+				}
+			}
+			failCancel()
+			// Keep source operations and finalizing slots intact. The claim-release
+			// defer and asynq retry can recover work that never became durable.
+			return enqueueErr
+		}
 	}
 
 	// Close postprocess.wiki spans for every successfully-mapped doc.

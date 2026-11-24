@@ -109,7 +109,7 @@ func (s *stubUserRepoForAuth) UpdateUser(context.Context, *types.User) error {
 	return nil
 }
 func (s *stubUserRepoForAuth) DeleteUser(context.Context, string) error { return nil }
-func (s *stubUserRepoForAuth) ListUsers(context.Context, int, int) ([]*types.User, error) {
+func (s *stubUserRepoForAuth) ListUsers(context.Context, string, int, int) ([]*types.User, error) {
 	return nil, nil
 }
 func (s *stubUserRepoForAuth) ListSystemAdmins(context.Context, int, int) ([]*types.User, int64, error) {

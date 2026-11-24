@@ -122,3 +122,23 @@ func TestPinnedGenerationSkillKeepsResearchAndKnowledgeScope(t *testing.T) {
 	require.Contains(t, prompt, "do not replace research into the task's factual content")
 	require.Contains(t, prompt, "unless the user explicitly restricts them")
 }
+
+func TestDataAnalystPromptEnforcesSQLAndFailureReporting(t *testing.T) {
+	data, err := os.ReadFile("../../config/prompt_templates/agent_system_prompt.yaml")
+	require.NoError(t, err)
+	var file struct {
+		Templates []config.PromptTemplate `yaml:"templates"`
+	}
+	require.NoError(t, yaml.Unmarshal(data, &file))
+	var content string
+	for _, tpl := range file.Templates {
+		if tpl.ID == "data_analyst" {
+			content = tpl.Content
+			break
+		}
+	}
+	require.NotEmpty(t, content)
+	require.Contains(t, content, "compute the figures through data_analysis SQL instead of doing manual arithmetic")
+	require.Contains(t, content, "report the failure explicitly and stop")
+	require.Contains(t, content, "verify that subtotals, totals, and percentage shares reconcile")
+}

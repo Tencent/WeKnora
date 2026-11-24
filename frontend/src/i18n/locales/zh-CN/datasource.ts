@@ -778,6 +778,7 @@ export default {
       book: '语雀知识库',
       library: 'Seafile 资料库'
     },
+    resourceUnavailable: '已删除或不可用',
     scheduleHuman: {
       '30min': '每 30 分钟',
       '1h': '每小时',
@@ -848,6 +849,8 @@ export default {
     logDetail: {
       startTime: '开始时间',
       endTime: '结束时间',
+      deletedItems: '源端已删除文档',
+      deletedItemsMore: '还有 {n} 个已删除文档未显示',
       failedItems: '失败文档',
       failedItemsMore: '还有 {n} 个失败文档未显示',
       docsFailedSummary: '{n} 个文档同步失败'
@@ -909,6 +912,12 @@ export default {
       deletion_lookup_failed: '删除前查找文档失败，请查看服务器日志',
       deletion_failed: '删除失败，请查看服务器日志',
       ingest_failed: '导入失败，请查看服务器日志',
+      unsupported_file_type: '不支持的文件类型',
+      prerequisite_not_configured: '知识库未配置所需模型（图片需配置 VLM 模型，音频需配置 ASR 模型）',
+      invalid_item_name: '文件名或文件夹路径包含非法字符',
+      invalid_url: '链接无效或被安全策略拦截',
+      invalid_json_content: 'JSON 文件内容为空或格式无效',
+      storage_quota_exceeded: '存储空间配额已满',
       nextcloud_permission_denied: '无权访问该 Nextcloud 文件，请检查账号权限。',
       nextcloud_not_found: 'Nextcloud 文件在扫描后消失，下次同步将重试。',
       nextcloud_file_too_large: 'Nextcloud 文件超过 MAX_FILE_SIZE_MB 限制。',
