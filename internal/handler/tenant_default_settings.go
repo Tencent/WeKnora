@@ -10,9 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetTenantDefaultSettings returns the workspace's default model choices.
-// Members read it to see which model a feature falls back to; it holds model
-// IDs only, never connection details.
+// GetTenantDefaultSettings returns workspace defaults as resource IDs only,
+// never connection details.
 func (h *TenantHandler) GetTenantDefaultSettings(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenant, _ := types.TenantInfoFromContext(ctx)
@@ -32,18 +31,25 @@ func (h *TenantHandler) GetTenantDefaultSettings(c *gin.Context) {
 	})
 }
 
-// updateTenantDefaultSettingsInternal replaces the workspace's default model
-// choices. Newly selected IDs must be usable models of the slot's type.
-// Unchanged stale IDs are allowed so admins can repair slots one at a time;
-// an empty ID returns the slot to the deployment default.
+// updateTenantDefaultSettingsInternal replaces the default model slots.
+// An omitted vector-store slot is preserved for older clients, while an
+// explicitly empty slot restores deployment defaults. Unchanged stale IDs
+// are allowed so admins can repair slots one at a time.
 func (h *TenantHandler) updateTenantDefaultSettingsInternal(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var cfg types.DefaultSettings
-	if err := c.ShouldBindJSON(&cfg); err != nil {
+	var body struct {
+		types.DefaultSettings
+		VectorStoreID *string `json:"vector_store_id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		_ = c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
+	}
+	cfg := body.DefaultSettings
+	if body.VectorStoreID != nil {
+		cfg.VectorStoreID = *body.VectorStoreID
 	}
 	cfg.Normalize()
 
@@ -102,6 +108,29 @@ func (h *TenantHandler) updateTenantDefaultSettingsInternal(c *gin.Context) {
 		}
 		if model.Status != types.ModelStatusActive {
 			_ = c.Error(errors.NewBadRequestError(fmt.Sprintf("%s: model is not active", slot.field)))
+			return
+		}
+	}
+
+	if body.VectorStoreID == nil {
+		cfg.VectorStoreID = previous.VectorStoreID
+	} else if id := cfg.VectorStoreID; id != "" && id != previous.VectorStoreID {
+		if types.IsEnvStoreID(id) {
+			_ = c.Error(errors.NewBadRequestError("vector_store_id: vector store not found"))
+			return
+		}
+		if h.vectorStores == nil {
+			_ = c.Error(errors.NewServiceUnavailableError("Vector store repository is unavailable"))
+			return
+		}
+		store, err := h.vectorStores.GetByID(ctx, tenant.ID, id)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, nil)
+			_ = c.Error(errors.NewInternalServerError("Failed to read vector store"))
+			return
+		}
+		if store == nil || store.TenantID != tenant.ID || store.DeletedAt.Valid {
+			_ = c.Error(errors.NewBadRequestError("vector_store_id: vector store not found"))
 			return
 		}
 	}

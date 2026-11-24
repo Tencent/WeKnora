@@ -3341,6 +3341,11 @@ definitions:
           UtilityModelID is the KnowledgeQA model for short generation tasks
           such as writing MCP usage instructions. Empty follows the chat default.
         type: string
+      vector_store_id:
+        description: |-
+          VectorStoreID selects a registered store for KB creation requests
+          that opt in to the workspace default. Empty uses the deployment vector store.
+        type: string
       vlm_model_id:
         description: VLMModelID is the default VLLM or vision-capable KnowledgeQA
           model.
@@ -18837,7 +18842,12 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBase'
+          allOf:
+          - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBase'
+          - properties:
+              use_workspace_default_vector_store:
+                type: boolean
+            type: object
       produces:
       - application/json
       responses:

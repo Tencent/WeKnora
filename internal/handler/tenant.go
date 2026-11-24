@@ -39,6 +39,7 @@ type TenantHandler struct {
 	systemSettingSvc interfaces.SystemSettingService
 	// modelService validates the models chosen as workspace defaults.
 	modelService interfaces.ModelService
+	vectorStores interfaces.VectorStoreRepository
 }
 
 // NewTenantHandler creates a new tenant handler instance with the provided service
@@ -68,6 +69,7 @@ func NewTenantHandler(
 	config *config.Config,
 	systemSettingSvc interfaces.SystemSettingService,
 	modelService interfaces.ModelService,
+	vectorStores interfaces.VectorStoreRepository,
 ) *TenantHandler {
 	return &TenantHandler{
 		service:          service,
@@ -79,6 +81,7 @@ func NewTenantHandler(
 		config:           config,
 		systemSettingSvc: systemSettingSvc,
 		modelService:     modelService,
+		vectorStores:     vectorStores,
 	}
 }
 

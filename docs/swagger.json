@@ -6167,7 +6167,19 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBase"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBase"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "use_workspace_default_vector_store": {
+                                            "type": "boolean"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 ],
@@ -29754,6 +29766,10 @@
                 },
                 "utility_model_id": {
                     "description": "UtilityModelID is the KnowledgeQA model for short generation tasks\nsuch as writing MCP usage instructions. Empty follows the chat default.",
+                    "type": "string"
+                },
+                "vector_store_id": {
+                    "description": "VectorStoreID selects a registered store for KB creation requests\nthat opt in to the workspace default. Empty uses the deployment vector store.",
                     "type": "string"
                 },
                 "vlm_model_id": {

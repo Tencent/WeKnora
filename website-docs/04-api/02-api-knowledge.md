@@ -31,12 +31,20 @@
 | `image_processing_config` | object | 否 | 图片处理配置：`model_id` / `image_pipeline`（`default`、`smartocr`）/ `image_pipeline_params` / `image_attrs_enabled`（兼容字段）/ `image_actions`（`{ ocr: { on: [...], on_unobserved: bool } }`）/ `image_vector_enabled`（图片向量索引与召回，默认 false，见[知识库功能](../03-features/02-knowledge-base.md)） |
 | `vlm_config` | object | 否 | 图片理解配置：`enabled`（默认 false）与 `model_id`（已创建的多模态模型 ID）须同时设置才能启用；可选 `description_language`、`custom_instructions`（≤4000 字） |
 | `storage_provider_config` | object | 否 | 存储配置 |
-| `vector_store_id` | string | 否 | 向量库绑定（非法返回 code 2200/2201） |
+| `vector_store_id` | string | 否 | 显式绑定已注册的向量库（非法或不可用时返回 code 2200/2201） |
+| `use_workspace_default_vector_store` | boolean | 否 | 为 `true` 时绑定[空间默认向量库](./02-api-tenant.md#default-settings)；不能同时传入非空的 `vector_store_id`。 |
 | `faq_config` / `wiki_config` / `extract_config` / `indexing_strategy` | object | 否 | 类型相关配置 |
 | `summary_model_id` | string | 否 | 摘要模型，也是自动标签和 AI 描述的默认模型 |
 | `auto_tag_config` / `profile_config` | object | 否 | 自动标签、AI 知识库描述（仅 document 类型，见下文） |
 
 响应：201 `{"success":true,"data":{KnowledgeBase}}`
+
+省略 `use_workspace_default_vector_store` 或传 `false` 时，未指定向量库的请求仍沿用部署环境配置。传 `true` 时，空间未配置默认向量库也沿用部署环境；如果配置已删除或不可用，则返回错误，不会静默切换。新建知识库会保存采用的向量库绑定。之后调整空间默认值不会更改已有知识库或迁移已有数据。
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge-bases" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"name":"产品文档","use_workspace_default_vector_store":true}'
+```
 
 `indexing_strategy` 里没写到的开关保持默认：向量和关键词开启，Wiki 和图谱关闭。显式传 `false` 才会关掉。
 
