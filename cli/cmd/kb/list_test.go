@@ -66,8 +66,10 @@ func TestList_NonEmpty_Text_RenderColumns(t *testing.T) {
 		t.Fatalf("runList: %v", err)
 	}
 	got := out.String()
-	for _, want := range []string{"ID", "NAME", "7 FAQs", "UPDATED",
-		"kb1", "Marketing", "5 docs", "kb2", "Engineering", "1 doc"} {
+	for _, want := range []string{
+		"ID", "NAME", "7 FAQs", "UPDATED",
+		"kb1", "Marketing", "5 docs", "kb2", "Engineering", "1 doc",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q in:\n%s", want, got)
 		}
