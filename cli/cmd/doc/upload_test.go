@@ -325,7 +325,8 @@ func TestUploadMetadataCommaValues(t *testing.T) {
 		args []string
 		want map[string]string
 	}{
-		{[]string{"region=Guangzhou,Shenzhen", "team=QA"}, map[string]string{"region": "Guangzhou,Shenzhen", "team": "QA"}},
+		{[]string{"region=Guangzhou,Shenzhen", "team=QA"},
+			map[string]string{"region": "Guangzhou,Shenzhen", "team": "QA"}},
 		{[]string{"team=QA,stage=prod"}, map[string]string{"team": "QA", "stage": "prod"}},
 		{[]string{`"region=A,B",team=QA`}, map[string]string{"region": "A,B", "team": "QA"}},
 	} {

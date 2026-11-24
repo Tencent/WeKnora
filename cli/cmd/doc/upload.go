@@ -188,7 +188,8 @@ Server-side ingestion knobs:
 	// raw string is decoded into opts.EnableMultimodel in RunE.
 	cmd.Flags().String("enable-multimodel", "", "Toggle multimodal extraction (true|false); unset ⇒ server default")
 	cmd.Flags().Lookup("enable-multimodel").NoOptDefVal = "true"
-	cmd.Flags().StringArrayVar(&opts.Metadata, "metadata", nil, "Attach metadata `key=value` (repeatable; empty value allowed, last-wins on duplicate keys)")
+	cmd.Flags().StringArrayVar(&opts.Metadata, "metadata", nil,
+		"Attach metadata `key=value` (repeatable; empty value allowed, last-wins on duplicate keys)")
 	cmd.Flags().StringVar(&opts.Channel, "channel", "", "Ingestion-channel tag recorded server-side (default \"api\")")
 	cmdutil.AddFormatFlag(cmd, docUploadFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
