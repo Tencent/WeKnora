@@ -377,9 +377,9 @@ func downloadAndExtractZip(ctx context.Context, zipURL string) (string, []types.
 		return "", nil, nil, fmt.Errorf("download zip status %d", resp.StatusCode)
 	}
 
-	zipData, err := readResultPackage(resp.Body, maxResultPackageBytes)
+	zipData, err := readResultPackage(resp.Body, minerUMaxZipBytes())
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("read zip body: %w", err)
+		return "", nil, nil, fmt.Errorf("read zip body (%s): %w", mineruMaxZipBytesEnv, err)
 	}
 	md, imageRefs, err := extractMarkdownZip(zipData, "MinerUCloud")
 	if err != nil {
@@ -504,9 +504,9 @@ func resolveInZip(imgPath, mdDir string, entries map[string]*zip.File) *zip.File
 
 // readZipEntry reads a text entry (the package markdown) under the per-entry cap.
 func readZipEntry(f *zip.File) (string, error) {
-	data, err := readZipEntryCapped(f, maxZipEntryBytes)
+	data, err := readZipEntryCapped(f, minerUMaxZipEntryBytes())
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s: %w", mineruMaxZipEntryBytesEnv, err)
 	}
 	return string(data), nil
 }
@@ -514,7 +514,11 @@ func readZipEntry(f *zip.File) (string, error) {
 // readZipEntryBytes reads a binary entry (an extracted image) under the
 // per-entry cap.
 func readZipEntryBytes(f *zip.File) ([]byte, error) {
-	return readZipEntryCapped(f, maxZipEntryBytes)
+	data, err := readZipEntryCapped(f, minerUMaxZipEntryBytes())
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", mineruMaxZipEntryBytesEnv, err)
+	}
+	return data, nil
 }
 
 // PingMinerUCloud checks if the MinerU Cloud API is reachable with the given API key.

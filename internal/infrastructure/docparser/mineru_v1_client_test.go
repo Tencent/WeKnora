@@ -177,6 +177,12 @@ func fastV1Client(baseURL, apiKey string) *minerUV1Client {
 	return c
 }
 
+func TestMinerUV1ClientUsesConfiguredResultPackageLimit(t *testing.T) {
+	t.Setenv(mineruMaxZipBytesEnv, "2147483648")
+	client := newMinerUV1Client("http://mineru.example", "", time.Second)
+	assert.Equal(t, int64(2<<30), client.maxZipBytes)
+}
+
 const v1TestMarkdown = "# Report\n\n![](images/page_0_image_1.png)\n\n" +
 	"<table><tr><td><img src=\"images/page_0_table_image_2_1.png\"></td></tr></table>\n"
 

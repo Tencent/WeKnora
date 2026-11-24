@@ -186,6 +186,54 @@ func TestMinerUMaxImageBytes(t *testing.T) {
 	}
 }
 
+func TestMinerUResultPackageLimits(t *testing.T) {
+	tests := []struct {
+		name       string
+		envName    string
+		value      string
+		defaultVal int64
+		got        func() int64
+		want       int64
+	}{
+		{
+			name: "zip default", envName: mineruMaxZipBytesEnv,
+			defaultVal: mineruV1MaxZipBytes, got: minerUMaxZipBytes, want: mineruV1MaxZipBytes,
+		},
+		{
+			name: "zip override", envName: mineruMaxZipBytesEnv, value: "2147483648",
+			defaultVal: mineruV1MaxZipBytes, got: minerUMaxZipBytes, want: 2 << 30,
+		},
+		{
+			name: "entry override", envName: mineruMaxZipEntryBytesEnv, value: "134217728",
+			defaultVal: maxZipEntryBytes, got: minerUMaxZipEntryBytes, want: 128 << 20,
+		},
+		{
+			name: "entry invalid", envName: mineruMaxZipEntryBytesEnv, value: "0",
+			defaultVal: maxZipEntryBytes, got: minerUMaxZipEntryBytes, want: maxZipEntryBytes,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(tt.envName, tt.value)
+			if got := tt.got(); got != tt.want {
+				t.Errorf("limit = %d, want %d (default %d)", got, tt.want, tt.defaultVal)
+			}
+		})
+	}
+}
+
+func TestReadZipEntryUsesConfiguredLimit(t *testing.T) {
+	t.Setenv(mineruMaxZipEntryBytesEnv, "4")
+	data := buildZip(t, map[string]string{"page.md": "12345"})
+	_, err := readZipEntry(openEntry(t, data, "page.md"))
+	if !errors.Is(err, errResultPackageTooLarge) {
+		t.Fatalf("err = %v, want errResultPackageTooLarge", err)
+	}
+	if !strings.Contains(err.Error(), mineruMaxZipEntryBytesEnv) {
+		t.Errorf("error = %q, want it to name %s", err, mineruMaxZipEntryBytesEnv)
+	}
+}
+
 func TestExtractMarkdownZipUsesConfiguredImageBudget(t *testing.T) {
 	const markdown = "![a](images/a.png)\n![b](images/b.png)\n![a again](images/a.png)"
 	data := buildZip(t, map[string]string{

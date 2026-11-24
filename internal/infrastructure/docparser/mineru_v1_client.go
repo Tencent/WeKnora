@@ -87,7 +87,7 @@ func newMinerUV1Client(baseURL, apiKey string, jobTimeout time.Duration) *minerU
 		pollInitial:  mineruV1PollInitial,
 		pollMax:      mineruV1PollMax,
 		jobTimeout:   jobTimeout,
-		maxZipBytes:  mineruV1MaxZipBytes,
+		maxZipBytes:  minerUMaxZipBytes(),
 		logLabel:     "MinerU",
 		cancelBudget: mineruV1CancelBudget,
 	}
@@ -530,7 +530,8 @@ func (c *minerUV1Client) downloadURL(ctx context.Context, rawURL string) ([]byte
 		return nil, err
 	}
 	if int64(len(data)) > c.maxZipBytes {
-		return nil, fmt.Errorf("artifact exceeds %d bytes", c.maxZipBytes)
+		return nil, fmt.Errorf("artifact exceeds %d bytes (configured by %s)",
+			c.maxZipBytes, mineruMaxZipBytesEnv)
 	}
 	return data, nil
 }
