@@ -28,7 +28,13 @@ func (t *rawToolsTransport) SendRequest(
 }
 
 func TestRawToolsPaginationErrorsAndCancellation(t *testing.T) {
-	for _, second := range []string{`{"tools":[],"nextCursor":"repeat"}`, `{"error":true}`, `not-json`} {
+	for _, second := range []string{
+		`{"tools":[],"nextCursor":"repeat"}`,
+		`{"error":true}`,
+		`not-json`,
+		`{}`,
+		`{"tools":null}`,
+	} {
 		t.Run(second, func(t *testing.T) {
 			calls := 0
 			seenIDs := map[string]bool{}

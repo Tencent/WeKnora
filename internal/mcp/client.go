@@ -731,6 +731,9 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 		if err := json.Unmarshal(response.Result, &page); err != nil {
 			return nil, fmt.Errorf("invalid tools/list response: %w", err)
 		}
+		if page.Tools == nil {
+			return nil, fmt.Errorf("invalid tools/list response: expected a tools array")
+		}
 		for _, tool := range page.Tools {
 			if len(tool.InputSchema) > maxToolSchemaBytes {
 				return nil, fmt.Errorf(
