@@ -96,3 +96,16 @@ func TestResolveDir_ExpandsTilde(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "/tmp/a~b", lit)
 }
+
+func TestWriteSkillsRejectsDirectoryInPlaceOfFile(t *testing.T) {
+	dir := t.TempDir()
+	skills, err := skillsfs.List()
+	require.NoError(t, err)
+	collision := filepath.Join(dir, skills[0].Files[0])
+	require.NoError(t, os.MkdirAll(collision, 0o755))
+	_, err = writeSkills(skills, dir, false)
+	require.ErrorContains(t, err, collision)
+	info, err := os.Stat(collision)
+	require.NoError(t, err)
+	assert.True(t, info.IsDir())
+}
