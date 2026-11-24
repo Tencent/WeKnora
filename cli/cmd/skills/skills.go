@@ -195,7 +195,8 @@ func writeSkills(skills []skillsfs.Skill, target string, force bool) ([]string, 
 			if !force {
 				if info, err := os.Stat(dst); err == nil {
 					if !info.Mode().IsRegular() {
-						return written, cmdutil.NewError(cmdutil.CodeLocalFileIO, fmt.Sprintf("expected a regular file at %s", dst))
+						msg := fmt.Sprintf("expected a regular file at %s", dst)
+						return written, cmdutil.NewError(cmdutil.CodeLocalFileIO, msg)
 					}
 					continue // Keep the existing skill file.
 				} else if !os.IsNotExist(err) {
