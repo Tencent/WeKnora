@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -2811,6 +2812,13 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	return parseGeneratedQuestions(response.Content, questionCount), nil
 }
 
+// generatedQuestionListMarker matches one leading numbered or bullet list
+// marker (e.g. "1.", "1)", "1、", "-", "*", "•") so digits and dots that
+// belong to the question itself (5G, 2024, 3D, 3.5, .NET) are preserved.
+// "1." directly followed by a digit is a number like "3.5", not a marker; the
+// group keeps that following character when the marker has no space.
+var generatedQuestionListMarker = regexp.MustCompile(`^(?:\d+[.)、]\s+|\d+[)、]|\d+\.(\D)|[-*•]\s*)`)
+
 // parseGeneratedQuestions drops inline <think> reasoning first: servers that
 // ignore Thinking=false still emit it in content, and each reasoning line
 // would otherwise be indexed as a question.
@@ -2822,8 +2830,7 @@ func parseGeneratedQuestions(content string, questionCount int) []string {
 		if line == "" {
 			continue
 		}
-		line = strings.TrimLeft(line, "0123456789.-*) ")
-		line = strings.TrimSpace(line)
+		line = strings.TrimSpace(generatedQuestionListMarker.ReplaceAllString(line, "${1}"))
 		if line != "" && len(line) > 5 {
 			questions = append(questions, line)
 			if len(questions) >= questionCount {

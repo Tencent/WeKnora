@@ -59,10 +59,9 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
-			// Validate static input before building the client so a bad
-			// --page-size/--limit returns input.invalid_argument (exit 5), not
-			// an auth error (exit 3).
-			if err := validateListOpts(opts); err != nil {
+			// Validate flags before building the client so invalid input
+			// returns input.invalid_argument (exit 5) even without a profile.
+			if _, err := validateListOpts(opts); err != nil {
 				return err
 			}
 			cli, err := f.Client()
@@ -85,36 +84,30 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	return cmd
 }
 
-// validateListOpts checks --page-size / --limit. Called from RunE before the
-// client is built (so a bad value surfaces as exit 5, not an auth error) and at
-// runList's top for direct callers; idempotent.
-func validateListOpts(opts *ListOptions) error {
+// validateListOpts checks the list flags and returns the parsed --since duration.
+func validateListOpts(opts *ListOptions) (time.Duration, error) {
 	if opts.PageSize < 1 || opts.PageSize > maxPageSize {
-		return &cmdutil.Error{
+		return 0, &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
 			Message: fmt.Sprintf("--page-size must be in 1..%d, got %d", maxPageSize, opts.PageSize),
 		}
 	}
 	if opts.Limit < 1 || opts.Limit > 10000 {
-		return &cmdutil.Error{
+		return 0, &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
 			Message: fmt.Sprintf("--limit must be in 1..10000, got %d", opts.Limit),
 		}
 	}
-	return nil
+	if opts.Since == "" {
+		return 0, nil
+	}
+	return parseSinceDuration(opts.Since)
 }
 
 func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
-	if err := validateListOpts(opts); err != nil {
+	since, err := validateListOpts(opts)
+	if err != nil {
 		return err
-	}
-	var since time.Duration
-	if opts.Since != "" {
-		d, err := parseSinceDuration(opts.Since)
-		if err != nil {
-			return err
-		}
-		since = d
 	}
 
 	threshold := time.Now().Add(-since)
