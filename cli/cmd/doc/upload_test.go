@@ -319,3 +319,9 @@ func TestUpload_Channel_DefaultStillAPI(t *testing.T) {
 	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path))
 	assert.Equal(t, uploadChannel, svc.got.channel)
 }
+
+func TestValidateRecursiveUploadPlan(t *testing.T) {
+	for _, opts := range []UploadOptions{{Recursive: true, Glob: "*", Name: "one.pdf"}, {Recursive: true, Glob: "["}} {
+		require.Error(t, validateUploadFlags(&opts, []string{"docs"}))
+	}
+}

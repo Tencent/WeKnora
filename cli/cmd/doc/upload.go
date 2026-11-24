@@ -252,6 +252,9 @@ func validateUploadFlags(opts *UploadOptions, args []string) error {
 		return cmdutil.NewFlagError(errors.New(
 			"a file path is required (or use `weknora doc fetch` for URLs, `weknora doc create` for inline text)"))
 	}
+	if opts.Recursive {
+		return validateRecursiveUploadFlags(opts)
+	}
 	return nil
 }
 
