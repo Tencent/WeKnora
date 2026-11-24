@@ -311,12 +311,14 @@ func (c *Client) applyReasoning(body map[string]any, opts *api.Options) {
 	s := c.cfg.Settings
 	levels := c.cfg.ThinkingLevels
 	level, requested := opts.Reasoning()
-	if requested {
+	if requested && level.Graded() {
+		level = levels.Clamp(level)
+	}
+	// A model may explicitly reject automatic reasoning as well as every
+	// graded level. Do not send a summary-only reasoning object in that case.
+	if requested && levels.Supports(level) {
 		if level.Enabled() {
 			reasoning := map[string]any{}
-			if level.Graded() {
-				level = levels.Clamp(level)
-			}
 			if level.Graded() {
 				reasoning["effort"] = levels.Value(level)
 			}
