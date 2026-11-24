@@ -94,7 +94,7 @@
 .artifactHeading > span { display: inline-flex; align-items: center; gap: 8px; }
 .artifactHeading > span:last-child { font-family: ui-monospace, monospace; letter-spacing: .07em; font-size: 12px; color: var(--mute); }
 .artifactHeading svg { width: 17px; height: 17px; color: var(--gold); }
-.artifactImage img { display: block; width: 100%; height: auto; }
+.artifactImage img { display: block; width: auto; height: auto; max-width: 100%; margin-inline: auto; }
 .artifactFigure figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 14px 20px; font-size: 12px; color: var(--soft); border-top: 1px solid var(--rule); }
 .artifactFigure figcaption > span:last-child { color: var(--mute); }
 .releaseExtras { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; padding-top: 29px; margin-top: 48px; border-top: 1px solid var(--rule); font-size: 13px; color: var(--soft); }
@@ -143,8 +143,8 @@
 @keyframes tabProgress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @media (prefers-reduced-motion: reduce) { .tabProgress { animation: none; } }
 .shotStack { display: grid; overflow: hidden; }
-.shotLayer { grid-area: 1 / 1; opacity: 0; transform: scale(1.015); pointer-events: none; transition: opacity .45s ease, transform .6s cubic-bezier(.2, .7, .2, 1); }
-.shotLayer[data-active="true"] { opacity: 1; transform: none; pointer-events: auto; }
+.shotLayer { grid-area: 1 / 1; opacity: 0; pointer-events: none; transition: opacity .45s ease; }
+.shotLayer[data-active="true"] { opacity: 1; pointer-events: auto; }
 @media (prefers-reduced-motion: reduce) { .shotLayer { transition: none; } }
 .pendingLabel { color: var(--mute); font-size: 12px; }
 .slideLinks { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 24px; margin-top: 10px; }
