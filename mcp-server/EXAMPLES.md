@@ -248,6 +248,35 @@ echo "WEKNORA_API_KEY=your_api_key_here" >> .env
 }
 ```
 
+#### 列出知识库标签
+```json
+{
+  "tool": "list_tags",
+  "arguments": {
+    "kb_id": "kb_123456",
+    "keyword": "华东",
+    "page": 1,
+    "page_size": 50
+  }
+}
+```
+
+#### 按标签限定检索范围聊天
+```json
+{
+  "tool": "chat",
+  "arguments": {
+    "session_id": "sess_345678",
+    "query": "华东区上个季度的项目进展如何",
+    "knowledge_base_ids": ["kb_123456"],
+    "tag_ids": ["tag_1", "tag_2"]
+  }
+}
+```
+
+`agent_chat` 同样支持 `tag_ids`；传 `tag_ids` 时需同时给出且仅给出一个
+`knowledge_base_id`，标签 ID 由 `list_tags` 返回。
+
 ### 块管理
 
 #### 列出知识块
