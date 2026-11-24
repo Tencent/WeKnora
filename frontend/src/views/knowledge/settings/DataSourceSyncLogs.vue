@@ -17,12 +17,19 @@ const loadingMore = ref(false)
 const hasMore = ref(false)
 const expandedId = ref('')
 const pageSize = 50
+// 请求代次：抽屉改开另一个数据源（或刷新）后仍在途的旧响应落地时必须丢弃，
+// 否则旧数据源的日志会覆盖/追加进新数据源抽屉并污染 hasMore
+// （与 FAQEntryManager/KbTagManageDrawer 等模块同款防护）。
+let logsRequestSeq = 0
 
 async function fetchLogs(reset = true) {
   if (!props.dataSourceId) return
 
+  const seq = ++logsRequestSeq
   if (reset) {
     loading.value = true
+    // 重置时一并复位加载更多标志，避免在途的旧 append 被丢弃后 loadingMore 卡死
+    loadingMore.value = false
   } else {
     loadingMore.value = true
   }
@@ -30,11 +37,15 @@ async function fetchLogs(reset = true) {
   try {
     const offset = reset ? 0 : logs.value.length
     const res = await getSyncLogs(props.dataSourceId, pageSize, offset)
+    // 过期响应直接丢弃：抽屉可能已改开其他数据源，旧数据既不属当前源也不属当前页
+    if (seq !== logsRequestSeq) return
     const items = res?.data || res || []
     logs.value = reset ? items : [...logs.value, ...items]
     hasMore.value = items.length === pageSize
   } catch { /* ignore */ }
 
+  // 过期请求的收尾不得触碰标志位，全部交给最新请求
+  if (seq !== logsRequestSeq) return
   if (reset) {
     loading.value = false
   } else {
