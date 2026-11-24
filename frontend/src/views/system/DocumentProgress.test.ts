@@ -130,3 +130,42 @@ test('shrinking live results clamp pagination before displaying an empty last pa
   assert.equal(vm.documents[0].id, 'current')
   assert.deepEqual(pages, [1, 4, 1])
 })
+
+test('silent background refresh updates data without flashing loading spinner', async t => {
+  const f = fixture(t)
+  let calls = 0
+  const second = deferred<ReturnType<typeof page>>()
+  const { vm } = f.component(new URL('./DocumentProgress.vue', import.meta.url), dependencies({
+    listDocumentProgress: () => (++calls === 1 ? Promise.resolve(page('first')) : second.promise),
+  }))
+  await flush()
+  assert.equal(vm.loading, false)
+  assert.equal(vm.documents[0].id, 'first')
+  const bg = vm.reload(false)
+  assert.equal(vm.loading, false)
+  second.resolve(page('updated'))
+  await bg
+  assert.equal(vm.documents[0].id, 'updated')
+  assert.equal(vm.loading, false)
+})
+
+test('batch start disables on empty results and reflects active search scope safely', async t => {
+  const f = fixture(t)
+  const { vm } = f.component(new URL('./DocumentProgress.vue', import.meta.url), dependencies({
+    listDocumentProgress: async () => page('', 0),
+  }))
+  await flush()
+  assert.equal(vm.batchDisabled, true)
+  assert.equal(vm.batchDisabledReason, 'documentProgress.batchDisabledEmpty')
+  vm.status = 'failed'
+  await flush()
+  assert.equal(vm.batchDisabled, true)
+  assert.equal(vm.batchDisabledReason, 'documentProgress.batchDisabledStatus')
+  vm.status = 'unfinished'
+  vm.count = undefined
+  assert.equal(vm.safeCount, 1)
+  assert.equal(vm.batchConfirmContent, 'documentProgress.confirmBatchAll')
+  vm.searchDraft = 'kb-alpha'
+  vm.applySearch()
+  assert.equal(vm.batchConfirmContent, 'documentProgress.confirmBatchScoped')
+})

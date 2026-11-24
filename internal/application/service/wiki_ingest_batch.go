@@ -464,7 +464,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	if !gotSlot {
 		exitStatus = "inflight_cap"
 		logger.Infof(ctx, "wiki ingest: KB %s at in-flight cap (%d), rescheduling", payload.KnowledgeBaseID, maxInflight)
-		s.scheduleCappedRetry(ctx, payload)
+		// Keep the shared per-KB capped-retry task KB-scoped rather than
+		// pinning it to one operator-selected document.
+		retryPayload := payload
+		retryPayload.KnowledgeID = ""
+		s.scheduleCappedRetry(ctx, retryPayload)
 		return nil
 	}
 	defer releaseSlot()
@@ -511,7 +515,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// re-triggered afterwards — stranding the KB indefinitely. Schedule a
 		// coalesced recheck timed past the stale threshold so those rows are
 		// reclaimed automatically once eligible.
-		followUpScheduled = s.scheduleStaleClaimRecheck(ctx, payload)
+		recheckPayload := payload
+		recheckPayload.KnowledgeID = ""
+		followUpScheduled = s.scheduleStaleClaimRecheck(ctx, recheckPayload)
 		return nil
 	}
 
