@@ -146,7 +146,7 @@
 
       <!-- Step 2: Connection -->
       <div v-else-if="wizardStep === 1" class="im-step-body">
-        <section v-if="formData.platform !== 'wechat'" class="setting-drawer__section im-drawer__section">
+        <section v-if="formData.platform !== 'wechat' && formData.platform !== 'line'" class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionAccess') }}</h4>
 
           <div class="form-item">
@@ -189,7 +189,7 @@
 
         <section class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionSession') }}</h4>
-          <div class="form-item">
+          <div v-if="formData.platform !== 'line'" class="form-item">
             <label class="form-label required">{{ $t('agentEditor.im.sessionMode') }}</label>
             <div class="option-chips">
               <button type="button" class="option-chip"
@@ -210,6 +210,20 @@
             <label class="form-label">{{ $t('agentEditor.im.replyLanguage') }}</label>
             <t-select v-model="formData.locale" :options="localeOptions" />
             <p class="form-desc">{{ $t('agentEditor.im.replyLanguageHint') }}</p>
+          </div>
+        </section>
+
+        <!-- LINE: structured Flex Message output. Session reset is the shared
+             /clear command, so there is no channel-specific keyword here. -->
+        <section v-if="formData.platform === 'line'"
+          class="setting-drawer__section im-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.lineAdvancedSettings') }}</h4>
+
+          <div class="form-item">
+            <t-checkbox v-model="lineEnableFlex">
+              {{ $t('agentEditor.im.lineEnableFlexMessage') }}
+            </t-checkbox>
+            <p class="form-desc">{{ $t('agentEditor.im.lineEnableFlexMessageHint') }}</p>
           </div>
         </section>
 
@@ -536,6 +550,27 @@
               </div>
             </template>
 
+            <!-- LINE credentials -->
+            <template v-if="formData.platform === 'line'">
+              <div class="platform-link-hint">
+                <a href="https://developers.line.biz/console/" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.lineConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label required">{{ $t('agentEditor.im.lineAccessToken') }}</label>
+                <t-input v-model="formData.credentials.channel_access_token" type="password"
+                  placeholder="LINE_CHANNEL_ACCESS_TOKEN" />
+              </div>
+              <div class="form-item">
+                <label class="form-label required">{{ $t('agentEditor.im.lineChannelSecret') }}</label>
+                <t-input v-model="formData.credentials.channel_secret" type="password"
+                  placeholder="LINE_CHANNEL_SECRET" />
+              </div>
+            </template>
+
             <!-- WeChat credentials (QR code binding) -->
             <template v-if="formData.platform === 'wechat'">
               <p class="form-desc">{{ $t('agentEditor.im.wechatHint') }}</p>
@@ -612,6 +647,7 @@ import mattermostLogo from '@/assets/img/im/mattermost.svg';
 import wechatLogo from '@/assets/img/im/wechat.svg';
 import qqbotLogo from '@/assets/img/im/qqbot.png';
 import yunzhijiaLogo from '@/assets/img/im/yunzhijia.svg';
+import lineLogo from '@/assets/img/im/line.svg';
 
 type IMPlatform = IMChannel['platform'];
 type IMLocale = NonNullable<IMChannel['locale']>;
@@ -627,6 +663,7 @@ const PLATFORM_LOGO: Record<string, string> = {
   wechat: wechatLogo,
   qqbot: qqbotLogo,
   yunzhijia: yunzhijiaLogo,
+  line: lineLogo,
 };
 
 const platformLogo = (platform: string): string => (platform ? PLATFORM_LOGO[platform] || '' : '');
@@ -679,6 +716,7 @@ const platformOptions = computed(() => ([
   { value: 'wechat' as IMPlatform, label: t('agentEditor.im.wechat'), logo: wechatLogo },
   { value: 'qqbot' as IMPlatform, label: t('agentEditor.im.qqbot'), logo: qqbotLogo },
   { value: 'yunzhijia' as IMPlatform, label: t('agentEditor.im.yunzhijia'), logo: yunzhijiaLogo },
+  { value: 'line' as IMPlatform, label: t('agentEditor.im.line'), logo: lineLogo },
 ]));
 
 const localeOptions = computed(() => ([
@@ -751,6 +789,14 @@ const formData = ref({
   session_mode: 'user' as 'user' | 'thread',
   knowledge_base_id: '',
   credentials: defaultCredentials(),
+});
+
+// LINE structured Flex Message output toggle, bound to the stored credential.
+const lineEnableFlex = computed<boolean>({
+  get: () => formData.value.credentials.enable_flex_message === true,
+  set: (value: boolean) => {
+    formData.value.credentials.enable_flex_message = value;
+  },
 });
 
 const channelMenuOptions = (channel: IMChannel | IMChannelOverview) => ([
@@ -838,6 +884,12 @@ function onPlatformChange(val: string | number | boolean) {
   if (val === 'wechat') {
     formData.value.mode = 'longpoll';
     formData.value.output_mode = 'full';
+  } else if (val === 'line') {
+    // LINE is locked to webhook delivery + direct (non-streaming) output.
+    formData.value.mode = 'webhook';
+    formData.value.output_mode = 'full';
+    // Structured-output default; session reset stays the shared /clear command.
+    formData.value.credentials.enable_flex_message = false;
   } else if (val === 'mattermost' || val === 'yunzhijia') {
     formData.value.mode = 'webhook';
     formData.value.output_mode = 'stream';

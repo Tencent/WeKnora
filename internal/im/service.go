@@ -1748,8 +1748,9 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		if !s.rateLimiter.Allow(ctx, rateLimitKey, s.rateLimitMax) {
 			logger.Warnf(ctx, "[IM] Rate limited: channel=%s user=%s chat=%s", channelID, msg.UserID, msg.ChatID)
 			_ = adapter.SendReply(ctx, msg, &ReplyMessage{
-				Content: "您的消息发送过于频繁，请稍后再试。",
-				IsFinal: true,
+				Content:   localizeCopy(ctx, "您的消息发送过于频繁，请稍后再试。", "您的訊息傳送過於頻繁，請稍後再試。"),
+				IsFinal:   true,
+				PlainText: true,
 			})
 			return nil
 		}
@@ -1780,8 +1781,9 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		logger.Infof(ctx, "[IM] Skipping QA for message without content: type=%s raw_type=%s",
 			msg.MessageType, msg.Extra["raw_msgtype"])
 		if err := adapter.SendReply(ctx, msg, &ReplyMessage{
-			Content: hint,
-			IsFinal: true,
+			Content:   hint,
+			IsFinal:   true,
+			PlainText: true,
 		}); err != nil {
 			logger.Warnf(ctx, "[IM] Failed to send empty-message hint reply: %v", err)
 		}
@@ -1821,8 +1823,12 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	// Unrecognised slash-word: show help hint instead of sending to QA.
 	if LooksLikeCommand(msg.Content) {
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
-			Content: "未知指令，发送 `/help` 查看所有可用指令。",
-			IsFinal: true,
+			Content: localizeCopy(ctx,
+				"未知指令，发送 `/help` 查看所有可用指令。",
+				"未知指令，發送 `/help` 查看所有可用指令。",
+			),
+			IsFinal:   true,
+			PlainText: true,
 		})
 		return nil
 	}
@@ -1893,8 +1899,9 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		qaCancel()
 		logger.Warnf(ctx, "[IM] Queue rejected: user=%s reason=%v", msg.UserID, enqueueErr)
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
-			Content: "当前排队人数较多，请稍后再试。",
-			IsFinal: true,
+			Content:   localizeCopy(ctx, "当前排队人数较多，请稍后再试。", "目前排隊人數較多，請稍後再試。"),
+			IsFinal:   true,
+			PlainText: true,
 		})
 		return nil
 	}
@@ -1908,8 +1915,9 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 			queueMsg = "收到，当前排队中，请稍候 ⏳"
 		}
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
-			Content: queueMsg,
-			IsFinal: true,
+			Content:   queueMsg,
+			IsFinal:   true,
+			PlainText: true,
 		})
 	} else {
 		logger.Infof(ctx, "[IM] Enqueued: user=%s pos=0 (immediate)", msg.UserID)
@@ -1978,7 +1986,11 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	attachments, imageURLs, downloaded, err := s.prepareIMAttachments(ctx, req.msg, req.adapter)
 	if err != nil {
 		logger.Warnf(ctx, "[IM] attachment preparation failed: %v", err)
-		if sendErr := req.adapter.SendReply(ctx, req.msg, &ReplyMessage{Content: "❌ 无法读取此附件，请重试或改用文字描述。", IsFinal: true}); sendErr != nil {
+		if sendErr := req.adapter.SendReply(ctx, req.msg, &ReplyMessage{
+			Content:   localizeCopy(ctx, "❌ 无法读取此附件，请重试或改用文字描述。", "❌ 無法讀取此附件，請重試或改用文字描述。"),
+			IsFinal:   true,
+			PlainText: true,
+		}); sendErr != nil {
 			logger.Warnf(ctx, "[IM] Failed to send attachment error reply: %v", sendErr)
 		}
 		return
@@ -2137,8 +2149,12 @@ func (s *Service) handleCommand(
 	if err != nil {
 		logger.Errorf(ctx, "[IM] Command /%s error: %v", cmd.Name(), err)
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
-			Content: "抱歉，执行指令时出现了异常，请稍后再试。",
-			IsFinal: true,
+			Content: localizeCopy(ctx,
+				"抱歉，执行指令时出现了异常，请稍后再试。",
+				"抱歉，執行指令時出現異常，請稍後再試。",
+			),
+			IsFinal:   true,
+			PlainText: true,
 		})
 		return err
 	}
@@ -2212,9 +2228,12 @@ func (s *Service) handleCommand(
 		}
 	}
 	if !sent {
+		// Command output is reference text the user may want to copy: send it
+		// as plain text instead of an answer card.
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
-			Content: result.Content,
-			IsFinal: true,
+			Content:   result.Content,
+			IsFinal:   true,
+			PlainText: true,
 		})
 	}
 
