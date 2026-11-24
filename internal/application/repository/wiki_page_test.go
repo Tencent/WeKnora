@@ -1154,7 +1154,8 @@ func TestWikiPageRepositoryGetOrCreate(t *testing.T) {
 
 	// The strict Create still rejects the duplicate, so interactive
 	// page creation keeps failing loudly instead of silently no-opping.
-	require.Error(t, repo.Create(ctx, makeWikiPage(kbA.ID, "entity/acme", types.WikiPageTypeEntity, types.WikiPageStatusPublished)))
+	duplicate := makeWikiPage(kbA.ID, "entity/acme", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	require.Error(t, repo.Create(ctx, duplicate))
 
 	// Same slug in another knowledge base is a different page.
 	otherKB := makeWikiPage(kbB.ID, "entity/acme", types.WikiPageTypeEntity, types.WikiPageStatusPublished)

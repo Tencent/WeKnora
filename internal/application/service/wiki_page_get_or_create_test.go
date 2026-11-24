@@ -20,7 +20,12 @@ import (
 func TestGetOrCreatePageReturnsWinnerOnSlugRace(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+	require.NoError(t, db.AutoMigrate(
+		&types.KnowledgeBase{},
+		&types.WikiFolder{},
+		&types.WikiPage{},
+		&types.WikiPageRevision{},
+	))
 	// Align with the production migration: the slug is unique per
 	// knowledge base, not globally. The model tag's single-column index
 	// would otherwise reject the same slug in another KB and shadow the
