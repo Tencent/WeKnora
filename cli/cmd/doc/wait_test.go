@@ -338,3 +338,14 @@ func TestWaitForDocs_DraftFailsFast(t *testing.T) {
 		t.Errorf("draft must fail fast (well under timeout); took %v", elapsed)
 	}
 }
+
+func TestWaitRejectsNonpositiveDurations(t *testing.T) {
+	for _, flag := range []string{"--interval=0", "--interval=-1s", "--timeout=0", "--timeout=-1s"} {
+		cmd := NewCmdWait(&cmdutil.Factory{Client: func() (*sdk.Client, error) { return nil, fmt.Errorf("unexpected client lookup") }})
+		cmd.SetArgs([]string{"doc1", flag})
+		err := cmd.Execute()
+		if err == nil || !strings.Contains(err.Error(), "positive") {
+			t.Errorf("%s: got %v", flag, err)
+		}
+	}
+}
