@@ -102,7 +102,6 @@
 .site .wiki { border-bottom: 1px solid var(--rule); padding-block: 48px; scroll-margin-top: 64px; }
 .site section.wiki[id] { scroll-margin-top: 64px; }
 .wiki .sectionHeading { margin-bottom: 24px; }
-.wiki .eyebrow { margin-bottom: 12px; }
 .cardActions { display: flex; align-items: center; gap: 12px; }
 .showcase { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 48px; align-items: start; }
 .showcaseList { border-top: 1px solid var(--rule); }
