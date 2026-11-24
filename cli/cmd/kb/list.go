@@ -147,11 +147,14 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	}
 
 	tw := tabwriter.NewWriter(iostreams.IO.Out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tDOCS\tUPDATED")
+	fmt.Fprintln(tw, "ID\tNAME\tCONTENTS\tUPDATED")
 	now := time.Now()
 	for _, kb := range items {
 		name := text.Truncate(40, kb.Name)
 		docs := text.Pluralize(int(kb.KnowledgeCount), "doc")
+		if kb.Type == "faq" {
+			docs = text.Pluralize(int(kb.ChunkCount), "FAQ")
+		}
 		updated := text.FuzzyAgo(now, kb.UpdatedAt)
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", kb.ID, name, docs, updated)
 	}
