@@ -281,7 +281,6 @@
               v-else
               v-model="formData.modelName"
               filterable
-              :filter="filterCatalogModel"
               creatable
               clearable
               :placeholder="getModelNamePlaceholder()"
@@ -946,13 +945,6 @@ const catalogModelOptions = computed<CatalogModelOption[]>(() => {
   }
   return options
 })
-
-const filterCatalogModel = (query: string, option: { label?: unknown; value?: unknown }) => {
-  const needle = query.trim().toLowerCase()
-  return [option.label, option.value].some(value =>
-    typeof value === 'string' && value.toLowerCase().includes(needle),
-  )
-}
 
 const findCatalogEntry = (name: string) => catalogEntries.value.find(m => m.id === name)
 
