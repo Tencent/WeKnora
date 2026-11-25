@@ -901,6 +901,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
 			if err != nil {
 				s.failKnowledgeAfterSwapCleanup(ctx, tenantInfo, kb, knowledge, hadPreviousContent, previousStorageSize, err.Error())
+				// The embedding span is already open at this point. Returning
+				// without closing it leaves the stage "running" until the
+				// housekeeping reaper promotes it to TASK_STALLED, so the UI
+				// reports a stall instead of the lookup failure that happened.
+				s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+					werrors.ErrCodeUnknown, "reload tenant storage failed", err)
 				s.deleteUnindexedChunks(ctx, knowledge)
 				return nil
 			}
@@ -908,6 +914,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			effectiveUsed := max(int64(0), tenantInfo.StorageUsed-previousStorageSize)
 			if effectiveUsed+totalStorageSize > tenantInfo.StorageQuota {
 				s.failKnowledgeAfterSwapCleanup(ctx, tenantInfo, kb, knowledge, hadPreviousContent, previousStorageSize, "存储空间不足")
+				// Same reason as above: the quota rejection is the outcome the
+				// user needs to see. A quota rejection is not a stall, and it
+				// is not retryable until the tenant frees space.
+				s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+					werrors.ErrCodeStorageQuotaExceeded, "storage quota exceeded", nil)
 				s.deleteUnindexedChunks(ctx, knowledge)
 				return nil
 			}
