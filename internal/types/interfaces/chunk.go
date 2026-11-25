@@ -105,6 +105,8 @@ type ChunkRepository interface {
 	// on every listed chunk of the tenant with one UPDATE per batch of IDs.
 	// updated_at is set automatically.
 	UpdateChunkFieldsByIDs(ctx context.Context, tenantID uint64, ids []string, fields map[string]interface{}) error
+	// CommitFAQImportBatch records the task checkpoint together with newly indexed chunk IDs.
+	CommitFAQImportBatch(ctx context.Context, tenantID uint64, knowledgeID string, indexedIDs []string, checkpoint types.JSON) error
 	// DeleteChunk deletes a chunk
 	DeleteChunk(ctx context.Context, tenantID uint64, id string) error
 	// DeleteChunks deletes chunks by IDs in batch

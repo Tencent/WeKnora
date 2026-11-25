@@ -300,6 +300,8 @@ type FAQExportEntry struct {
 
 // FAQEntryPayload 用于创建/更新 FAQ 条目的 payload
 type FAQEntryPayload struct {
+	// Original position within this upload, assigned by the worker after validation.
+	ImportIndex int `json:"-"`
 	// ID 可选，用于数据迁移时指定 seq_id（必须小于自增起始值 100000000）
 	ID *int64 `json:"id,omitempty"`
 	// The question the entry answers.
@@ -431,6 +433,9 @@ const (
 // FAQImportProgress represents the progress of an FAQ import task stored in Redis
 // When Status is "completed", the result fields (SkippedCount, ImportMode, ImportedAt, DisplayStatus, ProcessingTime) are populated.
 type FAQImportProgress struct {
+	// Worker identity for durable checkpoints. Use the enqueue timestamp for legacy tasks.
+	InstanceID         string              `json:"-"`
+	EnqueuedAt         int64               `json:"-"`
 	TaskID             string              `json:"task_id"`                        // UUID for the import task
 	KBID               string              `json:"kb_id"`                          // Knowledge Base ID
 	KnowledgeID        string              `json:"knowledge_id"`                   // FAQ Knowledge ID

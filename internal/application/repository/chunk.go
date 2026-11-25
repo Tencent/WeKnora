@@ -648,6 +648,35 @@ func (r *chunkRepository) UpdateChunkFieldsByIDs(
 	})
 }
 
+// CommitFAQImportBatch makes the import result and the new chunks' indexed
+// status visible together. A lost Redis progress update cannot undo either.
+func (r *chunkRepository) CommitFAQImportBatch(ctx context.Context, tenantID uint64, knowledgeID string,
+	indexedIDs []string, checkpoint types.JSON,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if len(indexedIDs) > 0 {
+			result := tx.Model(&types.Chunk{}).
+				Where("tenant_id = ? AND knowledge_id = ? AND id IN ?", tenantID, knowledgeID, indexedIDs).
+				Update("status", types.ChunkStatusIndexed)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != int64(len(indexedIDs)) {
+				return fmt.Errorf("FAQ import: expected %d indexed chunks, found %d", len(indexedIDs), result.RowsAffected)
+			}
+		}
+		result := tx.Table("knowledges").Where("tenant_id = ? AND id = ? AND deleted_at IS NULL", tenantID, knowledgeID).
+			UpdateColumn("faq_import_checkpoint", checkpoint)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrKnowledgeNotFound
+		}
+		return nil
+	})
+}
+
 // DeleteChunk deletes a chunk by its ID
 func (r *chunkRepository) DeleteChunk(ctx context.Context, tenantID uint64, id string) error {
 	return r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.Chunk{}).Error

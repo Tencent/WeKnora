@@ -227,6 +227,8 @@ type Knowledge struct {
 	// CustomMetadata is user-authored descriptive metadata. It is deliberately
 	// separate from Metadata, which contains internal ingestion state and IDs.
 	CustomMetadata JSON `json:"custom_metadata" gorm:"type:json;not null"`
+	// Written only by the FAQ batch transaction. Ordinary knowledge saves must preserve it.
+	FAQImportCheckpoint JSON `json:"-" gorm:"->;type:json"`
 	// Last FAQ import result (for FAQ type knowledge only)
 	LastFAQImportResult JSON `json:"last_faq_import_result" gorm:"type:json"`
 	// Creation time of the knowledge

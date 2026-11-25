@@ -1120,7 +1120,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 					OldMeta:       existingMeta,
 					MergedMeta:    mergedMeta,
 					Detail: types.FAQMergeDetail{
-						Index:            entryIdx,
+						Index:            entry.ImportIndex,
 						StandardQuestion: meta.StandardQuestion,
 						AnswerChanged:    oldAnswerStr != newAnswerStr,
 						NewSimilarCount:  newSimilarCount,
@@ -1369,6 +1369,28 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 	return entriesToProcess, chunksToDelete, skippedCount, nil
 }
 
+type faqImportCheckpoint struct {
+	InstanceID string                   `json:"instance_id"`
+	EnqueuedAt int64                    `json:"enqueued_at"`
+	Progress   *types.FAQImportProgress `json:"progress"`
+}
+
+func (s *knowledgeService) commitFAQImportProgress(ctx context.Context, tenantID uint64, knowledgeID string,
+	progress *types.FAQImportProgress, indexedIDs []string,
+) error {
+	data, err := json.Marshal(faqImportCheckpoint{progress.InstanceID, progress.EnqueuedAt, progress})
+	if err != nil {
+		return err
+	}
+	if err := s.chunkRepo.CommitFAQImportBatch(ctx, tenantID, knowledgeID, indexedIDs, data); err != nil {
+		return fmt.Errorf("commit FAQ import checkpoint: %w", err)
+	}
+	if err := s.saveFAQImportProgress(ctx, progress); err != nil {
+		return fmt.Errorf("publish committed FAQ import progress: %w", err)
+	}
+	return nil
+}
+
 // executeFAQImport 执行实际的FAQ导入逻辑
 func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, kbID string,
 	payload *types.FAQBatchUpsertPayload, tenantID uint64, processedCount int,
@@ -1377,6 +1399,11 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 	// 保存知识库和embedding模型信息，用于清理索引
 	var kb *types.KnowledgeBase
 	var embeddingModel embedding.Embedder
+	if len(progress.ValidEntryIndices) == 0 {
+		for i := range payload.Entries {
+			payload.Entries[i].ImportIndex = i
+		}
+	}
 	totalEntries := len(payload.Entries) + processedCount
 
 	// Recovery机制：如果发生任何错误或panic，回滚所有已创建的chunks和索引数据
@@ -1589,21 +1616,10 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			indexDuration,
 		)
 
-		// 更新chunks的Status为已索引：所有行写同一个值，一条 UPDATE ... WHERE id IN 即可，
-		// 不需要把 content 等字段再回传一遍。
-		for _, chunk := range chunks {
-			chunk.Status = int(types.ChunkStatusIndexed) // indexed
-		}
-		if err := s.chunkRepo.UpdateChunkFieldsByIDs(ctx, tenantID, chunkIds, map[string]interface{}{
-			"status": int(types.ChunkStatusIndexed),
-		}); err != nil {
-			return fmt.Errorf("failed to update chunks status: %w", err)
-		}
-
 		// 收集成功条目信息（tag 信息按批一次查出，避免每条一次查询）
 		tagsByID := s.loadFAQTagsForChunks(ctx, tenantID, chunks)
 		for idx, chunk := range chunks {
-			entryIdx := i + idx + processedCount // 原始条目索引
+			entryIdx := batch[idx].ImportIndex
 			meta, _ := chunk.FAQMetadata()
 			standardQ := ""
 			if meta != nil {
@@ -1624,8 +1640,8 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 		progress.Progress = actualProcessed * 100 / totalEntries
 		progress.Processed = actualProcessed
 		progress.Message = fmt.Sprintf("正在处理第 %d/%d 条", actualProcessed, totalEntries)
-		if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-			return fmt.Errorf("save FAQ import checkpoint: %w", err)
+		if err := s.commitFAQImportProgress(ctx, tenantID, faqKnowledge.ID, progress, chunkIds); err != nil {
+			return err
 		}
 
 		batchDuration := time.Since(batchStartTime)
@@ -2302,6 +2318,27 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
 
+	existingProgress, _ := s.GetFAQImportProgress(ctx, payload.TaskID)
+	// Redis serves live progress. A committed SQL checkpoint takes precedence
+	// on redelivery, even if the most recent cache write never arrived.
+	if len(knowledge.FAQImportCheckpoint) != 0 {
+		var checkpoint faqImportCheckpoint
+		if err := json.Unmarshal(knowledge.FAQImportCheckpoint, &checkpoint); err != nil {
+			return fmt.Errorf("decode FAQ import checkpoint: %w", err)
+		}
+		if checkpoint.Progress != nil && checkpoint.Progress.TaskID == payload.TaskID &&
+			checkpoint.InstanceID == payload.InstanceID && checkpoint.EnqueuedAt == payload.EnqueuedAt {
+			existingProgress = checkpoint.Progress
+		}
+	}
+
+	if existingProgress != nil && existingProgress.Status == types.FAQImportStatusCompleted {
+		if err := s.saveFAQImportProgress(ctx, existingProgress); err != nil {
+			return fmt.Errorf("publish completed FAQ import: %w", err)
+		}
+		return s.finishFAQImport(ctx, &payload)
+	}
+
 	// 如果 entries 存储在对象存储中，先下载
 	if payload.EntriesURL != "" && len(payload.Entries) == 0 {
 		logger.Infof(ctx, "Downloading FAQ entries from object storage: %s", payload.EntriesURL)
@@ -2336,16 +2373,6 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 
 	// 保存原始总数量
 	originalTotalEntries := len(payload.Entries)
-
-	// 初始化进度
-	// 检查是否已有验证结果（用于重试时跳过验证）
-	// 注意：必须在保存新 progress 之前查询，否则会被覆盖
-	existingProgress, _ := s.GetFAQImportProgress(ctx, payload.TaskID)
-	if existingProgress != nil && existingProgress.Status == types.FAQImportStatusCompleted {
-		return s.clearRunningFAQImportInfoIfMatches(
-			ctx, payload.KBID, payload.TaskID, payload.InstanceID, payload.EnqueuedAt,
-		)
-	}
 
 	progress := &types.FAQImportProgress{
 		TaskID:         payload.TaskID,
@@ -2389,6 +2416,9 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 			originalTotalEntries, len(validEntryIndices), progress.FailedCount)
 	}
 
+	progress.InstanceID = payload.InstanceID
+	progress.EnqueuedAt = payload.EnqueuedAt
+
 	// Dry run 模式：验证完成后直接返回结果
 	if payload.DryRun {
 		return s.finalizeFAQValidation(ctx, &payload, progress, originalTotalEntries)
@@ -2410,11 +2440,20 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	validEntries := make([]types.FAQEntryPayload, 0, len(validEntryIndices))
 	for _, idx := range validEntryIndices {
 		entry := payload.Entries[idx]
+		entry.ImportIndex = idx
 		question := strings.TrimSpace(entry.StandardQuestion)
 		originalIndices[question] = idx
 		if !completedQuestions[question] {
 			validEntries = append(validEntries, entry)
 		}
+	}
+
+	// Normalize checkpoints produced by earlier workers before publishing progress.
+	for i, entry := range progress.SuccessEntries {
+		progress.SuccessEntries[i].Index = originalIndices[entry.StandardQuestion]
+	}
+	for i, detail := range progress.MergeDetails {
+		progress.MergeDetails[i].Index = originalIndices[detail.StandardQuestion]
 	}
 
 	// 更新进度消息
@@ -2486,13 +2525,6 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		return fmt.Errorf("FAQ import failed: %w", err)
 	}
 
-	for i, entry := range progress.SuccessEntries {
-		progress.SuccessEntries[i].Index = originalIndices[entry.StandardQuestion]
-	}
-	for i, detail := range progress.MergeDetails {
-		progress.MergeDetails[i].Index = originalIndices[detail.StandardQuestion]
-	}
-
 	// 任务成功完成
 	logger.Infof(ctx, "FAQ import task completed: %s, imported: %d, failed: %d",
 		payload.TaskID, len(progress.SuccessEntries), progress.FailedCount)
@@ -2501,10 +2533,9 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	return s.finalizeFAQValidation(ctx, &payload, progress, originalTotalEntries)
 }
 
-// finalizeFAQValidation 完成 FAQ 验证/导入任务，生成失败条目 CSV（如果有）
-func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *types.FAQImportPayload,
-	progress *types.FAQImportProgress, originalTotalEntries int,
-) error {
+// Release ownership and remove the uploaded input only after the completed
+// progress is visible. Redelivery can finish this without downloading it again.
+func (s *knowledgeService) finishFAQImport(ctx context.Context, payload *types.FAQImportPayload) error {
 	// 清理对象存储中的 entries 文件（如果有）
 	if payload.EntriesURL != "" {
 		if err := s.fileSvc.DeleteFile(ctx, payload.EntriesURL); err != nil {
@@ -2513,6 +2544,13 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 			logger.Infof(ctx, "Deleted FAQ entries file from object storage: %s", payload.EntriesURL)
 		}
 	}
+	return s.clearRunningFAQImportInfoIfMatches(ctx, payload.KBID, payload.TaskID, payload.InstanceID, payload.EnqueuedAt)
+}
+
+// finalizeFAQValidation 完成 FAQ 验证/导入任务，生成失败条目 CSV（如果有）
+func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *types.FAQImportPayload,
+	progress *types.FAQImportProgress, originalTotalEntries int,
+) error {
 	progress.UpdatedAt = time.Now().Unix()
 
 	// 如果有失败条目，生成 CSV 文件
@@ -2582,16 +2620,17 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 		}
 	}
 
-	// 使用 updateFAQImportProgressStatus 来确保正确清理 running key
-	// 但是需要先保存其他字段，因为 updateFAQImportProgressStatus 不会保存所有字段
-	if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-		logger.Warnf(ctx, "Failed to save final FAQ import progress: %v", err)
+	// Publish the exact final snapshot. Reading the cache back here could
+	// replace it with an earlier batch if publication previously failed.
+	if !payload.DryRun {
+		if err := s.commitFAQImportProgress(ctx, payload.TenantID, payload.KnowledgeID, progress, nil); err != nil {
+			return err
+		}
+	} else if err := s.saveFAQImportProgress(ctx, progress); err != nil {
+		return err
 	}
-
-	// 然后调用状态更新来清理 running key
-	if err := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusCompleted,
-		100, originalTotalEntries, originalTotalEntries, progress.Message, ""); err != nil {
-		logger.Warnf(ctx, "Failed to update final FAQ import status: %v", err)
+	if err := s.finishFAQImport(ctx, payload); err != nil {
+		return err
 	}
 
 	logger.Infof(ctx, "FAQ task completed: %s, dry_run=%v, success: %d, added: %d, merged: %d, failed: %d, partial_failed: %d",
@@ -2716,8 +2755,8 @@ func (s *knowledgeService) executeFAQMergeOperations(
 
 		mergedCount += len(batch)
 		progress.MergedCount += len(batch)
-		if err := s.saveFAQImportProgress(ctx, progress); err != nil {
-			return mergedCount, fmt.Errorf("save FAQ merge checkpoint: %w", err)
+		if err := s.commitFAQImportProgress(ctx, tenantID, faqKnowledge.ID, progress, nil); err != nil {
+			return mergedCount, err
 		}
 
 		logger.Infof(ctx, "FAQ import task %s: merged batch %d-%d (%d chunks)", taskID, batchStart+1, batchEnd, len(mergedChunks))
