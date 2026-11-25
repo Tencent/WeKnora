@@ -220,6 +220,8 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 // When FileName or FileType is provided (or the URL path has a known file extension such as .pdf/.docx/.doc/.txt/.md),
 // the server automatically switches to file-download mode instead of web-page crawling.
 type CreateKnowledgeFromURLRequest struct {
+	TagIDs []string `json:"tag_ids,omitempty"`
+
 	// URL is the target URL (required)
 	URL string `json:"url"`
 	// FileName is the optional file name; used to hint file-download mode when URL has no extension
@@ -249,6 +251,9 @@ func (c *Client) CreateKnowledgeFromURL(
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/url", knowledgeBaseID)
 
 	reqBody := req
+	if len(reqBody.TagIDs) == 0 && req.TagID != "" {
+		reqBody.TagIDs = []string{req.TagID}
+	}
 
 	resp, err := c.doRequest(ctx, http.MethodPost, path, reqBody, nil)
 	if err != nil {
@@ -325,6 +330,8 @@ func (c *Client) ListKnowledge(ctx context.Context,
 // string means the knowledge base root. Omit FolderPath entirely for a flat
 // listing across every folder.
 type KnowledgeListFilter struct {
+	// TagIDs matches any listed tag. When empty, TagID selects a single tag.
+	TagIDs      []string
 	TagID       string
 	Keyword     string
 	FileType    string
@@ -350,8 +357,11 @@ func (c *Client) ListKnowledgeWithFilter(ctx context.Context,
 	queryParams := url.Values{}
 	queryParams.Add("page", strconv.Itoa(page))
 	queryParams.Add("page_size", strconv.Itoa(pageSize))
-	if filter.TagID != "" {
-		queryParams.Add("tag_id", filter.TagID)
+	if len(filter.TagIDs) > 0 {
+		queryParams.Set("tag_ids", strings.Join(filter.TagIDs, ","))
+	} else if filter.TagID != "" {
+		queryParams.Set("tag_ids", filter.TagID)
+		queryParams.Set("tag_id", filter.TagID) // Older servers accept the singular filter.
 	}
 	if filter.Keyword != "" {
 		queryParams.Add("keyword", filter.Keyword)
