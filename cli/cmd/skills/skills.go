@@ -193,8 +193,14 @@ func writeSkills(skills []skillsfs.Skill, target string, force bool) ([]string, 
 		for _, rel := range s.Files {
 			dst := filepath.Join(target, rel)
 			if !force {
-				if _, err := os.Stat(dst); err == nil {
-					continue // exists; leave it
+				if info, err := os.Stat(dst); err == nil {
+					if !info.Mode().IsRegular() {
+						msg := fmt.Sprintf("expected a regular file at %s", dst)
+						return written, cmdutil.NewError(cmdutil.CodeLocalFileIO, msg)
+					}
+					continue // Keep the existing skill file.
+				} else if !os.IsNotExist(err) {
+					return written, cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "inspect %s", dst)
 				}
 			}
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
