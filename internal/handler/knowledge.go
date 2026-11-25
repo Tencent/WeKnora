@@ -2565,6 +2565,9 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 	logger.Info(ctx, "Start re-parsing knowledge")
 
 	id := secutils.SanitizeForLog(c.Param("id"))
+	if knowledgeID := c.Param("knowledge_id"); knowledgeID != "" {
+		id = secutils.SanitizeForLog(knowledgeID)
+	}
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
 		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
@@ -2572,9 +2575,13 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 	}
 
 	// Validate KB access with editor permission (reparse requires write access)
-	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
 	if err != nil {
 		c.Error(err)
+		return
+	}
+	if c.Param("knowledge_id") != "" && knowledge.KnowledgeBaseID != c.Param("id") {
+		_ = c.Error(errors.NewBadRequestError("Knowledge does not belong to the URL knowledge base"))
 		return
 	}
 
@@ -2592,7 +2599,7 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 	}
 
 	// Call service to reparse knowledge
-	knowledge, err := h.kgService.ReparseKnowledge(effCtx, id, processOverrides)
+	knowledge, err = h.kgService.ReparseKnowledge(effCtx, id, processOverrides)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
@@ -3354,11 +3361,17 @@ type batchReparseKnowledgeRequest struct {
 // @Router       /knowledge/batch-reparse [post]
 func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
-	var req batchReparseKnowledgeRequest
+	// The scoped alias supplies the KB in the URL; the canonical route still
+	// requires kb_id in the body. Keep binding validation for both forms.
+	req := batchReparseKnowledgeRequest{KBID: c.Param("id")}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Errorf(ctx, "failed to parse batch reparse knowledge request: %v", err)
 		c.Error(errors.NewBadRequestError("invalid batch reparse knowledge request parameters"))
+		return
+	}
+	if kbID := c.Param("id"); kbID != "" && req.KBID != kbID {
+		_ = c.Error(errors.NewBadRequestError("kb_id does not match the URL knowledge base"))
 		return
 	}
 
