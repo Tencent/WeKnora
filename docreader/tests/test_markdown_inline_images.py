@@ -106,6 +106,29 @@ class MarkdownInlineImageTests(unittest.TestCase):
         self.assertIn(f"```md\n{IMAGE}\n```", doc.content)
         self.assertEqual(len(doc.images), 1)
 
+    def test_quoted_fences_preserve_examples_and_extract_following_image(self):
+        for quote, fence, example in (
+            ("> ", "```", f"# {IMAGE}"),
+            ("> > ", "~~~", f"- {IMAGE}"),
+            ("> ", "```", f"> ```\n> # {IMAGE}"),
+        ):
+            with self.subTest(quote=quote, fence=fence, example=example):
+                code = f"{quote}{fence}md\n{quote}{example}\n{quote}{fence}\n"
+                real_image = IMAGE.replace("[example]", "[real]")
+                doc = self.parse(f"{code}{quote}{real_image}")
+                self.assertEqual(len(doc.images), 1)
+                path, payload = next(iter(doc.images.items()))
+                self.assertEqual(doc.content, f"{code}{quote}![real]({path})")
+                self.assertEqual(payload, PNG_B64)
+
+    def test_unclosed_quoted_fence_ends_with_its_quote(self):
+        code = f"> > ```md\n> > # {IMAGE}\n"
+        real_image = IMAGE.replace("[example]", "[real]")
+        doc = self.parse(f"{code}> {real_image}")
+        self.assertEqual(len(doc.images), 1)
+        path = next(iter(doc.images))
+        self.assertEqual(doc.content, f"{code}> ![real]({path})")
+
     def test_helper_preserves_multiline_crlf_code(self):
         raw = f"`first\r\n{IMAGE}\r\nlast`\r\n"
         self.assertEqual(MarkdownImageUtil().extract_base64(raw), (raw, {}))

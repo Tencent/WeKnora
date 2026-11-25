@@ -34,6 +34,7 @@ _ESCAPE_OR_PIPE = re.compile(r"\\.|\|", re.DOTALL)
 # Looser than ``_SEPARATOR_CELL``: any non-empty run of ``:``/``-`` qualifies.
 _ALIGNMENT_CELL = re.compile(r"^[:-]+$")
 _CODE_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
+_BLOCK_QUOTE_MARKER = re.compile(r" {0,3}>[ \t]?")
 # shortcut: explicit ATX and paragraph-interrupting list markers, use a
 # source-position-aware Markdown parser if broader block handling is needed.
 _INLINE_BLOCK_START = re.compile(
@@ -48,6 +49,7 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
     out: List[str] = []
     pending: List[str] = []
     fence: Optional[str] = None
+    fence_depth = 0
 
     def flush_pending() -> None:
         if pending:
@@ -55,11 +57,21 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
             pending.clear()
 
     for line in content.split("\n"):
-        marker = _CODE_FENCE.fullmatch(line.removesuffix("\r"))
+        prefix_end = 0
+        quote_depth = 0
+        while quote := _BLOCK_QUOTE_MARKER.match(line, prefix_end):
+            prefix_end = quote.end()
+            quote_depth += 1
+        marker = _CODE_FENCE.fullmatch(line[prefix_end:].removesuffix("\r"))
+
+        # An unclosed fence ends when its block quote ends.
+        if fence is not None and quote_depth < fence_depth:
+            fence = None
         if fence is not None:
             out.append(line)
             if (
-                marker
+                quote_depth == fence_depth
+                and marker
                 and marker[1][0] == fence[0]
                 and len(marker[1]) >= len(fence)
                 and not marker[2].strip(" \t")
@@ -68,6 +80,7 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
         elif marker and (marker[1][0] != "`" or "`" not in marker[2]):
             flush_pending()
             fence = marker[1]
+            fence_depth = quote_depth
             out.append(line)
         else:
             pending.append(line)
