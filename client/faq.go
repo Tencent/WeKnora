@@ -361,13 +361,27 @@ func (c *Client) SearchFAQEntries(ctx context.Context,
 // 是否禁止被推荐(选填-默认False 可被推荐)
 func (c *Client) ExportFAQEntries(ctx context.Context, knowledgeBaseID string) ([]byte, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/faq/entries/export", knowledgeBaseID)
+	return c.exportFAQEntries(ctx, path)
+}
+
+// ExportFAQEntriesJSON exports FAQ entries as a raw JSON array compatible with FAQEntryPayload.
+// Unlike CSV, JSON preserves question and answer strings containing the CSV list separator (##).
+func (c *Client) ExportFAQEntriesJSON(ctx context.Context, knowledgeBaseID string) ([]byte, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/faq/entries/export?format=json", knowledgeBaseID)
+	return c.exportFAQEntries(ctx, path)
+}
+
+func (c *Client) exportFAQEntries(ctx context.Context, path string) ([]byte, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, newAPIError(resp.StatusCode, readErrorBody(resp.Body))
+	}
 
-	// Read the raw CSV data from response body
+	// Export endpoints return raw file data rather than a JSON response envelope.
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read export response: %w", err)
