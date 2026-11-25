@@ -236,9 +236,9 @@ func TestList_StatusFilter_ForwardedToSDK(t *testing.T) {
 	chdirIsolated(t)
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeListSvc{}
-	opts := &ListOptions{PageSize: 20, Limit: 30, Status: "failed"}
+	opts := &ListOptions{PageSize: 20, Limit: 30, Status: "draft"}
 	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
-	assert.Equal(t, "failed", svc.got.filter.ParseStatus,
+	assert.Equal(t, "draft", svc.got.filter.ParseStatus,
 		"--status must be forwarded as filter.ParseStatus for server-side filtering")
 }
 
