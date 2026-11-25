@@ -45,5 +45,11 @@ func newCmdCancelParse(f *cmdutil.Factory) *cobra.Command {
 	cmdutil.AddIgnoredKBFlag(cmd)
 	cmdutil.AddFormatFlag(cmd, "id", "parse_status", "file_name", "title")
 	cmdutil.AddDryRunFlag(cmd, &dryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Stop parsing an individual document.",
+		RequiredFlags: []string{"<doc-id> (positional)"},
+		Examples:      []string{cmd.Example},
+		Output:        "envelope.data contains the updated knowledge record and parse_status.",
+	})
 	return cmd
 }
