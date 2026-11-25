@@ -85,6 +85,9 @@ var ErrUnavailable = errors.New("anydoc: binding not built into this binary")
 // the limit the converter reported.
 var ErrResourceLimit = errors.New("document is too large for the parser")
 
+// ErrEncrypted marks an anydoc rejection that requires an unencrypted file.
+var ErrEncrypted = errors.New("anydoc: document is encrypted")
+
 // resourceLimiter is the method set anydoc's *ConvertError uses to report a
 // parser budget failure. The cgo binding implements it; the default build does
 // not import that package, so classification goes through this interface.
