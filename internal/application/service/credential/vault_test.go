@@ -99,7 +99,7 @@ func TestVaultUpsertReplacesPasswordButKeepsDomains(t *testing.T) {
 }
 
 func TestVaultUpdateAndDelete(t *testing.T) {
-	v, _ := newTestVault(t)
+	v, db := newTestVault(t)
 	ctx := context.Background()
 	item, err := v.Create(ctx, alice, LoginInput{Site: "a.com", Username: "u", Password: "p"})
 	require.NoError(t, err)
@@ -116,6 +116,9 @@ func TestVaultUpdateAndDelete(t *testing.T) {
 	require.NoError(t, v.Delete(ctx, alice, item.ID))
 	_, _, err = v.Password(ctx, alice, item.ID)
 	require.ErrorIs(t, err, types.ErrCredentialUnavailable)
+	var left int64
+	require.NoError(t, db.Unscoped().Model(&types.CredentialVaultItem{}).Where("id = ?", item.ID).Count(&left).Error)
+	assert.Zero(t, left, "a deleted login leaves no ciphertext behind")
 }
 
 func TestVaultWithoutKey(t *testing.T) {

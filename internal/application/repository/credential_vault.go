@@ -103,8 +103,12 @@ func (r *credentialVaultRepository) Update(ctx context.Context, item *types.Cred
 	return nil
 }
 
+// Delete removes a saved login outright. Nothing reads a row once its owner
+// cannot reach it, and no job purges soft-deleted ones, so a soft delete
+// would keep the ciphertext in the database for good.
 func (r *credentialVaultRepository) Delete(ctx context.Context, tenantID uint64, userID, id string) (bool, error) {
-	res := r.owned(ctx, tenantID, userID).Where("id = ?", id).Delete(&types.CredentialVaultItem{})
+	res := r.owned(ctx, tenantID, userID).Where("id = ? AND deleted_at IS NULL", id).
+		Unscoped().Delete(&types.CredentialVaultItem{})
 	if res.Error != nil {
 		return false, fmt.Errorf("delete credential vault item: %w", res.Error)
 	}
