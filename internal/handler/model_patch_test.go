@@ -79,8 +79,9 @@ func TestPatchModelRejectsUnsupportedFields(t *testing.T) {
 		field string
 	}{
 		{
-			name:  "parameters with display name",
-			body:  `{"display_name":"Updated","parameters":{"base_url":"https://new.example.com/v1","interface_type":"openai"}}`,
+			name: "parameters with display name",
+			body: `{"display_name":"Updated","parameters":{"base_url":"https://new.example.com/v1",` +
+				`"interface_type":"openai"}}`,
 			field: "parameters",
 		},
 		{
@@ -112,7 +113,8 @@ func TestPatchModelRejectsUnsupportedFields(t *testing.T) {
 				},
 			}}
 			rec := patchModel(t, stub, tt.body)
-			require.Equal(t, http.StatusBadRequest, rec.Code, "unsupported PATCH fields must not be silently ignored: %s", rec.Body.String())
+			require.Equal(t, http.StatusBadRequest, rec.Code,
+				"unsupported PATCH fields must not be silently ignored: %s", rec.Body.String())
 			assert.Contains(t, rec.Body.String(), `unknown field \"`+tt.field+`\"`)
 			assert.Nil(t, stub.updated, "invalid requests must not persist partial edits")
 			assert.Equal(t, "Original", stub.model.DisplayName)
