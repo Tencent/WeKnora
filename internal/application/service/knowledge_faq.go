@@ -349,7 +349,8 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 
 	oldMeta, err := chunk.FAQMetadata()
 	if err != nil {
-		return nil, err
+		// A full replacement can repair an unreadable previous entry.
+		logger.Warnf(ctx, "Rebuilding FAQ chunk %s with unreadable previous metadata: %v", chunk.ID, err)
 	}
 	oldTag, oldEnabled, oldFlags := chunk.TagID, chunk.IsEnabled, chunk.Flags
 	if oldMeta != nil {
