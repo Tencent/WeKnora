@@ -126,3 +126,23 @@ func TestPredictTrimsPartialUTF8FromFailedResponse(t *testing.T) {
 		t.Fatalf("error is not valid UTF-8: %q", err)
 	}
 }
+
+func TestPredictRejectsTruncatedCloudResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"partial answer"},"finish_reason":"length"}]}`)
+	}))
+	defer server.Close()
+
+	vlm := newTestWeKnoraCloudVLM(server.URL, server.Client())
+	content, err := vlm.PredictWithOptions(
+		t.Context(), nil, "describe this page", &PredictOptions{RejectTruncated: true},
+	)
+	if !errors.Is(err, ErrTruncatedCompletion) || content != "" {
+		t.Fatalf("Predict() = (%q, %v), want empty content and %v", content, err, ErrTruncatedCompletion)
+	}
+	content, err = vlm.Predict(t.Context(), nil, "describe this page")
+	if err != nil || content != "partial answer" {
+		t.Fatalf("Predict() = (%q, %v), want partial answer", content, err)
+	}
+}

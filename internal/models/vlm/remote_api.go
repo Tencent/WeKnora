@@ -162,6 +162,9 @@ func (v *RemoteAPIVLM) PredictWithOptions(
 		// as successful OCR. Returning an error also marks the model trace failed.
 		return "", fmt.Errorf("%w at %d tokens (finish_reason=length)", ErrTruncatedCompletion, maxTokens)
 	}
+	if opts != nil && opts.RejectTruncated && resp.FinishReason == types.FinishReasonIncomplete {
+		return "", fmt.Errorf("%w (finish_reason=%s)", ErrTruncatedCompletion, resp.FinishReason)
+	}
 	logger.Infof(ctx, "[VLM] response received, len=%d", len(content))
 	return content, nil
 }
