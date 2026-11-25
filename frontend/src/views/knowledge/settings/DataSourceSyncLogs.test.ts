@@ -138,3 +138,93 @@ test('DataSourceSyncLogs surfaces deleted_items with titles and external IDs acr
     app.unmount()
   }
 })
+
+test('DataSourceSyncLogs ignores stale reset and pagination responses after switching sources', async () => {
+  const pending: {
+    dataSourceId: string
+    offset: number
+    resolve: (value: { data: any[] }) => void
+  }[] = []
+  const props = reactive({ visible: false, dataSourceId: 'source-a', dataSourceName: 'Source A' })
+  const exports: any = {}
+  runInNewContext(compiled, {
+    exports,
+    require(name: string) {
+      if (name === 'vue') return require('vue')
+      if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
+      if (name === '@/api/datasource') return {
+        getSyncLogs(dataSourceId: string, _limit: number, offset: number) {
+          return new Promise(resolve => pending.push({ dataSourceId, offset, resolve }))
+        },
+      }
+      return { default: {} }
+    },
+    Date, Math, JSON,
+  })
+  const component = exports.default
+  component.render = () => null
+  const renderer = createRenderer<any, any>({
+    createElement: () => ({}), createText: () => ({}), createComment: () => ({}),
+    insert() {}, remove() {}, setElementText() {}, setText() {}, patchProp() {},
+    parentNode: () => null, nextSibling: () => null,
+  })
+  const instance = ref<any>()
+  const app = renderer.createApp({ render: () => h(component, { ...props, ref: instance }) })
+  app.mount({})
+  try {
+    props.visible = true
+    await nextTick()
+    assert.deepEqual(pending.map(({ dataSourceId, offset }) => ({ dataSourceId, offset })), [
+      { dataSourceId: 'source-a', offset: 0 },
+    ])
+
+    props.visible = false
+    props.dataSourceId = 'source-b'
+    props.dataSourceName = 'Source B'
+    props.visible = true
+    await nextTick()
+    assert.equal(pending[1].dataSourceId, 'source-b')
+
+    const sourceBFirstPage = Array.from({ length: 50 }, (_, index) => ({
+      id: `source-b-${index}`,
+      status: 'success',
+    }))
+    pending[1].resolve({ data: sourceBFirstPage })
+    await flush()
+    assert.equal(instance.value.logs[0].id, 'source-b-0')
+    assert.equal(instance.value.hasMore, true)
+
+    // The slower source A response must not replace source B or its paging state.
+    pending[0].resolve({ data: Array.from({ length: 50 }, (_, index) => ({
+      id: `source-a-${index}`,
+      status: 'success',
+    })) })
+    await flush()
+    assert.equal(instance.value.logs[0].id, 'source-b-0')
+    assert.equal(instance.value.hasMore, true)
+
+    instance.value.loadMore()
+    await nextTick()
+    assert.equal(pending[2].offset, 50)
+    assert.equal(instance.value.loadingMore, true)
+
+    props.dataSourceId = 'source-c'
+    props.dataSourceName = 'Source C'
+    await nextTick()
+    assert.equal(instance.value.loadingMore, false)
+    assert.equal(instance.value.logs.length, 0)
+    assert.equal(instance.value.hasMore, false)
+    assert.equal(pending[3].dataSourceId, 'source-c')
+
+    pending[3].resolve({ data: [{ id: 'source-c-0', status: 'success' }] })
+    await flush()
+    pending[2].resolve({ data: [{ id: 'source-b-50', status: 'success' }] })
+    await flush()
+    assert.deepEqual(instance.value.logs.map((log: any) => log.id), ['source-c-0'])
+    assert.equal(instance.value.hasMore, false)
+    assert.equal(instance.value.loading, false)
+    assert.equal(instance.value.loadingMore, false)
+  } finally {
+    app.unmount()
+  }
+})
