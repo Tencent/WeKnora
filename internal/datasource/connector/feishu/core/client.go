@@ -193,6 +193,25 @@ func (c *Client) GetTenantAccessToken(ctx context.Context) (string, error) {
 	return c.tokenCache, nil
 }
 
+// invalidateRejectedToken must not discard a newer token when a request using
+// the previous token finishes after another request has already refreshed it.
+func (c *Client) invalidateRejectedToken(token string) {
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+	if c.tokenCache == token {
+		c.tokenCache = ""
+		c.tokenExpAt = time.Time{}
+	}
+}
+
+func isFeishuTokenRejected(status int, body []byte) bool {
+	if status == http.StatusUnauthorized {
+		return true
+	}
+	var response ApiResponse
+	return json.Unmarshal(body, &response) == nil && response.Code == 99991663
+}
+
 // waitForRequestToken authenticates before pacing and rechecks the cached token
 // afterwards. A refresh must happen before rejoining the gate, otherwise requests
 // that have already been paced can pile up behind tokenMu and then burst together.
@@ -249,7 +268,8 @@ var feishuRetryBackoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * t
 // export/wiki APIs are aggressively rate limited, and a thousand-document sync
 // issues tens of thousands of calls; without backoff a single 429 burst used to
 // fail whole swathes of documents silently. HTTP 400 with code 99991400 is
-// also a rate limit. Ordinary permission/validation errors still fail fast.
+// also a rate limit. A rejected token is refreshed once within the retry budget;
+// ordinary permission/validation errors still fail fast.
 func (c *Client) DoRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
 	const (
 		maxRetries    = feishuMaxRetries
@@ -274,6 +294,7 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 	url := c.baseURL + path
 	var lastErr error
 	gate := c.requestGate(method, path)
+	authRetried := false
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		token, err := c.waitForRequestToken(ctx, gate)
@@ -324,6 +345,16 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 
 		logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d body=%s",
 			method, path, resp.StatusCode, len(respBody), truncate(string(respBody), 1000))
+
+		if isFeishuTokenRejected(resp.StatusCode, respBody) {
+			c.invalidateRejectedToken(token)
+			lastErr = newFeishuAPIError(resp.StatusCode, respBody)
+			if !authRetried && attempt < maxRetries {
+				authRetried = true
+				continue
+			}
+			return lastErr
+		}
 
 		if isFeishuRateLimited(resp.StatusCode, respBody) {
 			wait := feishuRateLimitWait(resp.Header, time.Now())
@@ -816,6 +847,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 	url := c.baseURL + path
 	var lastErr error
 	gate := c.requestGate(http.MethodGet, path)
+	authRetried := false
 
 	for attempt := 0; attempt <= feishuMaxRetries; attempt++ {
 		token, err := c.waitForRequestToken(ctx, gate)
@@ -846,9 +878,19 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 			return nil, lastErr
 		}
 
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusBadRequest {
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusBadRequest ||
+			resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
+			if isFeishuTokenRejected(resp.StatusCode, body) {
+				c.invalidateRejectedToken(token)
+				lastErr = newFeishuAPIError(resp.StatusCode, body)
+				if !authRetried && attempt < feishuMaxRetries {
+					authRetried = true
+					continue
+				}
+				return nil, lastErr
+			}
 			if !isFeishuRateLimited(resp.StatusCode, body) {
 				logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s",
 					path, resp.StatusCode, truncate(string(body), 500))
