@@ -76,13 +76,16 @@ don't require a file upload or remote URL. KB resolution follows the standard
 				if err != nil {
 					return err
 				}
+				planArgs := map[string]any{"text": opts.Text, "title": opts.Title, "kb": kbID}
+				if opts.TagID != "" {
+					planArgs["tag_id"] = opts.TagID
+				}
+				if opts.Channel != "" {
+					planArgs["channel"] = opts.Channel
+				}
 				if handled, err := cmdutil.HandleDryRun(c, true, cmdutil.DryRunPlan{
 					Action: "doc.create",
-					Args: map[string]any{
-						"text":  opts.Text,
-						"title": opts.Title,
-						"kb":    kbID,
-					},
+					Args:   planArgs,
 				}); handled {
 					return err
 				}
