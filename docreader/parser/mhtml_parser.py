@@ -127,8 +127,10 @@ class MHTMLParser(BaseParser):
                     try:
                         html_text = payload.decode(charset, errors="ignore")
                     except LookupError:
-                        html_text = payload.decode("utf-8", errors="ignore")
-                else:
+                        # An unknown MIME label is no better than no label:
+                        # let the document's own declaration decide.
+                        charset = None
+                if not charset:
                     # Keep the bytes until HTML declarations and BOMs have
                     # been inspected; decoding as UTF-8 first loses text.
                     html_text = UnicodeDammit(payload, is_html=True).unicode_markup or ""
