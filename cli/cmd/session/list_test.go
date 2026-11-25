@@ -176,6 +176,23 @@ func TestList_SinceFilter_RejectsInvalidDuration(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
 }
 
+func TestList_RejectsInvalidSinceBeforeClient(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	clientCalled := false
+	factory := &cmdutil.Factory{Client: func() (*sdk.Client, error) {
+		clientCalled = true
+		return nil, cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no profile configured")
+	}}
+	cmd := NewCmdList(factory)
+	cmd.SetArgs([]string{"--since=bogus"})
+
+	var typed *cmdutil.Error
+	require.ErrorAs(t, cmd.Execute(), &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	assert.Contains(t, typed.Message, "--since")
+	assert.False(t, clientCalled)
+}
+
 func TestList_SinceFilter_RejectsNonPositive(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	for _, v := range []string{"0d", "0h", "-1h"} {

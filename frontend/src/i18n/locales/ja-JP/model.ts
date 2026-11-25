@@ -275,6 +275,7 @@ export default {
       baseUrlPlaceholder: '例: https://api.openai.com/v1',
       baseUrlPlaceholderVllm: '例: http://localhost:11434/v1',
       baseUrlPlaceholderAsr: '例: https://api.openai.com/v1',
+      apiKey: 'APIキー',
       apiKeyOptional: 'APIキー（任意）',
       apiKeyPlaceholder: 'APIキーを入力してください',
       customHeadersLabel: 'カスタムリクエストヘッダー（任意）',

@@ -135,6 +135,26 @@ async function fixture(options: {
   await nextTick()
   return { vm, props, requests, saves, toasts, visibility, resolves, catalogEvents, catalogRequests, close: () => app.unmount() }
 }
+test('API key label follows the selected provider authentication requirement', async () => {
+  const f = await fixture ({
+    providers: [
+      { value: 'nvidia', requiresAuth: true, models: [] },
+      { value: 'generic', requiresAuth: false, models: [] },
+    ],
+  })
+
+  try {
+    f.vm.formData.provider = 'nvidia'
+    await nextTick()
+    assert.equal(f.vm.apiKeyLabel, 'model.editor.apiKey')
+
+    f.vm.formData.provider = 'generic'
+    await nextTick()
+    assert.equal(f.vm.apiKeyLabel, 'model.editor.apiKeyOptional')
+  } finally {
+    f.close()
+  }
+})
 
 for (const initiallyVisible of [true, false]) {
   for (const type of ['chat', 'embedding']) {
