@@ -54,6 +54,14 @@ class ModuleIntegrationTest(unittest.TestCase):
         missing = [name for name in REQUIRED_FILES if not (MCP_SERVER_DIR / name).exists()]
         self.assertEqual(missing, [], f"Missing files: {missing}")
 
+    def test_explicit_port_overrides_invalid_environment(self):
+        from unittest.mock import patch
+        from main import parse_arguments
+
+        with patch.dict(os.environ, {"MCP_PORT": "invalid"}):
+            with patch.object(sys, "argv", ["weknora-mcp-server", "--port", "9123"]):
+                self.assertEqual(parse_arguments().port, 9123)
+
     def test_main_help(self):
         result = subprocess.run(
             [sys.executable, "main.py", "--help"],
