@@ -35,13 +35,20 @@ const (
 	// RerankVolcengineKnowledge is Volcengine's managed Knowledge Service
 	// rerank, reached through the vikingdb SDK for the same reason.
 	RerankVolcengineKnowledge RerankAPI = "volcengine-knowledge"
+	// RerankWatsonx is IBM watsonx.ai's native text rerank shape: POST
+	// {base}/ml/v1/text/rerank with {model_id, inputs, query,
+	// parameters.return_options}, answering under results with {index,
+	// score}. The API also requires a version query parameter and either a
+	// project_id or a space_id; the client sends the former and takes the
+	// latter from ExtraBody.
+	RerankWatsonx RerankAPI = "watsonx-rerank"
 )
 
 // Known reports whether the value names a protocol this build implements.
 func (a RerankAPI) Known() bool {
 	switch a {
 	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI,
-		RerankTencentLKEAP, RerankVolcengineKnowledge:
+		RerankTencentLKEAP, RerankVolcengineKnowledge, RerankWatsonx:
 		return true
 	}
 	return false
@@ -52,7 +59,8 @@ func (a RerankAPI) Known() bool {
 // vendor SDKs are imported.
 func (a RerankAPI) HTTPServed() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI:
+	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI,
+		RerankWatsonx:
 		return true
 	}
 	return false

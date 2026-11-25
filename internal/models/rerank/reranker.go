@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
 	"github.com/Tencent/WeKnora/internal/models/api/pineconerank"
 	"github.com/Tencent/WeKnora/internal/models/api/teirank"
+	"github.com/Tencent/WeKnora/internal/models/api/watsonxrank"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 
 	// modelruntime.Resolve answers from the vendor catalog, which is empty until
@@ -207,6 +208,8 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		client = pineconerank.New(pineconerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankTEI:
 		client = teirank.New(teirank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankWatsonx:
+		client = watsonxrank.New(watsonxrank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankTencentLKEAP:
 		client, err = newLKEAPClient(config, resolved)
 	case api.RerankVolcengineKnowledge:

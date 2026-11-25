@@ -2060,6 +2060,15 @@
         }
       }
     ],
+    "watsonx": [
+      {
+        "id": "cross-encoder/ms-marco-minilm-l-12-v2",
+        "type": "Rerank",
+        "compat": {
+          "max_documents": 1000
+        }
+      }
+    ],
     "zhipu": [
       {
         "id": "glm-5.3",

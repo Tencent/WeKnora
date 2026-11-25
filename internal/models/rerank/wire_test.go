@@ -138,6 +138,12 @@ func answer(r *http.Request, body map[string]any) string {
 			parts = append(parts, fmt.Sprintf(`{"index":%d,"score":%v}`, i, probability(docs[i])))
 		}
 		return `{"data":[` + strings.Join(parts, ",") + `]}`
+	case strings.HasSuffix(r.URL.Path, "/ml/v1/text/rerank"): // IBM watsonx.ai
+		docs := texts(body["inputs"])
+		for i := len(docs) - 1; i >= 0; i-- {
+			parts = append(parts, fmt.Sprintf(`{"index":%d,"score":%v}`, i, probability(docs[i])))
+		}
+		return `{"results":[` + strings.Join(parts, ",") + `]}`
 	default: // Cohere
 		docs := texts(body["documents"])
 		score := probability
@@ -274,6 +280,17 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			name: "Hugging Face TEI", provider: "huggingface_tei", model: "BAAI/bge-reranker-large",
 			wantPath: "/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
 			wantBody: map[string]any{"query": query, "texts": anyStrings(three), "raw_scores": false, "truncate": true},
+		},
+		{
+			name: "watsonx native text rerank", provider: "watsonx", model: "cross-encoder/ms-marco-minilm-l-12-v2",
+			wantPath: "/ml/v1/text/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: map[string]any{
+				"model_id": "cross-encoder/ms-marco-minilm-l-12-v2", "query": query,
+				"inputs": anyStrings(three),
+				"parameters": map[string]any{
+					"return_options": map[string]any{"top_n": float64(3)},
+				},
+			},
 		},
 		{
 			name: "Hugging Face TEI splits at 32 documents", provider: "huggingface_tei",
