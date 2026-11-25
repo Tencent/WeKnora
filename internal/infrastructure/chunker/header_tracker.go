@@ -21,12 +21,19 @@ type headerTrackerHook struct {
 	priority     int
 }
 
+// GFM delimiter cells contain one or more hyphens with optional alignment colons.
+const markdownTableDelimiterCells = `(?:\|[ \t]*:?-+:?[ \t]*)+`
+
+var tableDelimiterRow = regexp.MustCompile(`^` + markdownTableDelimiterCells + `\|?$`)
+
 // defaultHeaderHooks returns header tracking hooks matching the Python defaults
 // in docreader/splitter/header_hook.py.
 var defaultHeaderHooks = []headerTrackerHook{
 	{
 		// Markdown table: header row + separator row (e.g. "| A | B |\n| --- | --- |\n")
-		startPattern: regexp.MustCompile(`(?si)^\s*(?:\|[^|\n]*)+[\r\n]+\s*(?:\|\s*:?-{3,}:?\s*)+\|?[\r\n]+$`),
+		startPattern: regexp.MustCompile(
+			`(?si)^\s*(?:\|[^|\n]*)+[\r\n]+\s*` + markdownTableDelimiterCells + `\|?[\r\n]+$`,
+		),
 		// Empty/whitespace line or a line that doesn't start with | or whitespace
 		endPattern: regexp.MustCompile(`(?si)^\s*$|^\s*[^|\s].*$`),
 		priority:   15,
@@ -187,10 +194,10 @@ func isEmptyTableHeaderRow(header string) bool {
 }
 
 // extractSeparatorLine returns the separator line (e.g. "| --- | --- |\n") from
-// a table header string. It looks for the line containing "---".
+// a table header string.
 func extractSeparatorLine(header string) string {
 	for _, line := range strings.Split(header, "\n") {
-		if strings.Contains(line, "---") {
+		if tableDelimiterRow.MatchString(strings.TrimSpace(line)) {
 			return line + "\n"
 		}
 	}
@@ -271,7 +278,7 @@ func firstTableRowColumnCount(text string) int {
 func headerTableColumnCount(header string) int {
 	for _, line := range strings.Split(header, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.Contains(line, "---") {
+		if line == "" || tableDelimiterRow.MatchString(line) {
 			continue
 		}
 		if n := tableRowColumnCount(line); n > 0 {
