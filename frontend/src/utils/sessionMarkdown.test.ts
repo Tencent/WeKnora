@@ -28,6 +28,11 @@ test('collectAllSessionMessages walks backwards and returns chronological unique
   assert.deepEqual(result.map((message) => message.id), ['1', '2', '3', '4'])
 })
 
+test('copying a session rejects a full page that cannot advance the history cursor', async () => {
+  const page = [{ id: 'm', role: 'user', created_at: '2026-01-01T00:00:00Z' }]
+  await assert.rejects(collectAllSessionMessages(async () => page, 1), /cursor/)
+})
+
 test('buildSessionMarkdown exports visible conversation content without internal citation tags', () => {
   const markdown = buildSessionMarkdown({
     sessionId: 'session-1',
@@ -115,9 +120,4 @@ test('missing and invalid export timestamps have a deterministic fallback', asyn
     { id: 'missing', role: 'assistant' },
   ])
   assert.deepEqual(result.map(message => message.id), ['missing', 'invalid', 'valid'])
-})
-
-test('copying a session rejects a full page that cannot advance the history cursor', async () => {
-  const page = [{ id: 'm', role: 'user', created_at: '2026-01-01T00:00:00Z' }]
-  await assert.rejects(collectAllSessionMessages(async () => page, 1), /cursor/)
 })
