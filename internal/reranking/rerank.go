@@ -125,10 +125,9 @@ func Rerank(
 	var scoredAsImage map[int]bool
 	defer func() { recordSelection(ctx, results, res, opts, scoredAsImage) }()
 
-	keep := topByScore(results, opts.MaxCandidates)
 	candidateIdx := make([]int, 0, len(results))
 	for i, r := range results {
-		if r == nil || (keep != nil && !keep[i]) {
+		if r == nil {
 			continue
 		}
 		passage := ModelPassage(ctx, r)
@@ -138,6 +137,22 @@ func Rerank(
 		candidateIdx = append(candidateIdx, i)
 		res.Candidates = append(res.Candidates, r)
 		res.Passages = append(res.Passages, passage)
+	}
+	// Empty passages cannot be scored and must not consume the model budget.
+	if keep := topByScore(res.Candidates, opts.MaxCandidates); keep != nil {
+		n := 0
+		for i, candidate := range res.Candidates {
+			if !keep[i] {
+				continue
+			}
+			res.Candidates[n] = candidate
+			res.Passages[n] = res.Passages[i]
+			candidateIdx[n] = candidateIdx[i]
+			n++
+		}
+		res.Candidates = res.Candidates[:n]
+		res.Passages = res.Passages[:n]
+		candidateIdx = candidateIdx[:n]
 	}
 	res.Diagnostics.CandidateCount = len(res.Candidates)
 	if len(res.Candidates) == 0 {
