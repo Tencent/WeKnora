@@ -699,7 +699,8 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		b.WriteString("\n")
 	}
 	visibleOutput := b.String()
-	outputWithoutTiming, _ := truncateShellStream(visibleOutput[:timingStart]+visibleOutput[timingEnd:], maxShellExecVisibleBytes)
+	outputWithoutTiming, _ := truncateShellStream(
+		visibleOutput[:timingStart]+visibleOutput[timingEnd:], maxShellExecVisibleBytes)
 	visibleOutput, totalTruncated := truncateShellStream(visibleOutput, maxShellExecVisibleBytes)
 	truncated = truncated || errorTruncated || totalTruncated
 

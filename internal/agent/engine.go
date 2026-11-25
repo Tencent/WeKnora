@@ -649,7 +649,8 @@ func toolRoundSignature(calls []types.ToolCall) string {
 				for key, value := range r.Data {
 					// The visible byte counts include the duration line too.
 					switch key {
-					case "duration_ms", "visible_original_bytes", "visible_returned_bytes", "total_truncated", "truncated":
+					case "duration_ms", "visible_original_bytes", "visible_returned_bytes",
+						"total_truncated", "truncated":
 					default:
 						en.Data[key] = value
 					}

@@ -58,7 +58,9 @@ func hasRepeatedToolNotice(opts *chat.ChatOptions) bool {
 
 type varyingDurationShell struct{ calls int }
 
-func (s *varyingDurationShell) ExecShellCommand(context.Context, string, string, string, time.Duration, map[string]string) (*sandbox.ExecuteResult, error) {
+func (s *varyingDurationShell) ExecShellCommand(
+	context.Context, string, string, string, time.Duration, map[string]string,
+) (*sandbox.ExecuteResult, error) {
 	s.calls++
 	return &sandbox.ExecuteResult{Duration: time.Duration(s.calls) * 11 * time.Millisecond}, nil
 }
@@ -285,7 +287,14 @@ func TestTrackRepeatedToolRound_WaitAgentBreaksTheStreak(t *testing.T) {
 
 func TestTrackRepeatedToolRound_PendingAttachmentDoesNotCountAsFailure(t *testing.T) {
 	g := &loopGuards{}
-	call := types.ToolCall{Name: "read_file", Args: map[string]interface{}{"path": "attachment://doc"}, Result: &types.ToolResult{AttachmentParsingPending: true, Error: "still being parsed"}}
+	call := types.ToolCall{
+		Name: "read_file",
+		Args: map[string]interface{}{"path": "attachment://doc"},
+		Result: &types.ToolResult{
+			AttachmentParsingPending: true,
+			Error:                    "still being parsed",
+		},
+	}
 	for i := 0; i <= maxRepeatedToolRounds; i++ {
 		assert.Zero(t, g.trackRepeatedToolRound([]types.ToolCall{call}))
 		_, attempts, nudge := g.recordFailedToolCall(call)
