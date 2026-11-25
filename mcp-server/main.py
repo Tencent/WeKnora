@@ -31,7 +31,7 @@ def setup_environment():
 def check_dependencies():
     """检查依赖是否已安装"""
     try:
-        import mcp
+        from mcp.server import MCPServer
         import requests
 
         return True
