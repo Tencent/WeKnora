@@ -45,12 +45,15 @@ func (s *knowledgeService) createKnowledgeFromFile(ctx context.Context,
 	// uploads pass a path-qualified name ("docs/spec/design.md"): the directory
 	// part becomes the knowledge's folder_path and only the base name is kept as
 	// the display / storage file name.
-	fileName := file.Filename
+	// Multipart filenames can arrive in a legacy codepage (GBK from Windows
+	// curl builds); normalize before validation or valid CJK names are
+	// rejected as illegal characters (issue #4268).
+	fileName := secutils.NormalizeMultipartFilename(file.Filename)
 	folderPath := ""
 	if customFileName != "" {
 		folderPath, fileName = types.SplitKnowledgeRelativePath(customFileName)
 		if fileName == "" {
-			fileName = file.Filename
+			fileName = secutils.NormalizeMultipartFilename(file.Filename)
 		}
 		logger.Infof(ctx, "Using custom filename: %s (original: %s, folder: %s)",
 			fileName, file.Filename, folderPath)

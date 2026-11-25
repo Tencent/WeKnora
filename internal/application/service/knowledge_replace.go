@@ -61,11 +61,14 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 		return nil, err
 	}
 
-	fileName, folderPath := file.Filename, existing.FolderPath
+	// Multipart filenames can arrive in a legacy codepage (GBK from Windows
+	// curl builds); normalize before validation or valid CJK names are
+	// rejected as illegal characters (issue #4268).
+	fileName, folderPath := secutils.NormalizeMultipartFilename(file.Filename), existing.FolderPath
 	if customFileName != "" {
 		customFolder, customName := types.SplitKnowledgeRelativePath(customFileName)
 		if customName == "" {
-			customName = file.Filename
+			customName = secutils.NormalizeMultipartFilename(file.Filename)
 		}
 		fileName = customName
 		// A path-qualified name relocates the knowledge. A bare filename
