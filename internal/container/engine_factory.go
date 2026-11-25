@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"gorm.io/gorm"
 
+	clickhouseRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/clickhouse"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
@@ -76,6 +77,8 @@ func createEngineServiceFromStore(
 		return createWeaviateEngine(store)
 	case types.DorisRetrieverEngineType:
 		return createDorisEngine(store)
+	case types.ClickhouseRetrieverEngineType:
+		return createClickhouseEngine(store)
 	case types.SQLiteRetrieverEngineType:
 		return createSQLiteEngine(store, db)
 	case types.TencentVectorDBRetrieverEngineType:
@@ -111,7 +114,8 @@ func validateRuntimeVectorStoreAddresses(store types.VectorStore) error {
 		types.OpenSearchRetrieverEngineType,
 		types.MilvusRetrieverEngineType,
 		types.TencentVectorDBRetrieverEngineType,
-		types.DorisRetrieverEngineType:
+		types.DorisRetrieverEngineType,
+		types.ClickhouseRetrieverEngineType:
 		return check("vector store address", cc.Addr)
 	case types.QdrantRetrieverEngineType:
 		endpoint := cc.Host
@@ -364,6 +368,35 @@ func createDorisEngine(store types.VectorStore) (interfaces.RetrieveEngineServic
 		db, httpBase, cc.Username, cc.Password, cc.Database, &store.IndexConfig,
 	)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.DorisRetrieverEngineType), nil
+}
+
+// createClickhouseEngine 创建 ClickHouse 原生向量检索引擎服务。
+//
+// Addr 字段承担原生协议地址 host:9000；Database 为目标库名。
+// clickhouse-go 的 database/sql 驱动在首次使用时才建连，
+// 因此这里只做配置校验，不做连通性探测（与 Doris 的 env 路径一致，
+// 不可用后端在首次检索/写入时报错，而不是阻塞启动）。
+func createClickhouseEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+	cc := store.ConnectionConfig
+	if cc.Addr == "" {
+		return nil, fmt.Errorf("clickhouse connection requires addr (host:port)")
+	}
+	if cc.Database == "" {
+		return nil, fmt.Errorf("clickhouse connection requires database")
+	}
+
+	db, err := sql.Open("clickhouse", clickhouseRepo.BuildDSN(cc.Addr, cc.Username, cc.Password, cc.Database))
+	if err != nil {
+		return nil, fmt.Errorf("create clickhouse client: %w", err)
+	}
+	db.SetMaxOpenConns(20)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(time.Hour)
+
+	repo := clickhouseRepo.NewClickhouseRetrieveEngineRepository(
+		db, cc.Database, &store.IndexConfig,
+	)
+	return retriever.NewKVHybridRetrieveEngine(repo, types.ClickhouseRetrieverEngineType), nil
 }
 
 // hostFromAddr 从 "host:port" 中拆出 host 部分；Addr 没有冒号时整段当作 host。

@@ -42,6 +42,10 @@ var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: DorisRetrieverEngineType},
 		{RetrieverType: VectorRetrieverType, RetrieverEngineType: DorisRetrieverEngineType},
 	},
+	// PR1 只支持 dense 向量检索（#5722）：关键词/hybrid 在后续 PR 落地。
+	"clickhouse": {
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: ClickhouseRetrieverEngineType},
+	},
 	"sqlite": {
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: SQLiteRetrieverEngineType},
 		{RetrieverType: VectorRetrieverType, RetrieverEngineType: SQLiteRetrieverEngineType},

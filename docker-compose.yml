@@ -329,7 +329,7 @@ services:
       # DB host would skip the 5432 port block.)
       # doris-be: Stream Load follows FE→BE redirects that must receive Basic
       # credentials on whitelisted BE hosts.
-      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe,doris-be,minio}
+      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe,doris-be,clickhouse,minio}
       # 仅允许白名单出站（默认关闭）。开启前请把所有需要访问的地址加入白名单，
       # 见 website-docs/01-getting-started/04-configuration.md「开启 SSRF_DNS_WHITELIST_ONLY 之前」。
       - SSRF_DNS_WHITELIST_ONLY=${SSRF_DNS_WHITELIST_ONLY:-}
@@ -839,6 +839,49 @@ services:
     profiles:
       - doris
 
+  # ---------------------------------------------------------------------------
+  # ClickHouse 25.8+（原生向量检索后端，opt-in via `--profile clickhouse`）
+  #
+  # 版本要求：必须 >= 25.8（vector_similarity HNSW 索引在 25.8 才 GA；
+  # 旧版建表会直接失败）。本 compose 使用 25.8 官方稳定 tag。
+  #
+  # 端口说明：
+  #   - 9000 (Native)：WeKnora 主链路读写走 clickhouse-go 原生协议。
+  #   - 8123 (HTTP)：调试 / ping / 可选的 HTTP 协议入口。
+  #
+  # 启用方式：
+  #   docker compose --profile clickhouse up -d
+  #   RETRIEVE_DRIVER=clickhouse docker compose up -d app
+  #
+  # 数据持久化在 clickhouse_data 卷中。
+  # 注意：与 `--profile langfuse` 的 langfuse-clickhouse 是两个独立实例，
+  # 不要共用（Langfuse 那个跑 24.8，不支持 vector_similarity 索引）。
+  # ---------------------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    container_name: WeKnora-clickhouse
+    hostname: clickhouse
+    environment:
+      - CLICKHOUSE_DB=${CLICKHOUSE_DATABASE:-weknora}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USERNAME:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+    profiles:
+      - clickhouse
+
   dex:
     image: dexidp/dex:latest
     container_name: dex
@@ -1113,6 +1156,8 @@ volumes:
   doris_fe_log:
   doris_be_storage:
   doris_be_log:
+  clickhouse_data:
+  clickhouse_logs:
   langfuse_clickhouse_data:
   langfuse_clickhouse_logs:
   langfuse_minio_data:

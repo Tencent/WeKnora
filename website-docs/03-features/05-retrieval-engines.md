@@ -38,6 +38,7 @@
 | Milvus | `milvus` | HNSW（IP/COSINE/L2） | BM25 Function 稀疏向量 | BM25 | Milvus analyzer | 每维一个 collection | 应用侧 | 中高 | 大规模向量、需要原生 BM25 混检 |
 | Weaviate | `weaviate` | nearVector（certainty） | 原生 BM25 | BM25 | Weaviate tokenizer | 动态 Class | certainty 原生 | 中 | GraphQL 生态、需副本/分片配置 |
 | Doris | `doris` | ANN HNSW inner_product/cosine | 倒排索引 MATCH_ANY | 倒排命中 | 建表声明 chinese parser | 每维一张表 | SQL 内 | 高 | 已有 Doris 数仓，检索与分析一体 |
+| ClickHouse | `clickhouse` | 原生 HNSW cosineDistance（25.8+ GA） | 不支持（PR1 仅 dense，关键词后续 PR） | — | — | 每维一张表 | SQL 内 | 中 | 已有 ClickHouse 集群，大规模向量检索 |
 | 腾讯云 VectorDB | `tencent_vectordb` | HNSW COSINE | 稀疏向量 BM25（SPARSE_INVERTED） | BM25 | SDK SparseEncoder | 每维一个 collection | 应用侧 | 低（云托管） | 腾讯云托管、免运维 |
 
 > 说明：无论引擎自身是否提供"混合检索"，WeKnora 的混合始终是**上层统一的 RRF 融合**（`knowledgebase_search_fusion.go`）——向量与关键词各自独立检索，按 rank 加权合并（见 [混合检索打分与归一化](#_5-混合检索打分与归一化)），因此各引擎只需分别提供两类单模检索。
@@ -48,7 +49,7 @@
 
 | 环境变量 | 默认 | 说明 |
 |----------|------|------|
-| `RETRIEVE_DRIVER` | `postgres` | 逗号分隔多驱动：`postgres` / `sqlite` / `elasticsearch_v7` / `elasticsearch_v8` / `opensearch` / `qdrant` / `milvus` / `weaviate` / `doris` / `tencent_vectordb`。多驱动时写操作广播到全部，检索按类型路由 |
+| `RETRIEVE_DRIVER` | `postgres` | 逗号分隔多驱动：`postgres` / `sqlite` / `elasticsearch_v7` / `elasticsearch_v8` / `opensearch` / `qdrant` / `milvus` / `weaviate` / `doris` / `clickhouse` / `tencent_vectordb`。多驱动时写操作广播到全部，检索按类型路由 |
 | `MULTI_STORE_RETRIEVE_TIMEOUT_SEC` | 30 | 多 store 并行检索每组超时 |
 | `ELASTICSEARCH_ADDR` / `_USERNAME` / `_PASSWORD` / `_INDEX` | — / `WeKnora` | ES v7/v8 共用 |
 | `OPENSEARCH_ADDR` / `_USERNAME` / `_PASSWORD` / `_INDEX` / `_INSECURE_SKIP_VERIFY` | — | OpenSearch |
@@ -56,6 +57,7 @@
 | `MILVUS_ADDRESS` / `_COLLECTION` / `_METRIC_TYPE` / `_USERNAME` / `_PASSWORD` / `_DB_NAME` | `localhost:19530` / `weknora_embeddings` / `IP` | metric 改后需重建 collection |
 | `WEAVIATE_HOST` / `_GRPC_ADDRESS` / `_SCHEME` / `_AUTH_ENABLED` / `_API_KEY` / `_COLLECTION` | `weaviate:8080` / `weaviate:50051` / `http` | 容器内用服务名 |
 | `DORIS_ADDR` / `_HTTP_PORT` / `_DATABASE` / `_USERNAME` / `_PASSWORD` / `_TABLE_PREFIX` / `_COMPAT_MODE` | `doris-fe:9030` / 8030 / `weknora` / `root` / — / `weknora_embeddings` / `auto` | Doris 4.1+；compat 模式建表后不可互换 |
+| `CLICKHOUSE_ADDR` / `_DATABASE` / `_USERNAME` / `_PASSWORD` / `_TABLE_PREFIX` | `clickhouse:9000` / `weknora` / `default` / — / `weknora_embeddings` | ClickHouse 25.8+；PR1 仅 dense 向量检索，不支持关键词/hybrid；原生协议端口 9000，HTTP 8123 仅调试用 |
 | `TENCENT_VECTORDB_ADDR` / `_USERNAME` / `_API_KEY` / `_DATABASE` / `_COLLECTION` | — | 三项核心缺一跳过注册 |
 | `NEO4J_ENABLE` / `NEO4J_URI` / `_USERNAME` / `_PASSWORD` | `false` / `bolt://neo4j:7687` | 图谱检索（独立于向量引擎体系） |
 
@@ -102,7 +104,7 @@ flowchart TD
     ENV["环境变量 RETRIEVE_DRIVER=postgres,qdrant,..."] --> REG
     DB["DB 表 vector_stores (实例级绑定)"] --> LOAD["loadDBStoresIntoRegistry"]
     LOAD --> REG["RetrieveEngineRegistry"]
-    REG --> BET["byEngineType: postgres / elasticsearch / opensearch / qdrant / milvus / weaviate / doris / sqlite / tencent_vectordb"]
+    REG --> BET["byEngineType: postgres / elasticsearch / opensearch / qdrant / milvus / weaviate / doris / clickhouse / sqlite / tencent_vectordb"]
     REG --> BSI["byStoreID: store-uuid 到引擎实例"]
 
     Q["HybridSearch(kbIDs, params)"] --> GRP["resolveStoreGroups 按 (VectorStoreID, 属主租户) 分组"]
@@ -124,7 +126,7 @@ flowchart TD
 
 ### 引擎逐个详解 {#_2-引擎逐个详解}
 
-引擎类型常量见 `internal/types/retriever.go`：`postgres`、`elasticsearch`、`opensearch`、`qdrant`、`milvus`、`weaviate`、`doris`、`sqlite`、`tencent_vectordb`（另有 `infinity`、`elasticfaiss` 为遗留枚举，无可部署实现）。除特别注明外，所有引擎的 `Support()` 均返回 `[keywords, vector]` 两类。
+引擎类型常量见 `internal/types/retriever.go`：`postgres`、`elasticsearch`、`opensearch`、`qdrant`、`milvus`、`weaviate`、`doris`、`clickhouse`、`sqlite`、`tencent_vectordb`（另有 `infinity`、`elasticfaiss` 为遗留枚举，无可部署实现）。除特别注明外，所有引擎的 `Support()` 均返回 `[keywords, vector]` 两类；例外：ClickHouse 在 PR1 只返回 `[vector]`（关键词/hybrid 后续 PR），Elasticsearch v7 只返回 `[keywords]`。
 
 #### PostgreSQL（pgvector + ParadeDB）— 默认引擎 {#_2-1-postgresql-pgvector-paradedb-—-默认引擎}
 
@@ -222,7 +224,19 @@ flowchart TD
 - **写入**：DUPLICATE KEY 表按 id 显式 delete + insert 保持替换语义；enabled/tag 更新经 Stream Load partial update。
 - 配置：`DORIS_ADDR` / `DORIS_HTTP_PORT` / `DORIS_DATABASE` / `DORIS_USERNAME` / `DORIS_PASSWORD` / `DORIS_TABLE_PREFIX` / `DORIS_COMPAT_MODE`。
 
-#### 腾讯云 VectorDB {#_2-10-腾讯云-vectordb}
+#### ClickHouse（25.8+） {#_2-10-clickhouse-25-8}
+
+`internal/application/repository/retriever/clickhouse/`（`repository.go` + `schema.go` + `structs.go` + `query.go`）。clickhouse-go/v2 的 database/sql 驱动连原生协议（9000），与 Doris 相同的 `*sql.DB` + sqlmock 测试形态。
+
+- **版本要求**：必须 >= 25.8。`vector_similarity` HNSW 索引在 25.8 才 GA（生产可用），且索引声明必须带维度参数；旧版建表直接失败。compose 自带 `--profile clickhouse` 的 `clickhouse/clickhouse-server:25.8` 单节点。
+- **建表**：每维度一张表（前缀 `CLICKHOUSE_TABLE_PREFIX|weknora_embeddings`），`schema.go` 生成 DDL：`ENGINE = ReplacingMergeTree() ORDER BY id` + `INDEX idx_emb embedding TYPE vector_similarity('hnsw', 'cosineDistance', <dim>)`（量化/M/ef_construction 用默认值 bf16/32/128）。
+- **替换语义**：ClickHouse 的 `ALTER TABLE ... DELETE/UPDATE` 是异步 mutation，delete + insert 无法安全模拟"按 id 覆盖"（mutation 可能在新 part 落盘后才执行，把刚写入的行也删掉）；因此用 ReplacingMergeTree 按 `ORDER BY id` 去重，检索侧用 `FINAL` 在查询时完成去重。
+- **向量检索**：`score = 1 - cosineDistance(embedding, query)`（cosine 相似度，越大越相似），`ORDER BY cosineDistance(...) ASC LIMIT TopK`（命中 HNSW 索引的写法），`HAVING score >= threshold` 在 LIMIT 之前过滤，`WHERE is_enabled = 1` 过滤已关闭 chunk。
+- **删除**：`ALTER TABLE ... DELETE WHERE <field> IN (...)`（异步 mutation，生效前已删 chunk 仍可能被返回；一致性硬化在后续 PR）。
+- **PR1 范围外**：关键词检索（`Retrieve` 收到 keywords 类型直接报错）、hybrid RRF、metadata filter；`Support()` 只返回 `[vector]`。
+- 配置：`CLICKHOUSE_ADDR` / `CLICKHOUSE_DATABASE` / `CLICKHOUSE_USERNAME` / `CLICKHOUSE_PASSWORD` / `CLICKHOUSE_TABLE_PREFIX`。
+
+#### 腾讯云 VectorDB {#_2-11-腾讯云-vectordb}
 
 `internal/application/repository/retriever/tencentvectordb/repository.go`。RpcClient，EventualConsistency，10s 超时。
 
@@ -231,7 +245,7 @@ flowchart TD
 - **关键词检索**：本地 `encoder.SparseEncoder`（BM25）把查询编码为稀疏向量，对 `sparse_vector` 字段做稀疏检索，遍历匹配维度的所有 collection。
 - 配置：`TENCENT_VECTORDB_ADDR` / `TENCENT_VECTORDB_USERNAME` / `TENCENT_VECTORDB_API_KEY` / `TENCENT_VECTORDB_DATABASE` / `TENCENT_VECTORDB_COLLECTION`。三项核心配置缺一则跳过注册。
 
-#### Neo4j — 图谱检索（不在 Registry 体系内） {#_2-11-neo4j-—-图谱检索-不在-registry-体系内}
+#### Neo4j — 图谱检索（不在 Registry 体系内） {#_2-12-neo4j-—-图谱检索-不在-registry-体系内}
 
 `internal/application/repository/retriever/neo4j/repository.go` 实现的是 `RetrieveGraphRepository`（`SearchNode(ctx, NameSpace, entities)`），不是向量/关键词引擎：按 `NameSpace{KnowledgeBase, Knowledge}` 检索实体节点与关系，服务于 chat pipeline 的 `ENTITY_SEARCH` 阶段（GraphRAG）。由 `NEO4J_ENABLE=true` + `NEO4J_URI`/`NEO4J_USERNAME`/`NEO4J_PASSWORD` 启用。单次查询最多从 200 个种子实体展开、最多返回 2000 行，详见[知识图谱](09-knowledge-graph.md)。
 
@@ -245,6 +259,7 @@ WeKnora 允许不同 KB 使用不同 embedding 模型（维度各异），各引
 | SQLite | 每维度一张 `vec0` 虚表（启动时按存量数据维度自动补建） |
 | Qdrant / Milvus / TencentVectorDB | 每维度一个 collection：`{base}_{dim}`，首写时 `ensureCollection` 惰性创建（sync.Map 记忆已建维度） |
 | Doris | 每维度一张表：`{prefix}_{dim}`，`schema.go` 生成 DDL 并轮询 ANN 索引就绪 |
+| ClickHouse | 每维度一张表：`{prefix}_{dim}`，`schema.go` 生成 DDL（ReplacingMergeTree + HNSW，25.8+） |
 | Elasticsearch | 单索引 `dense_vector` mapping（`ELASTICSEARCH_INDEX`），维度在 mapping 中固定 |
 | OpenSearch | 按维度创建 `{OPENSEARCH_INDEX}_{dim}` 别名及物理索引；另有无维度的关键词索引 |
 
@@ -333,7 +348,7 @@ sequenceDiagram
 |------|----------|
 | 引擎注册（env + DB store） | `internal/container/container.go`（`initRetrieveEngineRegistry`）、`engine_factory.go` |
 | 注册表 / 组合引擎 / 工厂 | `internal/application/service/retriever/`（`registry.go`、`composite.go`、`factory.go`、`normalizer.go`） |
-| 各引擎实现 | `internal/application/repository/retriever/{postgres,sqlite,elasticsearch,opensearch,qdrant,milvus,weaviate,doris,tencentvectordb,neo4j}` |
+| 各引擎实现 | `internal/application/repository/retriever/{postgres,sqlite,elasticsearch,opensearch,qdrant,milvus,weaviate,doris,clickhouse,tencentvectordb,neo4j}` |
 | 混合检索调度与融合 | `internal/application/service/knowledgebase_search*.go` |
 | 引擎类型常量 | `internal/types/retriever.go` |
 | 租户默认引擎 | `internal/types/tenant.go`（`GetDefaultRetrieverEngines`） |

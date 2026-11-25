@@ -312,7 +312,7 @@ func TestGetVectorStoreTypes(t *testing.T) {
 	types := GetVectorStoreTypes()
 
 	t.Run("returns supported external engine types (excludes postgres and sqlite)", func(t *testing.T) {
-		assert.Len(t, types, 7)
+		assert.Len(t, types, 8)
 	})
 
 	t.Run("type names match engine constants", func(t *testing.T) {
@@ -326,6 +326,7 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		assert.Contains(t, typeNames, "tencent_vectordb")
 		assert.Contains(t, typeNames, "weaviate")
 		assert.Contains(t, typeNames, "doris")
+		assert.Contains(t, typeNames, "clickhouse")
 		assert.Contains(t, typeNames, "opensearch")
 		assert.NotContains(t, typeNames, "postgres")
 		assert.NotContains(t, typeNames, "sqlite")
@@ -348,6 +349,28 @@ func TestGetVectorStoreTypes(t *testing.T) {
 			seen[f.Name] = f
 		}
 		assert.True(t, seen["addr"].Required)
+		assert.True(t, seen["database"].Required)
+		assert.True(t, seen["password"].Sensitive)
+	})
+
+	t.Run("clickhouse has connection and index fields", func(t *testing.T) {
+		var clickhouseType VectorStoreTypeInfo
+		for _, typ := range types {
+			if typ.Type == "clickhouse" {
+				clickhouseType = typ
+				break
+			}
+		}
+		require.NotEmpty(t, clickhouseType.ConnectionFields)
+		require.NotEmpty(t, clickhouseType.IndexFields)
+
+		// addr and database are required; native protocol default port 9000
+		seen := map[string]VectorStoreFieldInfo{}
+		for _, f := range clickhouseType.ConnectionFields {
+			seen[f.Name] = f
+		}
+		assert.True(t, seen["addr"].Required)
+		assert.Equal(t, "clickhouse:9000", seen["addr"].Default)
 		assert.True(t, seen["database"].Required)
 		assert.True(t, seen["password"].Sensitive)
 	})

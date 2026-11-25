@@ -41,6 +41,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	clickhouseRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/clickhouse"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
@@ -1801,6 +1802,45 @@ func initRetrieveEngineRegistry(
 				log.Errorf("Register doris retrieve engine failed: %v", err)
 			} else {
 				log.Infof("Register doris retrieve engine success: %s db=%s", dorisAddr, dorisDatabase)
+			}
+		}
+	}
+	if slices.Contains(retrieveDriver, "clickhouse") {
+		clickhouseAddr := os.Getenv("CLICKHOUSE_ADDR")
+		if clickhouseAddr == "" {
+			// docker-compose 默认服务名 + ClickHouse 原生协议端口
+			clickhouseAddr = "clickhouse:9000"
+		}
+		clickhouseDatabase := os.Getenv("CLICKHOUSE_DATABASE")
+		if clickhouseDatabase == "" {
+			clickhouseDatabase = "weknora"
+		}
+		clickhouseUsername := os.Getenv("CLICKHOUSE_USERNAME")
+		if clickhouseUsername == "" {
+			clickhouseUsername = "default"
+		}
+		clickhousePassword := os.Getenv("CLICKHOUSE_PASSWORD")
+
+		clickhouseDB, err := sql.Open("clickhouse",
+			clickhouseRepo.BuildDSN(clickhouseAddr, clickhouseUsername, clickhousePassword, clickhouseDatabase))
+		if err != nil {
+			log.Errorf("Create clickhouse client failed: %v", err)
+		} else {
+			clickhouseDB.SetMaxOpenConns(20)
+			clickhouseDB.SetMaxIdleConns(5)
+			clickhouseDB.SetConnMaxLifetime(time.Hour)
+
+			clickhouseRepository := clickhouseRepo.NewClickhouseRetrieveEngineRepository(
+				clickhouseDB, clickhouseDatabase, nil,
+			)
+			if err := registry.Register(
+				retriever.NewKVHybridRetrieveEngine(
+					clickhouseRepository, types.ClickhouseRetrieverEngineType,
+				),
+			); err != nil {
+				log.Errorf("Register clickhouse retrieve engine failed: %v", err)
+			} else {
+				log.Infof("Register clickhouse retrieve engine success: %s db=%s", clickhouseAddr, clickhouseDatabase)
 			}
 		}
 	}

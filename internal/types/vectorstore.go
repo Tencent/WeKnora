@@ -90,6 +90,7 @@ var validEngineTypes = map[RetrieverEngineType]bool{
 	MilvusRetrieverEngineType:          true,
 	WeaviateRetrieverEngineType:        true,
 	DorisRetrieverEngineType:           true,
+	ClickhouseRetrieverEngineType:      true,
 	TencentVectorDBRetrieverEngineType: true,
 	OpenSearchRetrieverEngineType:      true,
 }
@@ -143,7 +144,7 @@ type ConnectionConfig struct {
 	GrpcAddress string `yaml:"grpc_address" json:"grpc_address,omitempty"`
 	Scheme      string `yaml:"scheme" json:"scheme,omitempty"`
 	// Database name used by engines that support database-level namespaces
-	// (currently Milvus, Tencent VectorDB, and Doris).
+	// (currently Milvus, Tencent VectorDB, Doris, and ClickHouse).
 	Database string `yaml:"database" json:"database,omitempty"`
 	// Postgres
 	UseDefaultConnection bool `yaml:"use_default_connection" json:"use_default_connection,omitempty"`
@@ -315,6 +316,16 @@ func (c IndexConfig) GetIndexNameOrDefault(engineType RetrieverEngineType) strin
 		return "Weknora_embeddings"
 	case DorisRetrieverEngineType:
 		// Doris uses the prefix as the table base name; per-dimension tables are
+		// suffixed with _<dim> at runtime by the repository layer.
+		if c.CollectionPrefix != "" {
+			return c.CollectionPrefix
+		}
+		if c.CollectionName != "" {
+			return c.CollectionName
+		}
+		return "weknora_embeddings"
+	case ClickhouseRetrieverEngineType:
+		// ClickHouse uses the prefix as the table base name; per-dimension tables are
 		// suffixed with _<dim> at runtime by the repository layer.
 		if c.CollectionPrefix != "" {
 			return c.CollectionPrefix
@@ -761,6 +772,19 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 			},
 		},
 		{
+			Type:        "clickhouse",
+			DisplayName: "ClickHouse",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{Name: "addr", Type: "string", Required: true, Description: "Native Protocol Address (host:port)", Default: "clickhouse:9000"},
+				{Name: "database", Type: "string", Required: true, Description: "Database", Default: "weknora"},
+				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "default"},
+				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
+			},
+			IndexFields: []VectorStoreFieldInfo{
+				{Name: "collection_prefix", Type: "string", Required: false, Description: "Table Prefix", Default: "weknora_embeddings"},
+			},
+		},
+		{
 			Type:        "opensearch",
 			DisplayName: "OpenSearch",
 			ConnectionFields: []VectorStoreFieldInfo{
@@ -979,6 +1003,21 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 			},
 			IndexConfig: IndexConfig{
 				CollectionPrefix: envLookup("DORIS_TABLE_PREFIX"),
+			},
+		}
+	case "clickhouse":
+		return &VectorStore{
+			ID:         "__env_clickhouse__",
+			Name:       "ClickHouse",
+			EngineType: ClickhouseRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				Addr:     envLookup("CLICKHOUSE_ADDR"),
+				Database: envLookup("CLICKHOUSE_DATABASE"),
+				Username: envLookup("CLICKHOUSE_USERNAME"),
+				Password: envLookup("CLICKHOUSE_PASSWORD"),
+			},
+			IndexConfig: IndexConfig{
+				CollectionPrefix: envLookup("CLICKHOUSE_TABLE_PREFIX"),
 			},
 		}
 	default:
