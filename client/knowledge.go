@@ -89,7 +89,9 @@ var ErrDuplicateURL = errors.New("URL already exists")
 // KnowledgeProcessOverrides stores per-upload parse config overrides sent as process_config.
 // When nil, the server uses the knowledge base defaults only.
 type KnowledgeProcessOverrides struct {
-	ParserEngineRules        []ParserEngineRule        `json:"parser_engine_rules,omitempty"`
+	// ParserEngineRules inherits when nil and resets to the server's
+	// type-level defaults when explicitly empty.
+	ParserEngineRules        []ParserEngineRule        `json:"parser_engine_rules,omitzero"`
 	ChunkingConfig           *ChunkingConfig           `json:"chunking_config,omitempty"`
 	EnableMultimodel         *bool                     `json:"enable_multimodel,omitempty"`
 	VLMConfig                *VLMConfig                `json:"vlm_config,omitempty"`

@@ -3,8 +3,11 @@ package types
 // KnowledgeProcessOverrides stores per-upload parse config overrides in knowledge metadata.
 type KnowledgeProcessOverrides struct {
 	// SummaryEnabled defaults to true when omitted for backward compatibility.
-	SummaryEnabled           *bool                     `json:"summary_enabled,omitempty"`
-	ParserEngineRules        []ParserEngineRule        `json:"parser_engine_rules,omitempty"`
+	SummaryEnabled *bool `json:"summary_enabled,omitempty"`
+	// ParserEngineRules replaces the knowledge base rules when provided. A
+	// nil slice inherits them; an empty slice selects type-level defaults.
+	// Keep an explicit empty slice when persisting this override as JSON.
+	ParserEngineRules        []ParserEngineRule        `json:"parser_engine_rules,omitzero"`
 	ChunkingConfig           *ChunkingConfig           `json:"chunking_config,omitempty"`
 	EnableMultimodel         *bool                     `json:"enable_multimodel,omitempty"`
 	VLMConfig                *VLMConfig                `json:"vlm_config,omitempty"`

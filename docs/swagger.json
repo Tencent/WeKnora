@@ -32443,6 +32443,7 @@
                     }
                 },
                 "parser_engine_rules": {
+                    "description": "ParserEngineRules replaces the knowledge base rules when provided. A\nnil slice inherits them; an empty slice selects type-level defaults.\nKeep an explicit empty slice when persisting this override as JSON.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
