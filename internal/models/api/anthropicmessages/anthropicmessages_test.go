@@ -141,7 +141,8 @@ func TestBuildRequestBody_ExtraBodyExtendsThinking(t *testing.T) {
 	})
 	off := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
 		&api.Options{ReasoningEffort: api.ReasoningOff}, false)
-	assert.Equal(t, map[string]any{"type": "between_tools", "block_binding": binding}, off["thinking"])
+	// The off variant does not accept block_binding.
+	assert.Equal(t, map[string]any{"type": "between_tools"}, off["thinking"])
 
 	on := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
 		&api.Options{ReasoningEffort: api.ReasoningHigh}, false)
