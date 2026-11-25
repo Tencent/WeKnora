@@ -71,6 +71,8 @@ const (
 
 // AgentStreamResponse agent streaming response
 type AgentStreamResponse struct {
+	Usage *TokenUsage `json:"usage,omitempty"`
+
 	ID                  string                 `json:"id"`                   // Unique identifier
 	ResponseType        AgentResponseType      `json:"response_type"`        // Response type
 	Content             string                 `json:"content,omitempty"`    // Current content fragment

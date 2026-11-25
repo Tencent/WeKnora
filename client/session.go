@@ -294,6 +294,8 @@ const (
 
 // StreamResponse streaming response
 type StreamResponse struct {
+	Usage *TokenUsage `json:"usage,omitempty"`
+
 	ID                  string                 `json:"id"`                             // Unique identifier
 	ResponseType        ResponseType           `json:"response_type"`                  // Response type
 	Content             string                 `json:"content"`                        // Current content fragment
