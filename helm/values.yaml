@@ -480,7 +480,8 @@ minio:
   enabled: false
   image:
     repository: pgsty/minio
-    tag: latest
+    # -- Image tag (matches docker-compose.yml)
+    tag: "RELEASE.2026-08-04T00-00-00Z"
   # -- Root user
   rootUser: minioadmin
   # -- Root password (REQUIRED if enabled)
@@ -549,7 +550,8 @@ qdrant:
   enabled: false
   image:
     repository: qdrant/qdrant
-    tag: latest
+    # -- Image tag (matches docker-compose.yml)
+    tag: "v1.16.2"
   persistence:
     enabled: true
     size: 10Gi
