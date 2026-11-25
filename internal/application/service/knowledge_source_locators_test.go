@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -68,7 +70,7 @@ func TestBuildSourceIndexFollowsRewritesAndPlacesImages(t *testing.T) {
 		{Start: 9, End: len([]rune(parsed)), Locator: types.SourceLocator{Type: types.SourceLocatorPDF, Page: 2}},
 	}
 	images := []docparser.StoredImage{{ServingURL: "local://tenant/p2.jpg"}}
-	idx := buildSourceIndex(parsed, blocks, final, images)
+	idx := buildSourceIndex(parsed, blocks, final, images, nil)
 	require.NotNil(t, idx)
 	locs := idx.Locators(0, 5)
 	require.Len(t, locs, 1)
@@ -76,5 +78,109 @@ func TestBuildSourceIndexFollowsRewritesAndPlacesImages(t *testing.T) {
 	require.Len(t, images[0].SourceLocators, 1)
 	assert.Equal(t, 2, images[0].SourceLocators[0].Page)
 
-	assert.Nil(t, buildSourceIndex("x", nil, "x", nil))
+	assert.Nil(t, buildSourceIndex("x", nil, "x", nil, nil))
+}
+
+// sheetMarkdown builds a sheet whose only text is one caption block, followed
+// by count image references: the shape that put 274 images of the 5-2 volume on
+// page 26. Each image reference is rewritten to a serving URL, as ingestion does
+// before the chunker runs.
+func sheetMarkdown(count int) (parsed, final string, images []docparser.StoredImage,
+	locators map[string]types.SourceLocator,
+) {
+	var parsedB, finalB strings.Builder
+	parsedB.WriteString("图签文字")
+	finalB.WriteString("图签文字")
+	locators = make(map[string]types.SourceLocator, count)
+	images = make([]docparser.StoredImage, 0, count)
+	for i := 0; i < count; i++ {
+		ref := fmt.Sprintf("images/page_%d_image_0.jpg", i+2)
+		serving := fmt.Sprintf("local://tenant/%d.jpg", i)
+		parsedB.WriteString("\n\n![](" + ref + ")")
+		finalB.WriteString("\n\n![](" + serving + ")")
+		images = append(images, docparser.StoredImage{OriginalRef: ref, ServingURL: serving})
+		locators[ref] = types.SourceLocator{
+			Type:     types.SourceLocatorPDF,
+			Page:     i + 2,
+			SourceID: fmt.Sprintf("mineru:2:%d:8/0", i+1),
+			BBox:     []float64{0.1, 0.2, 0.3, 0.4},
+		}
+	}
+	return parsedB.String(), finalB.String(), images, locators
+}
+
+// One caption block followed by a hundred figures: inheriting the page of the
+// text above puts all of them on page 1, which is what the gallery showed. The
+// page the layout recorded for each image has to win.
+func TestBuildSourceIndexPlacesEachLaidOutImageOnItsOwnPage(t *testing.T) {
+	const count = 100
+	parsed, final, images, locators := sheetMarkdown(count)
+	// The single text block covers the caption and nothing else: every image
+	// below it has no containing block at all.
+	blocks := []types.SourceBlock{{
+		Start:   0,
+		End:     4,
+		Locator: types.SourceLocator{Type: types.SourceLocatorPDF, Page: 1, SourceID: "mineru:2:25:7"},
+	}}
+
+	idx := buildSourceIndex(parsed, blocks, final, images, locators)
+	require.NotNil(t, idx)
+
+	pages := make(map[int]int, count)
+	sourceIDs := make(map[string]int, count)
+	for _, image := range images {
+		require.Len(t, image.SourceLocators, 1, image.OriginalRef)
+		loc := image.SourceLocators[0]
+		require.False(t, loc.Partial, "a layout-placed image knows its page and region")
+		require.Len(t, loc.BBox, 4, image.OriginalRef)
+		pages[loc.Page]++
+		sourceIDs[loc.SourceID]++
+	}
+	require.Len(t, pages, count, "every image keeps its own page")
+	require.Len(t, sourceIDs, count, "every image keeps its own block")
+	require.NotContains(t, pages, 1, "no image inherits the caption page")
+	require.Equal(t, 2, images[0].SourceLocators[0].Page)
+	require.Equal(t, count+1, images[count-1].SourceLocators[0].Page)
+}
+
+// A parser that reports no image geometry keeps the old behaviour: the image
+// takes the page of the text it follows rather than losing its page.
+func TestBuildSourceIndexFallsBackToPrecedingBlockWithoutLayoutLocator(t *testing.T) {
+	parsed, final, images, _ := sheetMarkdown(3)
+	blocks := []types.SourceBlock{{
+		Start:   0,
+		End:     4,
+		Locator: types.SourceLocator{Type: types.SourceLocatorPDF, Page: 1, SourceID: "mineru:2:25:7"},
+	}}
+
+	buildSourceIndex(parsed, blocks, final, images, nil)
+
+	for _, image := range images {
+		require.Len(t, image.SourceLocators, 1, image.OriginalRef)
+		require.Equal(t, 1, image.SourceLocators[0].Page)
+		require.Equal(t, "mineru:2:25:7", image.SourceLocators[0].SourceID,
+			"the page still comes from the text block, not from an image block")
+	}
+}
+
+// A layout locator is keyed by the image reference, so an image the layout did
+// not report keeps the offset-based fallback even when its siblings have one.
+func TestBuildSourceIndexMixesLayoutAndFallbackPlacement(t *testing.T) {
+	parsed, final, images, locators := sheetMarkdown(3)
+	delete(locators, images[1].OriginalRef)
+	blocks := []types.SourceBlock{{
+		Start:   0,
+		End:     4,
+		Locator: types.SourceLocator{Type: types.SourceLocatorPDF, Page: 1, SourceID: "mineru:2:25:7"},
+	}}
+
+	buildSourceIndex(parsed, blocks, final, images, locators)
+
+	require.Equal(t, 2, images[0].SourceLocators[0].Page)
+	require.Equal(t, "mineru:2:1:8/0", images[0].SourceLocators[0].SourceID)
+	require.Equal(t, 1, images[1].SourceLocators[0].Page)
+	require.Equal(t, "mineru:2:25:7", images[1].SourceLocators[0].SourceID,
+		"the image the layout did not report keeps the offset-based fallback")
+	require.Equal(t, 4, images[2].SourceLocators[0].Page)
+	require.Equal(t, "mineru:2:3:8/0", images[2].SourceLocators[0].SourceID)
 }
