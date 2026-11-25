@@ -116,3 +116,9 @@ test('missing and invalid export timestamps have a deterministic fallback', asyn
   ])
   assert.deepEqual(result.map(message => message.id), ['missing', 'invalid', 'valid'])
 })
+
+test('export keeps citation-shaped examples in the original user question', () => {
+  const content = 'What does `<kb doc="manual" />` mean?'
+  const output = buildSessionMarkdown({ sessionId: 's', title: 'Help', labels, messages: [{ role: 'user', content }] })
+  assert.ok(output.includes(content))
+})
