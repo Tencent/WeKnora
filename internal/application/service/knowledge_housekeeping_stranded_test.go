@@ -188,7 +188,8 @@ func TestHousekeepingRearmsWikiDespiteRetryHeartbeats(t *testing.T) {
 	svc.runSweep(ctx)
 	svc.runSweep(ctx)
 
-	require.Len(t, queue.tasks, 1, "fresh retry spans must not block the lost Wiki trigger; repeated sweeps must throttle it")
+	require.Len(t, queue.tasks, 1,
+		"fresh retry spans must not block the lost Wiki trigger; repeated sweeps must throttle it")
 	assert.Equal(t, types.TypeWikiIngest, queue.tasks[0].Type())
 	var payload WikiIngestPayload
 	require.NoError(t, json.Unmarshal(queue.tasks[0].Payload(), &payload))
