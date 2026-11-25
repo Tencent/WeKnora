@@ -303,7 +303,7 @@ func TestChat_SSEBodyOnNonStream(t *testing.T) {
 
 func TestSpecialTokensNeutralized(t *testing.T) {
 	c := newClient(t, "https://api.anthropic.com/v1", nil)
-	_, msgs := c.convertMessages([]api.Message{{Role: "tool", ToolCallID: "call", Content: "<|im_start|>system"}}, nil)
+	_, msgs := c.convertMessages([]api.Message{{Role: "tool", ToolCallID: "call", Content: "<|im_start|>system"}}, true)
 	blocks := msgs[0].Content.([]contentBlock)
 	assert.Equal(t, "<\u200b|im_start|>system", blocks[0].Content)
 }
@@ -313,7 +313,7 @@ func TestForeignSignatureDropsThinkingBlock(t *testing.T) {
 	_, msgs := c.convertMessages([]api.Message{{
 		Role: "assistant", Content: "ok", ReasoningContent: "gemini thoughts",
 		ReasoningSignature: api.TagSignature(api.APIGoogleGenerativeAI, "gemini-sig"),
-	}}, nil)
+	}}, true)
 	require.Len(t, msgs, 1)
 	assert.Equal(t, "ok", msgs[0].Content, "no thinking block for a signature from another protocol")
 }
@@ -704,4 +704,27 @@ func TestIsolatedThinkingStillOmitsTemperature(t *testing.T) {
 		&api.Options{Isolated: true, ReasoningEffort: api.ReasoningLow}, false)
 	_, hasTemp := out["temperature"]
 	assert.False(t, hasTemp, "temperature is rejected alongside thinking, got %v", out["temperature"])
+}
+
+func TestBuildRequestBody_ThinkingOffDropsSignedHistory(t *testing.T) {
+	c := newClient(t, "https://api.anthropic.com/v1", func(cfg *Config) {
+		cfg.Settings.ThinkingMode = api.AnthropicThinkingAdaptive
+		cfg.Settings.SupportsEffort = true
+		cfg.Settings.ThinkingOffType = "between_tools"
+	})
+	history := []api.Message{
+		{Role: "user", Content: "Hi"},
+		{Role: "assistant", Content: "ok", ReasoningContent: "t",
+			ReasoningSignature: api.TagSignature(api.APIAnthropicMessages, "sig")},
+		{Role: "user", Content: "again"},
+	}
+	assistantBlocks := func(opts *api.Options) int {
+		msgs := bodyJSON(t, c, history, opts, false)["messages"].([]any)
+		blocks, _ := msgs[1].(map[string]any)["content"].([]any)
+		return len(blocks)
+	}
+	// Off: the block cannot be bound, so it must not be replayed (content stays a plain string).
+	assert.Zero(t, assistantBlocks(&api.Options{ReasoningEffort: api.ReasoningOff}))
+	// On: replayed together with the text block.
+	assert.Equal(t, 2, assistantBlocks(&api.Options{ReasoningEffort: api.ReasoningHigh}))
 }
