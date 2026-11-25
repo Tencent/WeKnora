@@ -954,7 +954,9 @@ const apiBaseUrl = computed(() => {
   }
   const configured = getApiBaseUrl().trim().replace(/\/$/, '')
   const origin = typeof window !== 'undefined' && window.location.origin !== 'null' ? window.location.origin : ''
-  return `${configured || origin}/api/v1`
+  // Always an absolute URL so the curl examples stay copy-pasteable under a
+  // subpath prefix (a bare "/weknora/api/v1" is not a valid curl URL).
+  return `${origin}${configured}/api/v1`
 })
 
 const showLanUrlUnavailableHint = computed(() => (

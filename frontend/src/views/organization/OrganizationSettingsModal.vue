@@ -757,6 +757,7 @@ import { useModalShell } from '@/composables/useModalShell'
 import SettingsModalShell from '@/components/SettingsModalShell.vue'
 import { useI18n } from 'vue-i18n'
 import { copyWithToast } from '@/utils/clipboard'
+import { getApiBaseUrl } from '@/utils/api-base'
 import {
   getOrganization,
   listOrgShares,
@@ -1211,7 +1212,7 @@ const isOwnerMember = (member: OrganizationMember): boolean => {
 
 const inviteLink = computed(() => {
   if (!inviteCode.value) return ''
-  return `${window.location.origin}/join?code=${inviteCode.value}`
+  return `${window.location.origin}${getApiBaseUrl()}/join?code=${inviteCode.value}`
 })
 
 const inviteValidityOptions = computed(() => [

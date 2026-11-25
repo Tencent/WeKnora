@@ -34,6 +34,34 @@ The external OIDC callback URL should be registered with the identity provider a
 https://example.com/weknora/api/v1/auth/oidc/callback
 ```
 
+## Docker Compose (built-in prefix)
+
+When deploying with the shipped `docker-compose.yml`, set one variable
+instead of configuring an external gateway:
+
+```dotenv
+APP_BASE_PATH=/weknora
+```
+
+Then rebuild the frontend image (the base path is baked in at build time)
+and restart both services:
+
+```bash
+docker compose build frontend
+docker compose up -d app frontend
+```
+
+With `APP_BASE_PATH` set, the internal Nginx routes `/weknora/*` (static
+files, `/api/`, `/mcp/`, `/r/`, `/embed/`, `/files/`) and the backend
+strips the prefix before routing, so no external gateway stripping is
+needed. The external-gateway setup below remains supported: a gateway that
+strips the prefix also works, because root paths pass through unchanged.
+
+Absolute URLs that leave WeKnora still need the prefix in their own
+settings: `FRONTEND_BASE_URL=https://example.com/weknora` for invite
+links, and `APP_EXTERNAL_URL=https://example.com/weknora` when IM image
+links are routed through `/r/`.
+
 ## Reverse Proxy
 
 The external gateway should remove `/weknora/` before forwarding requests to the internal frontend Nginx server.
@@ -82,5 +110,9 @@ The internal frontend Nginx configuration continues to serve files and proxy API
 - Root-path deployments remain the default when `VITE_BASE_PATH` is unset.
 - Changing `VITE_BASE_PATH` requires rebuilding the frontend assets or image.
 - This configuration does not provide runtime-switchable base paths.
+- MCP OAuth redirects, protected file images and embed snippet URLs follow
+  the configured base path. The commented-out dedicated embed-subdomain
+  Nginx block in `frontend/nginx.conf` is not prefix-aware, and the Helm
+  chart does not wire `APP_BASE_PATH` yet.
 - Auxiliary integrations and complete embedded-page workflows require separate validation.
 - Full OIDC login with a live identity provider should be verified before production rollout.

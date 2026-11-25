@@ -9,6 +9,10 @@ services:
       context: ./frontend
       args:
         VITE_FRONTEND_COMMIT: ${VITE_FRONTEND_COMMIT:-unknown}
+        # Subpath prefix the SPA is built with (APP_BASE_PATH, e.g. /weknora).
+        # Must match the runtime APP_BASE_PATH below; changing it requires
+        # rebuilding the frontend image. Defaults to root serving.
+        VITE_BASE_PATH: ${APP_BASE_PATH:-/}
         NPM_REGISTRY: ${NPM_REGISTRY:-}
         NODE_MAX_OLD_SPACE_SIZE: ${NODE_MAX_OLD_SPACE_SIZE:-4096}
     container_name: WeKnora-frontend
@@ -18,6 +22,7 @@ services:
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
       - MAX_SKILL_BUNDLE_SIZE_MB=${MAX_SKILL_BUNDLE_SIZE_MB:-256}
       - DEFAULT_LOCALE=${DEFAULT_LOCALE:-}
+      - APP_BASE_PATH=${APP_BASE_PATH:-}
       - APP_HOST=${APP_HOST:-app}
       # APP_BACKEND_PORT: the port NGINX proxies to (default 8080).
       # For local deployment this is the App container's listening port, independent of host-mapped APP_PORT.
@@ -119,6 +124,9 @@ services:
       # - APP_EXTERNAL_URL=${APP_EXTERNAL_URL:-}
       # 前端外部 origin，用于邀请链接等绝对 URL（留空走 host-relative）
       - FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-}
+      # 应用访问前缀：子路径部署时设为 /weknora 等路径（留空为根路径）。
+      # 后端去前缀、nginx 前缀路由；前端构建时由上方 VITE_BASE_PATH 注入。
+      - APP_BASE_PATH=${APP_BASE_PATH:-}
       # ========== 对象存储 - 腾讯云 COS ==========
       - COS_SECRET_ID=${COS_SECRET_ID:-}
       - COS_SECRET_KEY=${COS_SECRET_KEY:-}

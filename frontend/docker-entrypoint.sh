@@ -36,7 +36,27 @@ export MAX_SKILL_BUNDLE_SIZE=${SKILL_MB}M
 export APP_HOST=${APP_HOST:-app}
 export APP_PORT=${APP_PORT:-8080}
 export APP_SCHEME=${APP_SCHEME:-http}
-envsubst '${MAX_FILE_SIZE} ${MAX_SKILL_BUNDLE_SIZE} ${APP_HOST} ${APP_PORT} ${APP_SCHEME}' \
+# Public path prefix (APP_BASE_PATH, e.g. /weknora): empty or "/" means root
+# serving. Normalize to a clean root-relative path; values with whitespace
+# or nginx metacharacters are rejected (fail closed to root) so a typo can
+# never break the nginx config.
+APP_BASE_PATH=${APP_BASE_PATH:-}
+case "$APP_BASE_PATH" in
+  *[[:space:]]*|*';'*|*'{'*|*'}'*|*'#'*|*'\'*|*'"'*|*'$'*)
+    echo "warning: ignoring invalid APP_BASE_PATH '$APP_BASE_PATH'" >&2
+    APP_BASE_PATH=""
+    ;;
+esac
+while [ -n "$APP_BASE_PATH" ] && [ "$APP_BASE_PATH" != "${APP_BASE_PATH%/}" ]; do
+  APP_BASE_PATH=${APP_BASE_PATH%/}
+done
+case "$APP_BASE_PATH" in
+  ""|"/") APP_BASE_PATH="" ;;
+  /*) : ;;
+  *) APP_BASE_PATH="/${APP_BASE_PATH}" ;;
+esac
+export APP_BASE_PATH
+envsubst '${MAX_FILE_SIZE} ${MAX_SKILL_BUNDLE_SIZE} ${APP_HOST} ${APP_PORT} ${APP_SCHEME} ${APP_BASE_PATH}' \
   < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
 
 # 启动 nginx

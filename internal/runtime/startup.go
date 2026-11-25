@@ -79,6 +79,7 @@ var startupEnvVars = []envVarSpec{
 	{name: "JWT_SECRET", sensitive: true},
 	// Runtime
 	{name: "GIN_MODE"},
+	{name: "APP_BASE_PATH"},
 	{name: "AUTO_MIGRATE"},
 	// Database
 	{name: "DB_DRIVER"},

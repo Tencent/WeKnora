@@ -31,6 +31,9 @@ def check():
         for key, value in {
             "APP_SCHEME": "http", "APP_HOST": "127.0.0.1", "APP_PORT": "18081",
             "MAX_FILE_SIZE": "50m", "MAX_SKILL_BUNDLE_SIZE": "100m",
+            # Root deployment under test: the prefix is empty, so locations
+            # render exactly as before (e.g. location /api/).
+            "APP_BASE_PATH": "",
         }.items():
             config = config.replace("${" + key + "}", value)
         config = config.replace("/usr/share/nginx/html", "/check/web")

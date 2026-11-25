@@ -591,6 +591,7 @@ import { ref, onMounted, watch, onUnmounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { copyWithToast } from '@/utils/clipboard';
+import { getApiBaseUrl } from '@/utils/api-base';
 import { normalizeOptionalString } from '@/utils/optionalString';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
@@ -958,7 +959,7 @@ async function loadChannels() {
 
 function getCallbackUrl(channel: IMChannel): string {
   const base = window.location.origin;
-  return `${base}/api/v1/im/callback/${channel.id}`;
+  return `${base}${getApiBaseUrl()}/api/v1/im/callback/${channel.id}`;
 }
 
 async function copyUrl(channel: IMChannel) {
