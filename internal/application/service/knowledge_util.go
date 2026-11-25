@@ -25,10 +25,11 @@ import (
 // unknownFileType is returned by getFileType when a name carries no extension.
 const unknownFileType = "unknown"
 
-// dataTableFileExtensions are the spreadsheet formats that get an extra
-// table-summary task after their document-process task.
+// dataTableFileExtensions are the tabular formats that get an extra
+// table-summary task after their document-process task: spreadsheets, and
+// Word documents whose tables are loaded the same way.
 var dataTableFileExtensions = map[string]struct{}{
-	"csv": {}, "xlsx": {}, "xls": {},
+	"csv": {}, "xlsx": {}, "xls": {}, "docx": {},
 }
 
 // normalizeFileExtension delegates to the shared helper; kept so the many

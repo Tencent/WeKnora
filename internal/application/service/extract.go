@@ -550,8 +550,8 @@ func (s *DataTableSummaryService) prepareResources(
 
 	// 验证文件类型
 	fileType := strings.ToLower(knowledge.FileType)
-	if fileType != "csv" && fileType != "xlsx" && fileType != "xls" {
-		logger.Warnf(ctx, "knowledge %s is not a CSV or Excel file, skipping table summary", payload.KnowledgeID)
+	if fileType != "csv" && fileType != "xlsx" && fileType != "xls" && fileType != "docx" {
+		logger.Warnf(ctx, "knowledge %s is not a CSV, Excel, or Word file, skipping table summary", payload.KnowledgeID)
 		return nil, fmt.Errorf("unsupported file type: %s", fileType)
 	}
 
