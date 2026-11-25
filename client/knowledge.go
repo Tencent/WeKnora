@@ -366,10 +366,10 @@ func (c *Client) ListKnowledgeWithFilter(ctx context.Context,
 		queryParams.Add("source", filter.Source)
 	}
 	if !filter.StartTime.IsZero() {
-		queryParams.Add("start_time", filter.StartTime.Format(time.RFC3339))
+		queryParams.Add("start_time", filter.StartTime.Format(time.RFC3339Nano))
 	}
 	if !filter.EndTime.IsZero() {
-		queryParams.Add("end_time", filter.EndTime.Format(time.RFC3339))
+		queryParams.Add("end_time", filter.EndTime.Format(time.RFC3339Nano))
 	}
 	if filter.FolderPath != nil {
 		queryParams.Add("folder_path", *filter.FolderPath)
