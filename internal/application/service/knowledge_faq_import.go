@@ -2070,7 +2070,7 @@ func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 	if needDelete {
 		deleteStartTime := time.Now()
 		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
-			logger.Warnf(ctx, "Delete FAQ vectors failed: %v", err)
+			return fmt.Errorf("delete previous FAQ vectors: %w", err)
 		}
 		deleteDuration = time.Since(deleteStartTime)
 		if deleteDuration > 100*time.Millisecond {

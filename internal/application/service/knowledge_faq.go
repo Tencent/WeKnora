@@ -347,22 +347,8 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// 获取旧的相似问列表，用于增量更新
-	var oldSimilarQuestions []string
-	var oldStandardQuestion string
-	var oldAnswers []string
-	questionIndexMode := types.FAQQuestionIndexModeCombined
-	if kb.FAQConfig != nil && kb.FAQConfig.QuestionIndexMode != "" {
-		questionIndexMode = kb.FAQConfig.QuestionIndexMode
-	}
 	if existing, err := chunk.FAQMetadata(); err == nil && existing != nil {
 		meta.Version = existing.Version + 1
-		// 保存旧的内容用于增量比较
-		if questionIndexMode == types.FAQQuestionIndexModeSeparate {
-			oldSimilarQuestions = existing.SimilarQuestions
-			oldStandardQuestion = existing.StandardQuestion
-			oldAnswers = existing.Answers
-		}
 	}
 	if err := chunk.SetFAQMetadata(meta); err != nil {
 		return nil, err
@@ -415,22 +401,11 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// 增量索引优化：只对变化的内容进行索引操作
-	if questionIndexMode == types.FAQQuestionIndexModeSeparate && len(oldSimilarQuestions) > 0 {
-		// 分别索引模式下的增量更新
-		if err := s.incrementalIndexFAQEntry(ctx, kb, faqKnowledge, chunk, embeddingModel,
-			oldStandardQuestion, oldSimilarQuestions, oldAnswers, meta); err != nil {
-			return nil, err
-		}
-	} else {
-		// Combined 模式或首次创建，使用全量索引。needDelete=true 按 chunk
-		// 删除该条目的全部旧索引（含已移除的相似问），再整体重建。
-		// 同一 SourceID 重建索引并非所有引擎都会覆盖（ES v8、Qdrant 每次写入
-		// 生成新文档 ID），不先删会留下过期内容。
-		err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, true)
-		if err != nil {
-			return nil, err
-		}
+	// Full builds and historical incremental edits can leave both positional and
+	// hashed source IDs. Replace all vectors for this chunk, including aliases
+	// no longer present in its metadata.
+	if err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, true); err != nil {
+		return nil, err
 	}
 
 	// Build tag seq_id map for conversion
