@@ -292,7 +292,19 @@ func (r *wikiPageRepository) DeleteRevisionsByPage(ctx context.Context, pageID s
 // pages appear as v2 on first view and confuse users who expect `version` to
 // correspond to the number of intentional revisions.
 func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *types.WikiPage) error {
-	result := r.db.WithContext(ctx).
+	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
+				return err
+			}
+			return updateWikiAutoLinkedContent(tx, page)
+		})
+	}
+	return updateWikiAutoLinkedContent(r.db.WithContext(ctx), page)
+}
+
+func updateWikiAutoLinkedContent(db *gorm.DB, page *types.WikiPage) error {
+	result := db.
 		Model(page).
 		Where("id = ?", page.ID).
 		Updates(map[string]interface{}{
@@ -1367,7 +1379,22 @@ func (r *wikiPageRepository) ListRecentForSuggestions(
 
 // Delete soft-deletes a wiki page by knowledge base ID and slug
 func (r *wikiPageRepository) Delete(ctx context.Context, kbID string, slug string) error {
-	result := r.db.WithContext(ctx).
+	if page, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
+		if page.KnowledgeBaseID != kbID || page.Slug != slug {
+			return ErrWikiPageConflict
+		}
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
+				return err
+			}
+			return deleteWikiPageBySlug(tx, kbID, slug)
+		})
+	}
+	return deleteWikiPageBySlug(r.db.WithContext(ctx), kbID, slug)
+}
+
+func deleteWikiPageBySlug(db *gorm.DB, kbID, slug string) error {
+	result := db.
 		Where("knowledge_base_id = ? AND slug = ?", kbID, slug).
 		Delete(&types.WikiPage{})
 	if result.Error != nil {

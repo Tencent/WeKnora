@@ -396,6 +396,32 @@ type WikiPageUpdateRequest struct {
 	Version int `json:"version,omitempty"`
 }
 
+// WikiSourceSection assigns a passage and its evidence to one or more documents.
+type WikiSourceSection struct {
+	Content string              `json:"content"`
+	Sources map[string][]string `json:"sources"`
+}
+
+// WikiSourceRebuildRequest carries the proposed split and the preview's apply preconditions.
+type WikiSourceRebuildRequest struct {
+	Version         int                 `json:"version" binding:"required,min=1"`
+	OriginalContent *string             `json:"original_content,omitempty"`
+	ManualContent   string              `json:"manual_content"`
+	ManualSummary   *string             `json:"manual_summary" binding:"required"`
+	Sections        []WikiSourceSection `json:"sections" binding:"required,min=1"`
+	Apply           bool                `json:"apply"`
+}
+
+// WikiSourceRebuildPreview returns the previous and proposed page bodies for comparison.
+type WikiSourceRebuildPreview struct {
+	Version         int    `json:"version"`
+	OriginalContent string `json:"original_content"`
+	Content         string `json:"content"`
+	OriginalSummary string `json:"original_summary"`
+	Summary         string `json:"summary"`
+	Applied         bool   `json:"applied"`
+}
+
 // WikiPageRevisionListResponse is the payload for GET /wiki/revisions/*slug.
 // Revisions hold the superseded versions (content omitted in list mode);
 // the current version is described by CurrentVersion + the page row itself,

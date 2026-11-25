@@ -279,6 +279,26 @@ curl $BASE/api/v1/knowledgebase/kb-1/wiki/revisions/entity/acme-corp -H "Authori
 curl "$BASE/api/v1/knowledgebase/kb-1/wiki/revisions/entity/acme-corp?version=3" -H "Authorization: Bearer $TOKEN"
 ```
 
+### POST /api/v1/knowledgebase/:kb_id/wiki/source-rebuild/*slug
+
+为已有实体或概念页预览按来源更新的正文。仅 Wiki 编辑者可调用。先读取页面当前版本、正文、来源与分块引用，再写出要保留的人工正文、手工摘要和按来源归属的段落。手工摘要可以留空字符串，后续摄入只更新来源段落。一个段落可由多个来源共同支持。每个当前文档和分块引用都须在方案中有归属，分块必须属于对应文档。服务返回 `original_content`、`content` 和 `version` 供比对。
+
+```json
+{
+  "version": 7,
+  "manual_content": "# 项目\n\n经编辑确认的说明",
+  "manual_summary": "项目概览",
+  "sections": [
+    {
+      "content": "项目同时支持两个解析入口。",
+      "sources": {"doc-1": ["chunk-1"], "doc-2": ["chunk-2"]}
+    }
+  ]
+}
+```
+
+审阅后，将相同方案连同预览返回的 `original_content` 和 `"apply": true` 发送到同一端点。页面变化时返回 409，并要求重新预览。应用操作走正常页面版本和反链更新流程。后续摄入按归属替换更新来源的正文。其他来源仍支持的段落和人工正文会保留。普通页面编辑可修改人工正文，修改来源段落须走此端点。将页面回退到以前的修订时会恢复当时可见的正文并退出按来源更新模式。
+
 ### POST /api/v1/knowledgebase/:kb_id/wiki/revert
 
 用途：把页面回滚到某个历史版本。权限：KB owner 或 Admin+ + KBAccessWrite。

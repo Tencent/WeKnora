@@ -197,6 +197,7 @@ func TestWikiWriteRoutesDenyOutOfScopeAPIKeyKB(t *testing.T) {
 		{http.MethodPost, "/api/v1/knowledgebase/kb-other/wiki/rebuild-links"},
 		{http.MethodPost, "/api/v1/knowledgebase/kb-other/wiki/auto-fix"},
 		{http.MethodPut, "/api/v1/knowledgebase/kb-other/wiki/issues/1/status"},
+		{http.MethodPost, "/api/v1/knowledgebase/kb-other/wiki/source-rebuild/entity/some-page"},
 		{http.MethodPost, "/api/v1/knowledgebase/kb-other/wiki/revert"},
 	}
 

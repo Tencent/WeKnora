@@ -139,6 +139,9 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		return nil, repository.ErrWikiPageConflict
 	}
 	stripWikiPageInlineChunkCitations(page)
+	if err := checkWikiSourceManualEdit(ctx, existing, page.Content); err != nil {
+		return nil, err
+	}
 
 	// ── Truncation choke point ────────────────
 	//
@@ -315,6 +318,13 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 		return fmt.Errorf("get existing page: %w", err)
 	}
 
+	if wikiUsesSourceSections(existing) || wikiUsesSourceSections(page) {
+		if page.Version != existing.Version {
+			return repository.ErrWikiPageConflict
+		}
+		ctx = types.WithWikiPageWriteSnapshot(ctx, existing)
+	}
+
 	oldOutLinks := existing.OutLinks
 
 	existing.Content = stripWikiInlineChunkCitations(page.Content)
@@ -325,7 +335,8 @@ func (s *wikiPageService) UpdateAutoLinkedContent(ctx context.Context, page *typ
 		return fmt.Errorf("update auto-linked content: %w", err)
 	}
 
-	s.syncInLinks(ctx, existing.TenantID, existing.KnowledgeBaseID, existing.Slug, oldOutLinks, existing.OutLinks)
+	linkCtx := types.WithWikiPageWriteSnapshot(ctx, nil)
+	s.syncInLinks(linkCtx, existing.TenantID, existing.KnowledgeBaseID, existing.Slug, oldOutLinks, existing.OutLinks)
 
 	return nil
 }
@@ -433,6 +444,27 @@ func (s *wikiPageService) RevertPageToVersion(
 	target := *page
 	target.Title = rev.Title
 	target.Content = rev.Content
+	if wikiUsesSourceSections(page) {
+		if wikiHasSourceSections(rev.Content) {
+			// A legacy revision may contain marker-like text. Only unwrap
+			// revisions that can be parsed as source sections.
+			if parts, err := parseWikiSourceParts(rev.Content); err == nil {
+				var body strings.Builder
+				for _, part := range parts {
+					body.WriteString(part.text)
+					if part.sources != nil {
+						body.WriteByte('\n')
+					}
+				}
+				target.Content = body.String()
+			}
+		}
+		if err := setWikiSourceSectionMode(&target, false); err != nil {
+			return nil, err
+		}
+		ctx = context.WithValue(ctx, wikiSourceRebuildKey{}, true)
+		ctx = types.WithWikiPageWriteSnapshot(ctx, page)
+	}
 	target.Summary = rev.Summary
 	target.PageType = rev.PageType
 	target.Status = rev.Status
@@ -503,13 +535,13 @@ func (s *wikiPageService) DeletePage(ctx context.Context, kbID string, slug stri
 		return err
 	}
 
-	// Remove inbound link references from pages this page links to
-	s.removeInLinks(ctx, page.TenantID, kbID, slug, page.OutLinks)
-
-	// Delete the page
 	if err := s.repo.Delete(ctx, kbID, slug); err != nil {
 		return err
 	}
+
+	// Only remove backlinks after a successful snapshot-checked delete.
+	linkCtx := types.WithWikiPageWriteSnapshot(ctx, nil)
+	s.removeInLinks(linkCtx, page.TenantID, kbID, slug, page.OutLinks)
 
 	// Drop the snapshot history too: the page is gone from every read path,
 	// so its revisions are unreachable rows holding full content bodies.

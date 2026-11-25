@@ -22,6 +22,11 @@ type WikiPageService interface {
 	// persisted without bumping the version.
 	UpdatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error)
 
+	// RebuildSourceSections previews or applies a reviewed source attribution plan.
+	RebuildSourceSections(
+		ctx context.Context, kbID, slug string, req types.WikiSourceRebuildRequest,
+	) (*types.WikiSourceRebuildPreview, error)
+
 	// UpdatePageMeta updates only metadata (status, source_refs, etc.) without
 	// incrementing version or re-parsing links. Use for publish/archive/source
 	// ref changes driven by internal reconciliation.

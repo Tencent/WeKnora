@@ -2165,6 +2165,11 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 		return changed, affectedType, false, updateDeferred, err
 	}
 
+	if exists && wikiUsesSourceSections(page) {
+		changed, err := s.updateWikiSourceSections(ctx, page, updates, additions, retracts, tenantID)
+		return changed, affectedType, err != nil && len(additions) > 0, false, err
+	}
+
 	var remainingSourcesContent strings.Builder
 	var deletedContent strings.Builder
 	var relatedSlugs strings.Builder

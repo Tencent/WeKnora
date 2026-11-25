@@ -574,6 +574,8 @@ func (h *WikiPageHandler) UpdatePage(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page not found"})
 		case stderrors.Is(err, repository.ErrWikiPageConflict):
 			c.JSON(http.StatusConflict, gin.H{"error": "Wiki page was modified by someone else"})
+		case stderrors.Is(err, service.ErrWikiSourceSectionsEdited):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
@@ -584,6 +586,41 @@ func (h *WikiPageHandler) UpdatePage(c *gin.Context) {
 		h.recordManualWikiActivity(ctx, updated, "manual_edit")
 	}
 	c.JSON(http.StatusOK, updated)
+}
+
+// RebuildSourceSections previews a reviewed source rebuild or applies it against
+// the page shown in the preview.
+func (h *WikiPageHandler) RebuildSourceSections(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	slug := getSlugParam(c)
+	if slug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Wiki page slug is required"})
+		return
+	}
+
+	var req types.WikiSourceRebuildRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid source rebuild: " + err.Error()})
+		return
+	}
+	ctx := types.WithWikiEditSource(c.Request.Context(), types.WikiEditSourceUser)
+	preview, err := h.wikiService.RebuildSourceSections(ctx, kbID, slug, req)
+	switch {
+	case err == nil:
+		c.JSON(http.StatusOK, preview)
+	case stderrors.Is(err, repository.ErrWikiPageConflict):
+		c.JSON(http.StatusConflict, gin.H{"error": "Wiki page changed, create a new rebuild preview"})
+	case stderrors.Is(err, repository.ErrWikiPageNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "Wiki page not found"})
+	case stderrors.Is(err, service.ErrInvalidWikiSourceRebuild):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Wiki source rebuild failed"})
+	}
 }
 
 // ListRevisions godoc

@@ -295,10 +295,20 @@ func (s *knowledgeService) cleanupWikiReferences(
 			continue
 		}
 
+		// Manual-only wikis discard model retract jobs. An attributed page can
+		// remove the exact passages and refs immediately in either mode.
+		if wikiUsesSourceSections(page) {
+			if err := s.retractWikiSourceSection(ctx, page, knowledgeID); err != nil {
+				cleanupErr = errors.Join(cleanupErr, err)
+			}
+			continue
+		}
+
+		writeCtx := types.WithWikiPageWriteSnapshot(ctx, page)
 		remaining := removeSourceRef(page.SourceRefs, knowledgeID)
 
 		if len(remaining) == 0 {
-			if err := s.wikiService.DeletePage(ctx, kbID, page.Slug); err != nil {
+			if err := s.wikiService.DeletePage(writeCtx, kbID, page.Slug); err != nil {
 				logger.Warnf(ctx, "wiki cleanup: failed to delete page %s: %v", page.Slug, err)
 				cleanupErr = errors.Join(cleanupErr, err)
 			} else {
@@ -307,7 +317,7 @@ func (s *knowledgeService) cleanupWikiReferences(
 		} else {
 			page.SourceRefs = remaining
 			page.ChunkRefs = removeChunkRefs(page.ChunkRefs, sourceChunkRefs)
-			if err := s.wikiService.UpdatePageMeta(ctx, page); err != nil {
+			if err := s.wikiService.UpdatePageMeta(writeCtx, page); err != nil {
 				logger.Warnf(ctx, "wiki cleanup: failed to update source refs for page %s: %v", page.Slug, err)
 				cleanupErr = errors.Join(cleanupErr, err)
 			}
