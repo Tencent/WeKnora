@@ -37,6 +37,7 @@ type wikiUnavailablePendingRepo struct {
 	drainKeys []string
 	drainErr  error
 	drained   []string
+	discarded []string
 }
 
 func (r *wikiUnavailablePendingRepo) DrainUnclaimedAndRelease(
@@ -44,6 +45,13 @@ func (r *wikiUnavailablePendingRepo) DrainUnclaimedAndRelease(
 ) ([]string, error) {
 	r.drained = append(r.drained, taskType+"|"+scope+"|"+scopeID+"|"+op)
 	return r.drainKeys, r.drainErr
+}
+
+func (r *wikiUnavailablePendingRepo) DiscardUnclaimed(
+	_ context.Context, taskType, scope, scopeID, op string, _ time.Time,
+) error {
+	r.discarded = append(r.discarded, taskType+"|"+scope+"|"+scopeID+"|"+op)
+	return nil
 }
 
 type wikiUnavailableModelService struct {
@@ -62,13 +70,23 @@ func TestWikiIngestReleasesDocumentsWhenWikiUnavailable(t *testing.T) {
 	payload, err := json.Marshal(WikiIngestPayload{TenantID: 7, KnowledgeBaseID: "kb-1"})
 	require.NoError(t, err)
 	enabled := types.IndexingStrategy{WikiEnabled: true}
+	disabled := false
 	tests := []struct {
-		name     string
-		kb       *types.KnowledgeBase
-		modelErr error
+		name        string
+		kb          *types.KnowledgeBase
+		modelErr    error
+		wantDiscard []string
 	}{
 		{name: "wiki disabled", kb: &types.KnowledgeBase{ID: "kb-1"}},
 		{name: "no synthesis model", kb: &types.KnowledgeBase{ID: "kb-1", IndexingStrategy: enabled}},
+		{
+			name: "manual-only Wiki",
+			kb: &types.KnowledgeBase{
+				ID: "kb-1", IndexingStrategy: enabled,
+				WikiConfig: &types.WikiConfig{AutoGenerate: &disabled},
+			},
+			wantDiscard: []string{wikiTaskType + "|" + wikiTaskScope + "|kb-1|" + WikiOpRetract},
+		},
 		{
 			name: "synthesis model deleted",
 			kb: &types.KnowledgeBase{
@@ -91,6 +109,7 @@ func TestWikiIngestReleasesDocumentsWhenWikiUnavailable(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, []string{wikiTaskType + "|" + wikiTaskScope + "|kb-1|" + WikiOpIngest}, pending.drained)
+			assert.Equal(t, test.wantDiscard, pending.discarded)
 		})
 	}
 }

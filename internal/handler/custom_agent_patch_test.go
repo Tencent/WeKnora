@@ -275,3 +275,31 @@ func TestPatchAgentSkillsFailClosedWithoutLister(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
 	assert.Zero(t, repo.writes)
 }
+
+// The assistant's partial update must persist the same rerank setting as the
+// editor, without erasing it when a later tool call changes another field.
+func TestPatchAgentRerankModel(t *testing.T) {
+	for _, tc := range []struct{ name, initial, body, want string }{
+		{"configure", "", `{"rerank_model_id":"rerank-1"}`, "rerank-1"},
+		{"replace", "rerank-1", `{"rerank_model_id":"rerank-2"}`, "rerank-2"},
+		{"omitted", "rerank-1", `{"name":"Renamed"}`, "rerank-1"},
+		{"null", "rerank-1", `{"rerank_model_id":null}`, "rerank-1"},
+		{"clear", "rerank-1", `{"rerank_model_id":""}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &agentAvatarRepository{agent: patchTestAgent()}
+			repo.agent.Config.RerankModelID = tc.initial
+			rec := servePatch(t, repo, tc.body)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Equal(t, 1, repo.writes)
+			assert.Equal(t, tc.want, repo.agent.Config.RerankModelID)
+			assert.Equal(t, "model-1", repo.agent.Config.ModelID)
+			assert.Equal(t, []string{"kb-1"}, repo.agent.Config.KnowledgeBases)
+			var response struct {
+				Data types.CustomAgent `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+			assert.Equal(t, tc.want, response.Data.Config.RerankModelID)
+		})
+	}
+}

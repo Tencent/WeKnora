@@ -54,6 +54,15 @@ type SessionDesktop struct {
 	// human walked away. Zero means the handler should use the built-in default.
 	IdleDisconnect time.Duration
 
+	// Token is the websockify seat selector from ensure.sh. Empty means a
+	// legacy image (shared :0, dial the bare path). "0" is the shared screen
+	// on a new image. "1".."99" is this session's own screen.
+	Token string
+
+	// Isolated is true when Token names a per-session screen. The handler
+	// skips the machine-wide desktop slot in that case.
+	Isolated bool
+
 	// StartTTLRefresh extends the provider idle timeout while the relay
 	// ctx is live. Nil when the backend has no timeout to refresh.
 	StartTTLRefresh func(ctx context.Context)
@@ -146,16 +155,18 @@ func (s *SandboxDesktopService) StartSessionDesktop(ctx context.Context, t *Desk
 		return nil, ErrDesktopUnsupported
 	}
 
-	secret, err := readDesktopSecret(ctx, exec, t.SessionID, t.SandboxID)
+	secret, token, err := readDesktopSecret(ctx, exec, t.SessionID, t.SandboxID)
 	if err != nil {
 		return nil, err
 	}
 
 	// Dial. The secret stays in memory for exactly one handshake and is
-	// never sent to the browser.
+	// never sent to the browser. The token selects this session's screen;
+	// it is computed inside the sandbox, never taken from the browser.
 	dialed, err := desktops.OpenSessionDesktop(ctx, t.SessionID, sandbox.RemoteDesktopOptions{
 		BasicAuthUser:     sandbox.DesktopBasicAuthUser,
 		BasicAuthPassword: secret,
+		Token:             token,
 	})
 	if err != nil {
 		if errors.Is(err, sandbox.ErrDesktopUnsupported) {
@@ -174,6 +185,8 @@ func (s *SandboxDesktopService) StartSessionDesktop(ctx context.Context, t *Desk
 		SandboxID:       dialed.SandboxID,
 		IdleDisconnect:  terminalIdleDisconnectFromManager(mgr),
 		StartTTLRefresh: dialed.StartTTLRefresh,
+		Token:           token,
+		Isolated:        sandbox.DesktopSeatIsolated(token),
 	}, nil
 }
 
@@ -274,11 +287,18 @@ type sessionShellOptionsExecutor interface {
 	) (*sandbox.ExecuteResult, error)
 }
 
+// desktopSkipPrepOpts runs the desktop maintenance scripts. WorkDir is "/":
+// these execs skip workspace prep, so on a fresh session whose first exec is
+// the desktop tab nothing has created the session's workspace directory yet,
+// and the data plane rejects an exec whose cwd does not exist
+// ("invalid_argument: cwd ... does not exist"). The scripts use absolute
+// paths only, and start-desktop.sh moves to a neutral cwd before spawning.
 func desktopSkipPrepOpts(timeout time.Duration, expectedSandboxID string) sandbox.ShellExecOptions {
 	return sandbox.ShellExecOptions{
 		Timeout:           timeout,
 		SkipWorkspacePrep: true,
 		ExpectedSandboxID: expectedSandboxID,
+		WorkDir:           "/",
 	}
 }
 
@@ -287,52 +307,71 @@ func readDesktopSecret(
 	exec sessionShellOptionsExecutor,
 	sessionID string,
 	expectedSandboxID string,
-) (string, error) {
-	secret, err := runDesktopEnsure(ctx, exec, sessionID, expectedSandboxID)
+) (string, string, error) {
+	secret, token, err := runDesktopEnsure(ctx, exec, sessionID, expectedSandboxID)
 	if err == nil {
-		return secret, nil
+		return secret, token, nil
 	}
-	if errors.Is(err, ErrDesktopUnsupported) {
-		return "", err
+	if errors.Is(err, ErrDesktopUnsupported) || errors.Is(err, errDesktopNoFreeScreen) {
+		return "", "", err
+	}
+	// A canceled caller — the browser gave up mid-handshake, or a newer
+	// connection took over the session slot — must not reset the shared
+	// stack: the reset kills websockify, which carries every other
+	// session's desktop, and the failure was the caller's, not the
+	// stack's. The next attempt heals.
+	if ctx.Err() != nil {
+		logger.Warnf(ctx, "[sandbox-desktop] ensure abandoned (caller canceled) session=%s: %v",
+			sessionID, err)
+		return "", "", err
 	}
 	logger.Warnf(ctx, "[sandbox-desktop] ensure failed; resetting stack session=%s: %v",
 		sessionID, err)
 	if _, resetErr := exec.ExecShellCommandWithOptions(ctx, sessionID, sandbox.DesktopResetListenersCmd(),
 		desktopSkipPrepOpts(desktopProbeTimeout, expectedSandboxID)); resetErr != nil {
-		return "", fmt.Errorf("%w: reset desktop stack: %v", ErrDesktopStartFailed, resetErr)
+		return "", "", fmt.Errorf("%w: reset desktop stack: %v", ErrDesktopStartFailed, resetErr)
 	}
 	return runDesktopEnsure(ctx, exec, sessionID, expectedSandboxID)
 }
+
+// errDesktopNoFreeScreen is ErrDesktopStartFailed plus a marker so the reset
+// path can tell "every seat is taken" from "the stack failed to start".
+// Resetting kills websockify, which is the one listener every other session's
+// desktop is using.
+var errDesktopNoFreeScreen = fmt.Errorf("%w: %s", ErrDesktopStartFailed, sandbox.DesktopNoFreeScreenMarker)
 
 func runDesktopEnsure(
 	ctx context.Context,
 	exec sessionShellOptionsExecutor,
 	sessionID string,
 	expectedSandboxID string,
-) (string, error) {
+) (string, string, error) {
 	result, err := exec.ExecShellCommandWithOptions(ctx, sessionID,
 		sandbox.DesktopEnsureCmd(), desktopSkipPrepOpts(desktopStartTimeout, expectedSandboxID))
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrDesktopStartFailed, err)
+		return "", "", fmt.Errorf("%w: %v", ErrDesktopStartFailed, err)
 	}
 	if sandbox.IsDesktopEnsureUnsupported(result) {
 		logger.Warnf(ctx,
 			"[sandbox-desktop] %s missing in session=%s sandbox; config claims desktop support",
 			sandbox.DesktopStartScript, sessionID)
-		return "", ErrDesktopUnsupported
+		return "", "", ErrDesktopUnsupported
 	}
 	if result == nil || !result.IsSuccess() {
 		logger.Warnf(ctx, "[sandbox-desktop] ensure failed session=%s: %s",
 			sessionID, desktopExecDiagnostic(result))
-		return "", ErrDesktopStartFailed
+		if result != nil && strings.Contains(result.Stderr, sandbox.DesktopNoFreeScreenMarker) {
+			return "", "", errDesktopNoFreeScreen
+		}
+		return "", "", ErrDesktopStartFailed
 	}
-	secret, ok := sandbox.ParseDesktopEnsureSecret(result.Stdout)
+	secret, token, ok := sandbox.ParseDesktopEnsure(result.Stdout)
 	if !ok {
 		logger.Warnf(ctx, "[sandbox-desktop] ensure stdout was not READY session=%s: %s",
 			sessionID, desktopExecDiagnostic(result))
-		return "", ErrDesktopStartFailed
+		return "", "", ErrDesktopStartFailed
 	}
-	return secret, nil
+	return secret, token, nil
 }
 
 // desktopExecDiagnostic trims script output for one log line. Never fall back

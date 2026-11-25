@@ -2,6 +2,94 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - Unreleased
+
+Changes since v0.9.0. [Release and upgrade guide](./website-docs/07-releases/v0.9.1.md)
+
+### Chat and agent tools
+
+- Dictate in the chat composer. Enable audio uploads and choose a speech recognition model for the agent, hold the microphone button to speak, then edit the transcript before sending (#4804).
+- Give each supported sandbox session its own desktop and browser. You can sign in on the desktop and the agent can continue on the same page (#4785, #5035). Lite can use model review for host tool calls in a session and bind out-of-workspace write approvals to a specific file and its proposed contents (#5050).
+- Add a personal credential vault for sandbox website logins. Use a login once, or save it and choose it when the same site asks again. Passwords are encrypted at rest. A saved login can fill only HTTPS pages on domains allowed by both the entry and the current request (#5047).
+
+### Knowledge and search
+
+- Use an image on its own or alongside text in the knowledge-search API when the knowledge base has compatible image embeddings (#4823).
+- Correct existing OCR text and captions from the image gallery, and order PDF figures by source page (#4942, #4649).
+- Open a global search result at the matching passage and see the source knowledge base in a citation. Parent-aware retrieval can count hits under the same parent as a single top-K slot (#5177, #5343, #4740).
+- Keep existing content searchable while a batch reparse is queued and while the document is being read. Reading failures preserve that content. Old chunks are cleared when index replacement starts (#5024). Wiki sources persist during reprocessing (#5186).
+- System administrators can track ingestion and Wiki progress separately for each document in Task Queue. Search by document or knowledge base, inspect processing stages and past failures, and schedule pending Wiki work for one document or a batch of up to 100 (#4732, #5895).
+- Maintain Wiki pages manually, select a separate model for question generation, and parse XLSX with a compatible self-hosted MinerU service (#4707, #4718, #5039).
+
+### Integrations and other changes
+
+- Sync selected Nextcloud folders or files over WebDAV. Confluence syncs page attachments and preserves table structure. Notion handles nested page content more reliably (#4601, #4953, #4795, #5574).
+- Embedded chat can retain history in the current browser, and signed visitors can delete their own sessions (#4631, #5715).
+- Add optional OIDC PKCE S256, memory subject management for tenant admins, SearchApi, DeepSeek web search and fetch, and the Runcrate model provider (#4818, #4954, #4807, #4792, #4714).
+- Revalidate saved remote MCP tools when the server changes, stop context compaction and knowledge-file preparation on cancellation, and reject trailing data in SDK JSON responses (#5624, #5818, #5664, #5751).
+- Browse knowledge folders from the file mention picker, and inspect DocReader build information in Settings (#4700, #4769). OpenRouter's catalog adds Claude 5.5 entries (#4784).
+- The website now features teams using WeKnora. [Community showcase](https://github.com/Tencent/WeKnora/issues/4801)
+
+### Deployment and upgrade
+
+- Frontend navigation and OIDC callbacks support deployments under a path prefix. [Reverse proxy configuration](./docs/subpath-deployment.md) (#4977)
+- Back up the database, file storage, deployment configuration and encryption key before upgrading. PostgreSQL migrations advance from 134 to 137 and SQLite from 51 to 53. Downgrading can discard saved credentials, shorten PostgreSQL audit identifiers or conflict with new IM thread mappings. Restore a pre-upgrade backup to roll back.
+- Use the same 32-byte `SYSTEM_AES_KEY` across replicas and restarts when storing personal credentials. Pin Compose and Helm application images to `v0.9.1`, including the matching sandbox image or desktop template where enabled.
+- On PostgreSQL, automatic migrations create missing HNSW indexes for supported vector dimensions on first write or query, including 1536, 2560 and 3072 (#3364). PostgreSQL connection pool limits are configurable and Helm supports application pod annotations (#4349, #5159).
+
+## [0.9.0] - 2026-10-29
+
+Changes since v0.8.3. [Website release notes](./website-docs/07-releases/v0.9.0.md) · [Full comparison](https://github.com/Tencent/WeKnora/compare/v0.8.3...v0.9.0).
+
+### New Features
+
+- **WeKnora assistant**: a built-in workspace assistant with a launcher beside the logo and a side panel, page context, separate private history, bundled-documentation search for release, feature and configuration questions, and management operations performed as the current user within their permissions. It can create agents, schedule tasks, maintain knowledge bases, documents, FAQ, models, MCP services and skills, perform diagnostics and open relevant pages (#4302, #4303, #4314, #4342, #4344, #4375, #4427, #4429).
+- **Multi-agent collaboration**: durable child tasks, independent conversations, live progress and task views; use temporary workers or an existing reasoning-agent template without expanding resource access (#4438).
+- **Automations**: one-off and recurring schedules, timezone-aware validation, assistant execution, optional model override, persistent or per-run conversations, overlap/misfire policies, history, cancellation and in-app notifications (#4492, #4506, #4514, #4522, #4534, #4551).
+- **Permissions and approvals**: read-only, confirm-before-change and automatic-write access levels; persistent human-in-the-loop prompts, suspended runs, scoped grants and automation approval management (#4250, #4490).
+- **Sandbox allocation**: opt-in per-user machine reuse with session work directories, ownership-aware cleanup, idle retention and explicit skill rollout behavior (#4507, #4509, #4510, #4533, #4729).
+- **Background work**: managed asynchronous shell execution, incremental output, wait/cancel tools and session-scoped task APIs (#4579, #4580).
+- **Image pipelines**: configurable manual and smart OCR pipelines, pipeline-specific parameters and validation, plus optional OCR preprocessing (#3746, #4381).
+- **Datasource integrations**: deeper Feishu/Lark block parsing, folder and embedded-object handling; optional DingTalk folder preservation; Confluence Server/Data Center PAT support (#3497, #4422, #4549).
+- **Retrieval and browsing**: RRF settings, a standalone JSON knowledge-graph search API, document-scoped MCP search and FAQ list expansion controls (#4300, #4395, #4463, #4566).
+- **Workspace defaults**: choose default chat, utility, embedding, rerank, vision and speech models, plus a default web-search provider, from Settings. Explicit resource choices take precedence; unavailable defaults fall back to usable models (#4822).
+
+### Improvements
+
+- Improve assistant operation discovery, authorization, page links, task analysis, configuration guidance and interaction feedback.
+- Highlight the assistant entry beside the logo with a one-time introduction for existing users, and include it in new-user onboarding (#4836).
+- Support optional HTML main-content extraction and Excel percentage display text; preserve CSV cells and JSON literals, improve file parser fidelity and bound large-file processing (#4424, #4423, #4435, #4436).
+- Reuse resource handles for identical image bytes; improve model image resolution, scanned-page OCR for Wiki and image-processing traces (#4419, #4405, #4430).
+- Improve model streaming compatibility, reasoning/refusal handling, provider response bounds and SDK/CLI interoperability.
+- Improve Lite host workspace handling and approval for deletions or broader sandbox execution (#4076).
+- Add a model leaderboard and update website navigation, release assets, product documentation and API references.
+
+### Bug Fixes
+
+- Fix retrieval error propagation, vector-dimension isolation, reranking passage preservation and shared-knowledge model resolution.
+- Fix datasource pagination and repeated-cursor handling, failed attachment downloads, sync-log retention, selected-scope validation and deletion reconciliation.
+- Fix ambiguous MCP call retries, SSE connection/request lifetimes, stale OAuth dialogs and tool-result compatibility.
+- Fix failed quick-answer persistence, conversation export ordering, source-citation alignment and Unicode matching, attachment and task timeline behavior.
+- Bound web-search/provider/IM request bodies and archive expansion; avoid logging token fragments or bound slow-query parameters; strengthen resource scope checks.
+- Improve IM mention targeting, Wiki maintenance, parser failure/cancellation handling, deployment configuration and frontend status polling.
+- Show persistent approvals as waiting for a decision instead of a misleading countdown (#4824); preserve whitespace in Markdown documents created or updated by the assistant.
+- Recover valid DSML tool calls from OpenAI-compatible responses only for declared tools with valid arguments; preserve Ollama stream finish reasons and disable thinking during final-answer synthesis.
+- Reject MCP chat streams that end without a completion event and bound WeKnoraCloud vision response bodies.
+- Skip empty tokenized SQLite full-text queries so vector retrieval can continue; correct unsmoothed BLEU zero-precision handling and NDCG normalization against the full ideal ranking.
+
+### Upgrade Notes
+
+- Back up the database, file storage, deployment settings and required sandbox files. Apply PostgreSQL migrations **000119–000134** or SQLite **000037–000051**.
+- Workspace model defaults are stored in `tenants.default_settings` (PostgreSQL 000134 / SQLite 000051). Unset fields retain deployment fallback behavior; the utility model follows the chat default. Review the [default settings guide](./website-docs/03-features/06-models.md#workspace-defaults) after upgrading.
+- Existing Feishu/Lark sources are scheduled for resync. Review parsing mode and downstream workload; new sources default to blocks parsing while explicit export choices remain supported.
+- Migration 000125 (SQLite 000042) removes eligible empty image-derived chunks, not source documents or files.
+- Per-user sandbox reuse remains gated by `WEKNORA_SANDBOX_USER_ALLOCATION=enabled` and requires Redis. Upgrade every replica before enabling it; inspect active shared assignments before any downgrade.
+- Review assistant and custom-agent access ceilings, MCP risk policies and automation grants. Ordinary writes and destructive actions have distinct approval rules.
+- Prefer `WEKNORA_LOG_FORMAT`; legacy `LOG_FORMAT` is used only when the new variable is unset. Nonempty templates must include `%msg`.
+- Review new-workspace quota defaults, OCR preprocessing limits and optional HTML/Excel parser switches. Existing documents are not automatically reparsed when these switches change.
+- MinerU Cloud defaults to a 30-minute budget per batch/shard; Agent web fetch uses one shared 3-minute budget. Check outer timeouts as well.
+- Set `WEKNORA_VERSION=0.9.0` only after the release images are available, pull images explicitly and verify migrations, UI version, parsing, retrieval, approvals and scheduled runs. See the [upgrade guide](./website-docs/07-releases/v0.9.0.md#upgrade-notes).
+
 ## [0.8.3] - 2026-10-14
 
 Changes since v0.8.2, through upstream main `31c605568` (2026-10-13; 282 commits). The plugin-system series was reverted and is not part of this release. [Website release notes](./website-docs/07-releases/v0.8.3.md) · [Full commit comparison](https://github.com/Tencent/WeKnora/compare/v0.8.2...31c6055687d33f9ad7a92cf453a264ce13a1700d).

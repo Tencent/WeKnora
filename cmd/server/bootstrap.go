@@ -13,6 +13,7 @@ import (
 
 	"go.uber.org/dig"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -30,7 +31,7 @@ import (
 //   - Safe to leave set: once at least one system admin exists, the env
 //     var stops granting privileges. That prevents a UI revoke from being
 //     silently undone on the next restart.
-const bootstrapEnvVar = "WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL"
+const bootstrapEnvVar = service.BootstrapSystemAdminEmailEnv
 
 // runStartupBootstrap consults the env and applies any one-shot
 // bootstrap actions. Currently it only handles system-admin promotion;
@@ -74,8 +75,10 @@ func runStartupBootstrap(c *dig.Container) {
 // The bootstrap intentionally does NOT create a user when the email is
 // not yet registered: account creation is a workflow with side effects
 // (password hashing, tenant assignment, audit) that we don't want to
-// short-circuit. Operators should sign up normally first, then set the
-// env var on the next restart.
+// short-circuit. New sign-ups matching bootstrapEnvVar are promoted
+// immediately inside userService.Register when no system admin exists;
+// this startup hook remains for accounts that registered before the env
+// var was configured.
 func bootstrapSystemAdmin(ctx context.Context, userSvc interfaces.UserService, email string) {
 	user, err := userSvc.GetUserByEmail(ctx, email)
 	if err != nil {

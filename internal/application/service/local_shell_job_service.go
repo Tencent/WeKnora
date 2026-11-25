@@ -36,7 +36,7 @@ const (
 
 type localJobStarter interface {
 	StartForSession(context.Context, localsandbox.RunRequest) (localsandbox.Process, error)
-	GuardForSession(context.Context, string) (*localsandbox.PathGuard, localsandbox.Workspace, error)
+	GuardForSession(context.Context, string, ...localsandbox.Grant) (*localsandbox.PathGuard, localsandbox.Workspace, error)
 }
 
 type localJob struct {
@@ -262,6 +262,9 @@ func (s *LocalShellJobService) SubmitShellJob(
 			j.proc, lerr = s.starter.StartForSession(processCtx, localsandbox.RunRequest{
 				SessionID: ref.SessionID, Command: req.Command,
 				WorkDir: req.WorkDir, Env: req.Env,
+				Spec: localsandbox.ReviewSpec{
+					Command: req.DisplayCommand, Stdin: req.ProgramStdin, StdinIsProgram: req.ProgramStdin != "",
+				},
 			})
 			if lerr != nil {
 				_ = out.Close()

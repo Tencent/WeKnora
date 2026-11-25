@@ -281,7 +281,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 
 ## 内置厂商
 
-内置 30 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 31 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -308,6 +308,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 | OpenRouter | `openrouter` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | LiteLLM | `litellm` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Requesty | `requesty` | ✓ | ✓ | | ✓ | ✓ |
+| Runcrate | `runcrate` | ✓ | ✓ | | ✓ | |
 | Jina | `jina` | | ✓ | ✓ | | |
 | NVIDIA | `nvidia` | ✓ | ✓ | ✓ | ✓ | |
 | Novita AI | `novita` | ✓ | ✓ | ✓ | ✓ | |
@@ -345,6 +346,50 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 [Cohere API 建议](https://docs.cohere.com/v2/reference/rerank)，将超过 1000 篇的候选集
 拆成多个请求；1000 是采用的推荐批次大小。省略 `top_n` 以获取全部候选的分数，
 超长文档沿用服务端默认截断行为。本接入仅提供 Cohere 文本重排。
+
+### Runcrate
+
+Runcrate 是提供 OpenAI 兼容推理 API 的 GPU 云，默认地址为 `https://api.runcrate.ai/v1`，
+对话、向量和视觉模型共用该地址，模型 ID 带厂商前缀（如 `deepseek-ai/DeepSeek-V4.1-Flash`）。
+使用 GitHub 账号即可免费使用开源模型，API Key 在
+[Runcrate 控制台](https://www.runcrate.ai/dashboard/api-keys?utm_source=WeKnora&utm_medium=directory&utm_campaign=gpu_pricing)创建。
+
+通过 `POST /api/v1/models` 创建向量模型时，请求体示例：
+
+```json
+{
+  "name": "Qwen/Qwen3-Embedding-8B",
+  "type": "Embedding",
+  "source": "remote",
+  "parameters": {
+    "provider": "runcrate",
+    "base_url": "https://api.runcrate.ai/v1",
+    "api_key": "your-runcrate-api-key"
+  }
+}
+```
+
+思考强度通过 `reasoning_effort` 发送，关闭思考时发送 `none`；GLM-5.3、GLM-5.3 Flash、
+Qwen3.8 Flash 和 gpt-oss 120B 的思考无法关闭，目录中不提供「关闭」档位。
+
+## 设置空间默认模型 {#workspace-defaults}
+
+在「设置 → 默认设置」为当前空间选择常用模型，减少创建资源或运行任务时的重复选择。空间成员可以查看，管理员及所有者可以修改；每次选择后自动保存，页面会显示当前生效的模型及其来源。
+
+| 设置项 | 用途 |
+| --- | --- |
+| 对话模型 | 未明确指定模型时，用于问答与生成 |
+| 辅助任务模型 | 用于会话标题、MCP 使用说明、记忆提取等短文本生成；留空时跟随对话默认模型 |
+| 向量模型 | 用于需要默认向量模型的配置与任务 |
+| 重排模型 | 用于需要默认重排模型的检索与评估 |
+| 视觉模型 | 可选择视觉模型，或支持视觉输入的对话模型 |
+| 语音模型 | 用于需要默认语音识别模型的任务 |
+
+已在智能体、知识库或任务中明确选择的模型优先使用。未指定时，按空间默认、部署默认、第一个可用模型的顺序选择；空间默认模型被删除或停用时也按此顺序回退。清空一项可以恢复默认回退行为。没有可用模型时，需要先在「设置 → 模型」添加并启用对应模型。
+
+更改空间默认设置不会批量替换已有资源的模型配置，也不会自动重建向量索引。若要更换已有知识库的向量模型，仍需按知识库流程重建索引。
+
+同一页面还可选择默认联网搜索服务，前提是部署支持联网搜索且已配置服务。它沿用搜索服务的默认标记，连接地址和凭据仍在[网络搜索设置](11-web-search.md)中维护。接口与完整字段见[空间默认设置 API](../04-api/02-api-tenant.md#default-settings)。
 
 ## 查看引用与调整配置
 

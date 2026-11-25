@@ -63,19 +63,10 @@ func agentRequiresRerankModel(agent *types.CustomAgent) bool {
 // cannot be configured with one: the workspace's default active rerank
 // model, else its first active one, else none.
 func pickWorkspaceRerankModelID(models []*types.Model) string {
-	first := ""
-	for _, model := range models {
-		if model == nil || model.Type != types.ModelTypeRerank || model.Status != types.ModelStatusActive {
-			continue
-		}
-		if model.IsDefault {
-			return model.ID
-		}
-		if first == "" {
-			first = model.ID
-		}
+	if model := types.PickDefaultModel(models, types.ModelTypeRerank); model != nil {
+		return model.ID
 	}
-	return first
+	return ""
 }
 
 // isBuiltinAgent guards sharing. Shares of built-in agents created before

@@ -128,6 +128,28 @@ func TestBuildTOCPaths_CycleTerminates(t *testing.T) {
 	}
 }
 
+func TestBuildTOCPaths_DepthCountsUntitledAncestors(t *testing.T) {
+	nodes := []v2TOCNode{tocTitle("root", "", "Beyond depth limit")}
+	parent := "root"
+	for depth := range maxTOCDepth - 1 {
+		uuid := strconv.Itoa(depth)
+		nodes = append(nodes, tocTitle(uuid, parent, " "))
+		parent = uuid
+	}
+	nodes = append(nodes,
+		tocTitle("group", parent, "Immediate group"),
+		tocDoc("doc", "group", 101, "Doc"),
+	)
+
+	segs, inTOC := buildTOCPaths(nodes)
+	if !inTOC[101] {
+		t.Fatal("document should remain in the TOC")
+	}
+	if got := segs[101]; len(got) != 1 || got[0] != "Immediate group" {
+		t.Errorf("segs[101] = %v, want only the immediate group", got)
+	}
+}
+
 // A "/" in a group title must not become an extra nesting level: segments are
 // sanitised individually, before they are ever joined.
 func TestBuildTOCPaths_SanitizesEachSegment(t *testing.T) {

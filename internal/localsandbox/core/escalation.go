@@ -44,35 +44,157 @@ func (b *PolicyBuilder) ProposeGrant(p Policy, d Denial, cwd string) (Grant, boo
 	return Grant{Path: dir, Access: AccessWrite}, true
 }
 
+// ProposeFileGrant offers write access to one file the policy withholds. The
+// target must be a regular file, or missing with an existing parent; a
+// directory, a missing parent, or any hard-denied path is not offered.
+func (b *PolicyBuilder) ProposeFileGrant(p Policy, path string) (Grant, bool) {
+	if !filepath.IsAbs(path) {
+		return Grant{}, false
+	}
+	path = filepath.Clean(path)
+	if _, err := NewPathGuard(p).CheckWrite(path); err == nil {
+		return Grant{}, false
+	}
+	resolved, err := resolveExistingPrefix(path)
+	if err != nil {
+		return Grant{}, false
+	}
+	info, err := os.Lstat(resolved)
+	switch {
+	case err == nil && !info.Mode().IsRegular():
+		return Grant{}, false
+	case err != nil && !os.IsNotExist(err):
+		return Grant{}, false
+	}
+	parent, err := os.Stat(filepath.Dir(resolved))
+	if err != nil || !parent.IsDir() {
+		return Grant{}, false
+	}
+	if b.rejectGrantPath(p, resolved) != nil {
+		return Grant{}, false
+	}
+	return Grant{Path: resolved, Access: AccessWrite, File: true}, true
+}
+
 // rejectGrantPath is the check ProposeGrant and Relax share. path must already
-// be absolute; callers resolve symlinks first so a later EvalSymlinks in the
-// seatbelt backend cannot widen the grant.
+// be absolute; callers resolve symlinks first. Resolved-path refusals live on
+// Policy so Prepare can apply them again after EvalSymlinks.
 func (b *PolicyBuilder) rejectGrantPath(p Policy, path string) error {
 	if err := b.rejectBroadWorkspace(path); err != nil {
 		return err
 	}
-	for _, deny := range p.DenyRead {
-		denyPath := deny
-		if resolved, err := resolveExistingPrefix(deny); err == nil {
-			denyPath = resolved
+	// Deny-read entries may still be symlinks here. The seatbelt backend
+	// resolves them before Validate; grant checks compare both forms.
+	if len(p.DenyRead) > 0 {
+		denies := append([]string(nil), p.DenyRead...)
+		for _, deny := range p.DenyRead {
+			resolved, err := resolveExistingPrefix(deny)
+			if err == nil && !samePath(resolved, deny) {
+				denies = append(denies, resolved)
+			}
 		}
-		if PathUnder(path, deny) || PathUnder(path, denyPath) {
-			return fmt.Errorf("localsandbox: %q is read-denied and cannot be granted", path)
+		p.DenyRead = denies
+	}
+	if err := p.rejectResolvedGrant(path); err != nil {
+		return err
+	}
+	if err := b.rejectHomeDotPath(path); err != nil {
+		return err
+	}
+	if err := b.rejectProgramPath(path); err != nil {
+		return err
+	}
+	return b.rejectAppOwnedPath(path)
+}
+
+// programRoots hold programs the user runs outside the sandbox. They are
+// refused as grants only: a workspace the user chose may still live there, so
+// this stays out of rejectResolvedGrant, which Validate applies to every root.
+var programRoots = []string{"/opt", "/Applications"}
+
+// homeProgramDirs are the non-hidden per-user program directories.
+var homeProgramDirs = []string{"bin", "sbin", "go/bin", "Applications"}
+
+// rejectProgramPath refuses anything that holds programs the user runs outside
+// the sandbox, and any repo.git, whose hooks git runs. Writing to one is a
+// persistent escape, the same threat as rejectHomeDotPath.
+func (b *PolicyBuilder) rejectProgramPath(path string) error {
+	if hasBareGitComponent(path) {
+		return fmt.Errorf("localsandbox: %q is git metadata and cannot be granted", path)
+	}
+	for _, root := range programRoots {
+		if PathUnder(path, root) {
+			return fmt.Errorf("%w: %q holds programs", ErrWorkspaceTooBroad, path)
 		}
+	}
+	dirs := b.ToolchainBins()
+	if b.homeDir != "" && !isFilesystemRoot(filepath.Clean(b.homeDir)) {
+		homes := []string{filepath.Clean(b.homeDir)}
+		if resolved, err := resolveExistingPrefix(homes[0]); err == nil && resolved != homes[0] {
+			homes = append(homes, resolved)
+		}
+		for _, home := range homes {
+			for _, name := range homeProgramDirs {
+				dirs = append(dirs, filepath.Join(home, filepath.FromSlash(name)))
+			}
+		}
+	}
+	for _, dir := range dirs {
+		if PathUnder(path, dir) || PathUnder(dir, path) {
+			return fmt.Errorf("%w: %q holds programs", ErrWorkspaceTooBroad, path)
+		}
+	}
+	return nil
+}
+
+// nonHomePrivateRoots are the private-root entries that are not a home
+// directory. ~/Library is checked against every other private root.
+var nonHomePrivateRoots = []string{"/Users", "/Volumes", "/var", "/private/var"}
+
+func isNonHomePrivateRoot(root string) bool {
+	for _, prefix := range nonHomePrivateRoots {
+		if samePath(root, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// rejectResolvedGrant refuses an already-resolved absolute path that must not
+// be compiled as a write allow: git metadata, a system path, a deny-read
+// entry, a filesystem or well-known wide root, the home directory, or ~/Library.
+func (p Policy) rejectResolvedGrant(path string) error {
+	if err := rejectGitMetadata(p, path); err != nil {
+		return err
 	}
 	for _, root := range systemRoots {
 		if PathUnder(path, root) {
 			return fmt.Errorf("%w: %q", ErrWorkspaceTooBroad, path)
 		}
 	}
-	if err := b.rejectAppOwnedPath(path); err != nil {
-		return err
+	for _, deny := range p.DenyRead {
+		if PathUnder(path, deny) {
+			return fmt.Errorf("localsandbox: %q is read-denied and cannot be granted", path)
+		}
 	}
-	if err := b.rejectHomeDotPath(path); err != nil {
-		return err
+	if isFilesystemRoot(path) {
+		return fmt.Errorf("%w: %q", ErrFilesystemRoot, path)
 	}
-	if err := rejectGitMetadata(p, path); err != nil {
-		return err
+	if isWellKnownWideRoot(path) {
+		return fmt.Errorf("%w: %q", ErrWorkspaceTooBroad, path)
+	}
+	for _, private := range p.PrivateRoots {
+		if isNonHomePrivateRoot(private) {
+			continue
+		}
+		// private is the home the builder recorded. A grant that covers it,
+		// including the home directory itself, re-opens the private root.
+		if PathUnder(private, path) {
+			return fmt.Errorf("%w: %q covers the home directory", ErrWorkspaceTooBroad, path)
+		}
+		if PathUnder(path, filepath.Join(private, "Library")) {
+			return fmt.Errorf("%w: %q", ErrWorkspaceTooBroad, path)
+		}
 	}
 	return nil
 }

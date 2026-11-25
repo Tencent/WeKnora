@@ -22,12 +22,25 @@ type pgRepository struct {
 	db                   *gorm.DB // Database connection
 	keywordScoreMu       sync.Mutex
 	keywordScoreFunction string
+
+	// autoIndex is whether ensureHNSWIndex may build indexes at all
+	// (AUTO_MIGRATE != false).
+	autoIndex bool
+	// hnswSeen holds every embedding dimension ensureHNSWIndex has already
+	// scheduled in this process, so the catalog is consulted once per
+	// dimension (int -> struct{}).
+	hnswSeen sync.Map
+	// buildHNSWIndex is the work ensureHNSWIndex runs in the background;
+	// tests swap it for a recorder.
+	buildHNSWIndex func(dimension int)
 }
 
 // NewPostgresRetrieveEngineRepository creates a new PostgreSQL retriever repository
 func NewPostgresRetrieveEngineRepository(db *gorm.DB) interfaces.RetrieveEngineRepository {
 	logger.GetLogger(context.Background()).Info("[Postgres] Initializing PostgreSQL retriever engine repository")
-	return &pgRepository{db: db}
+	repo := &pgRepository{db: db, autoIndex: autoHNSWIndexEnabled()}
+	repo.buildHNSWIndex = repo.buildHNSWIndexInBackground
+	return repo
 }
 
 // keywordScoreFunctionSQL only selects fixed, schema-qualified function names.
@@ -133,6 +146,7 @@ func (g *pgRepository) Save(ctx context.Context, indexInfo *types.IndexInfo, add
 		return err
 	}
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully saved index for source ID: %s", indexInfo.SourceID)
+	g.ensureHNSWIndex(embeddingDB.Dimension)
 	return nil
 }
 
@@ -165,6 +179,9 @@ func (g *pgRepository) BatchSave(
 		return err
 	}
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch saved %d indices", len(indexInfoList))
+	for _, indexInfoDB := range indexInfoDBList {
+		g.ensureHNSWIndex(indexInfoDB.Dimension)
+	}
 	return nil
 }
 
@@ -337,6 +354,7 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 		len(params.Embedding), params.TopK, params.Threshold)
 
 	dimension := len(params.Embedding)
+	g.ensureHNSWIndex(dimension)
 	queryVector := pgvector.NewHalfVector(params.Embedding)
 
 	// Build WHERE conditions for filtering

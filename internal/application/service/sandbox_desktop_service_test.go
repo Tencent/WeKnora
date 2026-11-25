@@ -48,15 +48,22 @@ func TestReadDesktopSecretHappyPathSingleExec(t *testing.T) {
 	f := &fakeDesktopShell{results: []*sandbox.ExecuteResult{{
 		Stdout: "READY " + secret + "\n", ExitCode: 0,
 	}}}
-	got, err := readDesktopSecret(context.Background(), f, "sess-1", "")
+	got, token, err := readDesktopSecret(context.Background(), f, "sess-1", "")
 	require.NoError(t, err)
 	require.Equal(t, secret, got)
+	require.Empty(t, token)
 	require.Len(t, f.cmds, 1)
 	require.Equal(t, sandbox.DesktopEnsureCmd(), f.cmds[0])
 	require.True(t, f.calls[0].SkipWorkspacePrep)
 	require.Equal(t, desktopStartTimeout, f.calls[0].Timeout)
 	require.False(t, f.calls[0].AsRoot)
 	require.False(t, f.calls[0].AllowSkillsRoot)
+	// The desktop ensure skips workspace prep, so nothing creates the
+	// session's workspace directory on a fresh session whose first exec is
+	// the desktop tab. Cube validates the exec cwd and rejects a missing
+	// one ("invalid_argument: cwd ... does not exist"), so the desktop
+	// execs must run from a directory that always exists.
+	require.Equal(t, "/", f.calls[0].WorkDir)
 }
 
 func TestReadDesktopSecretMissingScriptDoesNotReset(t *testing.T) {
@@ -64,7 +71,7 @@ func TestReadDesktopSecretMissingScriptDoesNotReset(t *testing.T) {
 		ExitCode: sandbox.DesktopEnsureUnsupportedExit,
 		Stderr:   sandbox.DesktopEnsureUnsupportedMarker + "\n",
 	}}}
-	_, err := readDesktopSecret(context.Background(), f, "sess-1", "")
+	_, _, err := readDesktopSecret(context.Background(), f, "sess-1", "")
 	require.ErrorIs(t, err, ErrDesktopUnsupported)
 	require.Len(t, f.cmds, 1)
 }
@@ -75,7 +82,7 @@ func TestReadDesktopSecretBareExit2IsStartFailed(t *testing.T) {
 		{ExitCode: 0},
 		{ExitCode: 2, Stderr: "Syntax error: end of file unexpected\n"},
 	}}
-	_, err := readDesktopSecret(context.Background(), f, "sess-1", "")
+	_, _, err := readDesktopSecret(context.Background(), f, "sess-1", "")
 	require.ErrorIs(t, err, ErrDesktopStartFailed)
 	require.Equal(t, sandbox.DesktopResetListenersCmd(), f.cmds[1])
 	require.Len(t, f.cmds, 3)
@@ -90,9 +97,10 @@ func TestReadDesktopSecretTimeoutResetsThenRetries(t *testing.T) {
 			{Stdout: "READY " + secret + "\n", ExitCode: 0},
 		},
 	}
-	got, err := readDesktopSecret(context.Background(), f, "sess-1", "")
+	got, token, err := readDesktopSecret(context.Background(), f, "sess-1", "")
 	require.NoError(t, err)
 	require.Equal(t, secret, got)
+	require.Empty(t, token)
 	require.Equal(t, sandbox.DesktopEnsureCmd(), f.cmds[0])
 	require.Equal(t, sandbox.DesktopResetListenersCmd(), f.cmds[1])
 	require.Equal(t, sandbox.DesktopEnsureCmd(), f.cmds[2])
@@ -102,12 +110,29 @@ func TestReadDesktopSecretTimeoutResetsThenRetries(t *testing.T) {
 	require.Equal(t, desktopStartTimeout, f.calls[2].Timeout)
 }
 
+func TestReadDesktopSecretCancelDoesNotReset(t *testing.T) {
+	// A canceled caller (browser gave up, or a newer connection took over
+	// the session slot) must not tear down the shared stack: the reset kills
+	// websockify, which carries every other session's desktop, and the
+	// failure was the caller's, not the stack's.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f := &fakeDesktopShell{results: []*sandbox.ExecuteResult{
+		{ExitCode: -1, Killed: true, Error: "cube Exec: context canceled"},
+		{ExitCode: 0},
+		{ExitCode: 0},
+	}}
+	_, _, err := readDesktopSecret(ctx, f, "sess-1", "")
+	require.ErrorIs(t, err, ErrDesktopStartFailed)
+	require.Len(t, f.cmds, 1, "a canceled request must not reset or retry")
+}
+
 func TestReadDesktopSecretResetExecError(t *testing.T) {
 	f := &fakeDesktopShell{
 		results: []*sandbox.ExecuteResult{{ExitCode: 1, Stderr: "boom"}},
 		errs:    []error{nil, errors.New("reset failed")},
 	}
-	_, err := readDesktopSecret(context.Background(), f, "sess-1", "")
+	_, _, err := readDesktopSecret(context.Background(), f, "sess-1", "")
 	require.ErrorIs(t, err, ErrDesktopStartFailed)
 	require.Len(t, f.cmds, 2)
 }
@@ -149,9 +174,31 @@ func TestReadDesktopSecretRejectsUnparseableSuccess(t *testing.T) {
 		{ExitCode: 0},
 		{ExitCode: 0, Stdout: "started\n"},
 	}}
-	_, err := readDesktopSecret(context.Background(), f, "sess-1", "")
+	_, _, err := readDesktopSecret(context.Background(), f, "sess-1", "")
 	require.ErrorIs(t, err, ErrDesktopStartFailed)
 	require.Equal(t, sandbox.DesktopResetListenersCmd(), f.cmds[1])
+}
+
+func TestReadDesktopSecretReturnsTheSeatToken(t *testing.T) {
+	secret := "abcdefghijklmnopqrstuvwxyz012345"
+	f := &fakeDesktopShell{results: []*sandbox.ExecuteResult{{
+		Stdout: "READY " + secret + " 4\n", ExitCode: 0,
+	}}}
+	got, token, err := readDesktopSecret(context.Background(), f, "sess-1", "")
+	require.NoError(t, err)
+	require.Equal(t, secret, got)
+	require.Equal(t, "4", token)
+	require.Len(t, f.cmds, 1)
+}
+
+func TestReadDesktopSecretFullMachineDoesNotReset(t *testing.T) {
+	f := &fakeDesktopShell{results: []*sandbox.ExecuteResult{{
+		ExitCode: 1,
+		Stderr:   sandbox.DesktopNoFreeScreenMarker + "\n",
+	}}}
+	_, _, err := readDesktopSecret(context.Background(), f, "sess-1", "")
+	require.ErrorIs(t, err, ErrDesktopStartFailed)
+	require.Len(t, f.cmds, 1, "resetting would kill websockify for every other session")
 }
 
 type stubDesktopProvider struct {
@@ -286,6 +333,7 @@ func TestEnsureSessionDesktopHoldsTheOperationBeforeReadingTheMachine(t *testing
 type pinnedDesktopManager struct {
 	calls         []sandbox.ShellExecOptions
 	dialSandboxID string
+	dialOpts      sandbox.RemoteDesktopOptions
 	conn          *websocket.Conn
 	results       []*sandbox.ExecuteResult
 }
@@ -312,8 +360,9 @@ func (m *pinnedDesktopManager) ExecShellCommandWithOptions(
 }
 
 func (m *pinnedDesktopManager) OpenSessionDesktop(
-	context.Context, string, sandbox.RemoteDesktopOptions,
+	_ context.Context, _ string, opts sandbox.RemoteDesktopOptions,
 ) (*sandbox.SessionDesktopConn, error) {
+	m.dialOpts = opts
 	return &sandbox.SessionDesktopConn{Conn: m.conn, SandboxID: m.dialSandboxID}, nil
 }
 
@@ -335,6 +384,36 @@ func TestStartSessionDesktopPinsEveryStepToTheFixedSandbox(t *testing.T) {
 	for _, opts := range mgr.calls {
 		require.Equal(t, "sb-1", opts.ExpectedSandboxID)
 	}
+}
+
+func TestStartSessionDesktopDialsTheSeatToken(t *testing.T) {
+	secret := desktopTestSecret
+	mgr := &pinnedDesktopManager{
+		dialSandboxID: "sb-1",
+		results: []*sandbox.ExecuteResult{{
+			Stdout: "READY " + secret + " 4\n", ExitCode: 0,
+		}},
+	}
+	svc := &SandboxDesktopService{}
+	got, err := svc.StartSessionDesktop(context.Background(), &DesktopTarget{
+		SessionID: "sess-1", SandboxID: "sb-1", mgr: mgr,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "4", mgr.dialOpts.Token)
+	require.Equal(t, secret, mgr.dialOpts.BasicAuthPassword)
+	require.Equal(t, "4", got.Token)
+	require.True(t, got.Isolated)
+}
+
+func TestStartSessionDesktopLegacyImageIsNotIsolated(t *testing.T) {
+	mgr := &pinnedDesktopManager{dialSandboxID: "sb-1"}
+	svc := &SandboxDesktopService{}
+	got, err := svc.StartSessionDesktop(context.Background(), &DesktopTarget{
+		SessionID: "sess-1", SandboxID: "sb-1", mgr: mgr,
+	})
+	require.NoError(t, err)
+	require.Empty(t, mgr.dialOpts.Token)
+	require.False(t, got.Isolated)
 }
 
 func TestStartSessionDesktopRejectsADialToAnotherSandbox(t *testing.T) {

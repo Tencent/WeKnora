@@ -57,6 +57,15 @@ func TestClassifyCommandDetectsDeletes(t *testing.T) {
 		{"rm -rf ~/*", true, true},
 		{"rm -f ~", true, false},
 		{"rm -rf ~/project/dist", true, false},
+		{"find ~ -delete", true, true},
+		{"find / -name x -delete", true, true},
+		{"find ~/Desktop -delete", true, false},
+		{"find . -delete", true, false},
+		{"git -C ~ clean -fdx", true, true},
+		{"git -C / clean -fd", true, true},
+		{"git -C ~/Desktop clean -fdx", true, false},
+		{`bash -c 'find ~ -delete'`, true, true},
+		{`bash -c 'git -C ~ clean -fdx'`, true, true},
 	}
 	for _, tc := range cases {
 		got := ClassifyCommand(tc.command, home)

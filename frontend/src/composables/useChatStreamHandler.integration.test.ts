@@ -9,6 +9,7 @@ import * as history from '../utils/rag-pipeline-history.ts'
 import * as timestamps from '../utils/messageTimestamp.ts'
 import * as steering from '../utils/steerStreamFork.ts'
 import * as dataChange from '../utils/assistantDataChange.ts'
+import * as thinkBlocks from '../utils/thinkBlocks.ts'
 import * as hostApproval from '../views/chat/components/hostApproval.ts'
 import { useProtectedImageRecovery } from './useProtectedImageRecovery.ts'
 import { clearProtectedFileFailureCache, hydrateProtectedFileImages } from '../utils/security.ts'
@@ -28,6 +29,7 @@ const modules: Record<string, unknown> = {
   '@/utils/messageTimestamp': timestamps,
   '@/utils/steerStreamFork': steering,
   '@/utils/assistantDataChange': dataChange,
+  '@/utils/thinkBlocks': thinkBlocks,
   '@/views/chat/components/hostApproval': hostApproval,
 }
 const exports: { useChatStreamHandler?: typeof StreamHandler } = {}
@@ -172,6 +174,17 @@ test('a live host approval reaches the composer while the tool is still running'
   h.send('tool_approval_resolved', '', true, { pending_id: 'pending-1', approved: true, scope: 'once' })
   await h.flush()
   assert.deepEqual(hostApproval.pendingComposerApprovals.value.map((item) => item.pending_id), ['pending-2'])
+})
+
+test('a model review stays in the timeline and never reaches the composer', async t => {
+  const h = setup(t, 'agent')
+  hostApproval.clearComposerApproval()
+  h.send('tool_approval_required', '', true, {
+    pending_id: 'review-1', kind: 'host_command', tool_call_id: 'call-1',
+    host: { reason: 'delete', command: 'rm ~/Desktop/a.txt', reviewer: 'model', allow_session: false },
+  })
+  await h.flush()
+  assert.deepEqual(hostApproval.pendingComposerApprovals.value, [])
 })
 
 test('ordinary completion waits for the buffered typewriter before recovering images', async t => {

@@ -113,6 +113,7 @@ const getSourceInfo = (item: KnowledgeItem): { icon: string; label: string } => 
   if (ch === 'confluence') return { icon: 'cloud-download', label: t('knowledgeBase.channelConfluence') };
   if (ch === 'gitlab') return { icon: 'cloud-download', label: t('knowledgeBase.channelGitLab') };
   if (ch === 'seafile') return { icon: 'cloud-download', label: t('knowledgeBase.channelSeafile') };
+  if (ch === 'nextcloud') return { icon: 'cloud-download', label: t('knowledgeBase.channelNextcloud') };
   if (ch === 'ima') return { icon: 'cloud-download', label: t('knowledgeBase.channelIma') };
   if (ch === 'wechat') return { icon: 'cloud-download', label: t('knowledgeBase.channelWechat') };
   if (ch === 'wecom') return { icon: 'cloud-download', label: t('knowledgeBase.channelWecom') };

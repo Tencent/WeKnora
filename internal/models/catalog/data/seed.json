@@ -3311,6 +3311,60 @@
         "source": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
       },
       {
+        "id": "anthropic/claude-opus-5.5",
+        "name": "Claude Opus 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 4,
+          "output": 20,
+          "cache_read": 0.2,
+          "cache_write": 5
+        },
+        "source": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
+      },
+      {
+        "id": "anthropic/claude-sonnet-5.5",
+        "name": "Claude Sonnet 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 2,
+          "output": 10,
+          "cache_read": 0.1,
+          "cache_write": 2.5
+        },
+        "source": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
+      },
+      {
+        "id": "anthropic/claude-haiku-5.5",
+        "name": "Claude Haiku 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 0.1,
+          "output": 0.5,
+          "cache_read": 0.01,
+          "cache_write": 0.125
+        },
+        "source": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
+      },
+      {
         "id": "anthropic/claude-opus-5",
         "name": "Claude Opus 5",
         "reasoning": true,
@@ -4793,6 +4847,104 @@
         ],
         "context_window": 4096,
         "source": "https://docs.cohere.com/docs/models#rerank"
+      }
+    ],
+    "runcrate": [
+      {
+        "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+        "name": "DeepSeek V4.1 Flash",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "zai-org/GLM-5.3",
+        "name": "GLM-5.3",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1048576,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "zai-org/GLM-5.3-Flash",
+        "name": "GLM-5.3 Flash",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1048576,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "Qwen/Qwen3.8-Flash",
+        "name": "Qwen3.8 Flash",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "openai/gpt-oss-120b",
+        "name": "gpt-oss 120B",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 131072,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "moonshotai/Kimi-K2.6",
+        "name": "Kimi K2.6",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 262144,
+        "max_output_tokens": 16384,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "Qwen/Qwen3-Embedding-8B",
+        "name": "Qwen3 Embedding 8B",
+        "type": "Embedding",
+        "dimension": 4096,
+        "context_window": 32768,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "Qwen/Qwen3-Embedding-4B",
+        "name": "Qwen3 Embedding 4B",
+        "type": "Embedding",
+        "dimension": 2560,
+        "context_window": 32768,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "Qwen/Qwen3-Embedding-0.6B",
+        "name": "Qwen3 Embedding 0.6B",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32768,
+        "source": "https://api.runcrate.ai/v1/models"
+      },
+      {
+        "id": "BAAI/bge-m3",
+        "name": "BGE-M3",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 8192,
+        "source": "https://api.runcrate.ai/v1/models"
       }
     ]
   }

@@ -6,7 +6,7 @@
 
 空间命名配置可选择 Docker、CubeSandbox、E2B，本文说明这三类后端的部署。Lite 桌面客户端另有依赖操作系统隔离能力的 `host` 后端，不属于服务端命名配置，构建要求见下文 [Lite 本机沙箱](#lite-本机沙箱)；旧 `local` 宿主机进程后端已移除。Docker 直接使用 Engine API；E2B 使用控制面 REST 与 envd 数据面；Cube 保留专用适配器处理模板和网络策略。
 
-标准镜像由 `docker/Dockerfile.sandbox` 定义，包含 Python 3.12、Node.js 20、Bash、jq 与 `/workspace`。命令和文件操作默认使用沙箱内 root；保留 UID 1000 的 `user` 供显式按账号执行。跨会话隔离由容器或远端沙箱提供，不能把工作目录约定解释为 root 的文件权限限制。
+标准镜像由 `docker/Dockerfile.sandbox` 定义，包含 Python 3.12、Node.js 20、Bash、jq 与 `/workspace`。命令和文件操作默认使用沙箱内 root；保留 UID 1000 的 `user` 供显式按账号执行。每会话分配时，跨会话隔离由容器或远端沙箱提供；开启按用户复用后，同一机器内的会话没有操作系统级隔离。不能把工作目录约定解释为 root 的文件权限限制。
 
 | 构建 target | 镜像标签后缀 | 用途 |
 | --- | --- | --- |
@@ -109,7 +109,7 @@ Docker 终端是一个 `TTY=true` 的 exec，Engine API 不支持重新附着，
 | Windows | 尚未实现，报告不可用，不会退化为无隔离执行 |
 | Linux | 不支持 |
 
-每条命令都是新的本机进程，没有会话级实例，因此不写入会话的沙箱绑定，也不做工作区检查点。用户通过系统目录选择框批准的项目目录保存在 `desktop-prefs.json` 的 `project_dirs`；会话只能绑定列表中的目录本身，不能绑定其子目录或手工输入的路径。`approval_mode` 当前只支持 `auto`（在工作区内自由读写、禁止联网），写入其他值会被拒绝。偏好文件位置见[桌面客户端](../05-clients/05-desktop.md#_5-偏好设置存储-cmd-desktop-prefs-go)。
+每条命令都是新的本机进程，没有会话级实例，因此不写入会话的沙箱绑定，也不做工作区检查点。用户通过系统目录选择框批准的项目目录保存在 `desktop-prefs.json` 的 `project_dirs`；会话只能绑定列表中的目录本身，不能绑定其子目录或手工输入的路径。`approval_mode` 当前只支持 `auto`，写入其他值会被拒绝。默认限制网络、工作区外写入和项目 `.git` 写入；v0.9.0 的本机审批可针对删除或额外访问范围请求用户确认，不等于开放一个全局无限制模式。偏好文件位置见[桌面客户端](../05-clients/05-desktop.md#_5-偏好设置存储-cmd-desktop-prefs-go)。
 
 ## 开发验证
 

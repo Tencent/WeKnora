@@ -292,11 +292,18 @@ func TestExecShellCommandKeepsOrdinaryRemoteRequest(t *testing.T) {
 	require.Equal(t, RemoteExecRequest{
 		Command: "echo hi",
 		Shell:   true,
-		Env:     env,
+		Env: map[string]string{
+			"A":                    "B",
+			"WEKNORA_SESSION_ID":   "sess-1",
+			"WEKNORA_BROWSER_ROOT": "/var/lib/weknora/browser/session",
+		},
 		WorkDir: "/workspace/project",
 		User:    DefaultSandboxExecUser,
 		Timeout: time.Second,
 	}, last)
+	require.Equal(t, map[string]string{"A": "B"}, env, "caller map must not be mutated")
+	require.Equal(t, "/var/lib/weknora/browser/session", last.Env["WEKNORA_BROWSER_ROOT"])
+	require.NotEmpty(t, last.Env["WEKNORA_SESSION_ID"])
 }
 
 func TestExecShellCommandEmptyWorkDirUsesWorkspace(t *testing.T) {
@@ -1561,6 +1568,31 @@ func TestDeleteSessionWorkspacesWaitsForTheSessionAndRemovesOnlyIt(t *testing.T)
 	require.Contains(t, cmd, "-L", "symlinked parents are refused, not followed")
 }
 
+func TestDeleteSessionWorkspacesAlsoRemovesTheBrowserRoot(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionA, "true", "", time.Second, nil)
+	require.NoError(t, err)
+	m, ok := userAssignmentFor(userSessionA).UserMachine()
+	require.True(t, ok)
+
+	_, err = h.mgr.DeleteSessionWorkspaces(ctx, m, []string{userSessionA})
+	require.NoError(t, err)
+
+	layout, err := UserWorkspaceLayout(userSessionA)
+	require.NoError(t, err)
+	script := lastExecRequest(t, h.client).Command
+	require.Contains(t, script, ShellQuote(layout.BrowserRoot))
+	require.Contains(t, script, ShellQuote(layout.GitDir), "existing targets stay")
+	require.Contains(t, script, "command -v wk-display")
+	releaseAt := strings.Index(script, "wk-display release "+ShellQuote(userSessionA))
+	removeAt := strings.Index(script, ShellQuote(layout.BrowserRoot))
+	require.GreaterOrEqual(t, releaseAt, 0)
+	require.Less(t, removeAt, releaseAt, "release runs after the browser directory is removed")
+	require.NotContains(t, script, "wk-display release "+ShellQuote(userSessionB),
+		"deleting A must not release B's seat")
+}
+
 func TestDeleteSessionWorkspacesCompletesOnlyWhenTheMachineIsProvablyGone(t *testing.T) {
 	h := newUserManagerHarness(t)
 	m, _ := userAssignmentFor(userSessionA).UserMachine()
@@ -1831,4 +1863,45 @@ func TestMultiReplicaRealRedisLostLeaseStopsTheHolderAndFreesTheMachine(t *testi
 	ok, err := r1.mgr.ReclaimUserMachine(ctx, m, func(context.Context) (bool, error) { return true, nil })
 	require.NoError(t, err)
 	require.True(t, ok, "with the holder gone the machine can be reclaimed")
+}
+
+func TestWithBrowserEnvOverridesCallerValues(t *testing.T) {
+	in := map[string]string{
+		"WEKNORA_SESSION_ID":   "spoofed",
+		"WEKNORA_BROWSER_ROOT": "/tmp/spoofed",
+		"KEEP":                 "1",
+	}
+	out := withBrowserEnv(in, "sid-1", RemoteWorkspaceLayout())
+	require.Equal(t, "sid-1", out["WEKNORA_SESSION_ID"])
+	require.Equal(t, "/var/lib/weknora/browser/session", out["WEKNORA_BROWSER_ROOT"])
+	require.Equal(t, "1", out["KEEP"])
+	require.Equal(t, "spoofed", in["WEKNORA_SESSION_ID"], "input map must not be mutated")
+}
+
+func TestWithBrowserEnvLeavesLayoutsWithoutBrowserRootAlone(t *testing.T) {
+	out := withBrowserEnv(map[string]string{"A": "b"}, "sid-1", WorkspaceLayout{})
+	require.Equal(t, map[string]string{"A": "b"}, out)
+}
+
+func TestUserSessionExecGetsItsOwnBrowserEnv(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionA), userAssignmentFor(userSessionB))
+	ctx := ownerCtx()
+	_, err := h.mgr.ExecShellCommand(ctx, userSessionB, "true", "", time.Second, map[string]string{
+		"WEKNORA_SESSION_ID": userSessionA, // a model-supplied value must not win
+	})
+	require.NoError(t, err)
+	req := lastExecRequest(t, h.client)
+	require.Equal(t, userSessionB, req.Env["WEKNORA_SESSION_ID"])
+	require.Equal(t, "/var/lib/weknora/sessions/"+userSessionB+".browser", req.Env["WEKNORA_BROWSER_ROOT"])
+}
+
+func TestDesktopEnsureStyleExecCarriesTheSessionIdentity(t *testing.T) {
+	h := newUserManagerHarness(t, userAssignmentFor(userSessionB))
+	_, err := h.mgr.ExecShellCommandWithOptions(ownerCtx(), userSessionB, "true", ShellExecOptions{
+		Timeout: time.Second, SkipWorkspacePrep: true,
+	})
+	require.NoError(t, err)
+	req := lastExecRequest(t, h.client)
+	require.Equal(t, userSessionB, req.Env["WEKNORA_SESSION_ID"],
+		"ensure.sh reads it to choose this session's workspace")
 }

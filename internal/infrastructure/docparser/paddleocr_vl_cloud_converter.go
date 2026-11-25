@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -23,9 +22,10 @@ const (
 	paddleOCRVLCloudDefaultBaseURL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
 	paddleOCRVLCloudDefaultModel   = "PaddleOCR-VL-1.6"
 	paddleOCRVLCloudPollInterval   = 5 * time.Second
-	// paddleOCRVLCloudTimeout bounds how long one job is polled;
-	// WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT overrides it for documents that take
-	// longer, mirroring WEKNORA_MINERU_CLOUD_TIMEOUT on the MinerU cloud reader.
+	// paddleOCRVLCloudTimeout bounds the multipart submit upload and how long
+	// one job is polled; WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT overrides both,
+	// mirroring the self-hosted readers whose configured timeout also bounds
+	// the upload request that carries the file bytes.
 	paddleOCRVLCloudTimeout = 600 * time.Second
 )
 
@@ -153,16 +153,24 @@ func (c *PaddleOCRVLCloudReader) submitJob(ctx context.Context, req *types.ReadR
 	httpReq.Header.Set("Authorization", "bearer "+c.token)
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 
-	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 60 * time.Second, MaxRedirects: 5})
+	// The submit POST carries the whole file in one multipart body, so the
+	// per-job timeout must bound the upload too; the old fixed 60s ceiling
+	// failed every scan larger than ~100MB (#5589).
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: c.timeout, MaxRedirects: 5})
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return "", fmt.Errorf("HTTP request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API status %d: %s", resp.StatusCode, string(respBody))
+		preview := readErrorPreview(resp.Body)
+		return "", fmt.Errorf("API status %d: %s", resp.StatusCode, preview)
+	}
+
+	respBody, err := readCapped(resp.Body, maxJSONResponseBytes)
+	if err != nil {
+		return "", fmt.Errorf("read response body: %w", err)
 	}
 
 	var result paddleOCRVLCloudSubmitResponse
@@ -221,11 +229,18 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 			sleepCtx(ctx, c.pollInterval)
 			continue
 		}
-		respBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
 		if resp.StatusCode != http.StatusOK {
-			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] poll #%d status %d: %s", pollCount, resp.StatusCode, string(respBody))
+			preview := readErrorPreview(resp.Body)
+			_ = resp.Body.Close()
+			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] poll #%d status %d: %s",
+				pollCount, resp.StatusCode, preview)
+			sleepCtx(ctx, c.pollInterval)
+			continue
+		}
+		respBody, err := readCapped(resp.Body, maxJSONResponseBytes)
+		_ = resp.Body.Close()
+		if err != nil {
+			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] poll #%d read error: %v", pollCount, err)
 			sleepCtx(ctx, c.pollInterval)
 			continue
 		}
@@ -280,7 +295,7 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 	if resp.StatusCode != http.StatusOK {
 		return "", nil, nil, fmt.Errorf("download jsonl status %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(resp.Body)
+	data, err := readCapped(resp.Body, maxResultResponseBytes)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("read jsonl body: %w", err)
 	}
@@ -336,7 +351,10 @@ func (c *PaddleOCRVLCloudReader) downloadImages(mdContent string, imagesURL map[
 			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] download image %s: %v", ipath, err)
 			continue
 		}
-		imgBytes, err := io.ReadAll(resp.Body)
+		// A per-page crop, so the remote-image cap is the right ceiling rather
+		// than the JSON one, and image_resolver.go already applies that same
+		// cap to the images it fetches.
+		imgBytes, err := readCapped(resp.Body, maxRemoteImageSize)
 		resp.Body.Close()
 		if err != nil || resp.StatusCode != http.StatusOK {
 			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] read image %s status=%d err=%v", ipath, resp.StatusCode, err)

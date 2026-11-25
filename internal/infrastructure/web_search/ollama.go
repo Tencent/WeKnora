@@ -30,7 +30,7 @@ type OllamaProvider struct {
 }
 
 // NewOllamaProvider creates a new Ollama web search provider from parameters.
-func NewOllamaProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewOllamaProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Ollama provider")
 	}
@@ -53,10 +53,9 @@ func (p *OllamaProvider) Name() string {
 // Search performs a web search using Ollama Cloud API
 func (p *OllamaProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
+	query, maxResults := request.Query, request.MaxResults
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
 	}

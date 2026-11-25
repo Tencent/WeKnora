@@ -20,7 +20,7 @@ check_whitespace --cached
 staged_go=()
 while IFS= read -r line; do
   [[ -n "$line" ]] && staged_go+=("$line")
-done < <(git diff --cached --name-only --diff-filter=ACMR -- '*.go' ':!cli/**' || true)
+done < <(git diff --cached --name-only --diff-filter=ACMR -- '*.go' || true)
 
 if [[ ${#staged_go[@]} -gt 0 ]]; then
   go_files=()
@@ -29,9 +29,11 @@ if [[ ${#staged_go[@]} -gt 0 ]]; then
   done
   check_gofmt_files write "${go_files[@]}"
 
-  if command -v golangci-lint >/dev/null 2>&1; then
-    # Lint only what differs from HEAD (staged + unstaged in those packages).
-    run_golangci_if_available HEAD
+  if git diff --cached --name-only --diff-filter=ACMR -- '*.go' ':!cli/**' ':!client/**' | grep -q .; then
+    if command -v golangci-lint >/dev/null 2>&1; then
+      # Lint only what differs from HEAD (staged + unstaged in root module packages).
+      run_golangci_if_available HEAD
+    fi
   fi
 fi
 

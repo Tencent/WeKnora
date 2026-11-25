@@ -175,3 +175,15 @@ class ListEnginesResponse(_message.Message):
     ENGINES_FIELD_NUMBER: _ClassVar[int]
     engines: _containers.RepeatedCompositeFieldContainer[ParserEngineInfo]
     def __init__(self, engines: _Optional[_Iterable[_Union[ParserEngineInfo, _Mapping]]] = ...) -> None: ...
+
+class GetInfoRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class GetInfoResponse(_message.Message):
+    __slots__ = ("version", "commit_id")
+    VERSION_FIELD_NUMBER: _ClassVar[int]
+    COMMIT_ID_FIELD_NUMBER: _ClassVar[int]
+    version: str
+    commit_id: str
+    def __init__(self, version: _Optional[str] = ..., commit_id: _Optional[str] = ...) -> None: ...

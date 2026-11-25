@@ -79,12 +79,12 @@ func TestSearchProviderPatchPreservesParametersAndDefault(t *testing.T) {
 	}
 	require.NoError(t, repo.Create(ctx, original))
 	registry := websearch.NewRegistry()
-	registry.Register(
-		"duckduckgo",
-		func(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+	registry.Add(websearch.Spec{
+		Type: "duckduckgo",
+		Search: func(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 			return nil, fmt.Errorf("upstream echoed credential: %s", params.APIKey)
 		},
-	)
+	})
 	h := NewWebSearchProviderHandler(repo, svc, registry)
 	router := gin.New()
 	router.Use(

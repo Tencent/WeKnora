@@ -14,6 +14,7 @@ package session
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -222,51 +223,52 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 		return
 	}
 
-	// 4. One controlling desktop per machine, across replicas. The legacy
-	//    per-session slot is held too, so replicas still on the previous
-	//    release stay mutually exclusive during a rolling upgrade (remove it
-	//    in the following release). Unlike the terminal's 5-per-session
-	//    in-process counter, this must be distributed: two browsers on one
-	//    desktop means two people fighting over one keyboard.
-	releaseLegacy, gotLegacy, legacyHold, err := h.acquireDesktopSlot(ctx, desktopSlotKey(sessionID))
+	// 4. One active desktop tab per session — latest wins. A previous relay
+	//    whose browser hop died unnoticed (an unclean disconnect stays
+	//    undetected up to desktopReadTimeout; a zombie tab keeps ponging)
+	//    must not answer this session's reconnect with DESKTOP_BUSY, so the
+	//    session slot is taken over rather than contended: the loser's next
+	//    renewal fails the token compare, its hold context ends, and the
+	//    slot watcher below closes its browser hop.
+	//
+	//    The machine-wide slot — taken only for the shared :0 screen, only
+	//    after ensure says which screen this is — stays exclusive: it guards
+	//    another session's screen, and a seat token never touches it.
+	//
+	//    HoldOperation (taken above) is a shared membership pin so a rebuild
+	//    waits. It does not exclude another session's desktop.
+	releaseLegacy, legacyHold, err := h.acquireSessionDesktopSlot(ctx, sessionID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reserve desktop"})
-		return
-	}
-	if !gotLegacy {
-		c.JSON(http.StatusConflict, gin.H{"error": desktopErrBusy})
 		return
 	}
 	defer releaseLegacy()
-	releaseSlot, acquired, machineHold, err := h.acquireDesktopSlot(ctx, desktopMachineSlotKey(target.MachineID))
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reserve desktop"})
-		return
-	}
-	if !acquired {
-		c.JSON(http.StatusConflict, gin.H{"error": desktopErrBusy})
-		return
-	}
-	defer releaseSlot()
-	slotHold, stopSlotHold := mergeDesktopHolds(legacyHold, machineHold, opCtx)
-	defer stopSlotHold()
 
-	// Start, dial on the fixed sandbox. The relay context is detached only
-	// after the browser socket is upgraded. Losing either slot or the
-	// operation lease cancels this work.
+	// Start, dial on the fixed sandbox. Losing the session slot or the
+	// operation lease cancels this work. The machine slot is not held yet.
+	preHold, stopPreHold := mergeDesktopHolds(legacyHold, opCtx)
+	defer stopPreHold()
 	ensureCtx := ctx
-	if slotHold != nil {
+	if preHold != nil {
 		var cancelEnsure context.CancelFunc
 		ensureCtx, cancelEnsure = context.WithCancel(ctx)
-		stopEnsureWatch := context.AfterFunc(slotHold, cancelEnsure)
+		stopEnsureWatch := context.AfterFunc(preHold, cancelEnsure)
 		defer stopEnsureWatch()
 		defer cancelEnsure()
 	}
 	desktop, err := h.desktopService.StartSessionDesktop(ensureCtx, target)
 	if err != nil {
-		if slotHold != nil && slotHold.Err() != nil {
+		if ctx.Err() != nil {
+			// The browser gave up mid-ensure (or a takeover canceled this
+			// attempt's hold): the response goes nowhere. Do not report
+			// DESKTOP_BUSY — an abandoned attempt owns nothing anymore, and
+			// the slot is the next connection's. readDesktopSecret skips
+			// the shared-stack reset for the same reason.
+			logger.Warnf(ctx, "[sandbox-desktop] open abandoned session=%s: %v", sessionID, err)
+			return
+		}
+		if preHold != nil && preHold.Err() != nil {
 			c.JSON(http.StatusConflict, gin.H{"error": desktopErrBusy})
 			return
 		}
@@ -280,6 +282,22 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 		writeDesktopProtocolClose(browserConn, code)
 		return
 	}
+
+	releaseMachine, machineHold, busy, err := h.acquireSharedDesktopSlot(ctx, target.MachineID, desktop.Token)
+	if err != nil {
+		closeDesktopConn(desktop)
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reserve desktop"})
+		return
+	}
+	if busy {
+		closeDesktopConn(desktop)
+		c.JSON(http.StatusConflict, gin.H{"error": desktopErrBusy})
+		return
+	}
+	defer releaseMachine()
+	slotHold, stopSlotHold := mergeDesktopHolds(legacyHold, machineHold, opCtx)
+	defer stopSlotHold()
 
 	// 4. Read and validate the server's ProtocolVersion while an HTTP status
 	//    code is still expressible: not RFB 003.008 means the client side is
@@ -470,8 +488,9 @@ func (h *Handler) closeDesktopWithError(
 	writeDesktopProtocolClose(browserConn, code)
 }
 
-// acquireDesktopSlot reserves one desktop slot across all replicas. key is
-// the full Redis key (session or machine); callers build it.
+// acquireDesktopSlot reserves one desktop slot across all replicas, and
+// refuses when another holder owns it. It is the shared-:0 machine slot: the
+// holder is another session's relay, so this key must never be taken over.
 //
 // The terminal's per-session cap is a process-local counter, which is
 // harmless there (a second shell is a cosmetic problem) and unacceptable here
@@ -485,7 +504,7 @@ func (h *Handler) acquireDesktopSlot(
 	ctx context.Context, key string,
 ) (release func(), acquired bool, hold context.Context, err error) {
 	if h.redis == nil {
-		release, ok := sessionDesktopLimiter.acquire(key)
+		release, ok := sessionDesktopLimiter.acquireExclusive(key)
 		return release, ok, nil, nil
 	}
 	token, err := redislock.NewToken()
@@ -516,6 +535,54 @@ func (h *Handler) acquireDesktopSlot(
 			cancel()
 		})
 	}, true, hold, nil
+}
+
+// acquireSessionDesktopSlot takes this session's desktop slot with takeover
+// semantics: the reconnect wins, the previous holder loses. A previous relay
+// that has not yet noticed its dead browser hop (an unclean disconnect stays
+// undetected for up to desktopReadTimeout; a zombie tab answers pings
+// forever) used to answer every reconnect of this very session with
+// DESKTOP_BUSY.
+//
+// The loser notices at its next renewal — the token compare fails — so its
+// hold context ends and the handler's slot watcher closes its browser hop.
+// Its release cannot delete the successor's key (token compare), so a
+// half-dead predecessor cannot take the slot down with it.
+func (h *Handler) acquireSessionDesktopSlot(
+	ctx context.Context, sessionID string,
+) (release func(), hold context.Context, err error) {
+	key := desktopSlotKey(sessionID)
+	if h.redis == nil {
+		release, hold := sessionDesktopLimiter.acquireSession(key)
+		return release, hold, nil
+	}
+	token, err := redislock.NewToken()
+	if err != nil {
+		return func() {}, nil, err
+	}
+	// SET, not SETNX: latest wins. The lease stays the crashed-replica safety
+	// net — a holder that died without releasing expires on its own.
+	if err := h.redis.Set(ctx, key, token, desktopSlotLease).Err(); err != nil {
+		return func() {}, nil, fmt.Errorf("take over desktop slot: %w", err)
+	}
+
+	hold, cancelHold := context.WithCancelCause(context.Background())
+	renewCtx, stopRenew := context.WithCancel(context.WithoutCancel(ctx))
+	// The timing is read here, before the goroutine starts, so the renew loop
+	// never reads the package-level settings concurrently with a writer.
+	renewEvery, lease := desktopSessionSlotRenew, desktopSlotLease
+	go renewDesktopSlot(renewCtx, cancelHold, h.redis, key, token, renewEvery, lease)
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			stopRenew()
+			cancelHold(nil)
+			relCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, _ = redislock.Release(relCtx, h.redis, key, token)
+			cancel()
+		})
+	}, hold, nil
 }
 
 func renewDesktopSlot(
@@ -560,6 +627,12 @@ var (
 	// key is observed without waiting on the production 90s lease.
 	desktopSlotLease = 90 * time.Second
 	desktopSlotRenew = 30 * time.Second
+
+	// desktopSessionSlotRenew renews the session slot faster than the machine
+	// slot: a takeover evicts the previous holder only at its next renewal,
+	// and a reconnect should not share a keyboard with the outgoing tab for
+	// half a minute.
+	desktopSessionSlotRenew = 5 * time.Second
 )
 
 func desktopSlotKey(sessionID string) string {
@@ -568,6 +641,34 @@ func desktopSlotKey(sessionID string) string {
 
 func desktopMachineSlotKey(machineID string) string {
 	return "weknora:desktop-slot:machine:" + machineID
+}
+
+// acquireSharedDesktopSlot takes the one-desktop-per-machine lock when this
+// connection still uses the shared :0 screen. A seat token (1..99) returns
+// acquired with a nil hold and does not touch the lock, so two sessions on
+// one machine can watch their own screens together.
+//
+// busy is true when another session already holds the shared screen.
+func (h *Handler) acquireSharedDesktopSlot(
+	ctx context.Context, machineID, token string,
+) (release func(), hold context.Context, busy bool, err error) {
+	if sandbox.DesktopSeatIsolated(token) {
+		return func() {}, nil, false, nil
+	}
+	release, acquired, hold, err := h.acquireDesktopSlot(ctx, desktopMachineSlotKey(machineID))
+	if err != nil {
+		return func() {}, nil, false, err
+	}
+	if !acquired {
+		return func() {}, nil, true, nil
+	}
+	return release, hold, false, nil
+}
+
+func closeDesktopConn(desktop *service.SessionDesktop) {
+	if desktop != nil && desktop.Conn != nil {
+		_ = desktop.Conn.Close()
+	}
 }
 
 // mergeDesktopHolds ends as soon as any hold ends. Nil holds (no Redis) are
@@ -594,28 +695,76 @@ func mergeDesktopHolds(holds ...context.Context) (context.Context, func()) {
 
 // desktopLimiter caps one key to one desktop within this process. The key is
 // the full slot key, so a machine and a session do not share an entry.
+//
+// Session keys are takeover entries: a reconnect evicts the previous holder
+// instead of being rejected, mirroring the Redis SET takeover so Lite-mode
+// reconnects behave like distributed ones. Machine keys stay exclusive —
+// the holder there is another session's relay.
 type desktopLimiter struct {
 	mu   sync.Mutex
-	open map[string]bool
+	open map[string]*desktopLimiterEntry
 }
 
-var sessionDesktopLimiter = &desktopLimiter{open: make(map[string]bool)}
+// desktopLimiterEntry is one holder. The pointer is the identity used by
+// release: an evicted holder's release must not remove its successor's
+// entry. Go func values are not comparable, so the cancel lives here.
+type desktopLimiterEntry struct {
+	cancel context.CancelCauseFunc
+}
 
-func (l *desktopLimiter) acquire(key string) (func(), bool) {
+var sessionDesktopLimiter = &desktopLimiter{
+	open: make(map[string]*desktopLimiterEntry),
+}
+
+// acquireSession takes key with takeover semantics: the previous holder's
+// hold context is cancelled (so its relay closes), and the returned hold
+// ends when a later acquisition evicts this one. The release only removes
+// this holder's own entry, never its successor's.
+func (l *desktopLimiter) acquireSession(key string) (func(), context.Context) {
+	hold, cancel := context.WithCancelCause(context.Background())
+	entry := &desktopLimiterEntry{cancel: cancel}
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.open[key] {
+	if prev := l.open[key]; prev != nil {
+		prev.cancel(redislock.ErrLockOwnershipLost)
+	}
+	l.open[key] = entry
+	l.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			l.mu.Lock()
+			if l.open[key] == entry {
+				delete(l.open, key)
+			}
+			l.mu.Unlock()
+			cancel(nil)
+		})
+	}, hold
+}
+
+// acquireExclusive takes key or reports it held. Machine keys only: the
+// holder is another session's relay and must not be evicted.
+func (l *desktopLimiter) acquireExclusive(key string) (func(), bool) {
+	_, cancel := context.WithCancelCause(context.Background())
+	entry := &desktopLimiterEntry{cancel: cancel}
+	l.mu.Lock()
+	if _, held := l.open[key]; held {
+		l.mu.Unlock()
+		cancel(nil)
 		return func() {}, false
 	}
-	l.open[key] = true
-	released := false
+	l.open[key] = entry
+	l.mu.Unlock()
+	var once sync.Once
 	return func() {
-		l.mu.Lock()
-		defer l.mu.Unlock()
-		if !released {
-			released = true
-			delete(l.open, key)
-		}
+		once.Do(func() {
+			l.mu.Lock()
+			if l.open[key] == entry {
+				delete(l.open, key)
+			}
+			l.mu.Unlock()
+			cancel(nil)
+		})
 	}, true
 }
 
@@ -760,10 +909,12 @@ func (r *desktopRelay) isIdle(now time.Time) bool {
 	return r.idleFor(now) >= r.idleDisconnect
 }
 
-// watchIdle closes the relay once nobody has touched the desktop for
-// idleDisconnect. closePeers cancels relayCtx, which stops the
-// StartTTLRefresh loop started after upgrade — that is what finally lets
-// the sandbox pause on its own provider timeout.
+// watchIdle closes the viewer once nobody has touched the desktop for
+// idleDisconnect. The seat and its X server stay up: the same session's next
+// connect claims the same number and finds the display still alive.
+// closePeers cancels relayCtx, which stops the StartTTLRefresh loop started
+// after upgrade — that is what finally lets the sandbox pause on its own
+// provider timeout.
 func (r *desktopRelay) watchIdle(done <-chan struct{}) {
 	if r.idleDisconnect <= 0 {
 		return

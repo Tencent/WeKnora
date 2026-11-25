@@ -122,7 +122,7 @@ flowchart LR
 | `auth` | `AuthConfig` | `registration_mode`：`self_serve`（默认，开放注册）/ `invite_register`（仅限邀请注册）/ `invite_only`（禁止注册，`DISABLE_REGISTRATION=true` 时使用）；`default_tenant_mode`：`create_personal`（默认）/ `tenantless` |
 | `audit` | `AuditConfig` | `retention_days`：审计日志保留天数，段落省略时默认 90；0 禁用清理；<0 校验报错（env `WEKNORA_AUDIT_RETENTION_DAYS`） |
 | `oidc_auth` | `OIDCAuthConfig` | `enable`、`issuer_url`、`jwks_uri`、`discovery_url`（缺省由 issuer 拼 `/.well-known/openid-configuration`）、`client_id`、`client_secret`、`authorization_endpoint`、`token_endpoint`、`user_info_endpoint`、`scopes`（默认 `openid profile email`）、`user_info_mapping.username`（默认 `name`）/`email`（默认 `email`）；全部可用 `OIDC_AUTH_*` 环境变量覆盖 |
-| `agent` | `AgentConfig` | `llm_call_timeout`：单次 LLM 调用超时秒数（默认 120，env `WEKNORA_AGENT_LLM_TIMEOUT`）；`tool_approval_timeout_seconds`：MCP 工具人工审批等待（默认 600，env `WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT`） |
+| `agent` | `AgentConfig` | `llm_call_timeout`：单次 LLM 调用超时秒数（默认 120，env `WEKNORA_AGENT_LLM_TIMEOUT`）；`tool_approval_timeout_seconds`：MCP 工具人工审批等待（默认 600，env `WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT`）；`mcp_directory_max_age_seconds`：已保存 MCP 工具目录超过该时长后，下次使用时在后台重新拉取（默认 3600，负数关闭，env `WEKNORA_AGENT_MCP_DIRECTORY_MAX_AGE`） |
 | `im` | `IMConfig` | IM 渠道 QA 并发：`workers`（5）、`global_max_workers`（0=不限，需 Redis）、`max_queue_size`（50）、`max_per_user`（3）、`rate_limit_window`（60s）、`rate_limit_max`（10） |
 | `docreader` | `DocReaderConfig` | `addr`（gRPC 地址如 `docreader:50051` 或 HTTP base URL）、`transport`：`grpc`（默认）/ `http`；通常用 env `DOCREADER_ADDR` / `DOCREADER_TRANSPORT` |
 | `vector_database` | `VectorDatabaseConfig` | `driver`（通常用 env `RETRIEVE_DRIVER`） |
@@ -145,13 +145,14 @@ flowchart LR
 | `TZ` | Asia/Shanghai | 时区 |
 | `DEFAULT_LOCALE` | 空 | 前端界面默认语言（frontend 容器读取）：`zh-CN` / `en-US` / `ru-RU` / `ko-KR` / `ja-JP`，非法值忽略。仅影响未手动切换过语言的用户，优先级：用户已选语言 > 本变量 > `zh-CN`；改完重启 frontend 容器即可，无需重建镜像 |
 | `WEKNORA_LANGUAGE` | 空 | 文档处理语言（问题/摘要生成）。优先级：本变量 > 请求的 `Accept-Language` > 内置 `zh-CN`。文档处理语言可独立于界面语言设置，例如使用英文界面处理韩文文档。未设置回复语言的 IM 渠道也以本变量（未设置时为 `zh-CN`）作为默认回复语言 |
-| `AUTO_MIGRATE` | true | 启动时自动执行数据库迁移 |
+| `AUTO_MIGRATE` | true | 启动时自动执行数据库迁移。PostgreSQL 下也控制按维度后台建 HNSW 索引，设为 `false` 时两者都不做（见[检索引擎](../03-features/05-retrieval-engines.md)） |
 | `AUTO_RECOVER_DIRTY` | true | 自动修复 golang-migrate 的 dirty 状态（上次迁移中断留下的）。手工排查迁移问题时应临时设为 false，否则启动会自动改写迁移版本记录，见[数据库与迁移](../06-development/02-database-schema.md) |
 | `WEKNORA_TRUSTED_PROXIES` | 空 | gin 信任代理 CIDR（逗号分隔） |
 | `MAX_SKILL_BUNDLE_SIZE_MB` | 256 MiB（默认不小于 MAX_FILE_SIZE_MB，上限 512 MiB） | 技能 ZIP 上传与来源下载上限；反向代理请求体限制也需足够大 |
 | `MAX_FILE_SIZE_MB` | 50 | 上传文件大小限制（app/frontend/docreader 三处共用）；Helm 部署使用 `global.maxFileSizeMB` |
 | `CONCURRENCY_POOL_SIZE` | 5 | 通用并发池 |
 | `APP_EXTERNAL_URL` / `FRONTEND_BASE_URL` | 空 | IM 渠道图片/文件外链的外部可达 URL / 前端外部 origin |
+| `WEKNORA_MCP_ASK_TIMEOUT` | `4m` | MCP Server 内置 `ask` 的单次服务端时限；支持 Go duration（如 `10m`）或纯秒数（如 `600`），非法或非正值回退到 `4m`。客户端与反向代理的独立超时需另行配置 |
 | `RESOURCE_URL_MODE` | handle | API 响应里文件引用的默认形式：`handle` 返回内部 `resource://`，`public` 返回可直接加载的限时外链。单次请求可用 `?resource_urls=` 覆盖，详见 [API 总览](../04-api/01-api-overview.md) |
 
 `APP_EXTERNAL_URL` 影响 IM 渠道能否渲染知识库图片。IM 平台需要拿到公网 http(s) URL，二选一：
@@ -170,6 +171,7 @@ flowchart LR
 | `DB_DRIVER` | postgres | `postgres` / `sqlite`（Lite） |
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | postgres / 5432 / 空 / 空 / 空 | PostgreSQL 连接（必填） |
 | `DB_PATH` | — | `DB_DRIVER=sqlite` 时的数据库文件路径 |
+| `DB_MAX_OPEN_CONNS` | 空（不限制） | PostgreSQL 连接池最大连接数，应小于数据库 `max_connections`（默认 100）；超出的请求排队等待，而不是报 `too many clients already` |
 | `STREAM_MANAGER_TYPE` | 空（compose 实际走 redis） | `redis` / `memory` |
 | `REDIS_ADDR` / `REDIS_USERNAME` / `REDIS_PASSWORD` / `REDIS_DB` / `REDIS_PREFIX` | redis:6379 / … | Redis 连接 |
 | `REDIS_USE_TLS` | false | **启用 TLS 的总开关**，托管 Redis（如 AWS ElastiCache）需要打开；`REDIS_TLS_SERVER_NAME` 指定校验与 SNI 用的服务器名（地址是 IP 时有用），`REDIS_TLS_INSECURE_SKIP_VERIFY` 跳过证书校验（不安全，仅自签证书的开发环境用） |
@@ -213,6 +215,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `OLLAMA_OPTIONAL` | true | Ollama 不可用时仅告警不阻断启动 |
 | `BATCH_EMBED_SIZE` | 空 | 批量 embedding 大小 |
 | `VLM_HTTP_TIMEOUT_SECONDS` | 180 | VLM 单次请求超时 |
+| `GENERATE_QUESTIONS_MAX_TOKENS` | 2048 | 文档问题生成的补全预算，推理模型需同时容纳隐藏思考 token |
 | `VLM_MAX_TOKENS` | 5000 | 远程 VLM 单次请求的补全 token 预算（含模型隐藏的思考 token，整页扫描件被截断时报 `finish_reason=length` 可调大） |
 | `BUILTIN_MODELS_CONFIG` | config/builtin_models.yaml | 内置模型声明文件路径（见下文） |
 | `MODELS_CONFIG` | config/models.json | 模型厂商目录的部署叠加文件路径（补充厂商、覆盖地址或模型参数），格式见[模型管理](../03-features/06-models.md) |
@@ -241,7 +244,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `OIDC_AUTH_JWKS_URI` | 空 | id_token 验签公钥集；可经 discovery 补全，与 issuer/audience/有效期共同校验 |
 | `WEKNORA_INVITATION_TTL` | 168h | 邀请链接有效期 |
 | `WEKNORA_AUDIT_RETENTION_DAYS` | 90 | 审计日志保留天数 |
-| `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` | 空 | 引导第一个系统管理员。**不会创建用户**：该邮箱需先自行注册，下次启动时若部署内还没有任何系统管理员，才把它提升；已有管理员后本变量不再生效。详见[租户、用户与认证授权](../03-features/01-tenant-auth.md) |
+| `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` | 空 | 引导第一个系统管理员。**不会创建用户**：部署尚无系统管理员时，该邮箱在注册时立即提升（无需重启）；若账号先于变量配置注册，则在下次启动时提升；已有管理员后本变量不再生效。详见[租户、用户与认证授权](../03-features/01-tenant-auth.md) |
 | `OIDC_AUTH_ENABLE` 及 `OIDC_AUTH_*` / `OIDC_USER_INFO_MAPPING_*` | false / 空 | OIDC 单点登录全套配置 |
 | `SSRF_WHITELIST` / `SSRF_WHITELIST_EXTRA` | 空 / `searxng,qdrant,milvus,weaviate,doris-fe,doris-be,minio`（仅 app） | 出站请求 SSRF 白名单。`SSRF_WHITELIST` 为 app 与 docreader 共用；compose 只给 app 的 `SSRF_WHITELIST_EXTRA` 设了默认值，docreader 的同名变量默认为空 |
 | `SSRF_DNS_WHITELIST_ONLY` | false | 仅允许白名单出站（app 与 docreader 均读取）。开启后，不在白名单的主机在 **DNS 查询前**即被拒绝，URL 校验处不在白名单的 IP 直连也一并拒绝；域名只按名字匹配，写在白名单里的 CIDR 不再对域名生效。取值按布尔解析（`1/t/true` 开、`0/f/false` 关），**非空且无法解析的取值按「开」处理**。开启前的准备见下文 |
@@ -284,9 +287,25 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `DOCREADER_PDF_RENDER_DPI` / `DOCREADER_PDF_JPEG_QUALITY` / `DOCREADER_PDF_RENDER_MAX_EDGE` | 200 / 85 / 2000 | PDF 渲染 |
 | `DOCREADER_PDF_FORCE_SCANNED` / `DOCREADER_PDF_SCAN_IMAGE_RATIO` / `DOCREADER_PDF_SCAN_MIN_CHARS` | false / 代码默认 | 扫描件判定 |
 | `DOCREADER_ODL_HYBRID` / `DOCREADER_ODL_HYBRID_URL` / `DOCREADER_ODL_HYBRID_MODE` / `DOCREADER_ODL_HYBRID_FALLBACK` | off / http://odl-hybrid:5002 / auto / false | OpenDataLoader 混合解析 |
+| `DOCREADER_XLSX_PERCENT_AS_TEXT` / `DOCREADER_XLSX_PCT_ROW_HINT_MIN` | false / 0 | 可选百分比显示文本和同行推断；开启后可能把数值转为字符串，见[解析说明](../03-features/03-document-parsing.md) |
 | `DOCREADER_HTML_MAIN_CONTENT` | false | 上传的 HTML 文件只索引正文（与 URL 导入同一抽取策略；抽取不足时回退整页转换） |
 | 其余 `DOCREADER_PDF_*`（词距/边栏/隐藏文本/嵌入图/图表区等 20+ 项） | 见 `docker-compose.yml` docreader 段注释 | PDF 版式与抽取精调 |
 | `DOCREADER_EXTERNAL_HTTP_PROXY` / `_HTTPS_PROXY` | 空 | docreader 出站抓取代理 |
+
+### OCR 图片预处理 {#image-preprocess}
+
+这些变量限制 Docreader 预处理资源，不会自动开启知识库的预处理选项。
+
+| 名称 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DOCREADER_PREPROCESS_MAX_WORKERS` | 1 | 最大并发预处理数 |
+| `DOCREADER_PREPROCESS_TIMEOUT_SECONDS` | 30 | 单次预处理时限 |
+| `DOCREADER_PREPROCESS_THREADS` | 2 | 每个任务的工作线程数 |
+| `DOCREADER_PREPROCESS_MEMORY_MB` | 2048 | 进程内存限制，MiB |
+| `DOCREADER_PREPROCESS_MAX_PIXELS` | 16000000 | 输入像素上限 |
+| `DOCREADER_PREPROCESS_MAX_EDGE` / `DOCREADER_PREPROCESS_PROBE_EDGE` | 2000 / 2000 | 输出与探测图像的最大边长 |
+
+知识库按 `off` / `auto` / `always` 选择预处理方式。繁忙或处理失败时回退原图，见[文档解析](../03-features/03-document-parsing.md#_4-图片处理与多模态分工)。
 
 ### 描述生成与出站连接
 
@@ -300,17 +319,20 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
 | Sandbox 配置 | 设置页按空间维护 | 后端、凭据、模板、超时和私网访问策略按空间保存 |
+| `WEKNORA_SANDBOX_USER_ALLOCATION` | 未启用 | 设为 `enabled` 才开放按用户复用沙箱，需要 Redis；先升级全部副本，再开启并配置，见[分配方式](../03-features/22-skills-sandbox.md#user-sandbox) |
 | `WEKNORA_SANDBOX_DOCKER_ENABLED` | false | Docker 沙箱后端回退开关。系统管理员也可在「设置 → 系统设置 → 网络安全」打开（DB 优先，立即生效）。默认关闭，因为本机 `docker.sock` 等同宿主机 root |
 | `WEKNORA_AGENT_LLM_TIMEOUT` | 120s | Agent 单次 LLM 调用超时（Go duration 或纯数字秒） |
 | `WEKNORA_WEB_FETCH_TIMEOUT` | 3m | Agent `web_fetch` 单页抓取预算（Go duration 或纯数字秒）。HTTP 与 chromedp 共用这一预算，不叠加。空值、无效值或非正数使用默认值。工具包装层再多等 5 秒。快速回答管道仍为 15s，不使用此项 |
 | `WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT` / `_FAIL_OPEN` | 600s / fail-close | MCP 工具人工审批等待与失败策略 |
+| `WEKNORA_AGENT_MCP_DIRECTORY_MAX_AGE` | 1h | 已保存 MCP 工具目录的最长保存时间，超过后下次使用时在后台重新拉取（Go duration 或纯数字秒，负数关闭）。服务端版本或说明变化、调用因未知工具或参数无效被拒时也会重新拉取，见 [MCP 持久目录](../03-features/08-mcp.md#mcp-tool-directory) |
 | `WEKNORA_CHAT_ATTACHMENT_TTL_HOURS` / `_WAIT_TIMEOUT_SEC` / `_OCR_CONCURRENCY` / `_OCR_MAX_PAGES` | 24 / 60 / 8 / 8 | 未被有效会话消息引用的附件保留时长、读取解析等待超时与 OCR 并发/页数上限；已发送附件在原会话或分叉会话仍引用时不因 TTL 清理 |
 | `WEKNORA_HOUSEKEEPING_ENABLED` | 启用 | 回收卡在 processing 的脏数据 |
 | `WEKNORA_DOCUMENT_PROCESS_TIMEOUT` / `WEKNORA_DOCREADER_CALL_TIMEOUT` | 2h / 30m | 文档处理任务与单次 RPC 超时 |
 | `WEKNORA_PADDLEOCR_VL_TIMEOUT` | 1000s | 自建 PaddleOCR-VL HTTP 请求超时，支持正数 Go duration（如 `5400s`、`90m`）；空值、无效值或非正数使用默认值。外层超时需留余量，例如本项 `90m`、DocReader `100m`、文档任务 `2h` |
 | `WEKNORA_MINERU_TIMEOUT` | 1000s | 自建 MinerU 单次解析超时（V1 API 为整个解析任务，旧版为 `/file_parse` 请求），格式与默认值规则同上；超大 PDF 同样需要外层超时留余量 |
 | `WEKNORA_MINERU_CLOUD_TIMEOUT` | 30m | MinerU 云端（mineru.net）每个批次/分片轮询解析结果的最长时间，格式与默认值规则同上 |
-| `WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT` | 600s | PaddleOCR-VL 云端（AI Studio）轮询解析结果的最长时间，格式与默认值规则同上 |
+| `WEKNORA_MINERU_MAX_IMAGE_BYTES` | 536870912（512 MiB） | MinerU Cloud / 自建 V1 每个结果 ZIP 中引用图片的解压总字节上限（正整数）；空值、无效值、溢出或非正数使用默认值。大型扫描 PDF 可设为 `2147483648`（2 GiB），图片全部驻留内存，需为并发解析预留内存；下载 1 GiB、单条目 64 MiB 上限仍生效。修改后重新创建 app 容器 |
+| `WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT` | 600s | PaddleOCR-VL 云端（AI Studio）提交（整包 multipart 上传）与轮询解析结果的最长时间，格式与默认值规则同上 |
 | `WEKNORA_WEKNORACLOUD_TIMEOUT` | 20m | WeKnoraCloud 托管 docreader 轮询任务结果的最长时间，格式与默认值规则同上；应小于 `WEKNORA_DOCREADER_CALL_TIMEOUT` |
 
 沙箱后端、网络策略、脚本开关与个人环境变量使用空间配置/API 管理，见[技能与沙箱](../03-features/22-skills-sandbox.md)。长期记忆与自动标签均默认关闭，分别使用租户 memory_config 和知识库 auto_tag_config，不用全局环境变量替代各空间配置。

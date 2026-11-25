@@ -82,15 +82,42 @@ func TestDesktopSandboxRebuiltUsesStore(t *testing.T) {
 	require.False(t, h.desktopSandboxRebuilt(ctx, "sess-1", "sbx-b"))
 }
 
-func TestDesktopSlotIsExclusivePerSession(t *testing.T) {
-	first, ok := sessionDesktopLimiter.acquire("sess-excl")
-	require.True(t, ok)
-	_, ok = sessionDesktopLimiter.acquire("sess-excl")
-	require.False(t, ok, "a second desktop on one session means two people on one keyboard")
+func TestDesktopLimiterSessionKeyTakesOver(t *testing.T) {
+	// A reconnect must not be rejected by the session's own previous relay:
+	// after an unclean disconnect the old relay can hold the slot for up to
+	// desktopReadTimeout before it notices, and every retry used to come
+	// back DESKTOP_BUSY. Latest wins: the second holder evicts the first,
+	// whose hold context ends so its relay can close its browser hop.
+	first, firstHold := sessionDesktopLimiter.acquireSession("sess-take")
+	require.NotNil(t, firstHold)
+
+	second, secondHold := sessionDesktopLimiter.acquireSession("sess-take")
+	require.NotNil(t, secondHold)
+	select {
+	case <-firstHold.Done():
+	case <-time.After(time.Second):
+		t.Fatal("takeover must end the previous holder's hold so its relay closes")
+	}
+
+	// The evicted holder's release must not drop the new holder's entry.
 	first()
-	third, ok := sessionDesktopLimiter.acquire("sess-excl")
+	select {
+	case <-secondHold.Done():
+		t.Fatal("the new holder's slot must survive the old relay's release")
+	default:
+	}
+	second()
+}
+
+func TestDesktopLimiterMachineKeyStaysExclusive(t *testing.T) {
+	first, ok := sessionDesktopLimiter.acquireExclusive("machine-take")
+	require.True(t, ok)
+	_, ok = sessionDesktopLimiter.acquireExclusive("machine-take")
+	require.False(t, ok, "a machine slot guards another session's shared screen; it must never be taken over")
+	first()
+	next, ok := sessionDesktopLimiter.acquireExclusive("machine-take")
 	require.True(t, ok, "releasing must free the slot")
-	third()
+	next()
 }
 
 func TestDesktopSlotIsExclusivePerMachineAcrossSessions(t *testing.T) {
@@ -109,6 +136,45 @@ func TestDesktopSlotIsExclusivePerMachineAcrossSessions(t *testing.T) {
 	require.True(t, got)
 }
 
+func TestSeatDesktopsDoNotTakeTheMachineSlot(t *testing.T) {
+	h, _, client := newDesktopSlotHandler(t)
+	ctx := context.Background()
+	releaseA, holdA, busyA, err := h.acquireSharedDesktopSlot(ctx, "machine-1", "1")
+	require.NoError(t, err)
+	require.False(t, busyA)
+	require.Nil(t, holdA)
+	releaseB, _, busyB, err := h.acquireSharedDesktopSlot(ctx, "machine-1", "7")
+	require.NoError(t, err)
+	require.False(t, busyB)
+	require.Equal(t, int64(0), client.Exists(ctx, desktopMachineSlotKey("machine-1")).Val())
+	releaseA()
+	releaseB()
+}
+
+func TestSharedScreenStillTakesTheMachineSlot(t *testing.T) {
+	h, _, _ := newDesktopSlotHandler(t)
+	ctx := context.Background()
+	for _, token := range []string{"", "0"} {
+		release, hold, busy, err := h.acquireSharedDesktopSlot(ctx, "machine-1", token)
+		require.NoError(t, err, token)
+		require.False(t, busy, token)
+		require.NotNil(t, hold, token)
+		_, _, busy, err = h.acquireSharedDesktopSlot(ctx, "machine-1", token)
+		require.NoError(t, err, token)
+		require.True(t, busy, "token %q still shares :0", token)
+		release()
+	}
+}
+
+func TestSeatRelayWatchAllowsAMissingMachineHold(t *testing.T) {
+	session, cancel := context.WithCancel(context.Background())
+	merged, stop := mergeDesktopHolds(session, nil, context.Background())
+	require.NotNil(t, merged)
+	cancel()
+	require.Eventually(t, func() bool { return merged.Err() != nil }, time.Second, 5*time.Millisecond)
+	stop()
+}
+
 func TestMergeDesktopHoldsEndsWithAnyHold(t *testing.T) {
 	a, cancelA := context.WithCancel(context.Background())
 	b, cancelB := context.WithCancel(context.Background())
@@ -123,11 +189,16 @@ func TestMergeDesktopHoldsEndsWithAnyHold(t *testing.T) {
 }
 
 func TestDesktopSlotReleaseIsIdempotent(t *testing.T) {
-	release, ok := sessionDesktopLimiter.acquire("sess-idem")
-	require.True(t, ok)
+	release, hold := sessionDesktopLimiter.acquireSession("sess-idem")
 	release()
 	release()
-	next, ok := sessionDesktopLimiter.acquire("sess-idem")
+	select {
+	case <-hold.Done():
+	default:
+		t.Fatal("release must end the hold so the relay's slot watcher stops")
+	}
+	// A double release must not corrupt the map: the key is free again.
+	next, ok := sessionDesktopLimiter.acquireExclusive("sess-idem")
 	require.True(t, ok)
 	next()
 }
@@ -141,6 +212,18 @@ func withDesktopSlotTiming(t *testing.T, lease, renew time.Duration) {
 	})
 }
 
+// withDesktopSessionSlotTiming shortens the session slot's lease and
+// renewal; a takeover evicts the previous holder only at its next renewal
+// tick, so tests make that tick fast.
+func withDesktopSessionSlotTiming(t *testing.T, lease, renew time.Duration) {
+	t.Helper()
+	origLease, origRenew := desktopSlotLease, desktopSessionSlotRenew
+	desktopSlotLease, desktopSessionSlotRenew = lease, renew
+	t.Cleanup(func() {
+		desktopSlotLease, desktopSessionSlotRenew = origLease, origRenew
+	})
+}
+
 func newDesktopSlotHandler(t *testing.T) (*Handler, *miniredis.Miniredis, *redis.Client) {
 	t.Helper()
 	mini := miniredis.RunT(t)
@@ -150,15 +233,17 @@ func newDesktopSlotHandler(t *testing.T) (*Handler, *miniredis.Miniredis, *redis
 }
 
 func TestDesktopSlotRenewSurvivesTransientRedisError(t *testing.T) {
-	withDesktopSlotTiming(t, 400*time.Millisecond, 50*time.Millisecond)
+	withDesktopSessionSlotTiming(t, 400*time.Millisecond, 50*time.Millisecond)
 	h, mini, client := newDesktopSlotHandler(t)
 	ctx := context.Background()
 
-	release, got, hold, err := h.acquireDesktopSlot(ctx, desktopSlotKey("sess-blip"))
+	release, hold, err := h.acquireSessionDesktopSlot(ctx, "sess-blip")
 	require.NoError(t, err)
-	require.True(t, got)
 	require.NotNil(t, hold)
 	defer release()
+
+	owned, err := client.Get(ctx, desktopSlotKey("sess-blip")).Result()
+	require.NoError(t, err)
 
 	mini.SetError("timeout")
 	time.Sleep(70 * time.Millisecond)
@@ -173,21 +258,19 @@ func TestDesktopSlotRenewSurvivesTransientRedisError(t *testing.T) {
 		t.Fatal("a redis blip must not drop the desktop slot")
 	default:
 	}
-	require.NotEmpty(t, client.Get(ctx, desktopSlotKey("sess-blip")).Val())
-
-	_, got, _, err = h.acquireDesktopSlot(ctx, desktopSlotKey("sess-blip"))
+	still, err := client.Get(ctx, desktopSlotKey("sess-blip")).Result()
 	require.NoError(t, err)
-	require.False(t, got, "the original relay must still own the slot after a blip")
+	require.Equal(t, owned, still, "the original relay must still own the slot after a blip")
 }
 
 func TestDesktopSlotCancelsHoldWhenRedisStaysDownPastLease(t *testing.T) {
-	withDesktopSlotTiming(t, 200*time.Millisecond, 40*time.Millisecond)
+	withDesktopSessionSlotTiming(t, 200*time.Millisecond, 40*time.Millisecond)
 	h, mini, _ := newDesktopSlotHandler(t)
 	ctx := context.Background()
 
-	release, got, hold, err := h.acquireDesktopSlot(ctx, desktopSlotKey("sess-down"))
+	release, hold, err := h.acquireSessionDesktopSlot(ctx, "sess-down")
 	require.NoError(t, err)
-	require.True(t, got)
+	require.NotNil(t, hold)
 	defer release()
 
 	mini.SetError("timeout")
@@ -203,34 +286,74 @@ func TestDesktopSlotCancelsHoldWhenOwnershipIsStolen(t *testing.T) {
 	withDesktopSlotTiming(t, 400*time.Millisecond, 40*time.Millisecond)
 	h, _, client := newDesktopSlotHandler(t)
 	ctx := context.Background()
+	key := desktopMachineSlotKey("machine-stolen")
 
-	release, got, hold, err := h.acquireDesktopSlot(ctx, desktopSlotKey("sess-stolen"))
+	release, got, hold, err := h.acquireDesktopSlot(ctx, key)
 	require.NoError(t, err)
 	require.True(t, got)
 	defer release()
 
-	require.NoError(t, client.Set(ctx, desktopSlotKey("sess-stolen"), "intruder", time.Minute).Err())
+	require.NoError(t, client.Set(ctx, key, "intruder", time.Minute).Err())
 	select {
 	case <-hold.Done():
 	case <-time.After(300 * time.Millisecond):
 		t.Fatal("losing the redis key must cancel the hold so the relay can drop")
 	}
 
-	second, got, secondHold, err := h.acquireDesktopSlot(ctx, desktopSlotKey("sess-stolen"))
+	_, got, _, err = h.acquireDesktopSlot(ctx, key)
 	require.NoError(t, err)
-	require.False(t, got, "the thief still owns the key; we must not overwrite it")
-	_ = second
-	_ = secondHold
+	require.False(t, got, "the thief still owns the key; a machine slot must never be overwritten")
 }
 
-func TestDesktopSlotCancelsHoldWhenKeyExpires(t *testing.T) {
-	withDesktopSlotTiming(t, 400*time.Millisecond, 40*time.Millisecond)
+func TestSessionDesktopSlotTakeoverReplacesTheHolder(t *testing.T) {
+	// The reconnect-after-disconnect bug: the session slot was SETNX, so a
+	// previous relay that had not yet noticed its dead browser hop answered
+	// every reconnect with DESKTOP_BUSY. The takeover must replace the
+	// holder, end its hold (so its relay closes), and survive the loser's
+	// belated release.
+	withDesktopSessionSlotTiming(t, 400*time.Millisecond, 20*time.Millisecond)
 	h, _, client := newDesktopSlotHandler(t)
 	ctx := context.Background()
 
-	release, got, hold, err := h.acquireDesktopSlot(ctx, desktopSlotKey("sess-expired"))
+	first, firstHold, err := h.acquireSessionDesktopSlot(ctx, "sess-relay")
 	require.NoError(t, err)
-	require.True(t, got)
+
+	second, secondHold, err := h.acquireSessionDesktopSlot(ctx, "sess-relay")
+	require.NoError(t, err, "a reconnect must take over the slot instead of DESKTOP_BUSY")
+	defer second()
+
+	select {
+	case <-firstHold.Done():
+	case <-time.After(time.Second):
+		t.Fatal("the evicted relay's hold must end so its browser hop closes")
+	}
+
+	owned, err := client.Get(ctx, desktopSlotKey("sess-relay")).Result()
+	require.NoError(t, err)
+	require.NotEmpty(t, owned)
+
+	// The evicted holder's release compares tokens, so it cannot delete the
+	// successor's key.
+	first()
+	still, err := client.Get(ctx, desktopSlotKey("sess-relay")).Result()
+	require.NoError(t, err)
+	require.Equal(t, owned, still, "the old relay's release must not drop the new holder's slot")
+
+	select {
+	case <-secondHold.Done():
+		t.Fatal("the new holder's hold must outlive the old relay's release")
+	default:
+	}
+}
+
+func TestDesktopSlotCancelsHoldWhenKeyExpires(t *testing.T) {
+	withDesktopSessionSlotTiming(t, 400*time.Millisecond, 40*time.Millisecond)
+	h, _, client := newDesktopSlotHandler(t)
+	ctx := context.Background()
+
+	release, hold, err := h.acquireSessionDesktopSlot(ctx, "sess-expired")
+	require.NoError(t, err)
+	require.NotNil(t, hold)
 	defer release()
 
 	require.NoError(t, client.Del(ctx, desktopSlotKey("sess-expired")).Err())
@@ -240,9 +363,8 @@ func TestDesktopSlotCancelsHoldWhenKeyExpires(t *testing.T) {
 		t.Fatal("an expired slot must cancel the hold; otherwise a second client can join")
 	}
 
-	second, got, secondHold, err := h.acquireDesktopSlot(ctx, desktopSlotKey("sess-expired"))
+	second, secondHold, err := h.acquireSessionDesktopSlot(ctx, "sess-expired")
 	require.NoError(t, err)
-	require.True(t, got, "after the first hold is lost the session must accept one new desktop")
 	defer second()
 	_ = secondHold
 }
@@ -368,6 +490,37 @@ func TestSandboxDesktopWSStartsTTLRefreshOnRelayCtx(t *testing.T) {
 	require.NoError(t, err)
 	text := string(src)
 	require.Contains(t, text, "desktop.StartTTLRefresh(relayCtx)")
+}
+
+func TestSandboxDesktopWSTakesOverTheSessionSlot(t *testing.T) {
+	// The handler must acquire the session slot with takeover semantics and
+	// keep the slot-loss watcher that closes the evicted relay's browser hop
+	// with DESKTOP_BUSY.
+	src, err := os.ReadFile("sandbox_desktop_ws.go")
+	require.NoError(t, err)
+	text := string(src)
+	require.Contains(t, text, "h.acquireSessionDesktopSlot(ctx, sessionID)")
+	require.Contains(t, text, "relay.closeWith(desktopErrBusy)")
+}
+
+func TestSandboxDesktopWSDoesNotLabelAbandonedRequestsBusy(t *testing.T) {
+	// When the browser gave up mid-ensure (the 40s handshake abort), the
+	// request context dies and the old code answered 409 DESKTOP_BUSY from
+	// the preHold branch — a lie that hid the real failure (a seat flock
+	// wedged by a leaked dbus fd). An abandoned request must not be
+	// reported as contention.
+	src, err := os.ReadFile("sandbox_desktop_ws.go")
+	require.NoError(t, err)
+	text := string(src)
+	abandoned := strings.Index(text, "the response goes nowhere")
+	require.GreaterOrEqual(t, abandoned, 0,
+		"the Start failure branch must check the request context before blaming the slot")
+	startBranch := strings.Index(text, "h.desktopService.StartSessionDesktop(ensureCtx, target)")
+	require.GreaterOrEqual(t, startBranch, 0)
+	preHoldBranch := strings.Index(text, "preHold.Err() != nil")
+	require.GreaterOrEqual(t, preHoldBranch, 0)
+	require.Greater(t, preHoldBranch, abandoned,
+		"the context check must precede the preHold DESKTOP_BUSY mapping")
 }
 
 func TestSandboxDesktopWSDoesNotRefreshProviderTTL(t *testing.T) {

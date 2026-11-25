@@ -18,6 +18,18 @@ func item(kind, content string, importance int) *types.MemoryItem {
 	}
 }
 
+func TestHanSegmentsContract(t *testing.T) {
+	// Whatever jieba does with a given string, the contract the scorer relies
+	// on holds: segments are multi-character, non-Han text never produces
+	// one, and nothing outside the Han runs is touched.
+	require.Empty(t, hanSegments(""))
+	require.Empty(t, hanSegments("plain english 123"))
+	require.Empty(t, hanSegments("K8s v1.30"))
+	for _, segment := range hanSegments("连接池的默认大小，K8s 集群") {
+		require.GreaterOrEqual(t, len([]rune(segment)), 2)
+	}
+}
+
 func topicItem(kind, topic, content string, importance int) *types.MemoryItem {
 	entry := item(kind, content, importance)
 	entry.Topic = topic
@@ -125,4 +137,58 @@ func TestBigramsBeatSingleCharacterNoise(t *testing.T) {
 		types.MemoryRecallMaxItems, types.MemoryRecallRuneBudget)
 	require.NotEmpty(t, selected)
 	require.Equal(t, "数据迁移脚本放在 migrations 目录", selected[0].Content)
+}
+
+func TestTermUnitBeatsSharedFragments(t *testing.T) {
+	// 「连接池」 must reach the scorer as one term. The catering note below
+	// shares 的 and 池 with the question but nothing at the word level; the
+	// real match has to outrank it, and the note must stay out entirely.
+	items := []*types.MemoryItem{
+		item(types.MemoryKindFact, "项目用 Druid 连接池，最大连接数配置的是 50", 3),
+		item(types.MemoryKindFact, "食堂的池子每年冬天都要配置加热", 3),
+	}
+	selected := selectRecallItems("连接池的默认大小是多少", items,
+		types.MemoryRecallMaxItems, types.MemoryRecallRuneBudget)
+	require.NotEmpty(t, selected)
+	require.Equal(t, "项目用 Druid 连接池，最大连接数配置的是 50", selected[0].Content)
+	require.NotContains(t, contents(selected), "食堂的池子每年冬天都要配置加热")
+}
+
+func TestWordBoundariesFilterSharedCharacters(t *testing.T) {
+	// 改名 and 改选 share 改, 名人 shares 名, and the comma keeps the two
+	// query terms in separate runs. Character adjacency scored the selection
+	// note in; word-level features leave it with two lone ideographs.
+	items := []*types.MemoryItem{
+		item(types.MemoryKindFact, "备案的域名清单在运维手册里", 3),
+		item(types.MemoryKindFact, "名人堂改选结果是上周公布的", 3),
+	}
+	selected := selectRecallItems("改名，备案", items,
+		types.MemoryRecallMaxItems, types.MemoryRecallRuneBudget)
+	require.Len(t, selected, 1)
+	require.Equal(t, "备案的域名清单在运维手册里", selected[0].Content)
+}
+
+func TestMixedChineseAndEnglishTerms(t *testing.T) {
+	items := []*types.MemoryItem{
+		item(types.MemoryKindFact, "生产 K8s 集群的版本是 1.28", 3),
+		item(types.MemoryKindFact, "kubectl 命令手册的链接发过在群里", 3),
+	}
+	selected := selectRecallItems("把 K8s 集群升级到 1.30", items,
+		types.MemoryRecallMaxItems, types.MemoryRecallRuneBudget)
+	require.NotEmpty(t, selected)
+	require.Equal(t, "生产 K8s 集群的版本是 1.28", selected[0].Content)
+}
+
+func TestUnlistedTermKeepsCharacterFallback(t *testing.T) {
+	// 星澜 is a made-up product name jieba may not know. The memory carrying
+	// it must still be recalled through the character tiers, and rank ahead
+	// of a note that only shares the generic half of the term.
+	items := []*types.MemoryItem{
+		item(types.MemoryKindFact, "星澜大模型的接口密钥放在保险柜", 3),
+		item(types.MemoryKindFact, "公司的模型平台选型还在调研", 3),
+	}
+	selected := selectRecallItems("星澜大模型用哪个 API 地址", items,
+		types.MemoryRecallMaxItems, types.MemoryRecallRuneBudget)
+	require.NotEmpty(t, selected)
+	require.Equal(t, "星澜大模型的接口密钥放在保险柜", selected[0].Content)
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // ErrMemoryDisabled is returned by write operations when memory is off at the
@@ -26,7 +27,7 @@ var ErrItemNotFound = errors.New("memory: item not found")
 
 // ErrPreviouslyForgotten means the statement matches one the user deleted.
 // Callers on the write path treat it as "nothing to do", not as a failure.
-var ErrPreviouslyForgotten = errors.New("memory: previously forgotten by the user")
+var ErrPreviouslyForgotten = types.ErrMemoryPreviouslyForgotten
 
 // ErrSensitiveContent means the statement was almost entirely credentials or
 // identity numbers, so redacting it left nothing worth remembering.
@@ -36,7 +37,7 @@ var ErrSensitiveContent = errors.New("memory: statement was sensitive material")
 // re-derivation. The case this closes is the debounced run that reads the same
 // message minutes after the user deleted what it produced; past that, whatever
 // the user said is treated fresh again.
-const rejectedMessageWindow = time.Hour
+const rejectedMessageWindow = types.MemoryRejectedMessageWindow
 
 // Service implements interfaces.MemoryService.
 type Service struct {
@@ -103,6 +104,11 @@ func (s *Service) enabledScope(ctx context.Context) (interfaces.MemoryScope, *ty
 	// nothing stored yet, which is still "enabled" for the write path.
 	if subject != nil && !subject.Enabled {
 		return scope, cfg, false
+	}
+	if subject != nil {
+		scope = scope.WithGeneration(subject.ExtractionState.Generation)
+	} else {
+		scope = scope.WithGeneration("")
 	}
 	return scope, cfg, true
 }
@@ -315,6 +321,11 @@ func (s *Service) write(
 }
 
 func (s *Service) writeReplacing(ctx context.Context, scope interfaces.MemoryScope, cfg *types.MemoryConfig, item types.MemoryItem, targetID string) (*types.MemoryItem, error) {
+	var err error
+	scope, err = s.captureGeneration(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
 	content := types.SanitizeMemoryContent(item.Content)
 	if content == "" {
 		return nil, errors.New("memory: empty content")
@@ -391,6 +402,13 @@ func (s *Service) writeReplacing(ctx context.Context, scope interfaces.MemorySco
 			return nil, err
 		}
 		if duplicate != nil && !longer && (duplicate.Status == types.MemoryStatusActive || statusForWrite(item) == types.MemoryStatusPending) {
+			if duplicate.Status == types.MemoryStatusPending {
+				if err := s.repo.SaveItemWithPendingLimit(
+					ctx, scope, duplicate, "", cfg.EffectiveMaxItems(),
+				); err != nil {
+					return nil, err
+				}
+			}
 			return duplicate, nil
 		}
 		// The new statement subsumes the old one, so let it supersede.
@@ -419,7 +437,7 @@ func (s *Service) writeReplacing(ctx context.Context, scope interfaces.MemorySco
 	if existing != nil {
 		targetID = existing.ID
 	}
-	if err := s.repo.SaveItem(ctx, scope, stored, targetID); err != nil {
+	if err := s.repo.SaveItemWithPendingLimit(ctx, scope, stored, targetID, cfg.EffectiveMaxItems()); err != nil {
 		return nil, fmt.Errorf("save memory item: %w", err)
 	}
 
@@ -507,6 +525,12 @@ func (s *Service) enforceCapacity(ctx context.Context, scope interfaces.MemorySc
 // rebuildBlock re-renders the resident block so the read path stays a single
 // primary-key lookup. Called after every mutation.
 func (s *Service) rebuildBlock(ctx context.Context, scope interfaces.MemoryScope) {
+	var err error
+	scope, err = s.captureGeneration(ctx, scope)
+	if err != nil {
+		logger.Warnf(ctx, "memory: capture block generation failed: %v", err)
+		return
+	}
 	items, err := s.repo.ListActiveResident(ctx, scope, 60)
 	if err != nil {
 		logger.Warnf(ctx, "memory: rebuild block load failed: %v", err)
@@ -602,6 +626,10 @@ func (s *Service) DeleteTopic(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	scope, err = s.captureGeneration(ctx, scope)
+	if err != nil {
+		return err
+	}
 	stat, err := s.unpromotedTopic(ctx, scope, id)
 	if err != nil {
 		return err
@@ -636,6 +664,10 @@ func (s *Service) ListDocuments(
 // DeleteDocument stops using one document as a personal retrieval signal.
 func (s *Service) DeleteDocument(ctx context.Context, id string) error {
 	scope, err := ResolveScope(ctx)
+	if err != nil {
+		return err
+	}
+	scope, err = s.captureGeneration(ctx, scope)
 	if err != nil {
 		return err
 	}
@@ -756,6 +788,10 @@ func (s *Service) UpdateItem(
 	if err != nil {
 		return nil, err
 	}
+	scope, err = s.captureGeneration(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
 	existing, err := s.repo.GetItem(ctx, scope, id)
 	if err != nil {
 		return nil, err
@@ -796,6 +832,17 @@ func (s *Service) DeleteItem(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	return s.deleteItemInScope(ctx, scope, id, false)
+}
+
+func (s *Service) deleteItemInScope(
+	ctx context.Context, scope interfaces.MemoryScope, id string, pendingOnly bool,
+) error {
+	var err error
+	scope, err = s.captureGeneration(ctx, scope)
+	if err != nil {
+		return err
+	}
 	existing, err := s.repo.GetItem(ctx, scope, id)
 	if err != nil {
 		return err
@@ -803,16 +850,30 @@ func (s *Service) DeleteItem(ctx context.Context, id string) error {
 	if existing == nil {
 		return ErrItemNotFound
 	}
-	// Record the rejection before removing the row. Deleting a memory that
-	// distillation is about to re-derive from the same message is how a user
-	// ends up deleting the same thing twice and stops trusting the feature.
-	if err := s.repo.AddTombstone(
-		ctx, scope, existing.Topic, types.MemoryFingerprint(existing.Content), existing.SourceMessageID,
-	); err != nil {
-		logger.Warnf(ctx, "memory: record tombstone failed: %v", err)
+	if pendingOnly && existing.Status != types.MemoryStatusPending {
+		return types.ErrMemoryConflict
 	}
-	if err := s.repo.DeleteItem(ctx, scope, id); err != nil {
-		return err
+	if pendingOnly {
+		// Recheck under the subject lock so a concurrent confirmation cannot
+		// turn this rejection into deletion of an approved fact.
+		if err := s.repo.RejectPendingItem(ctx, scope, id); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrItemNotFound
+			}
+			return err
+		}
+	} else {
+		// Record the rejection before removing the row. Deleting a memory that
+		// distillation is about to re-derive from the same message is how a user
+		// ends up deleting the same thing twice and stops trusting the feature.
+		if err := s.repo.AddTombstone(
+			ctx, scope, existing.Topic, types.MemoryFingerprint(existing.Content), existing.SourceMessageID,
+		); err != nil {
+			logger.Warnf(ctx, "memory: record tombstone failed: %v", err)
+		}
+		if err := s.repo.DeleteItem(ctx, scope, id); err != nil {
+			return err
+		}
 	}
 	s.rebuildBlock(ctx, scope)
 	return nil
@@ -821,6 +882,10 @@ func (s *Service) DeleteItem(ctx context.Context, id string) error {
 // Clear forgets everything in the caller's memory space.
 func (s *Service) Clear(ctx context.Context) (int64, error) {
 	scope, err := ResolveScope(ctx)
+	if err != nil {
+		return 0, err
+	}
+	scope, err = s.captureGeneration(ctx, scope)
 	if err != nil {
 		return 0, err
 	}
@@ -1113,6 +1178,13 @@ func (s *Service) observeTopics(
 		return nil
 	}
 
+	var err error
+	scope, err = s.captureGeneration(ctx, scope)
+	if err != nil {
+		logger.Warnf(ctx, "memory: capture topic generation failed: %v", err)
+		return nil
+	}
+
 	// Clean the labels first, then resolve them against the subjects this
 	// person already has. Counting the raw string is what made this feature
 	// silently useless: a model names the same subject differently every run,
@@ -1312,6 +1384,17 @@ func (s *Service) ConfirmItem(ctx context.Context, id string) (*types.MemoryItem
 	if err != nil {
 		return nil, err
 	}
+	return s.confirmItemInScope(ctx, scope, id)
+}
+
+func (s *Service) confirmItemInScope(
+	ctx context.Context, scope interfaces.MemoryScope, id string,
+) (*types.MemoryItem, error) {
+	var err error
+	scope, err = s.captureGeneration(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
 	existing, err := s.repo.GetItem(ctx, scope, id)
 	if err != nil {
 		return nil, err
@@ -1320,11 +1403,18 @@ func (s *Service) ConfirmItem(ctx context.Context, id string) (*types.MemoryItem
 		return nil, ErrItemNotFound
 	}
 	if err := s.repo.ConfirmPendingItem(ctx, scope, id); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrItemNotFound
+		}
 		return nil, err
 	}
 	s.enforceCapacity(ctx, scope, s.workspaceConfig(ctx, scope.TenantID))
 	s.rebuildBlock(ctx, scope)
-	return s.repo.GetItem(ctx, scope, id)
+	item, err := s.repo.GetItem(ctx, scope, id)
+	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && item == nil) {
+		return nil, ErrItemNotFound
+	}
+	return item, err
 }
 
 // RejectItem declines an inference. It deletes rather than archives, so the

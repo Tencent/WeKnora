@@ -294,3 +294,21 @@ func TestDataSourceOperationsOmitRawUpstreamErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestManualKnowledgePreservesMarkdownWhitespace(t *testing.T) {
+	for _, id := range []string{"knowledge.create_manual", "knowledge.update_manual"} {
+		t.Run(id, func(t *testing.T) {
+			op, ok := Builtin().Get(id)
+			require.True(t, ok)
+			params := map[string]json.RawMessage{
+				"knowledge_base_id": raw("kb1"), "knowledge_id": raw("k1"),
+				"content": raw("    code\n\nparagraph  \n"), "status": raw("draft"),
+			}
+			call, err := op.Build(SelectParams(op, params))
+			require.NoError(t, err)
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(call.Body, &body))
+			assert.Equal(t, "    code\n\nparagraph  \n", body["content"])
+		})
+	}
+}

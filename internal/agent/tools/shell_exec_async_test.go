@@ -84,10 +84,24 @@ func TestShellExecAsyncClampsYieldAndPassesContext(t *testing.T) {
 	require.Equal(t, "m1", submitter.requests[0].ParentMessageID)
 	require.Equal(t, "tc1", submitter.requests[0].ToolCallID)
 	require.Equal(t, "build", submitter.requests[0].Description)
-	require.Equal(t, "cd /workspace && {\nmake build\n}", submitter.requests[0].Command)
+	require.Equal(t,
+		commandInWorkDir("/workspace", sandbox.WithSessionDisplay("make build")),
+		submitter.requests[0].Command)
 	require.Equal(t, "make build", submitter.requests[0].DisplayCommand)
 	require.Equal(t, "/workspace", submitter.requests[0].WorkDir)
 	require.Equal(t, interfaces.SessionRef{TenantID: 7, SessionID: "session-1"}, submitter.refs[0])
+}
+
+func TestShellExecAsyncOffersAProgramOnStdinForReview(t *testing.T) {
+	submitter := &fakeSubmitter{}
+	_, err := runAsyncTool(t, submitter, `{"command":"bash","stdin":"rm a"}`)
+	require.NoError(t, err)
+	require.Equal(t, "rm a", submitter.requests[0].ProgramStdin)
+
+	submitter = &fakeSubmitter{}
+	_, err = runAsyncTool(t, submitter, `{"command":"cat","stdin":"rm a"}`)
+	require.NoError(t, err)
+	require.Empty(t, submitter.requests[0].ProgramStdin, "data is not a program")
 }
 
 func TestShellExecAsyncMarksStartedOnRunningHandle(t *testing.T) {
@@ -159,10 +173,10 @@ func TestShellExecAsyncWrapsStdinBeforeSubmit(t *testing.T) {
 	require.True(t, result.Success, result.Error)
 	require.Len(t, submitter.requests, 1)
 	encoded := base64.StdEncoding.EncodeToString([]byte(stdin))
-	want := "cd " + sandbox.ShellQuote(sandbox.SessionWorkspaceRoot) + " && {\n" +
-		"printf %s " + sandbox.ShellQuote(encoded) +
-		" | base64 -d | /bin/bash --noprofile --norc -c " + sandbox.ShellQuote("cat") + "\n}"
-	require.Equal(t, want, submitter.requests[0].Command)
+	inner := "printf %s " + sandbox.ShellQuote(encoded) +
+		" | base64 -d | /bin/bash --noprofile --norc -c " + sandbox.ShellQuote("cat")
+	require.Equal(t, commandInWorkDir(sandbox.SessionWorkspaceRoot, sandbox.WithSessionDisplay(inner)),
+		submitter.requests[0].Command)
 	require.Equal(t, "cat", submitter.requests[0].DisplayCommand)
 	require.Equal(t, sandbox.SessionWorkspaceRoot, submitter.requests[0].WorkDir)
 }

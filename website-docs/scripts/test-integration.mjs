@@ -92,13 +92,65 @@ try {
   assert.equal(context.pages().length, 1);
 
   // Navigation to the current release feature docs, returning through the explicit home link.
-  await page.locator('#release').getByRole('link', { name: '原文引用定位', exact: true }).click();
-  await page.waitForSelector('.VPDoc h1');
-  assert.equal(new URL(page.url()).pathname, '/docs/03-features/18-chat-experience.html');
-  assert.match(await page.locator('.VPDoc h1').innerText(), /会话与对话体验/);
-  await page.locator('.wk-brand').click();
-  await homepage();
-  assert.equal(context.pages().length, 1);
+  for (const feature of [
+    { button: '语音输入 按住说话，改好文字再发送', anchor: 'voice', heading: '按住说话' },
+    { button: '凭据保险库 下次登录，直接选已保存的账号', anchor: 'vault', heading: '个人凭据保险库' },
+  ]) {
+    await page.locator('#release').getByRole('button', { name: feature.button, exact: true }).click();
+    const destination = '/docs/07-releases/v0.9.1.html#' + feature.anchor;
+    await page.locator('#release a[href="' + destination + '"]').click();
+    const heading = page.locator('.VPDoc #' + feature.anchor);
+    await heading.waitFor();
+    assert.equal(new URL(page.url()).pathname + new URL(page.url()).hash, destination);
+    assert.ok((await heading.innerText()).includes(feature.heading));
+    await page.locator('.wk-brand').click();
+    await homepage();
+    assert.equal(context.pages().length, 1);
+  }
+
+  // The product overview links to enduring features independently of the current release.
+  for (const feature of [
+    { id: 'work-assistant', button: /^多智能体协作 /, image: 'agent-collaboration', guide: '26-weknora-assistant.html#collaboration' },
+    { id: 'automations', button: /^执行权限与审批 /, image: 'assistant-permissions', guide: '28-agent-permissions.html' },
+  ]) {
+    await page.locator(`#capabilities a[href="#${feature.id}"]`).click();
+    const section = page.locator('#' + feature.id);
+    await section.getByRole('button', { name: feature.button }).click();
+    assert.equal(new URL(page.url()).hash, '#' + feature.id);
+    assert.equal(await section.locator('figure [aria-hidden="false"] img').getAttribute('src'), '/docs/_home/product/' + feature.image + '.png');
+    const destination = '/docs/03-features/' + feature.guide;
+    await section.locator(`a[href="${destination}"]`).click();
+    await page.waitForSelector('.VPDoc h1');
+    const url = new URL(page.url());
+    assert.equal(url.pathname + url.hash, destination);
+    await page.locator('.wk-brand').click();
+    await homepage();
+  }
+
+  // Release and overview films share a player and load only after a playback gesture.
+  const releaseFilm = page.getByRole('button', { name: /^v0\.9\.0 工作助手/ });
+  const overviewFilm = page.getByRole('button', { name: /^WeKnora 产品全览/ });
+  assert.equal(await page.locator('#demo video').count(), 1);
+  assert.equal(await releaseFilm.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('#demo video').getAttribute('src'), null);
+  await page.getByRole('button', { name: '播放 v0.9.0 工作助手视频，2 分 45 秒', exact: true }).click();
+  await page.waitForFunction(() => {
+    const video = document.querySelector('#demo video');
+    return video && !video.paused && video.currentTime > 0 && video.duration === 165;
+  });
+  const previousPlayer = await page.locator('#demo video').elementHandle();
+  await overviewFilm.click();
+  assert.equal(await previousPlayer.evaluate(video => video.paused && !video.isConnected && !video.hasAttribute('src')), true);
+  await previousPlayer.dispose();
+  assert.equal(await overviewFilm.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('#demo video').getAttribute('src'), null);
+  assert.equal(await page.locator('#video-caption a').getAttribute('href'), 'https://github.com/user-attachments/assets/2819598d-3140-4623-814a-8162a22b653c');
+  assert.ok(await page.getByRole('button', { name: '播放 WeKnora 产品全览视频，2 分 25 秒', exact: true }).isVisible());
+  await releaseFilm.focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await releaseFilm.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('#demo video').getAttribute('src'), null);
+  assert.equal(await page.locator('#demo video').getAttribute('poster'), '/docs/videos/weknora-v0.9.0-poster.png');
 
   // Preferences propagate between open homepage and docs tabs in both directions.
   const docs = await context.newPage();
@@ -129,6 +181,11 @@ try {
   // Switch and return links remain reachable on a narrow phone viewport.
   await page.setViewportSize({ width: 320, height: 800 });
   await page.goto(origin + '/');
+  const filmButtons = await page.getByRole('group', { name: '选择演示视频' }).getByRole('button').all();
+  const filmBounds = await Promise.all(filmButtons.map(button => button.boundingBox()));
+  assert.equal(filmBounds.length, 2);
+  assert.equal(Math.round(filmBounds[0].y), Math.round(filmBounds[1].y), 'Film choices remain side by side on mobile');
+  assert.ok(filmBounds.every(box => box.x >= 0 && box.x + box.width <= 320));
   await checkVisibleControl(page, 'button[role="switch"]');
   await page.getByRole('switch', { name: '切换到深色' }).click();
   await expectTheme(page, true);
@@ -184,7 +241,7 @@ try {
     }
   }
   assert.deepEqual(errors, []);
-  console.log('Integration checks passed: compact full-width mastheads, distinct product/docs navigation, quickstart entry, header search, theme toggle, reload, shared preferences, system theme, same-tab docs/home/logo navigation, mobile controls, and direct docs/404 routes.');
+  console.log('Integration checks passed: shared video playback and switching, release-first selection, side-by-side mobile choices, compact full-width mastheads, distinct product/docs navigation, quickstart entry, header search, theme toggle, reload, shared preferences, system theme, same-tab docs/home/logo navigation, mobile controls, and direct docs/404 routes.');
 } finally {
   await browser.close();
 }

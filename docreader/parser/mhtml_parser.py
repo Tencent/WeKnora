@@ -14,7 +14,7 @@ from urllib.parse import unquote, urljoin, urlparse
 import uuid
 from typing import Dict
 
-from bs4 import BeautifulSoup, NavigableString
+from bs4 import BeautifulSoup, NavigableString, UnicodeDammit
 
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
@@ -122,11 +122,16 @@ class MHTMLParser(BaseParser):
                 if not payload and part is not explicit_root:
                     continue
                 payload = payload or b""
-                charset = part.get_content_charset() or "utf-8"
-                try:
-                    html_text = payload.decode(charset, errors="ignore")
-                except LookupError:
-                    html_text = payload.decode("utf-8", errors="ignore")
+                charset = part.get_content_charset()
+                if charset:
+                    try:
+                        html_text = payload.decode(charset, errors="ignore")
+                    except LookupError:
+                        html_text = payload.decode("utf-8", errors="ignore")
+                else:
+                    # Keep the bytes until HTML declarations and BOMs have
+                    # been inspected; decoding as UTF-8 first loses text.
+                    html_text = UnicodeDammit(payload, is_html=True).unicode_markup or ""
                 html_parts.append(
                     {
                         "content": html_text,
@@ -197,34 +202,43 @@ class MHTMLParser(BaseParser):
 
     @staticmethod
     def _explicit_html_root(msg: Message) -> Message | None:
-        """Resolve a multipart/related start Content-ID to its HTML root."""
-        start = _header_str(msg.get_param("start", "")).strip().strip("<>")
-        if (
-            not start
-            or msg.get_content_type() != "multipart/related"
-            or not msg.is_multipart()
-        ):
+        """Resolve the related HTML root, including the default first part.
+
+        RFC 2387 specifies the first part when the start parameter is absent.
+        Malformed/unsupported roots retain the existing size-based fallback.
+        """
+        if msg.get_content_type() != "multipart/related" or not msg.is_multipart():
             return None
-        for part in msg.get_payload():
-            content_id = _header_str(part.get("Content-ID", "")).strip().strip("<>")
-            if content_id != start:
-                continue
-            if part.get_content_type() == "text/html":
-                return part
-            if (
-                part.get_content_type() == "multipart/alternative"
-                and part.is_multipart()
-            ):
-                # MIME alternatives are ordered from least to most faithful.
-                return next(
-                    (
-                        alternative
-                        for alternative in reversed(part.get_payload())
-                        if alternative.get_content_type() == "text/html"
-                    ),
-                    None,
-                )
+        parts = msg.get_payload()
+        if not parts:
             return None
+        start_param = msg.get_param("start", None)
+        if start_param is None:
+            part = parts[0]
+            # A missing or mismatched type is malformed and keeps the fallback.
+            declared_type = _header_str(msg.get_param("type", "")).lower()
+            if not declared_type or declared_type != part.get_content_type():
+                return None
+        else:
+            start = _header_str(start_param).strip().strip("<>")
+            if not start:
+                return None
+            part = next(
+                (item for item in parts
+                 if _header_str(item.get("Content-ID", "")).strip().strip("<>") == start),
+                None,
+            )
+            if part is None:
+                return None
+        if part.get_content_type() == "text/html":
+            return part
+        if part.get_content_type() == "multipart/alternative" and part.is_multipart():
+            # MIME alternatives are ordered from least to most faithful.
+            return next(
+                (alternative for alternative in reversed(part.get_payload())
+                 if alternative.get_content_type() == "text/html"),
+                None,
+            )
         return None
 
     @staticmethod

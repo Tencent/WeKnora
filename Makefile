@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
+.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs docs-check install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
 
 # Show help
 help:
@@ -42,6 +42,7 @@ help:
 	@echo "  lint              代码检查"
 	@echo "  deps              安装依赖"
 	@echo "  docs              生成 Swagger API 文档"
+	@echo "  docs-check        校验 Swagger API 文档是否与代码注解同步"
 	@echo "  install-swagger   安装 swag 工具"
 	@echo ""
 	@echo "模型厂商目录:"
@@ -143,13 +144,16 @@ docker-build-app:
 		--build-arg VERSION_ARG="$$VERSION" \
 		--build-arg COMMIT_ID_ARG="$$COMMIT_ID" \
 		--build-arg BUILD_TIME_ARG="$$BUILD_TIME" \
-		--build-arg GO_VERSION_ARG="$$GO_VERSION" \
 		--build-arg WITH_ANYDOC=$${WITH_ANYDOC:-1} \
 		-f docker/Dockerfile.app -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 
 # Build docreader Docker image
 docker-build-docreader:
-	docker build --platform $(PLATFORM) -f docker/Dockerfile.docreader -t wechatopenai/weknora-docreader:latest .
+	@eval $$(./scripts/get_version.sh env); \
+	docker build --platform $(PLATFORM) \
+		--build-arg VERSION_ARG="$$VERSION" \
+		--build-arg COMMIT_ID_ARG="$$COMMIT_ID" \
+		-f docker/Dockerfile.docreader -t wechatopenai/weknora-docreader:latest .
 
 # Build frontend Docker image (multi-stage: npm runs inside the builder stage)
 docker-build-frontend:
@@ -257,10 +261,12 @@ migrate-goto:
 # docs/swagger_contract_test.go fails.
 docs:
 	@echo "生成 Swagger API 文档..."
-	swag init -g $(MAIN_PATH)/main.go -o ./docs --parseDependency --parseInternal \
-		--exclude ./internal/localsandbox --overridesFile ./docs/swag.overrides
-	@echo "文档已生成到 ./docs 目录"
+	go run ./scripts/swagger-gen -o ./docs
+	@echo "文档已生成到 ./docs 目录（swagger.json / swagger.yaml；docs.go 通过 //go:embed 加载 swagger.json）"
 	@echo "启动服务后访问 http://localhost:8080/swagger/index.html 查看文档"
+
+docs-check:
+	go test ./docs/...
 
 # Install swagger tool
 install-swagger:

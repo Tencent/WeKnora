@@ -254,11 +254,7 @@ func (c *Client) buildBody(messages []api.Message, opts *api.Options, stream boo
 	}
 	c.applyReasoning(body, opts)
 
-	for k, v := range s.ExtraBody {
-		if _, exists := body[k]; !exists {
-			body[k] = v
-		}
-	}
+	api.MergeExtraBody(body, s.ExtraBody, opts != nil && opts.Isolated)
 	return body, nil
 }
 
@@ -268,7 +264,9 @@ func (c *Client) applySampling(body map[string]any, opts *api.Options) {
 	if !c.cfg.Settings.SupportsTemperature || c.cfg.Reasoning {
 		return
 	}
-	if opts.Temperature > 0 {
+	if opts.Isolated {
+		body["temperature"] = 0.0
+	} else if opts.Temperature > 0 {
 		body["temperature"] = opts.Temperature
 	}
 	if opts.TopP > 0 {

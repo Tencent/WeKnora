@@ -23,6 +23,7 @@ func TestProviderErrorPreviewKeepsValidUTF8(t *testing.T) {
 		{"zhipu", zhipuHTTPError},
 		{"metaso", metasoHTTPError},
 		{"bocha", bochaHTTPError},
+		{"deepseek", deepseekHTTPError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.render(500, []byte(body))
@@ -46,6 +47,7 @@ func TestProviderErrorPreviewIsBounded(t *testing.T) {
 		{"zhipu", zhipuHTTPError},
 		{"metaso", metasoHTTPError},
 		{"bocha", bochaHTTPError},
+		{"deepseek", deepseekHTTPError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.render(500, body)

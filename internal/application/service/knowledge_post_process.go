@@ -216,7 +216,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	willSpawnSummary := eff.SummaryEnabled && len(textChunks) > 0
 	willSpawnQuestion := len(textChunks) > 0 && kb.NeedsEmbeddingModel() &&
 		eff.QuestionGenerationConfig.Enabled
-	willSpawnWiki := kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0
+	willSpawnWiki := kb.IsWikiAutoGenerateEnabled() && len(textChunks) > 0
 	willSpawnAutoTag := kb.Type == types.KnowledgeBaseTypeDocument &&
 		kb.AutoTagConfig != nil && kb.AutoTagConfig.Enabled && len(textChunks) > 0
 	enqueuedAutoTag := false
@@ -492,7 +492,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			// Keep going past a failed release: stopping at the first error
 			// left every remaining slot without an owner.
 			for i := 0; i < shortfall; i++ {
-				if err := releaseSubtaskSlot(ctx, s.knowledgeRepo, payload.KnowledgeID); err != nil {
+				if err := releaseSubtaskSlot(ctx, s.knowledgeRepo, payload.KnowledgeID, attempt); err != nil {
 					logger.Errorf(ctx, "[KnowledgePostProcess] Failed to release subtask slot for %s: %v",
 						payload.KnowledgeID, err)
 				}

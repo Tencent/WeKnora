@@ -1,9 +1,11 @@
+// Package ollama manages calls to the Ollama service.
 package ollama
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -109,7 +111,7 @@ func (s *OllamaService) IsModelAvailable(ctx context.Context, modelName string) 
 	}
 
 	// If service is not available but set as optional, return false but no error
-	if !s.isAvailable && s.isOptional {
+	if !s.IsAvailable() && s.isOptional {
 		return false, nil
 	}
 
@@ -142,7 +144,7 @@ func (s *OllamaService) PullModel(ctx context.Context, modelName string) error {
 	}
 
 	// If service is not available but set as optional, return nil without further operations
-	if !s.isAvailable && s.isOptional {
+	if !s.IsAvailable() && s.isOptional {
 		logger.GetLogger(ctx).Warnf("Ollama service unavailable, unable to pull model %s", modelName)
 		return nil
 	}
@@ -334,8 +336,24 @@ func (s *OllamaService) Chat(ctx context.Context, req *api.ChatRequest, fn api.C
 		return err
 	}
 
-	// Use official client Chat method
-	return s.client.Chat(ctx, req, fn)
+	// The SDK accepts EOF even if no completion arrived, for both streaming
+	// and non-streaming requests. Do not let callers accept a partial answer
+	// or tool round as a successful response.
+	completed := false
+	err := s.client.Chat(ctx, req, func(resp api.ChatResponse) error {
+		completed = completed || resp.Done
+		return fn(resp)
+	})
+	if err != nil {
+		return err
+	}
+	if !completed {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return fmt.Errorf("ollama chat ended before done: %w", io.ErrUnexpectedEOF)
+	}
+	return nil
 }
 
 // Embeddings gets text embedding vectors

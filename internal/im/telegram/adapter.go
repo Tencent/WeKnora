@@ -289,15 +289,18 @@ func (a *Adapter) callAPIWithResult(ctx context.Context, method string, body int
 	}
 	defer resp.Body.Close()
 
+	// A failed call carries error_code and description and no result.
 	var apiResp struct {
-		OK     bool            `json:"ok"`
-		Result json.RawMessage `json:"result"`
+		OK          bool            `json:"ok"`
+		Result      json.RawMessage `json:"result"`
+		ErrorCode   int             `json:"error_code"`
+		Description string          `json:"description"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+	if err := im.DecodeIMResponse(resp.Body, &apiResp); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 	if !apiResp.OK {
-		return fmt.Errorf("telegram API %s failed: %s", method, string(apiResp.Result))
+		return fmt.Errorf("telegram API %s failed (%d): %s", method, apiResp.ErrorCode, apiResp.Description)
 	}
 	if result != nil {
 		if err := json.Unmarshal(apiResp.Result, result); err != nil {

@@ -186,6 +186,7 @@ type ModelResponse struct {
 	Description string             `json:"description" extensions:"x-agent"`
 	Parameters  ModelParametersDTO `json:"parameters" extensions:"x-agent"`
 	IsDefault   bool               `json:"is_default" extensions:"x-agent"`
+	DefaultFor  []string           `json:"default_for,omitempty" extensions:"x-agent"`
 	IsBuiltin   bool               `json:"is_builtin" extensions:"x-agent"`
 	Status      types.ModelStatus  `json:"status" extensions:"x-agent"`
 	CreatedAt   time.Time          `json:"created_at"`
@@ -331,6 +332,7 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		Description:  m.Description,
 		Parameters:   params,
 		IsDefault:    m.IsDefault,
+		DefaultFor:   m.DefaultFor,
 		IsBuiltin:    m.IsBuiltin,
 		Status:       m.Status,
 		CreatedAt:    m.CreatedAt,

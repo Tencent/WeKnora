@@ -10,11 +10,65 @@ import (
 	"gorm.io/gorm"
 )
 
-// SaveItem serializes replacements with confirmation and manual edits. A
-// proposal can replace another proposal, but cannot retire an active fact.
-func (r *memoryRepository) SaveItem(ctx context.Context, scope interfaces.MemoryScope, item *types.MemoryItem, replacesID string) error {
+// SaveItem 保留原有保存接口，并使用默认待确认记忆上限。
+func (r *memoryRepository) SaveItem(
+	ctx context.Context, scope interfaces.MemoryScope, item *types.MemoryItem, replacesID string,
+) error {
+	return r.SaveItemWithPendingLimit(ctx, scope, item, replacesID, types.DefaultMemoryMaxItems)
+}
+
+// SaveItemWithPendingLimit 在主体事务内保存替换关系，并归档超限的最旧待确认记忆。
+// 待确认记忆不会因容量限制而淘汰已确认的事实。
+func (r *memoryRepository) SaveItemWithPendingLimit(
+	ctx context.Context, scope interfaces.MemoryScope, item *types.MemoryItem, replacesID string, pendingLimit int,
+) error {
+	if pendingLimit <= 0 {
+		pendingLimit = types.DefaultMemoryMaxItems
+	}
+	if pendingLimit > 2000 {
+		pendingLimit = 2000
+	}
 	return r.withSubject(ctx, scope, func(tx *gorm.DB, _ *types.MemorySubject) error {
+		// Recheck rejection under the same subject lock as RejectPendingItem.
+		// A service preflight can race a rejection while a model result is saved.
+		txRepo := &memoryRepository{db: tx}
+		forgotten, err := txRepo.HasTombstone(ctx, scope, types.MemoryFingerprint(item.Content))
+		if err != nil {
+			return err
+		}
+		if !forgotten && item.Origin == types.MemoryOriginExtracted && item.SourceMessageID != "" {
+			forgotten, err = txRepo.HasTombstoneForMessage(
+				ctx, scope, item.SourceMessageID, types.MemoryRejectedMessageWindow,
+			)
+			if err != nil {
+				return err
+			}
+		}
+		if forgotten {
+			return types.ErrMemoryPreviouslyForgotten
+		}
 		query := func() *gorm.DB { return tx.Where("tenant_id = ? AND subject_id = ?", scope.TenantID, scope.SubjectID) }
+		trimPending := func() error {
+			if item.Status != types.MemoryStatusPending {
+				return nil
+			}
+			// Only bounded survivor IDs enter memory, even for a legacy backlog.
+			var keep []string
+			if err := query().Model(&types.MemoryItem{}).Where("status = ?", types.MemoryStatusPending).
+				Order("created_at DESC, id DESC").Limit(pendingLimit).Pluck("id", &keep).Error; err != nil {
+				return err
+			}
+			if err := query().Model(&types.MemoryItem{}).
+				Where("status = ? AND id NOT IN ?", types.MemoryStatusPending, keep).
+				Updates(map[string]interface{}{
+					"status": types.MemoryStatusArchived, "updated_at": time.Now(),
+				}).Error; err != nil {
+				return err
+			}
+			// A replay or backdated proposal may itself be archived by a lowered
+			// cap. Return the committed status rather than the old pending copy.
+			return query().First(item, "id = ?", item.ID).Error
+		}
 		var target types.MemoryItem
 		if replacesID != "" {
 			if err := query().First(&target, "id = ?", replacesID).Error; err != nil {
@@ -30,7 +84,7 @@ func (r *memoryRepository) SaveItem(ctx context.Context, scope interfaces.Memory
 				if target.SupersededBy != "" && query().First(&replacement, "id = ?", target.SupersededBy).Error == nil &&
 					replacement.Status == item.Status && replacement.Content == item.Content {
 					*item = replacement
-					return nil
+					return trimPending()
 				}
 				return types.ErrMemoryConflict
 			}
@@ -43,7 +97,7 @@ func (r *memoryRepository) SaveItem(ctx context.Context, scope interfaces.Memory
 		for _, old := range live {
 			if old.Content == item.Content && old.Status == item.Status {
 				*item = *old
-				return nil
+				return trimPending()
 			}
 		}
 		if item.Status == types.MemoryStatusPending {
@@ -79,13 +133,18 @@ func (r *memoryRepository) SaveItem(ctx context.Context, scope interfaces.Memory
 			}
 			ids = append(ids, old.ID)
 		}
-		if len(ids) == 0 {
-			return nil
+		if len(ids) > 0 {
+			if err := query().Model(&types.MemoryItem{}).
+				Where("id <> ? AND (id IN ? OR replaces_id IN ?) AND status IN ?", item.ID, ids, ids,
+					[]string{types.MemoryStatusActive, types.MemoryStatusPending}).
+				Updates(map[string]interface{}{
+					"status": types.MemoryStatusSuperseded, "invalid_at": time.Now(),
+					"superseded_by": item.ID, "updated_at": time.Now(),
+				}).Error; err != nil {
+				return err
+			}
 		}
-		return query().Model(&types.MemoryItem{}).
-			Where("id <> ? AND (id IN ? OR replaces_id IN ?) AND status IN ?", item.ID, ids, ids,
-				[]string{types.MemoryStatusActive, types.MemoryStatusPending}).
-			Updates(map[string]interface{}{"status": types.MemoryStatusSuperseded, "invalid_at": time.Now(), "superseded_by": item.ID, "updated_at": time.Now()}).Error
+		return trimPending()
 	})
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -51,17 +52,61 @@ type localTestStarter struct {
 	proc  *localTestProcess
 	root  string
 	calls int
+	last  localsandbox.RunRequest
+	err   error
 }
 
-func (f *localTestStarter) StartForSession(context.Context, localsandbox.RunRequest) (localsandbox.Process, error) {
+func (f *localTestStarter) StartForSession(
+	_ context.Context, req localsandbox.RunRequest,
+) (localsandbox.Process, error) {
 	f.calls++
+	f.last = req
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.proc, nil
 }
 
 func (f *localTestStarter) GuardForSession(
-	context.Context, string,
+	context.Context, string, ...localsandbox.Grant,
 ) (*localsandbox.PathGuard, localsandbox.Workspace, error) {
 	return nil, localsandbox.Workspace{Root: f.root}, nil
+}
+
+func TestLocalJobIsJudgedByWhatTheModelWroteNotItsWrapper(t *testing.T) {
+	base := t.TempDir()
+	p := newLocalTestProcess()
+	p.finish()
+	starter := &localTestStarter{proc: p, root: filepath.Join(base, "project")}
+	bg := NewBackgroundWork(background.NewMemoryActivityRegistry(nil), background.NewMemoryNoticeInbox(nil))
+	svc, err := newLocalShellJobService(starter, bg, nil, filepath.Join(base, "jobs"),
+		func(context.Context, int) (int64, error) { return 100, nil })
+	require.NoError(t, err)
+
+	_, err = svc.SubmitShellJob(context.Background(), interfaces.SessionRef{TenantID: 7, SessionID: "s"},
+		tools.ShellJobSubmitRequest{
+			Command: "wrapped", DisplayCommand: "bash", ProgramStdin: "rm a", Description: "x", YieldTime: time.Second,
+		})
+	require.NoError(t, err)
+	require.Equal(t, "wrapped", starter.last.Command)
+	require.Equal(t, localsandbox.ReviewSpec{Command: "bash", Stdin: "rm a", StdinIsProgram: true}, starter.last.Spec)
+}
+
+func TestLocalJobRefusedDeleteReachesTheModel(t *testing.T) {
+	base := t.TempDir()
+	starter := &localTestStarter{
+		proc: newLocalTestProcess(), root: filepath.Join(base, "project"),
+		err: fmt.Errorf("%w: run it with shell_exec", localsandbox.ErrAsyncCommandRefused),
+	}
+	bg := NewBackgroundWork(background.NewMemoryActivityRegistry(nil), background.NewMemoryNoticeInbox(nil))
+	svc, err := newLocalShellJobService(starter, bg, nil, filepath.Join(base, "jobs"),
+		func(context.Context, int) (int64, error) { return 100, nil })
+	require.NoError(t, err)
+
+	_, err = svc.SubmitShellJob(context.Background(), interfaces.SessionRef{TenantID: 7, SessionID: "s"},
+		tools.ShellJobSubmitRequest{Command: "rm a", Description: "x", YieldTime: time.Second})
+	require.ErrorIs(t, err, localsandbox.ErrAsyncCommandRefused)
+	require.Contains(t, err.Error(), "shell_exec")
 }
 
 func localFixture(t *testing.T) (*LocalShellJobService, *localTestProcess, *BackgroundWork) {

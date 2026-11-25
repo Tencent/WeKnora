@@ -11,6 +11,19 @@ import (
 type AuditAction string
 
 const (
+	// AuditActionMemorySubjectsListed 记录管理员分页查看租户主体摘要，仅包含分页和数量。
+	AuditActionMemorySubjectsListed AuditAction = "memory.subjects_listed"
+	// AuditActionMemorySubjectInspected 记录管理员查看目标主体记忆列表，不包含正文。
+	AuditActionMemorySubjectInspected AuditAction = "memory.subject_inspected"
+	// AuditActionMemoryItemConfirmed 记录管理员确认待审核记忆。
+	AuditActionMemoryItemConfirmed AuditAction = "memory.item_confirmed"
+	// AuditActionMemoryItemRejected 记录管理员否决待审核记忆。
+	AuditActionMemoryItemRejected AuditAction = "memory.item_rejected"
+	// AuditActionMemorySubjectCleared 记录管理员清空主体记忆。
+	AuditActionMemorySubjectCleared AuditAction = "memory.subject_cleared"
+	// AuditActionMemorySubjectSettingsUpdated 记录管理员修改主体记忆开关。
+	AuditActionMemorySubjectSettingsUpdated AuditAction = "memory.subject_settings_updated"
+
 	// AuditActionMemberAdded fires when a tenant Owner / Admin adds a
 	// new tenant_members row. The actor is the inviter; the target is
 	// the invited user.
@@ -217,7 +230,7 @@ const (
 type AuditLog struct {
 	ID            uint64       `json:"id"             gorm:"primaryKey;autoIncrement;index:idx_audit_logs_tenant_scope_desc,priority:4,sort:desc" extensions:"x-agent=event_id"`
 	TenantID      uint64       `json:"tenant_id"      gorm:"not null;index:idx_audit_logs_tenant_id_desc,priority:1;index:idx_audit_logs_tenant_action,priority:1;index:idx_audit_logs_tenant_scope_desc,priority:1"`
-	ActorUserID   string       `json:"actor_user_id"  gorm:"type:varchar(36);default:'';index:idx_audit_logs_actor"`
+	ActorUserID   string       `json:"actor_user_id"  gorm:"type:varchar(64);default:'';index:idx_audit_logs_actor"`
 	ActorRole     string       `json:"actor_role"     gorm:"type:varchar(32);default:''" extensions:"x-agent"`
 	Action        AuditAction  `json:"action"         gorm:"type:varchar(64);not null;index:idx_audit_logs_tenant_action,priority:2" extensions:"x-agent"`
 	ScopeType     string       `json:"scope_type"     gorm:"type:varchar(32);default:'';index:idx_audit_logs_tenant_scope_desc,priority:2"`

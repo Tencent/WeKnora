@@ -353,7 +353,7 @@ func (s *obsFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		Key:         aws.String(objectKey),
 		Body:        strings.NewReader(string(data)),
 		ContentType: aws.String("application/octet-stream"),
-		ACL:         "public-read",
+		// ACL:         "public-read",
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to upload bytes to OBS: %w", err)

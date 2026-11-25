@@ -2,6 +2,8 @@ package langfuse
 
 import (
 	"context"
+	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -50,6 +52,7 @@ func GinMiddleware() gin.HandlerFunc {
 		if rid, ok := types.RequestIDFromContext(ctx); ok {
 			opts.Metadata["request_id"] = rid
 		}
+		mergeMetadataHeader(opts.Metadata, c.Request.Header.Get(langfuseMetadataHeader))
 
 		newCtx, trace := mgr.StartTrace(ctx, opts)
 		c.Request = c.Request.WithContext(newCtx)
@@ -60,6 +63,78 @@ func GinMiddleware() gin.HandlerFunc {
 			"status":        c.Writer.Status(),
 			"response.size": c.Writer.Size(),
 		}, nil)
+	}
+}
+
+// langfuseMetadataHeader is the request header carrying caller-defined JSON
+// key/value pairs that are merged into the Langfuse trace metadata. For
+// example `X-Langfuse-Metadata: {"ticket_id":"T-123","biz_line":"ops"}` lets
+// callers tag traces with their own business labels for filtering in the
+// Langfuse UI. Values are optional and additive: a malformed body, an empty
+// header or a value exceeding the size/key limits below is ignored and never
+// fails the request.
+const langfuseMetadataHeader = "X-Langfuse-Metadata"
+
+// Bounds for the X-Langfuse-Metadata header. A raw value larger than
+// maxLangfuseMetadataHeaderBytes is ignored entirely, and at most
+// maxLangfuseMetadataHeaderKeys entries are merged per request. These caps
+// keep a single caller from inflating every traced span's metadata.
+const (
+	maxLangfuseMetadataHeaderBytes = 4 << 10 // 4 KiB raw header budget
+	maxLangfuseMetadataHeaderKeys  = 32
+)
+
+// mergeMetadataHeader parses the given X-Langfuse-Metadata header value as a
+// JSON object and merges its keys into md. Built-in correlation fields set by
+// GinMiddleware (http.method, http.path, http.query, request_id, ...) always
+// win on conflict so callers cannot clobber them. Non-object JSON, malformed
+// JSON, the empty header and oversized values are silently ignored; at most
+// maxLangfuseMetadataHeaderKeys caller keys are merged, and only scalar
+// (string/number/bool) values are accepted so nested objects and arrays
+// never end up in trace metadata.
+func mergeMetadataHeader(md map[string]interface{}, raw string) {
+	if md == nil || strings.TrimSpace(raw) == "" {
+		return
+	}
+	// Reject oversized headers before decoding so a huge value never costs
+	// us the unmarshal.
+	if len(raw) > maxLangfuseMetadataHeaderBytes {
+		return
+	}
+	var extra map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &extra); err != nil {
+		return
+	}
+	// Merge at most maxLangfuseMetadataHeaderKeys caller keys in a
+	// deterministic order (Go map iteration is randomized), skipping keys
+	// that would shadow the middleware's own correlation fields or whose
+	// value is not a scalar.
+	keys := make([]string, 0, len(extra))
+	for k := range extra {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	merged := 0
+	for _, k := range keys {
+		if merged >= maxLangfuseMetadataHeaderKeys {
+			break
+		}
+		if _, exists := md[k]; !exists && isScalarMetadataValue(extra[k]) {
+			md[k] = extra[k]
+			merged++
+		}
+	}
+}
+
+// isScalarMetadataValue reports whether v is a JSON scalar: string, number or
+// bool. Objects, arrays and null are rejected so nested structures never end
+// up in trace metadata.
+func isScalarMetadataValue(v interface{}) bool {
+	switch v.(type) {
+	case string, float64, bool:
+		return true
+	default:
+		return false
 	}
 }
 

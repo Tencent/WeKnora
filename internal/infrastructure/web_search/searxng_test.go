@@ -114,7 +114,7 @@ func TestSearxngProvider_Search(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	results, err := provider.Search(ctx, "hello", 5, true)
+	results, err := provider.Search(ctx, types.WebSearchRequest{Query: "hello", MaxResults: 5, IncludeDate: true})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestSearxngProvider_Search_EmptyWithUnresponsiveEngines(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	results, err := sp.Search(ctx, "test", 1, false)
+	results, err := sp.Search(ctx, types.WebSearchRequest{Query: "test", MaxResults: 1})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}

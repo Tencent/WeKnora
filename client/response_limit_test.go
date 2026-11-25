@@ -1,12 +1,40 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestListKnowledgeBasesRejectsMalformedResponseSuffix(t *testing.T) {
+	for _, tc := range []struct {
+		name, suffix string
+		wantError    bool
+	}{
+		{"whitespace", " \n\r\t", false},
+		{"garbage", " broken", true},
+		{"second value", ` {"success":false}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"success":true,"data":[{"id":"kb-1"}]}`+tc.suffix)
+			}))
+			defer server.Close()
+			bases, err := NewClient(server.URL).ListKnowledgeBases(context.Background())
+			if (err != nil) != tc.wantError {
+				t.Fatalf("ListKnowledgeBases() error = %v, want error = %t", err, tc.wantError)
+			}
+			if !tc.wantError && (len(bases) != 1 || bases[0].ID != "kb-1") {
+				t.Fatalf("ListKnowledgeBases() = %v, want kb-1", bases)
+			}
+		})
+	}
+}
 
 // fillerReader streams n bytes without allocating them, so a test can hand the
 // SDK a response body far larger than the cap without spending memory itself.
@@ -86,7 +114,47 @@ func TestParseResponseKeepsSmallErrorBody(t *testing.T) {
 	}
 }
 
-// The cap only applies to failures; a successful response still decodes.
+// A successful body must not be able to grow without bound either: the decoder
+// streams it, so an oversized envelope would be buffered up to the cap before
+// json.Decoder ever saw the end of it.
+func TestParseResponseCapsSuccessBody(t *testing.T) {
+	t.Run("oversized body is rejected", func(t *testing.T) {
+		// Valid JSON that only ends past the cap, so the decoder keeps reading
+		// instead of failing on the first byte.
+		body := io.MultiReader(
+			strings.NewReader(`{"pad":"`),
+			&fillerReader{remaining: maxResponseBodyBytes * 2},
+			strings.NewReader(`"}`),
+		)
+		var got struct {
+			Pad string `json:"pad"`
+		}
+
+		err := parseResponse(newTestResponse(http.StatusOK, body), &got)
+
+		if !errors.Is(err, errResponseBodyTooLarge) {
+			t.Fatalf("parseResponse() = %v, want %v", err, errResponseBodyTooLarge)
+		}
+	})
+
+	t.Run("body exactly at the cap decodes", func(t *testing.T) {
+		pad := strings.Repeat("a", int(maxResponseBodyBytes)-len(`{"pad":""}`))
+		var got struct {
+			Pad string `json:"pad"`
+		}
+
+		err := parseResponse(newTestResponse(http.StatusOK, strings.NewReader(`{"pad":"`+pad+`"}`)), &got)
+
+		if err != nil {
+			t.Fatalf("parseResponse() = %v, want nil", err)
+		}
+		if len(got.Pad) != len(pad) {
+			t.Errorf("decoded pad = %d bytes, want %d", len(got.Pad), len(pad))
+		}
+	})
+}
+
+// The cap must not disturb the normal success path: a small body still decodes.
 func TestParseResponseStillDecodesSuccessBody(t *testing.T) {
 	var got struct {
 		Name string `json:"name"`

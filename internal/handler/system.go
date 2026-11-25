@@ -38,6 +38,7 @@ type runtimeKnowledgeCanceller interface {
 
 // SystemHandler handles system-related requests
 type SystemHandler struct {
+	documentProgress *service.DocumentProgressService
 	cfg              *config.Config
 	neo4jDriver      neo4j.Driver
 	documentReader   interfaces.DocumentReader
@@ -83,8 +84,10 @@ func NewSystemHandler(cfg *config.Config,
 	knowledgeSvc interfaces.KnowledgeService,
 	storageBackendRepo interfaces.StorageBackendRepository,
 	sandboxConfigSvc *service.TenantSandboxConfigService,
+	documentProgress *service.DocumentProgressService,
 ) *SystemHandler {
 	return &SystemHandler{
+		documentProgress:   documentProgress,
 		cfg:                cfg,
 		neo4jDriver:        neo4jDriver,
 		documentReader:     documentReader,
@@ -286,6 +289,8 @@ type GetSystemInfoResponse struct {
 	CommitID            string `json:"commit_id,omitempty" extensions:"x-agent"`
 	BuildTime           string `json:"build_time,omitempty" extensions:"x-agent"`
 	GoVersion           string `json:"go_version,omitempty" extensions:"x-agent"`
+	DocReaderVersion    string `json:"docreader_version,omitempty" extensions:"x-agent"`
+	DocReaderCommitID   string `json:"docreader_commit_id,omitempty" extensions:"x-agent"`
 	KeywordIndexEngine  string `json:"keyword_index_engine,omitempty" extensions:"x-agent"`
 	VectorStoreEngine   string `json:"vector_store_engine,omitempty" extensions:"x-agent"`
 	GraphDatabaseEngine string `json:"graph_database_engine,omitempty" extensions:"x-agent"`
@@ -320,7 +325,7 @@ var (
 // @Produce      json
 // @Success      200  {object}  DataResponse{data=GetSystemInfoResponse}  "系统信息"
 // @x-agent {"id":"system.get_info","risk":"read"}
-// @x-agent-hint "Reads the backend version, edition, build, runtime, database migration status and configured engines. Empty or unknown means unavailable information. Engine configuration does not prove connectivity. Raw migration errors are omitted. Frontend build/version is separate and is not reported by this API; do not infer frontend/backend version agreement or available upgrades."
+// @x-agent-hint "Reads the backend version, edition, build, runtime, database migration status and configured engines. Docreader build information is omitted when its service is unavailable or does not support GetInfo. Empty or unknown means unavailable information. Engine configuration does not prove connectivity. Raw migration errors are omitted. Frontend build/version is separate and is not reported by this API; do not infer frontend/backend version agreement or available upgrades."
 // @Router       /system/info [get]
 func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -361,12 +366,27 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		uptimeSec = int64(runtime.ServerUptime().Seconds())
 	}
 
+	var docReaderVersion, docReaderCommitID string
+	if reader, ok := h.documentReader.(interface {
+		GetVersionInfo(context.Context) (string, string, error)
+	}); ok {
+		// A disconnected or older docreader must not fail system/info.
+		versionCtx, cancel := context.WithTimeout(ctx, time.Second)
+		version, commitID, err := reader.GetVersionInfo(versionCtx)
+		cancel()
+		if err == nil {
+			docReaderVersion, docReaderCommitID = version, commitID
+		}
+	}
+
 	response := GetSystemInfoResponse{
 		Version:             Version,
 		Edition:             Edition,
 		CommitID:            CommitID,
 		BuildTime:           BuildTime,
 		GoVersion:           GoVersion,
+		DocReaderVersion:    docReaderVersion,
+		DocReaderCommitID:   docReaderCommitID,
 		KeywordIndexEngine:  keywordIndexEngine,
 		VectorStoreEngine:   vectorStoreEngine,
 		GraphDatabaseEngine: graphDatabaseEngine,
@@ -1544,20 +1564,23 @@ type ListAllUsersResponse struct {
 // ListUsers godoc
 // @Summary      查询平台用户（List platform users）
 // @Description  Retrieve a paginated list of every user across tenants (SystemAdmin only).
-// @Description  Supports `offset` (default 0) and `limit` (default 50, max 200).
+// @Description  Supports `offset` (default 0), `limit` (default 50, max 200), and optional `q`.
+// @Description  `q` performs case-insensitive substring matching against username or email.
 // @Description  Password/hashes are never serialised — only the redacted UserInfo shape.
 // @Tags         System Admin
 // @Produce      json
-// @Param        offset query int false "Page offset" default(0) minimum(0) extensions(x-agent,x-agent-maximum=1000000)
-// @Param        limit  query int false "Page size (max 200)" default(50) minimum(1) maximum(200) extensions(x-agent,x-agent-maximum=50)
+// @Param        q      query string false "Filter by username or email" extensions(x-agent)
+// @Param        offset query int    false "Page offset" default(0) minimum(0) extensions(x-agent,x-agent-maximum=1000000)
+// @Param        limit  query int    false "Page size (max 200)" default(50) minimum(1) maximum(200) extensions(x-agent,x-agent-maximum=50)
 // @Success      200  {object}  ListAllUsersResponse  "Users retrieved successfully"
 // @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
 // @x-agent {"id":"system_admin.list_users","risk":"read","system_admin":true,"root":"users","max_items":50}
-// @x-agent-hint "Lists platform users across workspaces, including account enabled state and system administrator flag. Follow has_more using offset + limit. tenant_id is the home workspace, not a list of memberships. No search or role filter is supported: paginate before drawing conclusions."
+// @x-agent-hint "Lists platform users across workspaces, including account enabled state and system administrator flag. q filters username or email (not role); follow has_more using offset + limit. tenant_id is the home workspace, not a list of memberships."
 // @Router       /system/admin/users [get]
 func (h *SystemHandler) ListUsers(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 
+	q := strings.TrimSpace(c.Query("q"))
 	offset := 0
 	limit := 50
 	if v := c.Query("offset"); v != "" {
@@ -1574,7 +1597,7 @@ func (h *SystemHandler) ListUsers(c *gin.Context) {
 		limit = 200
 	}
 
-	users, hasMore, err := h.userSvc.ListAllUsers(ctx, offset, limit)
+	users, hasMore, err := h.userSvc.ListAllUsers(ctx, q, offset, limit)
 	if err != nil {
 		logger.Errorf(ctx, "Error listing users: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list users"})

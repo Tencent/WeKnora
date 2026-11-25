@@ -90,6 +90,26 @@ func TestParallelReadsRespectMutationBarriers(t *testing.T) {
 	}
 }
 
+func TestToolExecContextCarriesTheChatTurnRequestID(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = tools.NewToolRegistry()
+	var got string
+	engine.toolRegistry.RegisterTool(&orderedTestTool{
+		BaseTool: tools.NewBaseTool(tools.ToolReadFile, "", json.RawMessage(`{"type":"object"}`)),
+		run: func(ctx context.Context) *types.ToolResult {
+			meta, ok := tools.ToolExecFromContext(ctx)
+			require.True(t, ok)
+			got = meta.RequestID
+			return &types.ToolResult{Success: true}
+		},
+	})
+	ctx := context.WithValue(context.Background(), types.RequestIDContextKey, "turn-9")
+	engine.executeToolCallsParallel(ctx, &types.ChatResponse{ToolCalls: []types.LLMToolCall{
+		{ID: "a", Function: types.FunctionCall{Name: tools.ToolReadFile, Arguments: `{}`}},
+	}}, &types.AgentStep{}, 0, "session", "message")
+	require.Equal(t, "turn-9", got)
+}
+
 func TestParallelToolPanicFailsOnlyThatCall(t *testing.T) {
 	engine := newTestEngine(t, &mockChat{})
 	engine.toolRegistry = tools.NewToolRegistry()

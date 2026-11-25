@@ -30,6 +30,8 @@ const (
 	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
 	WebSearchProviderTypeBocha      WebSearchProviderType = "bocha"
 	WebSearchProviderTypeSerply     WebSearchProviderType = "serply"
+	WebSearchProviderTypeDeepSeek   WebSearchProviderType = "deepseek"
+	WebSearchProviderTypeSearchAPI  WebSearchProviderType = "searchapi"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -150,6 +152,8 @@ type WebSearchProviderTypeInfo struct {
 	DocsURL string `json:"docs_url,omitempty"`
 	// Provider-specific non-secret configuration rendered dynamically by the frontend.
 	ConfigFields []WebSearchProviderConfigField `json:"config_fields,omitempty"`
+	// Search and fetch readers registered for this type; nil when the type is not registered.
+	Clients *WebSearchClients `json:"clients,omitempty"`
 }
 
 // WebSearchProviderConfigField describes a non-secret provider-specific form field.
@@ -185,6 +189,11 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			ID: "serply", Name: "Serply", RequiresAPIKey: true, SupportsProxy: true,
 			Description: "Serply Google search API (supports country and freshness filters)",
 			DocsURL:     "https://serply.io/docs",
+		},
+		{
+			ID: "searchapi", Name: "SearchApi", RequiresAPIKey: true, SupportsProxy: true,
+			Description: "SearchApi Google search API (supports country and freshness filters)",
+			DocsURL:     "https://www.searchapi.io/docs/google",
 		},
 		{
 			ID:             "duckduckgo",
@@ -373,6 +382,14 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 					},
 				},
 			},
+		},
+		{
+			ID:             "deepseek",
+			Name:           "DeepSeek",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "DeepSeek Search and Fetch (requires API key)",
+			DocsURL:        "https://api-docs.deepseek.com/api/search",
 		},
 	}
 }

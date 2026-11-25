@@ -106,6 +106,20 @@ func (r *messageRepository) GetRecentMessagesBySession(
 	return messages, nil
 }
 
+// GetRecentUserMessages returns the newest limit user messages, oldest first.
+func (r *messageRepository) GetRecentUserMessages(
+	ctx context.Context, sessionID string, limit int,
+) ([]*types.Message, error) {
+	var messages []*types.Message
+	if err := r.db.WithContext(ctx).
+		Where("session_id = ? AND role = ?", sessionID, "user").
+		Order("created_at DESC").Limit(limit).Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	slices.Reverse(messages)
+	return messages, nil
+}
+
 // SessionHasIncompleteAssistant reports whether any assistant message in the
 // session is still generating. Rewind uses this instead of paging oldest
 // messages, so a late incomplete turn is not hidden behind a 1000-row window.

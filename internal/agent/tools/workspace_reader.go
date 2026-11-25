@@ -255,9 +255,10 @@ const (
 )
 
 // grepFilePage lists the numbered lines of content that match input.Query,
-// starting at input.Offset and bounded by the registry's output budget.
+// starting at input.Offset and bounded by both the byte and registry rune budgets.
 func grepFilePage(
 	ctx context.Context, input ReadFileInput, content, clean string, resultData map[string]interface{},
+	maxBytes int64,
 ) *types.ToolResult {
 	query := strings.TrimSpace(input.Query)
 	var matchers []*regexp.Regexp
@@ -283,6 +284,12 @@ func grepFilePage(
 	}
 	budget := OutputBudget(ctx) - readSandboxPageOverhead - utf8.RuneCountInString(clean) -
 		utf8.RuneCountInString(query)
+	if budget <= 0 {
+		return &types.ToolResult{
+			Success: false, Data: resultData,
+			Error: "file path, query and metadata exceed this read's output budget; increase the tool output limit",
+		}
+	}
 	var body strings.Builder
 	used, matches, next := 0, 0, 0
 	for i := start - 1; i < len(lines); i++ {
@@ -292,7 +299,19 @@ func grepFilePage(
 		line := readFileMatchSnippet(lines[i], matchers)
 		entry := fmt.Sprintf("%d: %s\n", i+1, line)
 		cost := utf8.RuneCountInString(entry)
-		if matches >= maxMatches || (matches > 0 && used+cost > budget) {
+		if matches >= maxMatches || used+cost > budget || int64(body.Len()+len(entry)) > maxBytes {
+			if matches == 0 {
+				message := fmt.Sprintf(
+					"matching line %d exceeds this read's output budget; increase the tool output limit", i+1)
+				if int64(len(entry)) > maxBytes {
+					message = fmt.Sprintf("matching line %d needs %d bytes, exceeding max_bytes=%d; increase max_bytes",
+						i+1, len(entry), maxBytes)
+				}
+				return &types.ToolResult{
+					Success: false, Data: resultData,
+					Error: fmt.Sprintf("%s or read offset=%d without query", message, i+1),
+				}
+			}
 			next = i + 1
 			break
 		}
@@ -407,7 +426,7 @@ func renderFileContent(
 		return &types.ToolResult{Success: true, Output: b.String(), Data: resultData}
 	}
 	if strings.TrimSpace(input.Query) != "" {
-		return grepFilePage(ctx, input, string(data), clean, resultData)
+		return grepFilePage(ctx, input, string(data), clean, resultData, maxBytes)
 	}
 
 	// The registry truncates any output past its rune ceiling by deleting the

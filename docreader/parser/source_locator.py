@@ -38,14 +38,14 @@ _SENTENCE_END = tuple("。．.!?！？：:；;」』”)）")
 
 
 def _fold(ch: str) -> str:
-    """Letters and digits only, lower-cased, full-width folded."""
-    if not ch.isalnum():
+    """Letters, digits and combining marks in a decomposed projection."""
+    if not ch.isalnum() and not unicodedata.category(ch).startswith("M"):
         return ""
-    return unicodedata.normalize("NFKC", ch).lower()
+    return unicodedata.normalize("NFKD", ch).lower()
 
 
 def normalize_with_positions(text: str) -> Tuple[str, List[int]]:
-    """Project text onto letters and digits.
+    """Project text onto decomposed letters, digits and combining marks.
 
     Returns the projection and, for each of its characters, the offset in
     ``text`` of the character it came from.
@@ -72,6 +72,23 @@ def normalize_with_positions(text: str) -> Tuple[str, List[int]]:
         for f in folded:
             out.append(f)
             pos.append(i)
+    # Decomposing individual characters retains original offsets, but marks
+    # from adjacent characters still need canonical combining-class order.
+    start = 0
+    while start < len(out):
+        if not unicodedata.combining(out[start]):
+            start += 1
+            continue
+        stop = start + 1
+        while stop < len(out) and unicodedata.combining(out[stop]):
+            stop += 1
+        ordered = sorted(
+            zip(out[start:stop], pos[start:stop]),
+            key=lambda item: unicodedata.combining(item[0]),
+        )
+        out[start:stop] = [item[0] for item in ordered]
+        pos[start:stop] = [item[1] for item in ordered]
+        start = stop
     return "".join(out), pos
 
 
@@ -80,6 +97,7 @@ def normalize(text: str) -> str:
 
 
 def _key_weight(key: str) -> int:
+    key = unicodedata.normalize("NFC", key)
     return sum(4 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in key)
 
 
@@ -135,7 +153,7 @@ def locate_lines(
     occurrences = {key: _numeric_safe_matches(norm, key) for key in counts}
     for idx, line in enumerate(line_texts):
         key = normalize(line)
-        if len(key) < _MIN_KEY_CHARS or len(occurrences[key]) != counts[key] or (
+        if len(unicodedata.normalize("NFC", key)) < _MIN_KEY_CHARS or len(occurrences[key]) != counts[key] or (
             _key_weight(key) < _SHORT_KEY_WEIGHT and len(occurrences[key]) > 1
         ):
             hits.append(None)
@@ -305,7 +323,7 @@ def page_blocks(
         hit = norm.find(key, norm_start)
         if hit < 0:
             return at
-        end_at = positions[hit + len(key) - 1] + 1
+        end_at = max(positions[hit:hit + len(key)]) + 1
         while end_at < len(page_text) and not page_text[end_at].isalnum():
             if page_text[end_at] == "\n":
                 return end_at + 1

@@ -92,6 +92,7 @@ func (c *Client) AgentQAStream(ctx context.Context, sessionID string, query stri
 
 // AgentQAStreamWithRequest performs agent-based Q&A with SSE streaming using the full request payload.
 // Pass ResourceURLOptions to receive public HTTP(S) file URLs in the stream.
+// An unfinished SSE data frame at EOF returns an error wrapping io.ErrUnexpectedEOF.
 func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 	sessionID string, request *AgentQARequest, callback AgentEventCallback,
 	opts ...ResourceURLOptions,
@@ -125,6 +126,7 @@ func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 // processAgentSSEStream processes the SSE stream and invokes callback for each event
 func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCallback) error {
 	scanner := bufio.NewScanner(reader)
+	scanner.Split(newSSELineSplitter())
 	// Default 64KiB per-line cap truncates large SSE data lines (the
 	// references event bundles chunk contents that can reach hundreds of
 	// KiB). Raise the cap so those lines parse instead of erroring with
@@ -177,7 +179,7 @@ func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCall
 		return fmt.Errorf("failed to read SSE stream: %w", err)
 	}
 
-	return nil
+	return incompleteSSEDataError(dataBuffer)
 }
 
 // AgentSession is a wrapper for agent-based interactions

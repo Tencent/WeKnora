@@ -338,7 +338,7 @@ func buildTOCPaths(nodes []v2TOCNode) (map[int64][]string, map[int64]bool) {
 		var reverse []string
 		visited := map[string]bool{n.UUID: true}
 		cur := n
-		for len(reverse) < maxTOCDepth {
+		for range maxTOCDepth {
 			parent, ok := byUUID[cur.ParentUUID]
 			if !ok || parent.UUID == "" || visited[parent.UUID] {
 				break // reached the root, hit a dangling parent, or a cycle

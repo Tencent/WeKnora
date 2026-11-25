@@ -38,6 +38,7 @@ const (
 	ChannelRSS              = "rss"               // RSS / Atom feed
 	ChannelIMA              = "ima"               // Tencent IMA (ima.qq.com)
 	ChannelSeafile          = "seafile"           // Seafile
+	ChannelNextcloud        = "nextcloud"         // Nextcloud
 )
 
 // Knowledge parse status constants

@@ -377,36 +377,30 @@ func (r *sqliteRepository) EstimateStorageSize(_ context.Context, indexInfoList 
 }
 
 func (r *sqliteRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, _ int, _ string) error {
-	var rows []sqliteEmbedding
-	if err := r.db.WithContext(ctx).Where("chunk_id IN ?", chunkIDList).Find(&rows).Error; err != nil {
-		return err
-	}
-	if err := r.deleteRowsAndVecs(r.db.WithContext(ctx), rows); err != nil {
-		return err
-	}
-	return r.db.WithContext(ctx).Where("chunk_id IN ?", chunkIDList).Delete(&sqliteEmbedding{}).Error
+	return r.deleteByIDs(ctx, "chunk_id", chunkIDList)
 }
 
 func (r *sqliteRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string, _ int, _ string) error {
-	var rows []sqliteEmbedding
-	if err := r.db.WithContext(ctx).Where("source_id IN ?", sourceIDList).Find(&rows).Error; err != nil {
-		return err
-	}
-	if err := r.deleteRowsAndVecs(r.db.WithContext(ctx), rows); err != nil {
-		return err
-	}
-	return r.db.WithContext(ctx).Where("source_id IN ?", sourceIDList).Delete(&sqliteEmbedding{}).Error
+	return r.deleteByIDs(ctx, "source_id", sourceIDList)
 }
 
 func (r *sqliteRepository) DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, _ int, _ string) error {
-	var rows []sqliteEmbedding
-	if err := r.db.WithContext(ctx).Where("knowledge_id IN ?", knowledgeIDList).Find(&rows).Error; err != nil {
-		return err
-	}
-	if err := r.deleteRowsAndVecs(r.db.WithContext(ctx), rows); err != nil {
-		return err
-	}
-	return r.db.WithContext(ctx).Where("knowledge_id IN ?", knowledgeIDList).Delete(&sqliteEmbedding{}).Error
+	return r.deleteByIDs(ctx, "knowledge_id", knowledgeIDList)
+}
+
+// deleteByIDs keeps metadata, vectors and keyword rows in the same transaction.
+// column is one of the fixed identifiers supplied by the deletion entry points.
+func (r *sqliteRepository) deleteByIDs(ctx context.Context, column string, ids []string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var rows []sqliteEmbedding
+		if err := tx.Where(column+" IN ?", ids).Find(&rows).Error; err != nil {
+			return err
+		}
+		if err := r.deleteRowsAndVecs(tx, rows); err != nil {
+			return err
+		}
+		return tx.Where(column+" IN ?", ids).Delete(&sqliteEmbedding{}).Error
+	})
 }
 
 func (r *sqliteRepository) CopyIndices(ctx context.Context,
@@ -570,6 +564,11 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 	}
 
 	ftsQuery := sanitizeFTS5Query(params.Query)
+	// Punctuation and symbols can leave no searchable terms after tokenization.
+	// MATCH rejects an empty expression; let hybrid retrieval continue with vectors.
+	if ftsQuery == "" {
+		return nil, nil
+	}
 
 	sql := `
 		SELECT e.id, e.source_id, e.source_type, e.chunk_id,

@@ -39,7 +39,7 @@ type KeenableProvider struct {
 
 // NewKeenableProvider creates a new Keenable provider from parameters.
 // The API key is optional; Keenable works keyless against the public endpoint.
-func NewKeenableProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+func NewKeenableProvider(params types.WebSearchProviderParameters) (interfaces.WebSearcher, error) {
 	client, err := NewSearchHTTPClient(defaultKeenableTimeout, params.ProxyURL)
 	if err != nil {
 		return nil, err
@@ -59,10 +59,9 @@ func (p *KeenableProvider) Name() string {
 // Search performs a web search using the Keenable Search API.
 func (p *KeenableProvider) Search(
 	ctx context.Context,
-	query string,
-	maxResults int,
-	includeDate bool,
+	request types.WebSearchRequest,
 ) ([]*types.WebSearchResult, error) {
+	query, maxResults, includeDate := request.Query, request.MaxResults, request.IncludeDate
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
 	}

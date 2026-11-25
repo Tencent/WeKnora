@@ -13,10 +13,10 @@ const source = readFileSync(new URL('./ImageGallery.vue', import.meta.url), 'utf
 const compiled = ts.transpileModule(`${source}\nexport {
   items, page, total, loading, error, keyword, hasMore, viewerIndex, viewerOpen,
   reload, loadMore, openViewer, onViewerLoadMore, initGallery,
-  resolveImageSrc, thumbUrls,
+  resolveImageSrc, thumbUrls, sortBy, sortOrder, imagePage, attrRows,
 }`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
-function setup(proxyImages = false) {
+function setup(proxyImages = false, sortIDs: string[] = []) {
   const calls: Array<{
     kb: string; params: ImageListParams
     resolve: (value: ImageListResult) => void; reject: (reason: Error) => void
@@ -37,7 +37,10 @@ function setup(proxyImages = false) {
       listGalleryImages: (kb: string, params: ImageListParams) => new Promise((resolve, reject) => {
         calls.push({ kb, params, resolve, reject })
       }),
-      fetchGalleryConfig: async () => ({ attributes: [], attribute_sources: [], mode: 'all', status: {} }),
+      fetchGalleryConfig: async () => ({
+        attributes: sortIDs.map(id => ({ id, usage: { in_sortfield: true }, label: id })),
+        attribute_sources: [], mode: 'all', status: {},
+      }),
     },
     '@/api/auth': { updateMyPreferences: async () => {} },
     './galleryImageSrc': {
@@ -286,4 +289,67 @@ test('HTTP and network failures allow retry, and ordinary URLs skip the proxy', 
   assert.equal(await state.resolveImageSrc('https://example.com/image.png'), 'https://example.com/image.png')
   assert.equal(imageCalls.length, 3)
   unmount()
+})
+
+
+test('画廊显式请求页码升序且后续分页保留排序', async () => {
+  const { state, calls, respond } = setup(false, ['builtin:created_at', 'builtin:page'])
+  const initial = state.initGallery()
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(calls[0].params.sortBy, 'builtin:page', '不能依赖服务端旧的无参排序')
+  assert.equal(calls[0].params.sortOrder, 'asc', '页码默认从小到大')
+  respond(0, ['a', 'b'])
+  await initial
+  const next = state.loadMore()
+  assert.equal(calls[1].params.sortBy, 'builtin:page', '后续页必须保持同一排序')
+  assert.equal(calls[1].params.sortOrder, 'asc')
+  respond(1, ['c'], 3)
+  await next
+})
+
+test('不允许页码排序时回退创建时间降序', async () => {
+  const { state, calls, respond } = setup(false, ['builtin:created_at'])
+  state.sortOrder.value = 'asc'
+  const initial = state.initGallery()
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(calls[0].params.sortBy, 'builtin:created_at')
+  assert.equal(calls[0].params.sortOrder, 'desc', '不能继承上个知识库的升序')
+  respond(0, [], 0)
+  await initial
+})
+
+test('切换知识库重新选择页码升序', async () => {
+  const { state, calls, respond, props } = setup(false, ['builtin:page', 'builtin:created_at'])
+  state.sortBy.value = 'builtin:created_at'
+  state.sortOrder.value = 'desc'
+  props.knowledgeBaseId = 'kb-2'
+  const initial = state.initGallery()
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(calls[0].kb, 'kb-2')
+  assert.equal(calls[0].params.sortBy, 'builtin:page')
+  assert.equal(calls[0].params.sortOrder, 'asc')
+  respond(0, [], 0)
+  await initial
+})
+
+
+test('页码角标使用原始一基页码并隐藏非法值', () => {
+  const { state } = setup()
+  for (const page of [1, 2, 10]) {
+    assert.equal(state.imagePage({ attrs: { 'source.page': page } }), page, '不能重复加一或按字符串解释页码')
+  }
+  for (const page of [undefined, null, 0, -1, '2', true, 2.5, Number.MAX_SAFE_INTEGER + 1, [], {}]) {
+    assert.equal(state.imagePage({ attrs: { 'source.page': page } }), null, '无效页码不能展示角标')
+  }
+  assert.equal(state.imagePage({}), null, '兼容没有attrs的旧记录')
+})
+
+
+test('图片详情不展示内部图序号并使用页码名称', () => {
+  const { state } = setup()
+  const rows = Array.from(state.attrRows({ attrs: { 'source.page': 2, 'source.image_index': 10, 'contain.text': 'block' } })) as any[]
+  assert.equal(rows.length, 2, '内部原文序号仅用于排序')
+  assert.equal(rows[0].label, 'knowledgeEditor.wikiBrowser.gallery.attr.builtin_page')
+  assert.equal(rows[0].value, '2')
+  assert.equal(state.attrRows({ attrs: { 'source.page': 'invalid' } }).length, 0, '非法页码不应出现在详情中')
 })

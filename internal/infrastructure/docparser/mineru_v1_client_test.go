@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -488,4 +489,27 @@ func TestExtractMarkdownZipResolvesEncodedAndNestedPaths(t *testing.T) {
 	require.Len(t, refs, 2)
 	assert.Equal(t, []byte("p1"), refs[0].ImageData)
 	assert.Equal(t, "image/jpeg", refs[1].MimeType)
+}
+
+func TestMinerUV1APIError_LongNonJSONBodyStaysValidUTF8(t *testing.T) {
+	// 500 bytes into this body falls inside a three-byte character.
+	body := []byte("<h1>" + strings.Repeat("服务暂时不可用", 30) + "</h1>")
+	require.Greater(t, len(body), 500)
+
+	err := newMinerUV1APIError(http.StatusBadGateway, body)
+	assert.True(t, utf8.ValidString(err.Error()), "error is not valid UTF-8: %q", err.Error())
+	assert.True(t, strings.HasSuffix(err.msg, "..."))
+	assert.LessOrEqual(t, len(err.msg), 500+len("..."))
+}
+
+func TestMinerUV1MimeTypeXlsx(t *testing.T) {
+	cases := map[string]string{
+		"book.xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		"BOOK.XLSX": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	}
+	for name, want := range cases {
+		if got := minerUV1MimeType(name); got != want {
+			t.Errorf("minerUV1MimeType(%q) = %q, want %q", name, got, want)
+		}
+	}
 }
