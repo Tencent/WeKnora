@@ -53,7 +53,10 @@ func TestList_Success_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	now := time.Now()
 	items := []sdk.Knowledge{
-		{ID: "doc1", FileName: "alpha.pdf", FileSize: 2048, ParseStatus: "completed", UpdatedAt: now.Add(-1 * time.Hour)},
+		{
+			ID: "doc1", FolderPath: "retail", FileName: "alpha.pdf",
+			FileSize: 2048, ParseStatus: "completed", UpdatedAt: now.Add(-time.Hour),
+		},
 		{ID: "doc2", FileName: "beta.md", FileSize: 0, ParseStatus: "pending", UpdatedAt: now.Add(-2 * 24 * time.Hour)},
 	}
 	svc := &fakeListSvc{items: items, total: 2}
@@ -66,7 +69,10 @@ func TestList_Success_Text(t *testing.T) {
 	assert.Equal(t, sdk.KnowledgeListFilter{}, svc.got.filter, "no flags ⇒ empty filter")
 
 	got := out.String()
-	for _, want := range []string{"ID", "NAME", "STATUS", "SIZE", "UPDATED", "doc1", "alpha.pdf", "completed", "2.0KB", "doc2", "beta.md", "pending"} {
+	for _, want := range []string{
+		"ID", "NAME", "STATUS", "SIZE", "UPDATED", "doc1", "retail/alpha.pdf",
+		"completed", "2.0KB", "doc2", "beta.md", "pending",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q in:\n%s", want, got)
 		}
@@ -495,4 +501,16 @@ func TestList_AllFiltersCombined(t *testing.T) {
 	assert.Equal(t, "tag_42", f.TagID)
 	assert.False(t, f.StartTime.IsZero())
 	assert.False(t, f.EndTime.IsZero())
+}
+
+func TestListFolderScopes(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	for _, folder := range []string{"", "retail"} {
+		svc := &fakeListSvc{}
+		opts := &ListOptions{PageSize: 10, Limit: 30, FolderPath: &folder}
+		format := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+		require.NoError(t, runList(context.Background(), opts, format, svc, "kb"))
+		require.NotNil(t, svc.got.filter.FolderPath)
+		assert.Equal(t, folder, *svc.got.filter.FolderPath)
+	}
 }
