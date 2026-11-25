@@ -468,6 +468,8 @@ export default {
     logDetail: {
       startTime: 'Started',
       endTime: 'Finished',
+      deletedItems: 'Deleted in source',
+      deletedItemsMore: '{n} more deleted documents not shown',
       failedItems: 'Failed documents',
       failedItemsMore: '{n} more failed documents not shown',
       docsFailedSummary: '{n} document(s) failed to sync'
@@ -633,6 +635,7 @@ export default {
       book: 'Yuque Book',
       library: 'Seafile Library'
     },
+    resourceUnavailable: 'Deleted or unavailable',
     neverSynced: 'Never synced',
     justNow: 'Just now',
     minutesAgo: '{n}m ago',
@@ -645,6 +648,12 @@ export default {
       deletion_lookup_failed: 'Failed to look up the item before deletion; see server logs',
       deletion_failed: 'Deletion failed; see server logs',
       ingest_failed: 'Ingest failed; see server logs',
+      unsupported_file_type: 'Unsupported file type',
+      prerequisite_not_configured: 'Required model is not configured for this knowledge base (VLM for images, ASR for audio)',
+      invalid_item_name: 'File name or folder path contains invalid characters',
+      invalid_url: 'Invalid or unsafe URL',
+      invalid_json_content: 'Invalid or empty JSON file content',
+      storage_quota_exceeded: 'Storage quota exceeded',
       nextcloud_permission_denied: 'Access to the Nextcloud file was denied; check account permissions.',
       nextcloud_not_found: 'The Nextcloud file disappeared after listing; the next sync retries it.',
       nextcloud_file_too_large: 'The Nextcloud file exceeds MAX_FILE_SIZE_MB.',

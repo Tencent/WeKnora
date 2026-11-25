@@ -301,7 +301,91 @@ func TestLiteEditionEndToEndSmoke(t *testing.T) {
 	doJSON(t, client, http.MethodGet, messagesURL, token, nil, http.StatusOK, &msgResp)
 	require.GreaterOrEqual(t, len(msgResp.Data), 2, "expected user + assistant messages persisted")
 
-	// 8. Graceful shutdown on SIGTERM must exit cleanly (code 0).
+	// 8. Exercise KB copy + cross-KB document move (reuse_vectors & reparse) without Redis.
+	var copyResp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			TaskID   string `json:"task_id"`
+			TargetID string `json:"target_id"`
+		} `json:"data"`
+	}
+	doJSON(t, client, http.MethodPost, baseURL+"/api/v1/knowledge-bases/copy", token, map[string]any{
+		"source_id": kbID,
+	}, http.StatusOK, &copyResp)
+	require.NotEmpty(t, copyResp.Data.TaskID)
+	require.NotEmpty(t, copyResp.Data.TargetID)
+	waitTaskProgressCompleted(
+		t, client, baseURL+"/api/v1/knowledge-bases/copy/progress/"+copyResp.Data.TaskID, token, 30*time.Second,
+	)
+
+	var clonedSearchResp struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			Content string `json:"content"`
+		} `json:"data"`
+	}
+	doJSON(t, client, http.MethodPost, baseURL+"/api/v1/knowledge-search", token, map[string]any{
+		"query":              "Helios-7492",
+		"knowledge_base_ids": []string{copyResp.Data.TargetID},
+		"rerank":             map[string]any{"enabled": rerankOff},
+	}, http.StatusOK, &clonedSearchResp)
+	require.NotEmpty(t, clonedSearchResp.Data)
+	require.Contains(t, clonedSearchResp.Data[0].Content, "Helios-7492")
+
+	var moveTargetResp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	doJSON(t, client, http.MethodPost, baseURL+"/api/v1/knowledge-bases", token, map[string]any{
+		"name":               "Lite Move Target KB",
+		"embedding_model_id": embedModelID,
+		"summary_model_id":   chatModelID,
+	}, http.StatusCreated, &moveTargetResp)
+	moveDstKBID := moveTargetResp.Data.ID
+	require.NotEmpty(t, moveDstKBID)
+
+	moveAndVerify := func(srcKB, dstKB, mode string, ids []string) {
+		var moveResp struct {
+			Success bool `json:"success"`
+			Data    struct {
+				TaskID string `json:"task_id"`
+			} `json:"data"`
+		}
+		doJSON(t, client, http.MethodPost, baseURL+"/api/v1/knowledge/move", token, map[string]any{
+			"source_kb_id":  srcKB,
+			"target_kb_id":  dstKB,
+			"knowledge_ids": ids,
+			"mode":          mode,
+		}, http.StatusOK, &moveResp)
+		require.NotEmpty(t, moveResp.Data.TaskID)
+		waitTaskProgressCompleted(
+			t, client, baseURL+"/api/v1/knowledge/move/progress/"+moveResp.Data.TaskID, token, 30*time.Second,
+		)
+	}
+
+	extraID := uploadMarkdownDocument(
+		t, client, baseURL, token, kbID, "helios-appendix.md", "# Appendix\n\nExtra batch move item.",
+	)
+	waitKnowledgeIndexed(t, client, baseURL, token, extraID, 45*time.Second)
+	moveIDs := []string{knowledgeID, extraID}
+
+	moveAndVerify(kbID, moveDstKBID, "reuse_vectors", moveIDs)
+	doJSON(t, client, http.MethodPost, baseURL+"/api/v1/knowledge-search", token, map[string]any{
+		"query":              "Helios-7492",
+		"knowledge_base_ids": []string{moveDstKBID},
+		"rerank":             map[string]any{"enabled": rerankOff},
+	}, http.StatusOK, &clonedSearchResp)
+	require.NotEmpty(t, clonedSearchResp.Data)
+
+	moveAndVerify(moveDstKBID, kbID, "reparse", moveIDs)
+	for _, id := range moveIDs {
+		waitKnowledgeIndexed(t, client, baseURL, token, id, 45*time.Second)
+	}
+	moveAndVerify(kbID, moveDstKBID, "reuse_vectors", moveIDs)
+
+	// 9. Graceful shutdown on SIGTERM must exit cleanly (code 0).
 	require.NoError(t, srvCmd.Process.Signal(syscall.SIGTERM))
 	select {
 	case <-done:
@@ -572,6 +656,35 @@ func waitKnowledgeIndexed(
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for knowledge %s to finish indexing", knowledgeID)
+}
+
+func waitTaskProgressCompleted(
+	t *testing.T, client *http.Client, progressURL, token string, timeout time.Duration,
+) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var resp struct {
+			Success bool `json:"success"`
+			Data    struct {
+				Status   string `json:"status"`
+				Progress int    `json:"progress"`
+				Failed   int    `json:"failed"`
+				Error    string `json:"error"`
+			} `json:"data"`
+		}
+		doJSON(t, client, http.MethodGet, progressURL, token, nil, http.StatusOK, &resp)
+		switch resp.Data.Status {
+		case "completed":
+			require.Equal(t, 100, resp.Data.Progress)
+			require.Zero(t, resp.Data.Failed, "task reported failed items: %s", resp.Data.Error)
+			return
+		case "failed":
+			t.Fatalf("task %s failed: %s", progressURL, resp.Data.Error)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for task %s to complete", progressURL)
 }
 
 func streamKnowledgeQA(

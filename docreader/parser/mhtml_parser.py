@@ -94,6 +94,12 @@ def _header_str(value) -> str:
     return "".join(parts)
 
 
+def _normalize_cid_scheme(value: str) -> str:
+    if value[:4].lower() == "cid:":
+        return "cid:" + value[4:]
+    return value
+
+
 class MHTMLParser(BaseParser):
     """Parser for MHTML web archives."""
 
@@ -127,8 +133,10 @@ class MHTMLParser(BaseParser):
                     try:
                         html_text = payload.decode(charset, errors="ignore")
                     except LookupError:
-                        html_text = payload.decode("utf-8", errors="ignore")
-                else:
+                        # An unknown MIME label is no better than no label:
+                        # let the document's own declaration decide.
+                        charset = None
+                if not charset:
                     # Keep the bytes until HTML declarations and BOMs have
                     # been inspected; decoding as UTF-8 first loses text.
                     html_text = UnicodeDammit(payload, is_html=True).unicode_markup or ""
@@ -261,7 +269,7 @@ class MHTMLParser(BaseParser):
                 values.add(f"cid:{unquote(cid)}")
             for value in values:
                 if value:
-                    image_aliases[value] = image_path
+                    image_aliases[_normalize_cid_scheme(value)] = image_path
 
     @staticmethod
     def _image_extension(content_type: str) -> str:
@@ -344,7 +352,13 @@ class MHTMLParser(BaseParser):
             text_fallback = soup.get_text(separator="\n", strip=True)
             self._escape_table_cell_pipes(soup)
             self._move_table_footer_rows_after_body(soup)
-            markdown_text = md(str(soup), heading_style="ATX")
+            # markdownify writes only the alt text of an image in a table cell
+            # or a heading unless the image's parent tag is listed, which
+            # drops the image from the document
+            image_parents = sorted({img.parent.name for img in soup.find_all("img")})
+            markdown_text = md(
+                str(soup), heading_style="ATX", keep_inline_images_in=image_parents
+            )
             result = self._normalize_markdown(markdown_text)
             if not result and text_fallback:
                 logger.warning("Markdown empty, falling back to text extraction")
@@ -420,6 +434,14 @@ class MHTMLParser(BaseParser):
                 # Comments and other special strings keep their own type
                 if type(text) is NavigableString and "|" in text:
                     text.replace_with(text.replace("|", "\\|"))
+        # An image in a cell is written with its alt text and title
+        for img in soup.find_all("img"):
+            if img.find_parent(["td", "th"]) is None:
+                continue
+            for attr in ("alt", "title"):
+                value = img.get(attr)
+                if isinstance(value, str) and "|" in value:
+                    img[attr] = value.replace("|", "\\|")
 
     @staticmethod
     def _normalize_markdown(markdown_text: str) -> str:
@@ -516,6 +538,7 @@ class MHTMLParser(BaseParser):
             if base_name:
                 candidates.append(base_name)
             for candidate in candidates:
-                if candidate in image_aliases:
-                    img["src"] = image_aliases[candidate]
+                path = image_aliases.get(_normalize_cid_scheme(candidate))
+                if path is not None:
+                    img["src"] = path
                     break

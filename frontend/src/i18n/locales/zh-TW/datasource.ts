@@ -778,6 +778,7 @@ export default {
       book: '語雀知識庫',
       library: 'Seafile 資料庫'
     },
+    resourceUnavailable: '已刪除或不可用',
     scheduleHuman: {
       '30min': '每 30 分鐘',
       '1h': '每小時',
@@ -848,6 +849,8 @@ export default {
     logDetail: {
       startTime: '開始時間',
       endTime: '結束時間',
+      deletedItems: '來源端已刪除文件',
+      deletedItemsMore: '還有 {n} 個已刪除文件未顯示',
       failedItems: '失敗文件',
       failedItemsMore: '還有 {n} 個失敗文件未顯示',
       docsFailedSummary: '{n} 個文件同步失敗'
@@ -909,6 +912,12 @@ export default {
       deletion_lookup_failed: '刪除前尋找文件失敗，請查看伺服器日誌',
       deletion_failed: '刪除失敗，請查看伺服器日誌',
       ingest_failed: '匯入失敗，請查看伺服器日誌',
+      unsupported_file_type: '不支援的檔案類型',
+      prerequisite_not_configured: '知識庫未設定所需模型（圖片需設定 VLM 模型，音訊需設定 ASR 模型）',
+      invalid_item_name: '檔案名稱或資料夾路徑包含非法字元',
+      invalid_url: '連結無效或遭安全策略攔截',
+      invalid_json_content: 'JSON 檔案內容為空或格式無效',
+      storage_quota_exceeded: '儲存空間配額已滿',
       nextcloud_permission_denied: '無權存取該 Nextcloud 檔案，請檢查帳號權限。',
       nextcloud_not_found: 'Nextcloud 檔案在掃描後消失，下次同步將重試。',
       nextcloud_file_too_large: 'Nextcloud 檔案超過 MAX_FILE_SIZE_MB 限制。',

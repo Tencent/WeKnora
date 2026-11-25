@@ -113,7 +113,9 @@ def _column_cursor(boxes, idx: int, ends: List[Optional[int]]) -> Optional[int]:
     return None
 
 
-def _numeric_safe_matches(text: str, key: str) -> List[int]:
+def _numeric_safe_matches(
+    text: str, key: str, positions: Sequence[int], page_text: str
+) -> List[int]:
     out = []
     if not key:
         return out
@@ -122,8 +124,20 @@ def _numeric_safe_matches(text: str, key: str) -> List[int]:
         before = text[at - 1] if at else ""
         end = at + len(key)
         after = text[end] if end < len(text) else ""
-        left = key[0].isdigit() and bool(before) and (before.isdigit() or before in ".,:/+−-")
-        right = key[-1].isdigit() and bool(after) and (after.isdigit() or after in ".,:/%‰")
+        # The projection removes line breaks. Check the original text to
+        # distinguish numeric neighbors on separate lines.
+        left = (
+            key[0].isdigit()
+            and at > 0
+            and (before.isdigit() or before in ".,:/+−-")
+            and "\n" not in page_text[positions[at - 1]:positions[at]]
+        )
+        right = (
+            key[-1].isdigit()
+            and end < len(text)
+            and (after.isdigit() or after in ".,:/%‰")
+            and "\n" not in page_text[positions[end - 1]:positions[end]]
+        )
         if not left and not right:
             out.append(at)
         start = at + 1
@@ -150,7 +164,7 @@ def locate_lines(
     ends: List[Optional[int]] = []
     cursor = 0
     counts = Counter(normalize(line) for line in line_texts)
-    occurrences = {key: _numeric_safe_matches(norm, key) for key in counts}
+    occurrences = {key: _numeric_safe_matches(norm, key, pos, page_text) for key in counts}
     for idx, line in enumerate(line_texts):
         key = normalize(line)
         if len(unicodedata.normalize("NFC", key)) < _MIN_KEY_CHARS or len(occurrences[key]) != counts[key] or (

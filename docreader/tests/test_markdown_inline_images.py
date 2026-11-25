@@ -59,6 +59,33 @@ class MarkdownInlineImageTests(unittest.TestCase):
         self.assertEqual(doc.content, raw)
         self.assertEqual(doc.images, {})
 
+    def test_backticks_do_not_pair_across_block_boundaries(self):
+        for raw in (
+            f"> - literal `\n> - {IMAGE} `",
+            f"literal `\n# Heading\n{IMAGE} `",
+            f"# Heading `\n{IMAGE} `",
+            f"literal `\n# {IMAGE} `",
+        ):
+            with self.subTest(raw=raw):
+                doc = self.parse(raw)
+                self.assertEqual(len(doc.images), 1)
+                path, payload = next(iter(doc.images.items()))
+                expected = raw.replace(IMAGE, f"![example]({path})")
+                self.assertEqual(doc.content, expected)
+                self.assertEqual(payload, PNG_B64)
+
+    def test_ordered_marker_can_continue_inline_code_in_a_paragraph(self):
+        raw = f"Example: `line one\n2. {IMAGE}`"
+        doc = self.parse(raw)
+        self.assertEqual(doc.content, raw)
+        self.assertEqual(doc.images, {})
+
+    def test_inline_code_within_heading_stays_literal(self):
+        raw = f"# Example: `{IMAGE}`"
+        doc = self.parse(raw)
+        self.assertEqual(doc.content, raw)
+        self.assertEqual(doc.images, {})
+
     def test_code_in_alt_text_does_not_hide_real_image(self):
         raw = IMAGE.replace("[example]", "[a `literal` example]")
         doc = self.parse(raw)
@@ -78,6 +105,29 @@ class MarkdownInlineImageTests(unittest.TestCase):
         self.assertIn(f"`{IMAGE}`", doc.content)
         self.assertIn(f"```md\n{IMAGE}\n```", doc.content)
         self.assertEqual(len(doc.images), 1)
+
+    def test_quoted_fences_preserve_examples_and_extract_following_image(self):
+        for quote, fence, example in (
+            ("> ", "```", f"# {IMAGE}"),
+            ("> > ", "~~~", f"- {IMAGE}"),
+            ("> ", "```", f"> ```\n> # {IMAGE}"),
+        ):
+            with self.subTest(quote=quote, fence=fence, example=example):
+                code = f"{quote}{fence}md\n{quote}{example}\n{quote}{fence}\n"
+                real_image = IMAGE.replace("[example]", "[real]")
+                doc = self.parse(f"{code}{quote}{real_image}")
+                self.assertEqual(len(doc.images), 1)
+                path, payload = next(iter(doc.images.items()))
+                self.assertEqual(doc.content, f"{code}{quote}![real]({path})")
+                self.assertEqual(payload, PNG_B64)
+
+    def test_unclosed_quoted_fence_ends_with_its_quote(self):
+        code = f"> > ```md\n> > # {IMAGE}\n"
+        real_image = IMAGE.replace("[example]", "[real]")
+        doc = self.parse(f"{code}> {real_image}")
+        self.assertEqual(len(doc.images), 1)
+        path = next(iter(doc.images))
+        self.assertEqual(doc.content, f"{code}> ![real]({path})")
 
     def test_helper_preserves_multiline_crlf_code(self):
         raw = f"`first\r\n{IMAGE}\r\nlast`\r\n"

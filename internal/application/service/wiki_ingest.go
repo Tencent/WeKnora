@@ -794,88 +794,76 @@ func (s *wikiIngestService) releaseIngestForUnavailableWiki(ctx context.Context,
 	return nil
 }
 
-func (s *wikiIngestService) enqueueFinalizeRow(ctx context.Context, op *types.TaskPendingOp) bool {
-	accepted, err := enqueueWikiPendingOp(ctx, s.pendingRepo, op)
-	if err != nil {
-		logger.Warnf(ctx, "wiki finalize: enqueue %s row failed: %v", op.Op, err)
-		return false
-	}
-	return accepted
-}
-
-// enqueueFinalize persists this batch's KB-global convergence work into the
-// finalize lane of task_pending_ops and schedules a debounced trigger. One
-// "slug" row per affected page (carrying its fresh title when this batch wrote
-// it, for cross-linking) plus one "change" row per doc added/removed (for the
-// index-intro change description).
+// enqueueFinalize persists convergence work before the ingest batch settles
+// its source rows. Persistence has its own bounded budget, independent of any
+// earlier cleanup work or the cancelled task context. The returned count is
+// the number of rows not persisted when an error occurs.
 func (s *wikiIngestService) enqueueFinalize(
-	ctx context.Context,
-	payload WikiIngestPayload,
-	affectedSlugs []string,
-	freshTitleBySlug map[string]string,
-	changes []wikiFinalizeChange,
-	folderIDs []string,
-) {
+	ctx context.Context, payload WikiIngestPayload,
+	affectedSlugs []string, freshTitleBySlug map[string]string,
+	changes []wikiFinalizeChange, folderIDs []string,
+) (int, error) {
 	if s.pendingRepo == nil {
-		return
+		return 0, nil
 	}
-	acceptedAny := false
-	for _, slug := range affectedSlugs {
-		row := wikiFinalizeRow{Slug: slug, Title: freshTitleBySlug[slug]}
+	rows := make([]*types.TaskPendingOp, 0, len(affectedSlugs)+len(changes)+1)
+	appendRow := func(op, key string, row wikiFinalizeRow) error {
 		b, err := json.Marshal(row)
 		if err != nil {
-			continue
+			return err
 		}
-		if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
-			TenantID: payload.TenantID,
-			TaskType: wikiFinalizeTaskType,
-			Scope:    wikiTaskScope,
-			ScopeID:  payload.KnowledgeBaseID,
-			Op:       wikiFinalizeOpSlug,
-			DedupKey: slug,
-			Payload:  b,
-		}) {
-			acceptedAny = true
+		rows = append(rows, &types.TaskPendingOp{
+			TenantID: payload.TenantID, TaskType: wikiFinalizeTaskType,
+			Scope: wikiTaskScope, ScopeID: payload.KnowledgeBaseID, Op: op, DedupKey: key, Payload: b,
+		})
+		return nil
+	}
+	for _, slug := range affectedSlugs {
+		row := wikiFinalizeRow{Slug: slug, Title: freshTitleBySlug[slug]}
+		if err := appendRow(wikiFinalizeOpSlug, slug, row); err != nil {
+			return len(affectedSlugs) + len(changes), err
 		}
 	}
 	for i := range changes {
-		row := wikiFinalizeRow{Change: &changes[i]}
-		b, err := json.Marshal(row)
-		if err != nil {
-			continue
-		}
-		if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
-			TenantID: payload.TenantID,
-			TaskType: wikiFinalizeTaskType,
-			Scope:    wikiTaskScope,
-			ScopeID:  payload.KnowledgeBaseID,
-			Op:       wikiFinalizeOpChange,
-			DedupKey: "",
-			Payload:  b,
-		}) {
-			acceptedAny = true
+		if err := appendRow(wikiFinalizeOpChange, "", wikiFinalizeRow{Change: &changes[i]}); err != nil {
+			return len(affectedSlugs) + len(changes), err
 		}
 	}
 	if len(folderIDs) > 0 {
 		row := wikiFinalizeRow{FolderIDs: uniqueWikiFolderIDs(folderIDs)}
-		if b, err := json.Marshal(row); err == nil {
-			if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
-				TenantID: payload.TenantID,
-				TaskType: wikiFinalizeTaskType,
-				Scope:    wikiTaskScope,
-				ScopeID:  payload.KnowledgeBaseID,
-				Op:       wikiFinalizeOpFolderPrune,
-				DedupKey: "",
-				Payload:  b,
-			}) {
-				acceptedAny = true
-			}
+		if err := appendRow(wikiFinalizeOpFolderPrune, "", row); err != nil {
+			return len(rows) + 1, err
 		}
 	}
-	if !acceptedAny {
-		return
+	if len(rows) == 0 {
+		return 0, nil
 	}
-	s.scheduleFinalize(ctx, payload)
+	// Allow larger batches more time, but never detach unbounded work.
+	budget := max(30*time.Second, min(5*time.Minute, time.Duration((len(rows)-1)/100+1)*5*time.Second))
+	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+	defer cancel()
+	accepted := false
+	if batch, ok := s.pendingRepo.(interfaces.TaskPendingOpsKnowledgeBaseBatchGuard); ok {
+		var err error
+		accepted, err = batch.EnqueueBatchIfKnowledgeBaseActive(enqueueCtx, rows)
+		if err != nil {
+			return len(rows), fmt.Errorf("wiki finalize: persist %d rows: %w", len(rows), err)
+		}
+	} else {
+		// Alternate repositories retain their existing guarded single-row path;
+		// errors still stop the ingest batch from trimming its source operations.
+		for i, row := range rows {
+			ok, err := enqueueWikiPendingOp(enqueueCtx, s.pendingRepo, row)
+			if err != nil {
+				return len(rows) - i, fmt.Errorf("wiki finalize: persist row %d/%d: %w", i+1, len(rows), err)
+			}
+			accepted = accepted || ok
+		}
+	}
+	if accepted {
+		s.scheduleFinalize(enqueueCtx, payload)
+	}
+	return 0, nil
 }
 
 func uniqueWikiFolderIDs(values []string) []string {

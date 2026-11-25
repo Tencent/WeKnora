@@ -21,6 +21,7 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 		Use:   "doc",
 		Short: "Manage documents in a knowledge base",
 	}
+	cmd.AddCommand(newCmdCancelParse(f))
 	cmd.AddCommand(NewCmdCreate(f))
 	cmd.AddCommand(NewCmdDelete(f))
 	cmd.AddCommand(NewCmdDownload(f))
