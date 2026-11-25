@@ -20,10 +20,11 @@ type streamExitSessionService struct {
 func runStreamExitHandler(
 	ctx context.Context, service *Service, sender StreamSender, agent *types.CustomAgent,
 ) error {
-	return service.handleMessageStream(
+	_, err := service.handleMessageStream(
 		ctx, &IncomingMessage{Platform: PlatformFeishu, UserID: "user", Content: "question"},
 		&types.Session{ID: "session"}, agent, nil, nil, nil, sender, nil, "user", nil,
 	)
+	return err
 }
 
 func streamExitAgent() *types.CustomAgent {

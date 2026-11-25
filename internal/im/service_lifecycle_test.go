@@ -23,6 +23,7 @@ func (*lifecycleTestAdapter) VerifyCallback(*gin.Context) error { return nil }
 func (*lifecycleTestAdapter) ParseCallback(*gin.Context) (*IncomingMessage, error) {
 	return nil, nil
 }
+
 func (*lifecycleTestAdapter) SendReply(context.Context, *IncomingMessage, *ReplyMessage) error {
 	return nil
 }
@@ -85,6 +86,7 @@ func newLifecycleTestDB(t *testing.T) *gorm.DB {
 		knowledge_base_id TEXT DEFAULT '',
 		bot_identity TEXT NOT NULL DEFAULT '',
 		session_mode TEXT NOT NULL DEFAULT 'user',
+		admin_digest TEXT NOT NULL DEFAULT '{}',
 		credentials TEXT NOT NULL DEFAULT '{}',
 		created_at DATETIME,
 		updated_at DATETIME,

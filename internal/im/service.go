@@ -1998,22 +1998,26 @@ func (s *Service) executeQARequest(req *qaRequest) {
 			// Full output still starts the platform stream so users immediately see
 			// its thinking placeholder. No intermediate reasoning/tool content is
 			// sent; the placeholder is replaced only after QA completes.
-			if err := s.handleMessageFullOutput(
+			answer, err := s.handleMessageFullOutput(
 				ctx, req.msg, req.session, req.agent, kbIDs, attachments, imageURLs,
 				progressSender, req.adapter, req.userKey, req.tenant,
-			); err != nil {
+			)
+			if err != nil {
 				logger.Errorf(ctx, "[IM] Full-output QA failed: %v", err)
 			}
+			s.sendAdminDigest(imOutboundContext(ctx), req.adapter, req.channel, req.msg, req.session.ID, answer)
 			return
 		}
 	} else if streamer, ok := req.adapter.(StreamSender); ok {
 		// Stream mode sends intermediate reasoning and answer updates.
-		if err := s.handleMessageStream(
+		answer, err := s.handleMessageStream(
 			ctx, req.msg, req.session, req.agent, kbIDs, attachments, imageURLs,
 			streamer, req.adapter, req.userKey, req.tenant,
-		); err != nil {
+		)
+		if err != nil {
 			logger.Errorf(ctx, "[IM] Stream QA failed: %v", err)
 		}
+		s.sendAdminDigest(imOutboundContext(ctx), req.adapter, req.channel, req.msg, req.session.ID, answer)
 		return
 	}
 
@@ -2035,6 +2039,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 		return
 	}
 
+	s.sendAdminDigest(outCtx, req.adapter, req.channel, req.msg, req.session.ID, answer)
 	logger.Infof(ctx, "[IM] Reply sent: channel=%s platform=%s user=%s answer_len=%d",
 		req.channelID, req.msg.Platform, req.msg.UserID, len(answer))
 }
@@ -2055,7 +2060,7 @@ func (s *Service) handleMessageFullOutput(
 	adapter Adapter,
 	userKey string,
 	tenant *types.Tenant,
-) error {
+) (string, error) {
 	streamID, err := streamer.StartStream(ctx, msg)
 	if err != nil {
 		logger.Warnf(ctx, "[IM] StartStream failed for full output, falling back to plain reply: %v", err)
@@ -2102,9 +2107,9 @@ func (s *Service) handleMessageFullOutput(
 			ctx, "[IM] Full-output reply sent: platform=%s user=%s answer_len=%d",
 			msg.Platform, msg.UserID, len(answer),
 		)
-		return nil
+		return answer, nil
 	}
-	return errors.Join(finalizeErr, endErr, fallbackErr)
+	return answer, errors.Join(finalizeErr, endErr, fallbackErr)
 }
 
 // handleCommand executes a slash-command and sends the result back to the user.
@@ -2515,7 +2520,12 @@ func briefToolSummary(output string) string {
 // handleMessageStream runs the QA pipeline and streams answer chunks to the IM platform
 // in real-time via the StreamSender interface. Chunks are batched at streamFlushInterval
 // to avoid API rate-limiting.
-func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, streamer StreamSender, adapter Adapter, userKey string, tenant *types.Tenant) error {
+func (s *Service) handleMessageStream(
+	ctx context.Context, msg *IncomingMessage, session *types.Session,
+	customAgent *types.CustomAgent, kbIDs []string,
+	attachments types.MessageAttachments, imageURLs []string,
+	streamer StreamSender, adapter Adapter, userKey string, tenant *types.Tenant,
+) (string, error) {
 	// Start the stream on the IM platform (e.g., create Feishu streaming card)
 	streamID, err := streamer.StartStream(ctx, msg)
 	if err != nil {
@@ -2798,13 +2808,13 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	// Create user message
 	userMsg, err := s.messageService.CreateMessage(qaCtx, createIMUserMessagePayload(session.ID, msg.Content, requestID, attachments))
 	if err != nil {
-		return fmt.Errorf("create user message: %w", err)
+		return "", fmt.Errorf("create user message: %w", err)
 	}
 
 	// Create placeholder assistant message
 	assistantMsg, err = s.messageService.CreateMessage(qaCtx, createIMAssistantMessagePayload(session.ID, requestID))
 	if err != nil {
-		return fmt.Errorf("create assistant message: %w", err)
+		return "", fmt.Errorf("create assistant message: %w", err)
 	}
 
 	// Register inflight mapping so cross-instance /stop can find this request
@@ -2961,14 +2971,19 @@ loop:
 	}
 
 	if finalizeErr != nil && fallbackErr != nil {
-		return errors.Join(finalizeErr, endErr, fallbackErr)
+		return answer, errors.Join(finalizeErr, endErr, fallbackErr)
 	}
 	logger.Infof(ctx, "[IM] Stream reply sent: platform=%s user=%s answer_len=%d", msg.Platform, msg.UserID, len(answer))
-	return endErr
+	return answer, endErr
 }
 
 // fallbackNonStream is used when streaming initialization fails.
-func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, attachments types.MessageAttachments, imageURLs []string, adapter Adapter, userKey string, tenant *types.Tenant) error {
+func (s *Service) fallbackNonStream(
+	ctx context.Context, msg *IncomingMessage, session *types.Session,
+	customAgent *types.CustomAgent, kbIDs []string,
+	attachments types.MessageAttachments, imageURLs []string,
+	adapter Adapter, userKey string, tenant *types.Tenant,
+) (string, error) {
 	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, attachments, imageURLs, userKey, msg.Quote)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
@@ -2976,7 +2991,7 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 	}
 
 	outCtx := imOutboundContext(ctx)
-	return adapter.SendReply(outCtx, msg, &ReplyMessage{
+	return answer, adapter.SendReply(outCtx, msg, &ReplyMessage{
 		Content: formatIMOutboundAnswerOrFallback(outCtx, answer,
 			s.newOutboundFileServiceResolver(tenant, customAgent, kbIDs)),
 		IsFinal: true,
