@@ -34,6 +34,13 @@ export interface SessionMessagePageFetcher {
   (beforeTime: string, limit: number): Promise<SessionExportMessage[]>
 }
 
+export class SessionHistoryExportLimitError extends Error {
+  constructor() {
+    super('Session history exceeds the Markdown export limit')
+    this.name = 'SessionHistoryExportLimitError'
+  }
+}
+
 const roleOrder = (role?: string): number => {
   if (role === 'user') return 0
   if (role === 'assistant') return 1
@@ -73,6 +80,12 @@ export async function collectAllSessionMessages(
       throw new Error('Session history cursor did not advance')
     }
     beforeTime = oldestTime
+
+    // A full final page can be an exact fit. Check for one older message
+    // without adding it to the export or exceeding the collection cap.
+    if (pageIndex + 1 === maxPages && (await fetchPage(beforeTime, 1)).length > 0) {
+      throw new SessionHistoryExportLimitError()
+    }
   }
 
   const seen = new Set<string>()
