@@ -2160,7 +2160,7 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 			_, writeErr := s.wikiService.UpdatePage(ctx, page)
 			updateDeferred, err = classifyWikiPageWrite(writeErr)
 		} else {
-			_, err = s.wikiService.CreatePage(ctx, page)
+			updateDeferred, err = s.createWikiPageOrUpdate(ctx, ctx, page)
 		}
 		return changed, affectedType, false, updateDeferred, err
 	}
@@ -2441,12 +2441,41 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 			_, updateErr := s.wikiService.UpdatePage(writeCtx, page)
 			updateDeferred, err = classifyWikiPageWrite(updateErr)
 		} else {
-			_, err = s.wikiService.CreatePage(ctx, page)
+			writeCtx := ctx
+			if len(retracts) > 0 {
+				writeCtx = types.WithWikiShrinkAllowed(ctx)
+			}
+			updateDeferred, err = s.createWikiPageOrUpdate(ctx, writeCtx, page)
 		}
 		return true, affectedType, additionFailed, updateDeferred, err
 	}
 
 	return false, "", additionFailed, false, err
+}
+
+// createWikiPageOrUpdate persists a page the exists snapshot said was
+// missing. When a concurrent batch created the same slug after the
+// snapshot, GetOrCreatePage reports created=false and the content is
+// applied through the normal versioned UpdatePage instead of failing
+// the batch on the unique-key conflict (Tencent/WeKnora#5656).
+func (s *wikiIngestService) createWikiPageOrUpdate(
+	ctx, writeCtx context.Context, page *types.WikiPage,
+) (updateDeferred bool, err error) {
+	existing, created, err := s.wikiService.GetOrCreatePage(ctx, page)
+	if err != nil {
+		return false, err
+	}
+	if created {
+		return false, nil
+	}
+	// Lost the slug race: adopt the winner's identity so the versioned
+	// update below targets the stored row, and snapshot it so the
+	// conflict check in UpdatePage compares against the row just read.
+	page.ID = existing.ID
+	page.Version = existing.Version
+	writeCtx = types.WithWikiPageWriteSnapshot(writeCtx, existing)
+	_, writeErr := s.wikiService.UpdatePage(writeCtx, page)
+	return classifyWikiPageWrite(writeErr)
 }
 
 // classifyWikiPageWrite turns the result of one guarded UpdatePage call into
