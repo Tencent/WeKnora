@@ -170,3 +170,10 @@ test('editing a preserved one-shot into invalid or skipped wall time still fails
     assert.equal(triggerFromScheduleForm({ ...form, at }, 'America/New_York'), null, at)
   }
 })
+
+test('an unavailable timezone does not prevent opening a one-shot schedule', () => {
+  const trigger = { type: 'once' as const, at: '2027-05-01T10:00:00Z', timezone: 'Invalid/Zone' }
+  const form = scheduleFormFromTrigger(trigger)
+  assert.equal(form.at, '')
+  assert.equal(triggerFromScheduleForm(form, trigger.timezone), null)
+})

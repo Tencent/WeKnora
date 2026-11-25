@@ -165,6 +165,33 @@ func TestParseOutputSalvagesTruncatedReply(t *testing.T) {
 	}
 }
 
+func TestParseOutputSalvagePreservesCompleteBackslashEscapes(t *testing.T) {
+	p := &PluginQueryUnderstand{}
+	for _, tc := range []struct {
+		name    string
+		rawTail string
+		wantOCR string
+	}{
+		{name: "complete escape", rawTail: `C:\\logs\\`, wantOCR: `C:\logs\`},
+		{name: "dangling escape", rawTail: `C:\\logs\`, wantOCR: `C:\logs`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cm := &types.ChatManage{PipelineState: types.PipelineState{RewriteQuery: "original query"}}
+			p.parseOutput(cm, `{"rewrite_query":"find files under C:\\logs\\","intent":"kb_search",`+
+				`"image_description":"`+tc.rawTail)
+			if want := `find files under C:\logs\`; cm.RewriteQuery != want {
+				t.Errorf("rewrite = %q, want %q", cm.RewriteQuery, want)
+			}
+			if cm.ImageDescription != tc.wantOCR {
+				t.Errorf("image description = %q, want %q", cm.ImageDescription, tc.wantOCR)
+			}
+			if cm.Intent != types.IntentKBSearch {
+				t.Errorf("intent = %q, want kb_search", cm.Intent)
+			}
+		})
+	}
+}
+
 // A rewrite cut off by the token cap must not replace the user's query.
 func TestParseOutputDropsTruncatedRewrite(t *testing.T) {
 	p := &PluginQueryUnderstand{}

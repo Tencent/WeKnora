@@ -37,6 +37,30 @@ func TestParseGeneratedQuestions(t *testing.T) {
 			count:   3,
 			want:    []string{},
 		},
+		{
+			name:    "preserves leading digits in question text",
+			content: "5G网络怎么设置\n2024年营收是多少\n1. 3D打印的原理是什么？\n.NET 8 有哪些新特性",
+			count:   4,
+			want: []string{
+				"5G网络怎么设置",
+				"2024年营收是多少",
+				"3D打印的原理是什么？",
+				".NET 8 有哪些新特性",
+			},
+		},
+		{
+			name:    "strips numbered and bullet list markers",
+			content: "1. 问题内容足够长吗\n2.问题内容足够长吗\n3)问题内容足够长吗\n4、问题内容足够长吗\n- 问题内容足够长吗\n3.5版本有什么变化",
+			count:   6,
+			want: []string{
+				"问题内容足够长吗",
+				"问题内容足够长吗",
+				"问题内容足够长吗",
+				"问题内容足够长吗",
+				"问题内容足够长吗",
+				"3.5版本有什么变化",
+			},
+		},
 	}
 
 	for _, tt := range tests {

@@ -428,6 +428,7 @@ export default {
       baseUrlPlaceholder: '例如：https://api.openai.com/v1',
       baseUrlPlaceholderVllm: '例如：http://localhost:11434/v1',
       baseUrlPlaceholderAsr: '例如：https://api.openai.com/v1',
+      apiKey: 'API Key',
       apiKeyOptional: 'API Key（可选）',
       apiKeyPlaceholder: '输入 API Key',
       customHeadersLabel: '自定义请求头（可选）',

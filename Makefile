@@ -183,6 +183,7 @@ start-ollama:
 	./scripts/start_all.sh --ollama
 
 # 使用新脚本仅启动Docker容器
+.PHONY: start-docker
 start-docker:
 	./scripts/start_all.sh --docker
 
@@ -223,6 +224,7 @@ migrate-up:
 migrate-down:
 	./scripts/migrate.sh down
 
+.PHONY: migrate-version migrate-create migrate-force migrate-goto
 migrate-version:
 	./scripts/migrate.sh version
 
@@ -273,6 +275,7 @@ install-swagger:
 	go install github.com/swaggo/swag/cmd/swag@latest
 
 # Format code
+.PHONY: fmt lint deps
 fmt:
 	go fmt ./...
 
@@ -290,6 +293,7 @@ deps:
 # in-process office document parser (run `make anydoc-lib` first).
 # When .git is absent (e.g. inside a docker build), fall back to the VERSION
 # file so compose-built images still report the base version.
+.PHONY: build-prod
 build-prod:
 	VERSION=$$(git describe --tags --abbrev=0 2>/dev/null || echo "$${VERSION:-$$(cat VERSION 2>/dev/null || echo unknown)}"); \
 	COMMIT_ID=$${COMMIT_ID:-unknown}; \
@@ -331,6 +335,7 @@ package-lite:
 	./scripts/package-lite.sh
 
 # Package Mac App
+.PHONY: package-mac-app download_spatial clean-db
 package-mac-app:
 	./scripts/package-mac-app.sh
 

@@ -442,14 +442,13 @@ class WeKnoraClient:
         """List knowledge in a knowledge base.
 
         ``folder_path`` filters to one folder (empty string = root).
-        ``folder_scope`` is passed through when the backend supports
-        scoped folder listing.
+        Use ``folder_scope="subtree"`` (or "all") to include descendants.
         """
         params = {"page": page, "page_size": page_size}
         if folder_path is not None:
             params["folder_path"] = folder_path
-        if folder_scope:
-            params["folder_scope"] = folder_scope
+        if folder_path is not None and folder_scope in ("all", "subtree"):
+            params["folder_recursive"] = "true"
         return self._request(
             "GET", f"/knowledge-bases/{kb_id}/knowledge", params=params
         )
@@ -616,13 +615,21 @@ class WeKnoraClient:
                             f"Server error: {event_data.get('content', 'unknown error')}"
                         )
                     elif response_type in ("complete", "stop"):
+                        metadata = event_data.get("data")
+                        final = metadata.get("final_content") if isinstance(metadata, dict) else None
                         result = {
-                            "answer": "".join(answer_chunks),
+                            "answer": final if response_type == "complete" and isinstance(final, str) and final else "".join(answer_chunks),
                             "references": references,
                             "_debug_events": debug_events,
                         }
                         if response_type == "stop":
                             result["stopped"] = True
+                        else:
+                            # A complete event can end only the current stream
+                            # while the run is still waiting on a human prompt.
+                            data = event_data.get("data")
+                            if isinstance(data, dict) and data.get("suspended"):
+                                result["suspended"] = data["suspended"]
                         return result
 
             raise RequestException("SSE stream ended before complete event")
@@ -711,12 +718,19 @@ class WeKnoraClient:
         """Read a wiki page by slug, returns full markdown + metadata + links"""
         return self._request("GET", f"/knowledgebase/{kb_id}/wiki/pages/{slug}")
 
-    def wiki_index_view(self, kb_id: str, limit: int = 50) -> Dict:
-        """Get structured wiki index with per-type directory groups"""
+    def wiki_index_view(
+        self, kb_id: str, limit: int = 50, page_type: str = "", cursor: str = ""
+    ) -> Dict:
+        """Get a window of wiki directory entries."""
+        params = {"limit": limit}
+        if page_type:
+            params["types"] = page_type
+        if cursor:
+            params["cursor"] = cursor
         return self._request(
             "GET",
             f"/knowledgebase/{kb_id}/wiki/index",
-            params={"limit": limit},
+            params=params,
         )
 
 
@@ -775,8 +789,9 @@ def create_knowledge_base(
         "chunking_config": {
             "chunk_size": 1000,
             "chunk_overlap": 200,
-            "separators": ["."],
-            "enable_multimodal": True,
+            # Same separators and strategy as a KB created in the web UI.
+            "separators": ["\n\n", "\n", "。", "！", "？", ";", "；"],
+            "strategy": "auto",
         },
         "embedding_model_id": embedding_model_id,
         "summary_model_id": summary_model_id,
@@ -910,7 +925,7 @@ def list_knowledge(
     """List knowledge entries in a knowledge base.
 
     ``folder_path`` optionally filters to one folder (``""`` = root).
-    ``folder_scope`` is forwarded when the backend supports scoped listing.
+    Use ``folder_scope="subtree"`` (or "all") to include descendants.
     """
     return client.list_knowledge(
         kb_id, page, page_size, folder_path=folder_path, folder_scope=folder_scope
@@ -1041,11 +1056,8 @@ async def agent_chat(
     """Agentic pipeline chat: the agent autonomously calls tools (knowledge_search, web_search, SQL, etc.).
 
     REQUIRED: agent_id (name or UUID) — use list_agents to discover agents.
-    IMPORTANT: many agents have KBSelectionMode=none and NO built-in knowledge bases.
-    In that case you MUST pass knowledge_base_ids, otherwise the agent will fail
-    with 'no search targets available'. Use get_agent to inspect an agent's
-    kb_selection_mode and knowledge_bases before calling. If kb_selection_mode is
-    'none' or 'selected' with an empty list, always provide knowledge_base_ids.
+    Optional knowledge_base_ids (names or UUIDs) override or supplement the
+    agent's default knowledge bases. Omit them to use the agent's configured scope.
     """
     resolved_agent_id = await asyncio.to_thread(client.resolve_agent_id, agent_id)
     kb_ids = (
@@ -1053,45 +1065,6 @@ async def agent_chat(
         if knowledge_base_ids
         else None
     )
-    # Pre-check: if no KB IDs provided, inspect agent config to detect
-    # kb_selection_mode=none/selected-empty so we fail fast with a clear message
-    # instead of the cryptic backend error "no search targets available".
-    if not kb_ids:
-        try:
-            agent_info = await asyncio.to_thread(client.get_agent, resolved_agent_id)
-            cfg = (agent_info.get("data") or agent_info).get("config") or {}
-            mode = cfg.get("kb_selection_mode", "selected")
-            built_in_kbs = cfg.get("knowledge_bases") or []
-            needs_kbs = (mode == "none") or (
-                mode in ("selected", "") and not built_in_kbs
-            )
-            if needs_kbs:
-                all_kbs = _normalize_kb_entries(
-                    await asyncio.to_thread(client.list_knowledge_bases)
-                ) + _normalize_kb_entries(
-                    await asyncio.to_thread(client.list_shared_knowledge_bases)
-                )
-                seen_ids: set[str] = set()
-                unique_kbs: list[Dict] = []
-                for kb in all_kbs:
-                    kb_id = kb.get("id")
-                    if kb_id and kb_id not in seen_ids:
-                        seen_ids.add(kb_id)
-                        unique_kbs.append(kb)
-                kb_summary = ", ".join(
-                    f"{kb.get('name')} ({kb.get('id')})" for kb in unique_kbs[:10]
-                )
-                raise ValueError(
-                    f"Agent '{agent_id}' has kb_selection_mode='{mode}' with no built-in "
-                    f"knowledge bases. You must provide knowledge_base_ids. "
-                    f"Available knowledge bases: [{kb_summary}]"
-                )
-        except ValueError:
-            raise
-        except Exception as preflight_err:
-            logger.warning(
-                "agent_chat preflight KB check failed (non-fatal): %s", preflight_err
-            )
     fn = functools.partial(
         client.agent_chat,
         session_id,
@@ -1157,13 +1130,15 @@ def wiki_read_page(kb_id: str, slug: str) -> dict:
 
 
 @mcp.tool()
-def wiki_index_view(kb_id: str, limit: int = 50) -> dict:
+def wiki_index_view(
+    kb_id: str, limit: int = 50, page_type: str = "", cursor: str = ""
+) -> dict:
     """Get a structured wiki index with per-type directory groups.
 
-    Returns an overview of all wiki pages organized by type (entity, concept,
-    summary, etc.).
+    Pass a group's type as page_type and its next_cursor as cursor to read
+    the next window of that group.
     """
-    return client.wiki_index_view(kb_id, limit)
+    return client.wiki_index_view(kb_id, limit, page_type, cursor)
 
 
 # ---------------------------------------------------------------------------
@@ -1252,7 +1227,7 @@ def main():
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.getenv("MCP_PORT", "8000")),
+        default=os.getenv("MCP_PORT", "8000"),
         help="Bind port for network transports (default: 8000)",
     )
     args = parser.parse_args()

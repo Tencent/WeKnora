@@ -276,6 +276,7 @@ export default {
       baseUrlPlaceholderVllm: 'e.g. http://localhost:11434/v1',
       baseUrlPlaceholderAsr: 'e.g. https://api.openai.com/v1',
       apiKeyOptional: 'API Key (optional)',
+      apiKey: 'API Key',
       apiKeyPlaceholder: 'Enter API Key',
       customHeadersLabel: 'Custom Request Headers (optional)',
       customHeadersDesc: 'Extra HTTP headers appended to requests to the remote model API (e.g. for enterprise gateway auth or tracing). Reserved headers like Authorization / Content-Type are ignored.',

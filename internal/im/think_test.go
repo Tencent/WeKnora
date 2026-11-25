@@ -1,9 +1,40 @@
 package im
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestThinkingPlaceholder(t *testing.T) {
+	t.Setenv("WEKNORA_LANGUAGE", "en-US")
+	for _, tt := range []struct {
+		name   string
+		locale string
+		want   string
+	}{
+		{"deployment default", "", "Thinking..."},
+		{"English", "en-US", "Thinking..."},
+		{"Simplified Chinese", "zh-CN", "正在思考..."},
+		{"Traditional Chinese", "zh-TW", "正在思考..."},
+		{"Japanese", "ja-JP", "考え中..."},
+		{"Korean", "ko-KR", "생각 중..."},
+		{"Russian", "ru-RU", "Думаю..."},
+		{"unsupported locale", "unsupported", "正在思考..."},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tt.locale != "" {
+				ctx = context.WithValue(ctx, types.LanguageContextKey, tt.locale)
+			}
+			if got := ThinkingPlaceholder(ctx); got != tt.want {
+				t.Errorf("ThinkingPlaceholder() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestStripThinkBlocks(t *testing.T) {
 	tests := []struct {

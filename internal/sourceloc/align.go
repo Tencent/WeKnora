@@ -22,7 +22,12 @@ const alignMinRunes = 2
 
 // Align maps complete source units, never extending a hit through unmatched
 // content. Unknown gaps must stay unknown: assigning them to the preceding
-// block can point a citation at an entirely different page.
+// block can point a citation at an entirely different page. A unit whose
+// text only survives in a displaced spot (a caption, a summary, a table the
+// renderer moved) must not orphan the units after it either: matching it
+// there would jump the cursor past their only occurrences, so one bad
+// match would cascade into a whole section losing its locators. Such a
+// unit is skipped instead and the units after it still align.
 func Align(markdown string, units []Unit) []types.SourceBlock {
 	norm := normalizeMarkdown(markdown)
 	runes := []rune(markdown)
@@ -33,7 +38,33 @@ func Align(markdown string, units []Unit) []types.SourceBlock {
 		counts[normalizeKey(u.Text)]++
 	}
 	matches := indexNormalizedMatches(norm.text, counts)
-	for _, u := range units {
+	// lastOccurrence[i] is the last normalized offset at which unit i's
+	// text occurs, or -1 when the unit cannot be placed at all (too short,
+	// absent, or ambiguous). suffixMinLast[i] is the earliest such offset
+	// among the placeable units from i on.
+	lastOccurrence := make([]int, len(units))
+	for i, u := range units {
+		key := normalizeKey(u.Text)
+		lastOccurrence[i] = -1
+		if utf8.RuneCountInString(key) < alignMinRunes {
+			continue
+		}
+		positions := matches[key]
+		if len(positions) != counts[key] {
+			continue
+		}
+		lastOccurrence[i] = positions[len(positions)-1]
+	}
+	suffixMinLast := make([]int, len(units)+1)
+	suffixMinLast[len(units)] = -1
+	for i := len(units) - 1; i >= 0; i-- {
+		m := suffixMinLast[i+1]
+		if lastOccurrence[i] >= 0 && (m < 0 || lastOccurrence[i] < m) {
+			m = lastOccurrence[i]
+		}
+		suffixMinLast[i] = m
+	}
+	for i, u := range units {
 		key := normalizeKey(u.Text)
 		if utf8.RuneCountInString(key) < alignMinRunes {
 			continue
@@ -51,6 +82,13 @@ func Align(markdown string, units []Unit) []types.SourceBlock {
 		}
 		at := positions[matchIndex]
 		endByte := at + len(key)
+		// If a later unit's text only occurs before this match ends, it
+		// could still be placed now but never after the cursor jumps, so
+		// this match is a displaced copy, not the unit's own occurrence.
+		// Skip the unit instead of orphaning the rest of the section.
+		if next := suffixMinLast[i+1]; next >= cursor && next < endByte {
+			continue
+		}
 		start := lineLeadStart(runes, norm.pos[at], floor)
 		end := norm.end[endByte-1]
 		// Include trailing markup/URLs on the matched line and blank lines,

@@ -564,6 +564,11 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 	logger.Infof(ctx, "[Tool][DataAnalysis] Loading CSV file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
 
 	if !t.loadedTables[tableName] {
+		csvPath, cleanup, err := prepareCSVForDuckDB(ctx, filename)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare CSV for DuckDB: %w", err)
+		}
+		defer cleanup()
 		// Keep cleanup tracking even if CREATE fails; only successful creation
 		// makes the table reusable by a later call.
 		t.recordCreatedTable(tableName)
@@ -573,10 +578,10 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 		// Table will be created in the session schema
 		createTableSQL := fmt.Sprintf(
 			"CREATE TABLE \"%s\" AS SELECT * FROM read_csv_auto('%s', header=true, all_varchar=true)",
-			tableName, sqlSingleQuoteEscape(filename),
+			tableName, sqlSingleQuoteEscape(csvPath),
 		)
 
-		_, err := t.db.ExecContext(ctx, createTableSQL)
+		_, err = t.db.ExecContext(ctx, createTableSQL)
 		if err != nil {
 			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from CSV: %v", err)
 			return nil, fmt.Errorf("failed to create table from CSV: %w", err)
@@ -900,7 +905,7 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 		}
 	}
 
-	if _, err := io.Copy(tmp, reader); err != nil {
+	if _, err := io.Copy(tmp, materializationReader{ctx: ctx, reader: reader}); err != nil {
 		_ = tmp.Close()
 		cleanup()
 		return "", noop, fmt.Errorf("failed to copy knowledge '%s' to temp file: %w", knowledge.ID, err)
@@ -914,6 +919,22 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 		knowledge.ID, tmpPath, t.sessionID)
 
 	return tmpPath, cleanup, nil
+}
+
+type materializationReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r materializationReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.reader.Read(p)
+	if contextErr := r.ctx.Err(); contextErr != nil {
+		return n, contextErr
+	}
+	return n, err
 }
 
 // LoadFromKnowledgeID loads data from a Knowledge ID into a DuckDB table and returns the table schema

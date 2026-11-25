@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -299,15 +300,51 @@ func (a *WebhookAdapter) SendReply(ctx context.Context, incoming *im.IncomingMes
 
 	// For group chats, try sending to the group via appchat API first.
 	// This works for groups created via /cgi-bin/appchat/create.
-	if incoming.ChatType == im.ChatTypeGroup && incoming.ChatID != "" {
-		if err := a.sendToAppChat(ctx, accessToken, incoming.ChatID, reply); err == nil {
-			return nil
+	toGroup := incoming.ChatType == im.ChatTypeGroup && incoming.ChatID != ""
+	for i, content := range splitMarkdown(reply.Content) {
+		if i > 0 && strings.TrimSpace(content) == "" {
+			continue // a line break just past the limit; WeCom has nothing to show for it
 		}
-		logger.Debugf(ctx, "[WeCom] appchat/send failed for chat=%s, falling back to touser: %v", incoming.ChatID, err)
+		part := *reply
+		part.Content = content
+		if toGroup {
+			err := a.sendToAppChat(ctx, accessToken, incoming.ChatID, &part)
+			if err == nil {
+				continue
+			}
+			logger.Debugf(ctx, "[WeCom] appchat/send failed for chat=%s, falling back to touser: %v",
+				incoming.ChatID, err)
+			toGroup = false
+		}
+		// Fallback (or direct message): send to the user directly.
+		if err := a.sendToUser(ctx, accessToken, incoming.UserID, &part); err != nil {
+			return err
+		}
 	}
+	return nil
+}
 
-	// Fallback (or direct message): send to the user directly.
-	return a.sendToUser(ctx, accessToken, incoming.UserID, reply)
+// maxMarkdownBytes is the WeCom limit on markdown.content for both
+// message/send and appchat/send: "最长不超过2048个字节，必须是utf8编码".
+const maxMarkdownBytes = 2048
+
+// splitMarkdown cuts text into parts of at most maxMarkdownBytes, at a rune
+// boundary, and at a line break when one falls in the second half of a part.
+// The parts joined together are the original text.
+func splitMarkdown(text string) []string {
+	var parts []string
+	for len(text) > maxMarkdownBytes {
+		cut := maxMarkdownBytes
+		for i := 1; i < utf8.UTFMax && !utf8.RuneStart(text[cut]); i++ {
+			cut--
+		}
+		if newline := strings.LastIndexByte(text[:cut], '\n'); newline >= cut/2 {
+			cut = newline + 1
+		}
+		parts = append(parts, text[:cut])
+		text = text[cut:]
+	}
+	return append(parts, text)
 }
 
 // sendToAppChat sends a message to a WeCom group chat via the appchat API.

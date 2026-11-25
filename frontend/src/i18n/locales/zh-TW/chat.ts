@@ -209,6 +209,8 @@ export default {
     referenceChunkCount: '{count}個片段',
     fallbackHint: '未從知識庫中檢索到相關內容，以上為模型直接回答',
     truncatedHint: '回答在模型單次輸出上限處被截斷，以上為截斷前已生成的內容',
+    branchFromHere: '從這裡分支出新對話',
+    branchFromReply: '從這則回答繼續分支',
     rewind: {
       tooltip: '回滾到這裡',
       confirmTitle: '回滾到這裡？',
