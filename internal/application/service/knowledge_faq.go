@@ -394,7 +394,7 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 	answerOnly := indexMode == types.FAQIndexModeQuestionOnly && oldMeta != nil &&
 		!slices.Equal(oldMeta.Answers, meta.Answers) &&
 		oldMeta.StandardQuestion == meta.StandardQuestion && slices.Equal(oldMeta.SimilarQuestions, meta.SimilarQuestions) &&
-		oldTag == chunk.TagID && oldEnabled == chunk.IsEnabled && oldFlags == chunk.Flags
+		oldEnabled == chunk.IsEnabled && oldFlags == chunk.Flags
 	if !answerOnly {
 		faqKnowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, chunk.KnowledgeID)
 		if err != nil {
@@ -406,6 +406,15 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		}
 		// Full builds and historical edits can leave both positional and hashed alias IDs.
 		if err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, true); err != nil {
+			return nil, err
+		}
+	} else if oldTag != chunk.TagID {
+		// PUT can also clear a default tag. Update the index filter in place.
+		engine, err := retriever.CreateRetrieveEngineForKB(ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID)
+		if err != nil {
+			return nil, err
+		}
+		if err := engine.BatchUpdateChunkTagID(ctx, map[string]string{chunk.ID: chunk.TagID}); err != nil {
 			return nil, err
 		}
 	}
