@@ -83,7 +83,7 @@ class EPUBParser(BaseParser):
             html_files = [
                 f
                 for f in epub_zip.namelist()
-                if f.endswith((".html", ".xhtml", ".htm"))
+                if f.lower().endswith((".html", ".xhtml", ".htm"))
             ]
 
             def chapter_num(filename: str) -> int:
@@ -119,7 +119,7 @@ class EPUBParser(BaseParser):
                         base_path=posixpath.dirname(html_file),
                     )
                     base = os.path.basename(html_file)
-                    title = base.replace(".html", "").replace(".xhtml", "")
+                    title = os.path.splitext(base)[0]
                     title = re.sub(
                         r"chapter[_-]?", "Chapter ", title, flags=re.IGNORECASE
                     )
