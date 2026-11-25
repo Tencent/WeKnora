@@ -1003,6 +1003,7 @@ func validateFAQEntryPayloadBasic(entry *types.FAQEntryPayload) error {
 }
 
 type faqMergeOperation struct {
+	IndexOnly     bool
 	Entry         types.FAQEntryPayload
 	ExistingChunk *types.Chunk
 	OldMeta       *types.FAQChunkMetadata
@@ -1090,7 +1091,8 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 					len(mergedSimilar) == len(existingMeta.SimilarQuestions) &&
 					len(mergedNegative) == len(existingMeta.NegativeQuestions) &&
 					slices.Equal(meta.Answers, existingMeta.Answers)
-				if contentUnchanged && !enabledChanged && !recommendedChanged && !answerStrategyChanged {
+				indexOnly := contentUnchanged && !enabledChanged && !recommendedChanged && !answerStrategyChanged
+				if indexOnly && existingChunk.IndexStatus != "processing" {
 					skippedQuestions[strings.TrimSpace(entry.StandardQuestion)] = true
 					logger.Infof(ctx, "Skipping merge for unchanged FAQ entry: %s", meta.StandardQuestion)
 					continue
@@ -1120,6 +1122,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 				}
 
 				mergeOps = append(mergeOps, faqMergeOperation{
+					IndexOnly:     indexOnly,
 					Entry:         entry,
 					ExistingChunk: existingChunk,
 					OldMeta:       existingMeta,
@@ -2630,14 +2633,7 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 	return nil
 }
 
-// executeFAQMergeOperations 批量执行 append-mode 合并操作：更新已有 chunk
-// 的 metadata / content / 索引。使用 ListChunksByID 批量加载 + SaveChunks 事
-// 务批量保存，减少 DB 往返。任一批次失败立即返回，由 executeFAQImport
-// 的 defer recovery 决定是否回滚整次导入。
-//
-// 必要时这里逐条 fan-out 索引（EFPutDocument），而不是合并 chunks 批量
-// 重建：因为索引底层是按 SourceID 覆盖写入，按合并后的最终内容直接 put
-// 即可。
+// executeFAQMergeOperations stages each merge batch and indexes the committed rows.
 func (s *knowledgeService) executeFAQMergeOperations(
 	ctx context.Context,
 	taskID string,
@@ -2662,62 +2658,48 @@ func (s *knowledgeService) executeFAQMergeOperations(
 		}
 		batch := mergeOps[batchStart:batchEnd]
 
-		// 1. 批量加载完整 chunk（calculateAppendOperations 中只加载了部分字段，
-		//    缺少 status/seq_id 等，直接更新会将这些字段覆盖为零值）
-		chunkIDs := make([]string, len(batch))
-		for i, op := range batch {
-			chunkIDs[i] = op.ExistingChunk.ID
-		}
-		fullChunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, chunkIDs)
-		if err != nil {
-			logger.Errorf(ctx, "FAQ import task %s: failed to batch reload chunks for merge: %v", taskID, err)
-			return mergedCount, fmt.Errorf("failed to batch reload chunks for merge: %w", err)
-		}
-		chunkMap := make(map[string]*types.Chunk, len(fullChunks))
-		for _, c := range fullChunks {
-			chunkMap[c.ID] = c
-		}
-
-		// 2. 逐条应用合并数据
+		// Commit the intended edits before the remote call. Keep them marked
+		// processing until the exact stored revision has reached the index.
+		ids := make([]string, 0, len(batch))
 		mergedChunks := make([]*types.Chunk, 0, len(batch))
+		snapshots := make([]*types.Chunk, 0, len(batch))
+		updates := make([]map[string]any, 0, len(batch))
 		for _, op := range batch {
-			fullChunk, ok := chunkMap[op.ExistingChunk.ID]
-			if !ok {
-				logger.Errorf(ctx, "FAQ import task %s: chunk %s not found during batch reload", taskID, op.ExistingChunk.ID)
-				return mergedCount, fmt.Errorf("chunk %s not found during batch reload", op.ExistingChunk.ID)
+			ids = append(ids, op.ExistingChunk.ID)
+			mergedChunks = append(mergedChunks, op.ExistingChunk)
+			if op.IndexOnly {
+				continue // already staged by an earlier attempt
 			}
-
-			if err := fullChunk.SetFAQMetadata(op.MergedMeta); err != nil {
-				logger.Errorf(ctx, "FAQ import task %s: failed to set merged metadata for chunk %s: %v", taskID, fullChunk.ID, err)
-				return mergedCount, fmt.Errorf("failed to set merged FAQ metadata: %w", err)
+			var merged types.Chunk
+			if err := merged.SetFAQMetadata(op.MergedMeta); err != nil {
+				return mergedCount, err
 			}
-
-			fullChunk.Content = buildFAQChunkContent(op.MergedMeta, indexMode)
-			fullChunk.ContentHash = types.CalculateFAQContentHash(op.MergedMeta)
-			fullChunk.UpdatedAt = time.Now()
-
-			// 用新值覆盖运营状态
+			fields := map[string]any{
+				"metadata": merged.Metadata, "content_hash": merged.ContentHash,
+				"content":      buildFAQChunkContent(op.MergedMeta, indexMode),
+				"index_status": "processing", "updated_at": time.Now(),
+			}
 			if op.Entry.IsEnabled != nil {
-				fullChunk.IsEnabled = *op.Entry.IsEnabled
+				fields["is_enabled"] = *op.Entry.IsEnabled
 			}
 			if op.Entry.IsRecommended != nil {
+				flags := op.ExistingChunk.Flags.ClearFlag(types.ChunkFlagRecommended)
 				if *op.Entry.IsRecommended {
-					fullChunk.Flags = fullChunk.Flags.SetFlag(types.ChunkFlagRecommended)
-				} else {
-					fullChunk.Flags = fullChunk.Flags.ClearFlag(types.ChunkFlagRecommended)
+					flags = flags.SetFlag(types.ChunkFlagRecommended)
 				}
+				fields["flags"] = flags
 			}
-
-			mergedChunks = append(mergedChunks, fullChunk)
+			snapshots = append(snapshots, op.ExistingChunk)
+			updates = append(updates, fields)
+		}
+		if len(updates) > 0 {
+			if err := s.chunkRepo.UpdateFAQChunksIfCurrent(ctx, tenantID, snapshots, updates); err != nil {
+				return mergedCount, fmt.Errorf("stage FAQ merge: %w", err)
+			}
 		}
 
-		// Keep the previous metadata until indexing succeeds. A retry must still
-		// see a changed entry if rebuilding its vectors failed.
-		if err := s.indexFAQChunks(ctx, kb, faqKnowledge, mergedChunks, embeddingModel, false, true); err != nil {
-			return mergedCount, fmt.Errorf("failed to re-index merged chunks: %w", err)
-		}
-		if err := s.chunkRepo.SaveChunks(ctx, mergedChunks); err != nil {
-			return mergedCount, fmt.Errorf("failed to batch save merged chunks: %w", err)
+		if err := s.indexStoredFAQMerges(ctx, kb, faqKnowledge, embeddingModel, ids); err != nil {
+			return mergedCount, err
 		}
 
 		// 5. 收集成功条目信息
@@ -2741,6 +2723,50 @@ func (s *knowledgeService) executeFAQMergeOperations(
 	}
 
 	return mergedCount, nil
+}
+
+// If a user edits or removes a row while the vector store is writing, repeat
+// the rebuild from the committed rows. Never copy the old snapshot back to SQL.
+func (s *knowledgeService) indexStoredFAQMerges(ctx context.Context, kb *types.KnowledgeBase, knowledge *types.Knowledge,
+	model embedding.Embedder, ids []string,
+) error {
+	for {
+		rows, err := s.chunkRepo.ListChunksByID(ctx, kb.TenantID, ids)
+		if err != nil {
+			return err
+		}
+		current := make(map[string]*types.Chunk, len(rows))
+		ready := make([]map[string]any, len(rows))
+		for i, row := range rows {
+			current[row.ID] = row
+			ready[i] = map[string]any{"index_status": "ready"}
+		}
+		if len(rows) < len(ids) {
+			var deleted []string
+			for _, id := range ids {
+				if current[id] == nil {
+					deleted = append(deleted, id)
+				}
+			}
+			engine, err := retriever.CreateRetrieveEngineForKB(ctx, s.retrieveEngine, s.ownership, kb.TenantID, kb.VectorStoreID)
+			if err != nil {
+				return err
+			}
+			if err := engine.DeleteByChunkIDList(ctx, deleted, model.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
+				return err
+			}
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		if err := s.indexFAQChunks(ctx, kb, knowledge, rows, model, false, true); err != nil {
+			return fmt.Errorf("re-index merged FAQs: %w", err)
+		}
+		err = s.chunkRepo.UpdateFAQChunksIfCurrent(ctx, kb.TenantID, rows, ready)
+		if !errors.Is(err, repository.ErrChunkRevisionConflict) {
+			return err
+		}
+	}
 }
 
 // loadFAQTagsForChunks resolves every distinct tag referenced by chunks with a

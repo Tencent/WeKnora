@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrChunkRevisionConflict = errors.New("chunk revision conflict")
@@ -507,6 +509,41 @@ func (r *chunkRepository) SaveChunks(ctx context.Context, chunks []*types.Chunk)
 	})
 }
 
+// UpdateFAQChunksIfCurrent keeps the read/compare/write inside a short DB
+// transaction. Embedding and vector-store calls run outside the row locks.
+func (r *chunkRepository) UpdateFAQChunksIfCurrent(ctx context.Context, tenantID uint64, snapshots []*types.Chunk, updates []map[string]any) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		ids := make([]string, len(snapshots))
+		for i, snapshot := range snapshots {
+			ids[i] = snapshot.ID
+		}
+		var rows []*types.Chunk
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id, metadata, is_enabled, flags, tag_id, updated_at, index_status").
+			Where("tenant_id = ? AND id IN ?", tenantID, ids).Order("id").Find(&rows).Error
+		if err != nil {
+			return err
+		}
+		current := make(map[string]*types.Chunk, len(rows))
+		for _, row := range rows {
+			current[row.ID] = row
+		}
+		for i, snapshot := range snapshots {
+			row := current[snapshot.ID]
+			if row == nil || !row.UpdatedAt.Equal(snapshot.UpdatedAt) || row.IndexStatus != snapshot.IndexStatus ||
+				row.IsEnabled != snapshot.IsEnabled || row.Flags != snapshot.Flags || row.TagID != snapshot.TagID ||
+				!bytes.Equal(row.Metadata, snapshot.Metadata) {
+				return fmt.Errorf("FAQ chunk %s: %w", snapshot.ID, ErrChunkRevisionConflict)
+			}
+			if err := tx.Model(&types.Chunk{}).Where("tenant_id = ? AND id = ?", tenantID, row.ID).
+				UpdateColumns(updates[i]).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // UpdateChunks updates chunks in batch using raw SQL for efficiency.
 // Uses raw SQL to bypass GORM's default value handling for boolean fields.
 //
@@ -901,7 +938,7 @@ func (r *chunkRepository) ListAllFAQChunksWithMetadataByKnowledgeBaseID(
 	for {
 		var batchChunks []*types.Chunk
 		if err := r.db.WithContext(ctx).
-			Select("id, metadata, content_hash, is_enabled, flags").
+			Select("id, seq_id, metadata, content_hash, is_enabled, flags, tag_id, updated_at, index_status").
 			Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ? AND status = ?",
 				tenantID, kbID, types.ChunkTypeFAQ, types.ChunkStatusIndexed).
 			Offset(offset).

@@ -101,6 +101,9 @@ type ChunkRepository interface {
 	UpdateChunks(ctx context.Context, chunks []*types.Chunk) error
 	// SaveChunks persists full chunk objects in a single transaction using GORM Save (UPDATE).
 	SaveChunks(ctx context.Context, chunks []*types.Chunk) error
+	// UpdateFAQChunksIfCurrent applies a batch only while its FAQ snapshots are current.
+	UpdateFAQChunksIfCurrent(ctx context.Context, tenantID uint64, snapshots []*types.Chunk, updates []map[string]any) error
+
 	// UpdateChunkFieldsByIDs sets the same column values (e.g. {"status": 2})
 	// on every listed chunk of the tenant with one UPDATE per batch of IDs.
 	// updated_at is set automatically.
