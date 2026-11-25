@@ -248,7 +248,14 @@
       <div v-else class="im-step-body">
         <section class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionCredentials') }}</h4>
-          <div class="drawer-form">
+          <div v-if="editingChannel?.credentials_configured" class="setting-row">
+            <span>{{ $t('credential.configured') }}</span>
+            <t-button variant="text" @click="toggleCredentialReplacement">
+              {{ replaceCredentials ? $t('common.cancel') : $t('credential.update') }}
+            </t-button>
+          </div>
+          <div v-if="writeCredentials" class="drawer-form">
+            <p v-if="replaceCredentials" class="form-desc">{{ $t('agentEditor.im.replaceCredentialsHint') }}</p>
             <!-- WeCom credentials -->
             <template v-if="formData.platform === 'wecom'">
               <div class="platform-link-hint">
@@ -327,7 +334,7 @@
               </div>
               <template v-if="formData.mode === 'webhook'">
                 <div class="form-item">
-                  <label class="form-label">Verification Token</label>
+                  <label class="form-label required">Verification Token</label>
                   <t-input v-model="formData.credentials.verification_token" placeholder="Verification Token" />
                 </div>
                 <div class="form-item">
@@ -383,9 +390,9 @@
               </div>
               <template v-if="formData.mode === 'webhook'">
                 <div class="form-item">
-                  <label class="form-label">Secret Token</label>
+                  <label class="form-label required">Secret Token</label>
                   <t-input v-model="formData.credentials.secret_token" type="password"
-                    placeholder="Secret Token (optional)" />
+                    placeholder="Secret Token" />
                 </div>
               </template>
             </template>
@@ -500,8 +507,8 @@
                   </a>
                 </p>
               </div>
-              <div class="form-item">
-                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaSecret') }}</label>
+              <div v-if="formData.mode === 'webhook'" class="form-item">
+                <label class="form-label required">{{ $t('agentEditor.im.yunzhijiaSecret') }}</label>
                 <t-input v-model="formData.credentials.secret" type="password"
                   :placeholder="$t('agentEditor.im.yunzhijiaSecretPlaceholder')" />
                 <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaSecretHint') }}</p>
@@ -595,7 +602,7 @@ import { normalizeOptionalString } from '@/utils/optionalString';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
   getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels,
-  type IMChannelOverview, type CustomAgent,
+  type IMChannelOverview, type IMChannelSummary, type CustomAgent,
 } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import type { IMChannel } from '@/api/agent';
@@ -641,7 +648,7 @@ const agentOptions = computed(() =>
   agents.value.map((agent) => ({ label: agent.name, value: agent.id })),
 );
 
-const allChannels = ref<Array<IMChannel | IMChannelOverview>>([]);
+const allChannels = ref<Array<IMChannelSummary | IMChannelOverview>>([]);
 const channels = computed(() => {
   const filter = filterAgentId.value?.trim();
   if (!filter) return allChannels.value;
@@ -650,7 +657,9 @@ const channels = computed(() => {
 const loading = ref(false);
 const saving = ref(false);
 const showCreateDialog = ref(false);
-const editingChannel = ref<IMChannel | null>(null);
+const editingChannel = ref<IMChannelSummary | null>(null);
+const replaceCredentials = ref(false);
+const writeCredentials = computed(() => !editingChannel.value?.credentials_configured || replaceCredentials.value);
 const editingEnabled = ref(true);
 const wizardStep = ref(0);
 const channelNameTouched = ref(false);
@@ -753,7 +762,7 @@ const formData = ref({
   credentials: defaultCredentials(),
 });
 
-const channelMenuOptions = (channel: IMChannel | IMChannelOverview) => ([
+const channelMenuOptions = (channel: IMChannelSummary | IMChannelOverview) => ([
   {
     content: channel.enabled ? t('common.off') : t('common.on'),
     value: 'toggle',
@@ -762,18 +771,18 @@ const channelMenuOptions = (channel: IMChannel | IMChannelOverview) => ([
 
 function handleChannelMenuClick(
   data: { value?: string },
-  channel: IMChannel | IMChannelOverview,
+  channel: IMChannelSummary | IMChannelOverview,
 ) {
   if (data.value === 'toggle') {
     void handleToggle(channel);
   }
 }
 
-function agentDisplayName(channel: IMChannel | IMChannelOverview): string {
+function agentDisplayName(channel: IMChannelSummary | IMChannelOverview): string {
   return agentForChannel(channel)?.name || '';
 }
 
-function agentForChannel(channel: IMChannel | IMChannelOverview): CustomAgent | undefined {
+function agentForChannel(channel: IMChannelSummary | IMChannelOverview): CustomAgent | undefined {
   const found = agents.value.find((agent) => agent.id === channel.agent_id);
   if (found) return found;
   const overviewName = (channel as IMChannelOverview).agent_name;
@@ -829,11 +838,7 @@ const wechatBound = computed(() => {
 function onPlatformChange(val: string | number | boolean) {
   if (editingChannel.value) return;
   formData.value.credentials = defaultCredentials();
-  stopWeChatPolling();
-  wechatQRContent.value = '';
-  wechatQRImgUrl.value = '';
-  wechatQRCode.value = '';
-  wechatQRStatus.value = '';
+  resetWeChatBinding();
   // WeChat uses fixed mode/output
   if (val === 'wechat') {
     formData.value.mode = 'longpoll';
@@ -929,6 +934,14 @@ async function pollOnce() {
   }
 }
 
+function resetWeChatBinding() {
+  stopWeChatPolling();
+  wechatQRContent.value = '';
+  wechatQRImgUrl.value = '';
+  wechatQRCode.value = '';
+  wechatQRStatus.value = '';
+}
+
 function stopWeChatPolling() {
   wechatPollActive = false;
   if (wechatPollTimer) {
@@ -956,12 +969,12 @@ async function loadChannels() {
   }
 }
 
-function getCallbackUrl(channel: IMChannel): string {
+function getCallbackUrl(channel: Pick<IMChannel, 'id'>): string {
   const base = window.location.origin;
   return `${base}/api/v1/im/callback/${channel.id}`;
 }
 
-async function copyUrl(channel: IMChannel) {
+async function copyUrl(channel: Pick<IMChannel, 'id'>) {
   await copyWithToast(getCallbackUrl(channel), 'common.copySuccess');
 }
 
@@ -973,14 +986,14 @@ function openCreate() {
   showCreateDialog.value = true;
 }
 
-function openDrawer(channel: IMChannel | IMChannelOverview) {
+function openDrawer(channel: IMChannelSummary | IMChannelOverview) {
   void editChannel(channel);
 }
 
-async function editChannel(channel: IMChannel | IMChannelOverview) {
+async function editChannel(channel: IMChannelSummary | IMChannelOverview) {
   wizardStep.value = 0;
-  let fullChannel: IMChannel | null = null;
-  if (!('credentials' in channel)) {
+  let fullChannel: IMChannelSummary | null = null;
+  if (!('credentials_configured' in channel)) {
     try {
       const res = await listIMChannels(channel.agent_id);
       fullChannel = (res.data || []).find((item) => item.id === channel.id) || null;
@@ -988,12 +1001,13 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
       fullChannel = null;
     }
   } else {
-    fullChannel = channel as IMChannel;
+    fullChannel = channel;
   }
   if (!fullChannel) {
     MessagePlugin.error(t('common.operationFailed'));
     return;
   }
+  replaceCredentials.value = false;
   editingChannel.value = fullChannel;
   editingEnabled.value = fullChannel.enabled;
   channelNameTouched.value = true;
@@ -1006,22 +1020,29 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     locale: fullChannel.locale || '',
     session_mode: fullChannel.session_mode || 'user',
     knowledge_base_id: fullChannel.knowledge_base_id || '',
-    credentials: { ...fullChannel.credentials },
+    credentials: defaultCredentials(),
   };
   normalizeYunzhijiaCredentials();
   showCreateDialog.value = true;
 }
 
+function toggleCredentialReplacement() {
+  replaceCredentials.value = !replaceCredentials.value;
+  if (replaceCredentials.value) {
+    formData.value.credentials = defaultCredentials();
+    normalizeYunzhijiaCredentials();
+  } else {
+    resetWeChatBinding();
+  }
+}
+
 function resetForm() {
+  replaceCredentials.value = false;
   editingChannel.value = null;
   editingEnabled.value = true;
   wizardStep.value = 0;
   channelNameTouched.value = false;
-  stopWeChatPolling();
-  wechatQRContent.value = '';
-  wechatQRImgUrl.value = '';
-  wechatQRCode.value = '';
-  wechatQRStatus.value = '';
+  resetWeChatBinding();
   formData.value = {
     target_agent_id: filterAgentId.value || '',
     platform: 'wecom',
@@ -1039,16 +1060,38 @@ async function handleSave() {
   saving.value = true;
   try {
     // For WeChat, validate that credentials are bound
-    if (formData.value.platform === 'wechat' && !formData.value.credentials.bot_token) {
+    if (writeCredentials.value && formData.value.platform === 'wechat' && !wechatBound.value) {
       MessagePlugin.warning(t('agentEditor.im.wechatScanBind'));
       return;
     }
-    if (formData.value.platform === 'yunzhijia') {
+    if (writeCredentials.value && formData.value.platform === 'yunzhijia') {
       // normalize fills in the default allowed host suffix, so only the send URL
       // needs explicit validation here.
       normalizeYunzhijiaCredentials();
       if (!String(formData.value.credentials.send_msg_url || '').trim()) {
         MessagePlugin.warning(t('agentEditor.im.yunzhijiaSendMsgUrlRequired'));
+        return;
+      }
+    }
+
+    if (replaceCredentials.value) {
+      const { platform, mode, credentials } = formData.value;
+      const feishuFields = mode === 'webhook' ? ['app_id', 'app_secret', 'verification_token'] : ['app_id', 'app_secret'];
+      const requiredFields: Record<IMPlatform, string[]> = {
+        wecom: mode === 'webhook' ? ['corp_id', 'agent_secret', 'token', 'encoding_aes_key'] : ['bot_id', 'bot_secret'],
+        feishu: feishuFields,
+        lark: feishuFields,
+        slack: ['bot_token', mode === 'webhook' ? 'signing_secret' : 'app_token'],
+        telegram: mode === 'webhook' ? ['bot_token', 'secret_token'] : ['bot_token'],
+        dingtalk: ['client_id', 'client_secret'],
+        mattermost: ['site_url', 'bot_token', 'outgoing_token'],
+        wechat: ['bot_token', 'ilink_bot_id'],
+        qqbot: ['app_id', 'client_secret'],
+        yunzhijia: mode === 'webhook' ? ['send_msg_url', 'secret'] : ['send_msg_url'],
+      };
+      const missing = requiredFields[platform].filter(key => !String(credentials[key] || '').trim());
+      if (missing.length) {
+        MessagePlugin.warning(t('agentEditor.im.missingCredentials', { fields: missing.join(', ') }));
         return;
       }
     }
@@ -1061,7 +1104,7 @@ async function handleSave() {
         locale: formData.value.locale,
         session_mode: formData.value.session_mode,
         knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
-        credentials: formData.value.credentials,
+        ...(writeCredentials.value ? { credentials: formData.value.credentials } : {}),
         enabled: editingEnabled.value,
         ...(formData.value.target_agent_id ? { agent_id: formData.value.target_agent_id } : {}),
       });
@@ -1095,7 +1138,7 @@ async function handleSave() {
   }
 }
 
-async function handleToggle(channel: IMChannel | IMChannelOverview) {
+async function handleToggle(channel: IMChannelSummary | IMChannelOverview) {
   try {
     await toggleIMChannel(channel.id);
     await loadChannels();
