@@ -32,6 +32,7 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/output"
 	"github.com/Tencent/WeKnora/cli/internal/sse"
+	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -148,7 +149,7 @@ func runChat(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, s
 	sessionID := opts.SessionID
 	autoCreated := false
 	if sessionID == "" {
-		sess, err := svc.CreateSession(ctx, &sdk.CreateSessionRequest{Title: "weknora chat"})
+		sess, err := svc.CreateSession(ctx, &sdk.CreateSessionRequest{Title: text.OneLine(60, opts.Query)})
 		if err != nil {
 			// Ctrl-C during session creation: classify as cancelled so the
 			// hint nudges the user toward retry-with-signal-clean, not
