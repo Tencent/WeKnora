@@ -128,3 +128,31 @@ func TestLoopGuardsResetFailedToolCallStreakOnSuccessOrDifferentCall(t *testing.
 	require.Equal(t, 1, count)
 	require.Equal(t, failedToolCallContinue, action)
 }
+
+func TestLoopGuardsIgnorePendingAttachmentParsing(t *testing.T) {
+	failed := types.ToolCall{
+		Name:   "read_file",
+		Args:   map[string]interface{}{"path": "attachment://doc"},
+		Result: &types.ToolResult{Success: false, Error: "still being parsed"},
+	}
+	pending := failed
+	pending.Result = &types.ToolResult{
+		Success:                  false,
+		Error:                    "still being parsed",
+		AttachmentParsingPending: true,
+	}
+
+	guards := &loopGuards{}
+	for range maxConsecutiveFailedToolCalls - 1 {
+		guards.recordFailedToolCall(failed)
+	}
+	_, count, action := guards.recordFailedToolCall(pending)
+	require.Zero(t, count)
+	require.Equal(t, failedToolCallContinue, action)
+
+	for range maxConsecutiveFailedToolCallStop + 1 {
+		_, count, action = guards.recordFailedToolCall(pending)
+		require.Zero(t, count)
+		require.Equal(t, failedToolCallContinue, action)
+	}
+}

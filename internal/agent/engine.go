@@ -591,7 +591,7 @@ const (
 // recordFailedToolCall tracks consecutive failures of the same model-facing
 // tool name and arguments. A successful or different call breaks the streak.
 func (g *loopGuards) recordFailedToolCall(call types.ToolCall) (string, int, failedToolCallAction) {
-	if call.Result != nil && call.Result.Success {
+	if call.Result != nil && (call.Result.Success || call.Result.AttachmentParsingPending) {
 		g.resetFailedToolCallStreak()
 		return "", 0, failedToolCallContinue
 	}
