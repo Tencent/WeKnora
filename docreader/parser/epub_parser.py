@@ -45,13 +45,11 @@ class EPUBParser(BaseParser):
             try:
                 book = epub.read_epub(epub_path)
                 metadata = self._extract_metadata(book)
-                markdown_content, images = self._extract_content(book)
+                markdown_content, images, chapter_count = self._extract_content(book)
 
                 metadata["source_format"] = "epub"
                 metadata["file_size"] = len(content)
-                metadata["chapter_count"] = len(
-                    [part for part in markdown_content.split("\n## ") if part.strip()]
-                )
+                metadata["chapter_count"] = chapter_count
                 metadata["image_count"] = len(images)
                 return Document(
                     content=markdown_content, images=images, metadata=metadata
@@ -83,11 +81,13 @@ class EPUBParser(BaseParser):
             html_files = [
                 f
                 for f in epub_zip.namelist()
-                if f.endswith((".html", ".xhtml", ".htm"))
+                if f.lower().endswith((".html", ".xhtml", ".htm"))
             ]
 
             def chapter_num(filename: str) -> int:
-                match = re.search(r"chapter(\d+)", filename, re.IGNORECASE)
+                match = re.search(
+                    r"chapter[_-]?(\d+)", posixpath.basename(filename), re.IGNORECASE
+                )
                 return int(match.group(1)) if match else 999999
 
             html_files.sort(key=chapter_num)
@@ -119,7 +119,7 @@ class EPUBParser(BaseParser):
                         base_path=posixpath.dirname(html_file),
                     )
                     base = os.path.basename(html_file)
-                    title = base.replace(".html", "").replace(".xhtml", "")
+                    title = os.path.splitext(base)[0]
                     title = re.sub(
                         r"chapter[_-]?", "Chapter ", title, flags=re.IGNORECASE
                     )
@@ -198,7 +198,7 @@ class EPUBParser(BaseParser):
                     metadata[out_key] = values[0][0]
         return metadata
 
-    def _extract_content(self, book) -> tuple[str, Dict[str, str]]:
+    def _extract_content(self, book) -> tuple[str, Dict[str, str], int]:
         markdown_parts = []
         images: Dict[str, str] = {}
         image_aliases: Dict[str, str] = {}
@@ -212,16 +212,26 @@ class EPUBParser(BaseParser):
                     images[img_path] = base64.b64encode(img_data).decode("utf-8")
                     self._add_image_aliases(image_aliases, item.get_name(), img_path)
 
+        chapter_count = 0
         for item in self._documents_in_reading_order(book):
-            markdown_parts.append(
-                self._process_chapter(
-                    item,
-                    toc_index=len(markdown_parts),
-                    image_aliases=image_aliases,
-                )
+            chapter_md = self._process_chapter(
+                item,
+                toc_index=len(markdown_parts),
+                image_aliases=image_aliases,
             )
+            markdown_parts.append(chapter_md)
+            # Count the documents rendered, not the "## " lines in the joined
+            # markdown: every chapter is emitted under one "## " heading, but so
+            # is every h2 the chapter itself contains, and a navigation page
+            # renders like a chapter without being one.
+            if chapter_md.strip() and not isinstance(item, epub.EpubNav):
+                chapter_count += 1
 
-        return "\n\n".join(part for part in markdown_parts if part.strip()), images
+        return (
+            "\n\n".join(part for part in markdown_parts if part.strip()),
+            images,
+            chapter_count,
+        )
 
     @staticmethod
     def _documents_in_reading_order(book) -> list:

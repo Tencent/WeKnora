@@ -28,12 +28,8 @@ type uploadedFile struct {
 // when ≥1 file failed (the typed code mirrors the first failure's
 // classification so callers can still branch).
 func runUploadRecursive(ctx context.Context, opts *UploadOptions, fopts *cmdutil.FormatOptions, svc UploadService, kbID, dir string) error {
-	if opts.Name != "" {
-		return &cmdutil.Error{
-			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: "--name cannot be combined with --recursive (one name can't apply to N files)",
-			Hint:    "drop --name or upload files one at a time",
-		}
+	if err := validateRecursiveUploadFlags(opts); err != nil {
+		return err
 	}
 	// Parse --metadata up front so a malformed value aborts before the
 	// first SDK call - otherwise a typo in `key=value` would only surface
@@ -53,16 +49,6 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, fopts *cmdutil
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
 			Message: fmt.Sprintf("not a directory: %s (drop --recursive to upload a single file)", dir),
-		}
-	}
-
-	// Sanity-check the pattern up front so a typo doesn't show up as "no
-	// files matched" per-file. Cobra populates --glob; tests pass it
-	// explicitly - no in-function default needed.
-	if _, err := filepath.Match(opts.Glob, ""); err != nil {
-		return &cmdutil.Error{
-			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: fmt.Sprintf("invalid --glob %q: %v", opts.Glob, err),
 		}
 	}
 
@@ -211,4 +197,22 @@ func walkMatches(root, pattern string) ([]string, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func validateRecursiveUploadFlags(opts *UploadOptions) error {
+	if opts.Name != "" {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: "--name cannot be combined with --recursive (one name can't apply to N files)",
+			Hint:    "drop --name or upload files one at a time",
+		}
+	}
+	if _, err := filepath.Match(opts.Glob, ""); err != nil {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("invalid --glob %q: %v", opts.Glob, err),
+		}
+	}
+
+	return nil
 }

@@ -159,8 +159,7 @@ func runFetch(ctx context.Context, opts *FetchOptions, fopts *cmdutil.FormatOpti
 	k, err := svc.CreateKnowledgeFromURL(ctx, kbID, req)
 	if err != nil {
 		if errors.Is(err, sdk.ErrDuplicateURL) {
-			return cmdutil.Wrapf(cmdutil.CodeResourceAlreadyExists, err,
-				"URL already ingested into this knowledge base")
+			return existingDocumentError(err, k, "URL already ingested into this knowledge base")
 		}
 		return cmdutil.WrapHTTP(err, "fetch document from %s", opts.URL)
 	}

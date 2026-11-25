@@ -28,6 +28,11 @@ test('collectAllSessionMessages walks backwards and returns chronological unique
   assert.deepEqual(result.map((message) => message.id), ['1', '2', '3', '4'])
 })
 
+test('copying a session rejects a full page that cannot advance the history cursor', async () => {
+  const page = [{ id: 'm', role: 'user', created_at: '2026-01-01T00:00:00Z' }]
+  await assert.rejects(collectAllSessionMessages(async () => page, 1), /cursor/)
+})
+
 test('buildSessionMarkdown exports visible conversation content without internal citation tags', () => {
   const markdown = buildSessionMarkdown({
     sessionId: 'session-1',
@@ -63,6 +68,24 @@ test('buildSessionMarkdown exports visible conversation content without internal
 })
 
 
+for (const role of ['user', 'assistant'] as const) {
+  for (const [description, content] of [
+    ['Markdown hard breaks', 'First line  \nSecond line'],
+    ['fenced code whitespace', '```python\nvalue = """first  \nsecond\t\n"""\n```'],
+  ]) {
+    test(`buildSessionMarkdown preserves ${description} in ${role} messages`, () => {
+      const markdown = buildSessionMarkdown({
+        sessionId: 'session-1',
+        title: 'Example chat',
+        labels,
+        messages: [{ role, content: `\n${content}\n` }],
+      })
+
+      assert.ok(markdown.endsWith(`## ${labels[role]}\n\n${content}\n`))
+    })
+  }
+}
+
 test('export messages sort by instants across fractional timestamps and timezone offsets', async () => {
   const messages = [
     { id: 'late', role: 'assistant', created_at: '2026-01-01T00:00:00.100Z' },
@@ -97,4 +120,10 @@ test('missing and invalid export timestamps have a deterministic fallback', asyn
     { id: 'missing', role: 'assistant' },
   ])
   assert.deepEqual(result.map(message => message.id), ['missing', 'invalid', 'valid'])
+})
+
+test('export keeps citation-shaped examples in the original user question', () => {
+  const content = 'What does `<kb doc="manual" />` mean?'
+  const output = buildSessionMarkdown({ sessionId: 's', title: 'Help', labels, messages: [{ role: 'user', content }] })
+  assert.ok(output.includes(content))
 })
