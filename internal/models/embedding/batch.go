@@ -40,6 +40,8 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 	if batchSize <= 0 {
 		return nil, fmt.Errorf("BATCH_EMBED_SIZE must be greater than 0")
 	}
+	batchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	textEmbeddings := utils.MapSlice(texts, func(text string) *textEmbedding {
 		return &textEmbedding{text: text}
 	})
@@ -61,13 +63,14 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 				return
 			}
 			// Embed text
-			embedding, err := model.BatchEmbed(ctx, utils.MapSlice(texts, func(text *textEmbedding) string {
+			embedding, err := model.BatchEmbed(batchCtx, utils.MapSlice(texts, func(text *textEmbedding) string {
 				return text.text
 			}))
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
 					firstErr = err
+					cancel()
 				}
 				mu.Unlock()
 				return
@@ -76,6 +79,7 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 				mu.Lock()
 				if firstErr == nil {
 					firstErr = fmt.Errorf("embedding model returned %d embeddings for %d inputs", len(embedding), len(texts))
+					cancel()
 				}
 				mu.Unlock()
 				return
