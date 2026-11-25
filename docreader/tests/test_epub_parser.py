@@ -237,6 +237,35 @@ def _epub_with_encoded_chapter(encoding: str, *, missing_navigation: bool) -> by
 
 
 class EPUBParserTest(unittest.TestCase):
+    def test_zip_fallback_keeps_chapters_with_mixed_case_extensions(self):
+        for extension in (".XHTML", ".XhTmL", ".HTML", ".HtMl", ".HTM", ".HtM"):
+            with self.subTest(extension=extension):
+                content = BytesIO()
+                with zipfile.ZipFile(content, "w") as archive:
+                    archive.writestr(
+                        f"OPS/Chapter1{extension}",
+                        "<html><body><p>First chapter.</p></body></html>",
+                    )
+                    archive.writestr(
+                        "OPS/Chapter2.xhtml",
+                        "<html><body><p>Second chapter.</p></body></html>",
+                    )
+                with self.assertLogs(
+                    "docreader.parser.epub_parser", level="WARNING"
+                ) as logs:
+                    document = Parser().parse_file(
+                        "mixed.epub", "epub", content.getvalue()
+                    )
+                self.assertTrue(
+                    any("trying ZIP fallback" in line for line in logs.output)
+                )
+                self.assertEqual(document.metadata["chapter_count"], 2)
+                self.assertEqual(
+                    document.content,
+                    "## Chapter 1\n\nFirst chapter.\n\n"
+                    "## Chapter 2\n\nSecond chapter.",
+                )
+
     def test_zip_recovery_decodes_unicode_chapters(self):
         for encoding in ("utf-8", "utf-8-sig", "utf-16-le", "utf-16-be"):
             for extract_images in (False, True):
