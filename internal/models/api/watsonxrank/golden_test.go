@@ -26,10 +26,18 @@ const (
 
 var guidePassages = []string{
 	"A foundation model is a large-scale generative AI model that can be adapted to a wide range of downstream tasks.",
-	"Generative AI is a class of AI algorithms that can produce various types of content including text, source code, imagery, audio, and synthetic data.",
-	"Agentic AI is a generative AI flow that can decompose a prompt into multiple tasks, assign tasks to appropriate gen AI agents, and synthesize an answer without human intervention.",
-	"AI ethics is a multidisciplinary field that studies how to optimize AI's beneficial impact while reducing risks and adverse outcomes. Examples of AI ethics issues are data responsibility and privacy, fairness, explainability, robustness, transparency, environmental sustainability, inclusion, moral agency, value alignment, accountability, trust, and technology misuse.",
-	"AI governance is an organization's act of governing, through its corporate instructions, staff, processes and systems to direct, evaluate, monitor, and take corrective action throughout the AI lifecycle, to provide assurance that the AI system is operating as the organization intends, as its stakeholders expect, and as required by relevant regulation.",
+	"Generative AI is a class of AI algorithms that can produce various types of content " +
+		"including text, source code, imagery, audio, and synthetic data.",
+	"Agentic AI is a generative AI flow that can decompose a prompt into multiple tasks, " +
+		"assign tasks to appropriate gen AI agents, and synthesize an answer without human intervention.",
+	"AI ethics is a multidisciplinary field that studies how to optimize AI's beneficial impact " +
+		"while reducing risks and adverse outcomes. Examples of AI ethics issues are data responsibility " +
+		"and privacy, fairness, explainability, robustness, transparency, environmental sustainability, " +
+		"inclusion, moral agency, value alignment, accountability, trust, and technology misuse.",
+	"AI governance is an organization's act of governing, through its corporate instructions, staff, " +
+		"processes and systems to direct, evaluate, monitor, and take corrective action " +
+		"throughout the AI lifecycle, to provide assurance that the AI system is operating as the organization " +
+		"intends, as its stakeholders expect, and as required by relevant regulation.",
 }
 
 const guideResponse = `{
