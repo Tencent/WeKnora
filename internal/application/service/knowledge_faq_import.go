@@ -1020,14 +1020,14 @@ type faqMergeOperation struct {
 // 新的相似问而不丢历史数据。
 func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 	tenantID uint64, kbID string, entries []types.FAQEntryPayload,
-) (newEntries []types.FAQEntryPayload, mergeOps []faqMergeOperation, skippedCount int, err error) {
+) (newEntries []types.FAQEntryPayload, mergeOps []faqMergeOperation, skippedQuestions map[string]bool, err error) {
 	if len(entries) == 0 {
-		return nil, nil, 0, nil
+		return nil, nil, nil, nil
 	}
 
 	existingChunks, err := s.chunkRepo.ListAllFAQChunksWithMetadataByKnowledgeBaseID(ctx, tenantID, kbID)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("failed to list existing FAQ chunks: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to list existing FAQ chunks: %w", err)
 	}
 
 	existingStdQToChunk := make(map[string]*types.Chunk)
@@ -1052,10 +1052,11 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 	newEntries = make([]types.FAQEntryPayload, 0, len(entries))
 	mergeOps = make([]faqMergeOperation, 0)
 
+	skippedQuestions = make(map[string]bool)
 	for entryIdx, entry := range entries {
 		meta, sErr := sanitizeFAQEntryPayload(&entry)
 		if sErr != nil {
-			skippedCount++
+			skippedQuestions[strings.TrimSpace(entry.StandardQuestion)] = true
 			logger.Warnf(ctx, "Skipping invalid FAQ entry: %v", sErr)
 			continue
 		}
@@ -1085,8 +1086,12 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 				recommendedChanged := entry.IsRecommended != nil &&
 					*entry.IsRecommended != existingChunk.Flags.HasFlag(types.ChunkFlagRecommended)
 				answerStrategyChanged := meta.AnswerStrategy != existingMeta.AnswerStrategy
-				if existingChunk.ContentHash == newHash && !enabledChanged && !recommendedChanged && !answerStrategyChanged {
-					skippedCount++
+				contentUnchanged := existingChunk.ContentHash == newHash &&
+					len(mergedSimilar) == len(existingMeta.SimilarQuestions) &&
+					len(mergedNegative) == len(existingMeta.NegativeQuestions) &&
+					slices.Equal(meta.Answers, existingMeta.Answers)
+				if contentUnchanged && !enabledChanged && !recommendedChanged && !answerStrategyChanged {
+					skippedQuestions[strings.TrimSpace(entry.StandardQuestion)] = true
 					logger.Infof(ctx, "Skipping merge for unchanged FAQ entry: %s", meta.StandardQuestion)
 					continue
 				}
@@ -1135,7 +1140,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 		// 正常情况下这些冲突应在 executeFAQDryRunValidation 阶段就被拦截，这里
 		// 仅作为防御性兜底；用 Warn 级别打点便于排查验证层漏检。
 		if existingQuestions[meta.StandardQuestion] || batchQuestions[meta.StandardQuestion] {
-			skippedCount++
+			skippedQuestions[strings.TrimSpace(entry.StandardQuestion)] = true
 			logger.Warnf(ctx,
 				"calculateAppendOperations: dropping FAQ entry with duplicate standard question %q "+
 					"(should have been filtered at validation); entry_idx=%d",
@@ -1150,7 +1155,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 		newEntries = append(newEntries, entry)
 	}
 
-	return newEntries, mergeOps, skippedCount, nil
+	return newEntries, mergeOps, skippedQuestions, nil
 }
 
 // calculateReplaceOperations 计算Replace模式下需要删除、创建、更新的条目
@@ -1449,10 +1454,23 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 	} else {
 		// Append 模式（智能合并）：标准问已存在的条目走 merge ops，其余作为新建。
 		var mergeOps []faqMergeOperation
-		entriesToProcess, mergeOps, skippedCount, err = s.calculateAppendOperations(ctx, tenantID, kb.ID, payload.Entries)
+		var skippedQuestions map[string]bool
+		entriesToProcess, mergeOps, skippedQuestions, err = s.calculateAppendOperations(
+			ctx, tenantID, kb.ID, payload.Entries,
+		)
 		if err != nil {
 			return fmt.Errorf("failed to calculate append operations: %w", err)
 		}
+
+		skippedCount = len(skippedQuestions)
+		// A row with rejected questions already counts as a partial failure,
+		// even when its remaining fields require no changes.
+		for _, failure := range progress.FailedEntries {
+			if failure.IsPartialFailure {
+				delete(skippedQuestions, failure.StandardQuestion)
+			}
+		}
+		progress.SkippedCount = len(skippedQuestions)
 
 		if len(mergeOps) > 0 {
 			mergedCount, mergeErr := s.executeFAQMergeOperations(ctx, taskID, kb, faqKnowledge, embeddingModel, indexMode, mergeOps, progress)
@@ -2539,7 +2557,7 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 	progress.Processed = originalTotalEntries
 
 	if len(progress.ValidEntryIndices) > 0 {
-		progress.SuccessCount = len(progress.ValidEntryIndices) - progress.PartialFailedCount
+		progress.SuccessCount = len(progress.ValidEntryIndices) - progress.PartialFailedCount - progress.SkippedCount
 	} else if len(progress.SuccessEntries) > 0 {
 		progress.SuccessCount = len(progress.SuccessEntries) - progress.PartialFailedCount
 	} else {
@@ -2645,7 +2663,7 @@ func (s *knowledgeService) executeFAQMergeOperations(
 		batch := mergeOps[batchStart:batchEnd]
 
 		// 1. 批量加载完整 chunk（calculateAppendOperations 中只加载了部分字段，
-		//    缺少 status/is_enabled/flags/seq_id 等，直接更新会将这些字段覆盖为零值）
+		//    缺少 status/seq_id 等，直接更新会将这些字段覆盖为零值）
 		chunkIDs := make([]string, len(batch))
 		for i, op := range batch {
 			chunkIDs[i] = op.ExistingChunk.ID
@@ -2693,15 +2711,13 @@ func (s *knowledgeService) executeFAQMergeOperations(
 			mergedChunks = append(mergedChunks, fullChunk)
 		}
 
-		// 3. 事务批量保存（GORM Save 全字段更新，确保 metadata/content_hash 持久化）
-		if err := s.chunkRepo.SaveChunks(ctx, mergedChunks); err != nil {
-			logger.Errorf(ctx, "FAQ import task %s: failed to batch save merged chunks: %v", taskID, err)
-			return mergedCount, fmt.Errorf("failed to batch save merged chunks: %w", err)
-		}
-
-		// 4. 重建索引。先删旧索引：ES v8、Qdrant 等引擎不会覆盖相同 SourceID。
+		// Keep the previous metadata until indexing succeeds. A retry must still
+		// see a changed entry if rebuilding its vectors failed.
 		if err := s.indexFAQChunks(ctx, kb, faqKnowledge, mergedChunks, embeddingModel, false, true); err != nil {
 			return mergedCount, fmt.Errorf("failed to re-index merged chunks: %w", err)
+		}
+		if err := s.chunkRepo.SaveChunks(ctx, mergedChunks); err != nil {
+			return mergedCount, fmt.Errorf("failed to batch save merged chunks: %w", err)
 		}
 
 		// 5. 收集成功条目信息

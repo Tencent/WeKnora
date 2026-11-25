@@ -134,7 +134,7 @@ type ChunkRepository interface {
 	// only ID and ContentHash fields for efficiency
 	ListAllFAQChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
 	// ListAllFAQChunksWithMetadataByKnowledgeBaseID lists all FAQ chunks for a knowledge base ID
-	// returns ID and Metadata fields for duplicate question checking
+	// includes metadata, content hash, enabled state and flags for append planning
 	ListAllFAQChunksWithMetadataByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) ([]*types.Chunk, error)
 	// FindFAQChunkWithDuplicateQuestion finds a single FAQ chunk whose standard_question or
 	// similar_questions overlap with the given question list. Returns nil if no duplicate found.

@@ -887,7 +887,7 @@ func (r *chunkRepository) ListAllFAQChunksByKnowledgeID(
 }
 
 // ListAllFAQChunksWithMetadataByKnowledgeBaseID lists all FAQ chunks for a knowledge base ID
-// Returns ID and Metadata fields for duplicate question checking
+// Includes the content hash and operational fields used to plan append merges.
 // Uses batch query to handle large datasets
 func (r *chunkRepository) ListAllFAQChunksWithMetadataByKnowledgeBaseID(
 	ctx context.Context,
@@ -901,7 +901,7 @@ func (r *chunkRepository) ListAllFAQChunksWithMetadataByKnowledgeBaseID(
 	for {
 		var batchChunks []*types.Chunk
 		if err := r.db.WithContext(ctx).
-			Select("id, metadata").
+			Select("id, metadata, content_hash, is_enabled, flags").
 			Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ? AND status = ?",
 				tenantID, kbID, types.ChunkTypeFAQ, types.ChunkStatusIndexed).
 			Offset(offset).
