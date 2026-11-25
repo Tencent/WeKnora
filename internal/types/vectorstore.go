@@ -775,13 +775,25 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 			Type:        "clickhouse",
 			DisplayName: "ClickHouse",
 			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "addr", Type: "string", Required: true, Description: "Native Protocol Address (host:port)", Default: "clickhouse:9000"},
+				{
+					Name:        "addr",
+					Type:        "string",
+					Required:    true,
+					Description: "Native Protocol Address (host:port)",
+					Default:     "clickhouse:9000",
+				},
 				{Name: "database", Type: "string", Required: true, Description: "Database", Default: "weknora"},
 				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "default"},
 				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_prefix", Type: "string", Required: false, Description: "Table Prefix", Default: "weknora_embeddings"},
+				{
+					Name:        "collection_prefix",
+					Type:        "string",
+					Required:    false,
+					Description: "Table Prefix",
+					Default:     "weknora_embeddings",
+				},
 			},
 		},
 		{

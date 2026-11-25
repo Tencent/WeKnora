@@ -230,7 +230,8 @@ func (r *clickhouseRepository) Retrieve(ctx context.Context,
 	case types.VectorRetrieverType:
 		return r.VectorRetrieve(ctx, params)
 	default:
-		return nil, fmt.Errorf("clickhouse retriever does not support retriever type %v in PR1 (keywords/hybrid land in follow-up PRs, see #5722)", params.RetrieverType)
+		return nil, fmt.Errorf("clickhouse retriever does not support retriever type %v in PR1 "+
+			"(keywords/hybrid land in follow-up PRs, see #5722)", params.RetrieverType)
 	}
 }
 

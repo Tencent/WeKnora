@@ -376,10 +376,12 @@ func TestCopyIndices(t *testing.T) {
 
 	// ensureTable：3 维已在 newTestRepo 里置位，直接跳过。
 	cols := append([]string{}, columnsForCopy...)
-	mock.ExpectQuery("SELECT (.+) FROM `weknora_embeddings_3` FINAL WHERE knowledge_base_id = \\? ORDER BY id LIMIT 64 OFFSET 0").
+	mock.ExpectQuery("SELECT (.+) FROM `weknora_embeddings_3` FINAL WHERE knowledge_base_id = \\? " +
+		"ORDER BY id LIMIT 64 OFFSET 0").
 		WithArgs("base-src").
 		WillReturnRows(sqlmock.NewRows(cols).
-			AddRow("row-1", "hello world", "chunk-1", 1, "chunk-1", "kb-src", "base-src", "tag-1", int64(1), "[0.1,0.2,0.3]"))
+			AddRow("row-1", "hello world", "chunk-1", 1, "chunk-1", "kb-src", "base-src", "tag-1",
+				int64(1), "[0.1,0.2,0.3]"))
 
 	stmt := "INSERT INTO `weknora_embeddings_3` (" + strings.Join(columns, ", ") + ") " +
 		"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, [0.1,0.2,0.3])"
