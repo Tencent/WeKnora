@@ -133,7 +133,9 @@ export function buildSessionMarkdown(options: {
 
   for (const message of options.messages) {
     if (message.role !== 'user' && message.role !== 'assistant') continue
-    const content = cleanMessageContent(message.content)
+    const content = message.role === 'assistant'
+      ? cleanMessageContent(message.content)
+      : (message.content || '').trim()
     const attachments = (message.attachments || [])
       .map((attachment) => attachment.file_name?.trim() || '')
       .filter(Boolean)
