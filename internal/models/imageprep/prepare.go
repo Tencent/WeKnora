@@ -47,9 +47,10 @@ func LimitsOf(in api.ImageInput) Limits {
 }
 
 // Prepare turns stored image bytes into an image the model will take.
-// An image already in an accepted format and within the byte limit goes as
-// it is; anything else is re-encoded — as JPEG where the vendor takes it,
-// PNG otherwise — and scaled down until it fits.
+// A colour image already in an accepted format and within the byte limit
+// goes as it is; anything else is re-encoded — as JPEG where the vendor takes
+// it, PNG otherwise — and scaled down until it fits. Re-encoded images always
+// carry colour channels.
 func Prepare(data []byte, limits Limits) (api.EmbedImage, error) {
 	if len(data) == 0 {
 		return api.EmbedImage{}, fmt.Errorf("image is empty")
@@ -58,13 +59,21 @@ func Prepare(data []byte, limits Limits) (api.EmbedImage, error) {
 	if !strings.HasPrefix(mime, "image/") {
 		return api.EmbedImage{}, fmt.Errorf("not an image (%s)", mime)
 	}
-	if acceptsMIME(limits, mime) && fitsBytes(limits, len(data)) {
+	fits := acceptsMIME(limits, mime) && fitsBytes(limits, len(data))
+	if fits && !needsRGB(data) {
 		return api.EmbedImage{Data: data, MIMEType: mime}, nil
 	}
 
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return api.EmbedImage{}, fmt.Errorf("decode %s: %w", mime, err)
+	}
+	// Only the channels are wrong: keep a PNG lossless, so a scanned page
+	// loses no detail on its way to OCR.
+	if fits && mime == "image/png" {
+		if out, err := encodeImage(src, mime); err == nil && fitsBytes(limits, len(out)) {
+			return api.EmbedImage{Data: out, MIMEType: mime}, nil
+		}
 	}
 	target := "image/jpeg"
 	if !acceptsMIME(limits, target) {
@@ -95,6 +104,23 @@ func Prepare(data []byte, limits Limits) (api.EmbedImage, error) {
 	}
 }
 
+// needsRGB reports whether data decodes to something other than colour
+// channels: grayscale, a palette or CMYK. Some vision processors (Qwen-VL
+// under vLLM, for one) take only three channels and fail on these. An image
+// this package cannot read is left alone.
+func needsRGB(data []byte) bool {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return false
+	}
+	switch cfg.ColorModel {
+	case color.RGBAModel, color.RGBA64Model, color.NRGBAModel, color.NRGBA64Model,
+		color.YCbCrModel, color.NYCbCrAModel:
+		return false
+	}
+	return true
+}
+
 func acceptsMIME(limits Limits, mime string) bool {
 	return len(limits.MIMETypes) == 0 || slices.Contains(limits.MIMETypes, mime)
 }
@@ -115,7 +141,12 @@ func encodeImage(img image.Image, mime string) ([]byte, error) {
 		draw.Draw(flat, b, img, b.Min, draw.Over)
 		err = jpeg.Encode(&buf, flat, &jpeg.Options{Quality: prepJPEGQuality})
 	} else {
-		err = png.Encode(&buf, img)
+		// Keep the alpha, but as colour channels: a grayscale or palette
+		// source would otherwise be written back out as one.
+		b := img.Bounds()
+		rgba := image.NewNRGBA(b)
+		draw.Draw(rgba, b, img, b.Min, draw.Src)
+		err = png.Encode(&buf, rgba)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("encode %s: %w", mime, err)
