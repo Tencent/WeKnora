@@ -775,8 +775,9 @@ def create_knowledge_base(
         "chunking_config": {
             "chunk_size": 1000,
             "chunk_overlap": 200,
-            "separators": ["."],
-            "enable_multimodal": True,
+            # Same separators and strategy as a KB created in the web UI.
+            "separators": ["\n\n", "\n", "。", "！", "？", ";", "；"],
+            "strategy": "auto",
         },
         "embedding_model_id": embedding_model_id,
         "summary_model_id": summary_model_id,

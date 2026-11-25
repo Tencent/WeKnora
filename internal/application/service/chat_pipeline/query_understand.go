@@ -423,9 +423,10 @@ func salvageStructuredQueryOutput(content string) (queryUnderstandOutput, bool) 
 		if closed := m[3] != ""; !closed && !isImageDescriptionField(m[1]) {
 			continue
 		}
-		value := strings.TrimSuffix(m[2], "\\")
+		// The pattern already excludes a dangling escape. A captured trailing
+		// backslash is part of a complete escape and must be preserved.
 		var decoded string
-		if err := json.Unmarshal([]byte(`"`+value+`"`), &decoded); err != nil {
+		if err := json.Unmarshal([]byte(`"`+m[2]+`"`), &decoded); err != nil {
 			continue
 		}
 		encoded, _ := json.Marshal(decoded)

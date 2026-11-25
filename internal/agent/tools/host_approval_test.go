@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -274,4 +275,33 @@ func TestUserApproverNamesTheToolAndPreviewsTheWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 8, gate.requests[1].Host.WriteBytes)
 	require.Equal(t, "--- a\n+++ b\n", gate.requests[1].Host.WritePreview)
+}
+
+// TestHostApprovalPreviewsKeepMultiByteCharactersWhole: the write preview and
+// the stdin preview are bounded by bytes. Chinese content (three bytes per
+// character) used to be cut inside a character, and the event JSON then
+// carried U+FFFD to the approval card.
+func TestHostApprovalPreviewsKeepMultiByteCharactersWhole(t *testing.T) {
+	content := strings.Repeat("知", hostPreviewLimit)
+
+	host := hostPayload(sandbox.CommandApprovalRequest{WriteContent: content}, "user")
+	require.LessOrEqual(t, len(host.WritePreview), hostPreviewLimit)
+	require.NotEmpty(t, host.WritePreview)
+	require.True(t, utf8.ValidString(host.WritePreview), "write preview must be valid UTF-8")
+	require.True(t, strings.HasPrefix(content, host.WritePreview), "preview must be a prefix")
+
+	diff := "--- a\n+++ b\n" + content
+	host = hostPayload(sandbox.CommandApprovalRequest{EditDiff: diff, WriteContent: "ignored"}, "user")
+	require.True(t, utf8.ValidString(host.WritePreview), "edit diff preview must be valid UTF-8")
+	require.True(t, strings.HasPrefix(diff, host.WritePreview), "edit diff keeps precedence")
+
+	stdin := stdinData(sandbox.CommandApprovalRequest{Stdin: content})
+	require.LessOrEqual(t, len(stdin), hostPreviewLimit)
+	require.True(t, utf8.ValidString(stdin), "stdin preview must be valid UTF-8")
+	require.True(t, strings.HasPrefix(content, stdin), "stdin preview must be a prefix")
+
+	// ASCII still uses the whole byte budget: no rune back-off for it.
+	ascii := strings.Repeat("a", hostPreviewLimit+1)
+	require.Equal(t, strings.Repeat("a", hostPreviewLimit),
+		hostPayload(sandbox.CommandApprovalRequest{WriteContent: ascii}, "user").WritePreview)
 }

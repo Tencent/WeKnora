@@ -1,4 +1,4 @@
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, computed } from 'vue'
 import { knowledgeSemanticSearch } from '@/api/knowledge-base'
 import { searchMessages, type MessageSearchGroupItem } from '@/api/chat-history'
 import { useOrganizationStore } from '@/stores/organization'
@@ -81,11 +81,12 @@ export function useCmdkSearch(options: {
   const query = ref('')
   const loading = ref(false)
   const hasSearched = ref(false)
+  const searchFailures = ref<Array<'knowledge' | 'messages'>>([])
 
   // All KBs the current user can see (own + shared). Loaded lazily & cached.
   const knowledgeBases = ref<CmdkKb[]>([])
   const kbsLoaded = ref(false)
-  let kbsLoadingPromise: Promise<void> | null = null
+  let kbsLoadingPromise: Promise<boolean> | null = null
 
   const fileGroups = ref<CmdkFileGroup[]>([])
   const messageGroups = ref<CmdkMsgGroup[]>([])
@@ -100,8 +101,8 @@ export function useCmdkSearch(options: {
   const orgStore = useOrganizationStore()
   const menuStore = useMenuStore()
 
-  const ensureKbs = async (): Promise<void> => {
-    if (kbsLoaded.value) return
+  const ensureKbs = async (): Promise<boolean> => {
+    if (kbsLoaded.value) return true
     if (kbsLoadingPromise) return kbsLoadingPromise
     kbsLoadingPromise = (async () => {
       try {
@@ -123,8 +124,10 @@ export function useCmdkSearch(options: {
           .filter((k: CmdkKb) => !ownIds.has(k.id))
         knowledgeBases.value = [...own, ...sharedList]
         kbsLoaded.value = true
+        return true
       } catch (e) {
         console.error('[cmdk] failed to load knowledge bases', e)
+        return false
       } finally {
         kbsLoadingPromise = null
       }
@@ -234,6 +237,7 @@ export function useCmdkSearch(options: {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
   const clearResults = () => {
+    searchFailures.value = []
     fileGroups.value = []
     messageGroups.value = []
     totalChunks.value = 0
@@ -244,41 +248,60 @@ export function useCmdkSearch(options: {
   const runSearch = async (q: string, seq: number) => {
     loading.value = true
     hasSearched.value = true
+    searchFailures.value = []
 
     // Determine knowledge_base_ids for chunk search. A non-empty lockedKbIds
     // narrows the scope and also disables message search (out of scope).
     const locked = options.lockedKbIds?.() || []
     const scoped = locked.length > 0
+    let knowledgeAvailable = true
     let kbIds: string[]
     if (scoped) {
       kbIds = locked
     } else {
-      await ensureKbs()
+      knowledgeAvailable = await ensureKbs()
       kbIds = knowledgeBases.value.map(k => k.id)
     }
+    if (seq !== requestSeq) return
 
-    const knowledgePromise = kbIds.length > 0
-      ? knowledgeSemanticSearch({ query: q, knowledge_base_ids: kbIds })
-          .then((res: any) => (res?.success && res.data ? res.data : []))
-          .catch((e) => {
-            console.error('[cmdk] knowledge search failed', e)
-            return []
-          })
-      : Promise.resolve([])
+    const knowledgePromise = !knowledgeAvailable
+      ? Promise.reject(new Error('Knowledge base discovery failed'))
+      : kbIds.length > 0
+        ? knowledgeSemanticSearch({ query: q, knowledge_base_ids: kbIds })
+            .then((res: any) => {
+              // A nil Go slice is serialized as null, which is a valid empty result.
+              if (!res?.success || (res.data !== null && !Array.isArray(res.data))) {
+                throw new Error('Invalid knowledge search response')
+              }
+              return res.data || []
+            })
+        : Promise.resolve([])
 
     const messagesPromise = scoped
       ? Promise.resolve({ items: [], total: 0 })
       : searchMessages({ query: q, mode: 'hybrid', limit: 30 })
-          .then((res: any) => (res?.success && res.data ? res.data : { items: [], total: 0 }))
-          .catch((e) => {
-            console.error('[cmdk] message search failed', e)
-            return { items: [], total: 0 }
+          .then((res: any) => {
+            if (!res?.success || !res.data || (res.data.items !== null && !Array.isArray(res.data.items))) {
+              throw new Error('Invalid message search response')
+            }
+            return { ...res.data, items: res.data.items || [] }
           })
 
-    const [chunks, msgRes] = await Promise.all([knowledgePromise, messagesPromise])
+    const [knowledgeResult, messageResult] = await Promise.allSettled([knowledgePromise, messagesPromise])
 
     // Stale response guard.
     if (seq !== requestSeq) return
+
+    if (knowledgeResult.status === 'rejected') {
+      searchFailures.value.push('knowledge')
+      console.error('[cmdk] knowledge search failed', knowledgeResult.reason)
+    }
+    if (messageResult.status === 'rejected') {
+      searchFailures.value.push('messages')
+      console.error('[cmdk] message search failed', messageResult.reason)
+    }
+    const chunks = knowledgeResult.status === 'fulfilled' ? knowledgeResult.value : []
+    const msgRes = messageResult.status === 'fulfilled' ? messageResult.value : { items: [], total: 0 }
 
     // Group chunks by knowledge_id.
     const fmap = new Map<string, CmdkFileGroup>()
@@ -334,19 +357,33 @@ export function useCmdkSearch(options: {
   const lockedSignature = () =>
     (options.lockedKbIds?.() || []).slice().sort().join(',')
 
+  const retrySearch = () => {
+    const trimmed = query.value.trim()
+    if (!trimmed || loading.value) return
+    if (debounceTimer) clearTimeout(debounceTimer)
+    debounceTimer = null
+    void runSearch(trimmed, ++requestSeq)
+  }
+
   watch([query, lockedSignature], ([val]) => {
+    const seq = ++requestSeq
+    searchFailures.value = []
+    hasSearched.value = false
     if (debounceTimer) clearTimeout(debounceTimer)
     const trimmed = (val as string).trim()
     if (!trimmed) {
-      requestSeq++ // cancel in-flight
       loading.value = false
       clearResults()
       return
     }
     debounceTimer = setTimeout(() => {
-      const seq = ++requestSeq
       runSearch(trimmed, seq)
     }, debounceMs)
+  })
+
+  onBeforeUnmount(() => {
+    requestSeq++
+    if (debounceTimer) clearTimeout(debounceTimer)
   })
 
   onMounted(() => {
@@ -363,6 +400,8 @@ export function useCmdkSearch(options: {
     query,
     loading,
     hasSearched,
+    searchFailures,
+    retrySearch,
     knowledgeBases,
     fileGroups,
     messageGroups,
