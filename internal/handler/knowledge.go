@@ -2577,7 +2577,7 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 		return
 	}
 	if c.Param("knowledge_id") != "" && knowledge.KnowledgeBaseID != c.Param("id") {
-		c.Error(errors.NewBadRequestError("Knowledge does not belong to the URL knowledge base"))
+		_ = c.Error(errors.NewBadRequestError("Knowledge does not belong to the URL knowledge base"))
 		return
 	}
 
@@ -3367,7 +3367,7 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 		return
 	}
 	if kbID := c.Param("id"); kbID != "" && req.KBID != kbID {
-		c.Error(errors.NewBadRequestError("kb_id does not match the URL knowledge base"))
+		_ = c.Error(errors.NewBadRequestError("kb_id does not match the URL knowledge base"))
 		return
 	}
 

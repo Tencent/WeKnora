@@ -36,7 +36,9 @@ func (s *reparseRouteKnowledge) GetKnowledgeByIDOnly(_ context.Context, id strin
 	return &types.Knowledge{ID: id, KnowledgeBaseID: kbID, TenantID: 7}, nil
 }
 
-func (s *reparseRouteKnowledge) GetKnowledgeBatch(ctx context.Context, _ uint64, ids []string) ([]*types.Knowledge, error) {
+func (s *reparseRouteKnowledge) GetKnowledgeBatch(
+	ctx context.Context, _ uint64, ids []string,
+) ([]*types.Knowledge, error) {
 	var rows []*types.Knowledge
 	for _, id := range ids {
 		row, _ := s.GetKnowledgeByIDOnly(ctx, id)
@@ -45,7 +47,9 @@ func (s *reparseRouteKnowledge) GetKnowledgeBatch(ctx context.Context, _ uint64,
 	return rows, nil
 }
 
-func (s *reparseRouteKnowledge) ReparseKnowledge(ctx context.Context, id string, overrides *types.KnowledgeProcessOverrides) (*types.Knowledge, error) {
+func (s *reparseRouteKnowledge) ReparseKnowledge(
+	ctx context.Context, id string, overrides *types.KnowledgeProcessOverrides,
+) (*types.Knowledge, error) {
 	s.singleIDs = append(s.singleIDs, id)
 	s.overrides = overrides
 	return s.GetKnowledgeByIDOnly(ctx, id)
@@ -74,17 +78,63 @@ func TestKnowledgeReparseRoutes(t *testing.T) {
 		batch, override  bool
 	}{
 		{name: "scoped_single", path: "/knowledge-bases/kb/knowledge/doc/reparse", status: 200},
-		{name: "scoped_single_overrides", path: "/knowledge-bases/kb/knowledge/doc/reparse", body: `{"process_config":{"summary_enabled":false}}`, status: 200, override: true},
-		{name: "scoped_batch", path: "/knowledge-bases/kb/knowledge/batch-reparse", body: `{"ids":["doc"],"process_config":{"summary_enabled":false}}`, status: 200, batch: true, override: true},
-		{name: "scoped_batch_matching_body", path: "/knowledge-bases/kb/knowledge/batch-reparse", body: `{"kb_id":"kb","ids":["doc"]}`, status: 200, batch: true},
+		{
+			name:     "scoped_single_overrides",
+			path:     "/knowledge-bases/kb/knowledge/doc/reparse",
+			body:     `{"process_config":{"summary_enabled":false}}`,
+			status:   200,
+			override: true,
+		},
+		{
+			name:     "scoped_batch",
+			path:     "/knowledge-bases/kb/knowledge/batch-reparse",
+			body:     `{"ids":["doc"],"process_config":{"summary_enabled":false}}`,
+			status:   200,
+			batch:    true,
+			override: true,
+		},
+		{
+			name:   "scoped_batch_matching_body",
+			path:   "/knowledge-bases/kb/knowledge/batch-reparse",
+			body:   `{"kb_id":"kb","ids":["doc"]}`,
+			status: 200,
+			batch:  true,
+		},
 		{name: "canonical_single", path: "/knowledge/doc/reparse", status: 200},
-		{name: "canonical_batch", path: "/knowledge/batch-reparse", body: `{"kb_id":"kb","ids":["doc"]}`, status: 200, batch: true},
+		{
+			name:   "canonical_batch",
+			path:   "/knowledge/batch-reparse",
+			body:   `{"kb_id":"kb","ids":["doc"]}`,
+			status: 200,
+			batch:  true,
+		},
 		{name: "canonical_batch_requires_kb", path: "/knowledge/batch-reparse", body: `{"ids":["doc"]}`, status: 400},
 		{name: "scoped_single_wrong_kb", path: "/knowledge-bases/kb/knowledge/foreign/reparse", status: 400},
-		{name: "scoped_batch_wrong_document", path: "/knowledge-bases/kb/knowledge/batch-reparse", body: `{"ids":["foreign"]}`, status: 400},
-		{name: "scoped_batch_wrong_body_kb", path: "/knowledge-bases/kb/knowledge/batch-reparse", body: `{"kb_id":"other","ids":["doc"]}`, status: 400},
-		{name: "scoped_single_viewer", path: "/knowledge-bases/kb/knowledge/doc/reparse", role: types.TenantRoleViewer, status: 403},
-		{name: "scoped_batch_viewer", path: "/knowledge-bases/kb/knowledge/batch-reparse", body: `{"ids":["doc"]}`, role: types.TenantRoleViewer, status: 403},
+		{
+			name:   "scoped_batch_wrong_document",
+			path:   "/knowledge-bases/kb/knowledge/batch-reparse",
+			body:   `{"ids":["foreign"]}`,
+			status: 400,
+		},
+		{
+			name:   "scoped_batch_wrong_body_kb",
+			path:   "/knowledge-bases/kb/knowledge/batch-reparse",
+			body:   `{"kb_id":"other","ids":["doc"]}`,
+			status: 400,
+		},
+		{
+			name:   "scoped_single_viewer",
+			path:   "/knowledge-bases/kb/knowledge/doc/reparse",
+			role:   types.TenantRoleViewer,
+			status: 403,
+		},
+		{
+			name:   "scoped_batch_viewer",
+			path:   "/knowledge-bases/kb/knowledge/batch-reparse",
+			body:   `{"ids":["doc"]}`,
+			role:   types.TenantRoleViewer,
+			status: 403,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
