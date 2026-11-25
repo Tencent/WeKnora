@@ -52,6 +52,34 @@ func (r *registrationSettingRepo) Upsert(_ context.Context, row *types.SystemSet
 	return nil
 }
 
+func TestValidateDefaultSharedSpaceID(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   any
+		wantErr bool
+	}{
+		{name: "empty clears the auto-grant", value: ""},
+		{name: "positive id", value: "42"},
+		{name: "whitespace trimmed", value: "  42  "},
+		{name: "zero rejected", value: "0", wantErr: true},
+		{name: "negative rejected", value: "-1", wantErr: true},
+		{name: "non-numeric rejected", value: "abc", wantErr: true},
+		{name: "non-string rejected", value: 42, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRegistryEntry(DefaultSharedSpaceSettingKey, tt.value)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateRegistrationModes(t *testing.T) {
 	svc := &systemSettingService{repo: &registrationSettingRepo{}, cache: make(map[string]*types.SystemSetting)}
 	ctx := context.WithValue(context.Background(), types.UserIDContextKey, "system-admin")

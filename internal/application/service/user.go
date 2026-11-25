@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -233,6 +234,11 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 		}
 	}
 
+	// Default shared space (#5837): best-effort viewer grant in the
+	// configured space. Failures are logged inside the helper and
+	// never fail registration.
+	s.grantDefaultSharedSpaceMembership(ctx, user)
+
 	if user.IsSystemAdmin {
 		logger.Infof(ctx,
 			"[bootstrap] promoted user %s (%s) to system admin via %s on registration",
@@ -242,6 +248,54 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 
 	logger.Info(ctx, "User registered successfully")
 	return user, nil
+}
+
+// grantDefaultSharedSpaceMembership adds a newly registered user as a
+// viewer member of the default shared space configured via the
+// tenant.default_shared_space_id system setting (#5837).
+//
+// Best-effort by design: an unset setting (the default) means no
+// auto-grant, and every failure mode — invalid value, missing space,
+// grant error — is logged and swallowed so a bad setting can never
+// block sign-up. If the user is already a member (e.g. the invite
+// link that registered them targeted the default space itself), the
+// existing membership is kept untouched.
+func (s *userService) grantDefaultSharedSpaceMembership(ctx context.Context, user *types.User) {
+	if user == nil || s.systemSettingSvc == nil || s.memberService == nil {
+		return
+	}
+	raw := strings.TrimSpace(s.systemSettingSvc.GetString(ctx, DefaultSharedSpaceSettingKey, "", ""))
+	if raw == "" {
+		return
+	}
+	spaceID, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || spaceID == 0 {
+		logger.Warnf(ctx, "default shared space: ignoring invalid %s=%q: %v",
+			DefaultSharedSpaceSettingKey, raw, err)
+		return
+	}
+	// The user already owns their freshly created personal space;
+	// there is nothing to grant when it is also the default space.
+	if spaceID == user.TenantID {
+		return
+	}
+	if s.tenantService != nil {
+		if _, err := s.tenantService.GetTenantByID(ctx, spaceID); err != nil {
+			logger.Warnf(ctx, "default shared space: tenant %d not found, skipping auto-grant for user %s: %v",
+				spaceID, user.ID, err)
+			return
+		}
+	}
+	if _, err := s.memberService.AddMember(ctx, user.ID, spaceID, types.TenantRoleViewer, nil); err != nil {
+		if errors.Is(err, ErrMembershipAlreadyExists) {
+			return
+		}
+		logger.Warnf(ctx, "default shared space: failed to grant viewer membership for user %s in tenant %d: %v",
+			user.ID, spaceID, err)
+		return
+	}
+	logger.Infof(ctx, "default shared space: granted viewer membership for user %s in tenant %d",
+		user.ID, spaceID)
 }
 
 // shouldPromoteBootstrapSystemAdmin reports whether a newly registering email

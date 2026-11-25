@@ -100,6 +100,12 @@ type settingSpec struct {
 // safely runtime-tunable (no startup caching that would not honour
 // the new value, no in-memory state bound at init time we cannot
 // re-derive)".
+// DefaultSharedSpaceSettingKey is the system-setting key holding the
+// default shared space (tenant) ID for #5837. Empty (the default)
+// means no auto-grant; a positive decimal workspace ID makes every
+// newly registered user a viewer member of that space.
+const DefaultSharedSpaceSettingKey = "tenant.default_shared_space_id"
+
 var registry = map[string]settingSpec{
 	// NOTE: file.max_size_mb is intentionally NOT registered. Although
 	// the Go upload handlers accept a runtime override via
@@ -152,6 +158,19 @@ var registry = map[string]settingSpec{
 		Category: "auth",
 		Description: "公开注册成功后的默认空间策略。create_personal = 自动创建个人空间并设为 Owner；" +
 			"tenantless = 仅创建用户，等待接受邀请或主动创建空间。修改后只影响新注册用户。",
+	},
+	// tenant.default_shared_space_id (#5837): the workspace whose
+	// knowledge bases and agents every newly registered user may view.
+	// Read at registration time only — changing the value never
+	// re-grants or revokes existing users. Empty = no auto-grant
+	// (existing deployments behave exactly as before).
+	DefaultSharedSpaceSettingKey: {
+		Type:     "string",
+		EnvName:  "",
+		Default:  "",
+		Category: "tenant",
+		Description: "默认共享空间 ID。设置后，所有新注册用户自动获得该空间的 viewer（只读）成员权限，" +
+			"可查看其中的知识库与智能体。留空 = 不自动授权，现有部署行为不变。修改后只影响新注册用户。",
 	},
 	"auth.complex_password_enabled": {
 		Type:     "bool",
@@ -1398,6 +1417,22 @@ func validateRegistryEntry(key string, rawValue any) error {
 			return err
 		}
 		return utils.ValidateSSRFWhitelistEntries(entries)
+	case DefaultSharedSpaceSettingKey:
+		// Empty clears the auto-grant; otherwise the value must be a
+		// positive decimal workspace ID. Strict here so a typo fails
+		// at save time instead of silently never granting.
+		raw, ok := rawValue.(string)
+		if !ok {
+			return errors.New("expected a workspace ID string")
+		}
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return nil
+		}
+		id, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || id == 0 {
+			return errors.New("must be a positive workspace ID")
+		}
 	}
 	return nil
 }

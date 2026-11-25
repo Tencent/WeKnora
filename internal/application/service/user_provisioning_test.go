@@ -46,6 +46,7 @@ func (r *provisioningUserRepo) UpdateUser(_ context.Context, user *types.User) e
 type provisioningTenantService struct {
 	interfaces.TenantService
 	createCalls int
+	getErrIDs   map[uint64]bool
 }
 
 func (s *provisioningTenantService) CreateTenant(context.Context, *types.Tenant) (*types.Tenant, error) {
@@ -54,16 +55,50 @@ func (s *provisioningTenantService) CreateTenant(context.Context, *types.Tenant)
 }
 
 func (s *provisioningTenantService) GetTenantByID(_ context.Context, id uint64) (*types.Tenant, error) {
+	if s.getErrIDs != nil && s.getErrIDs[id] {
+		return nil, errors.New("tenant not found")
+	}
 	return &types.Tenant{ID: id}, nil
 }
 
 type provisioningMemberService struct {
 	interfaces.TenantMemberService
-	members []*types.TenantMember
+	members  []*types.TenantMember
+	addCalls []provisioningAddCall
+	addErr   error
+}
+
+type provisioningAddCall struct {
+	userID   string
+	tenantID uint64
+	role     types.TenantRole
 }
 
 func (s *provisioningMemberService) ListByUser(context.Context, string) ([]*types.TenantMember, error) {
 	return s.members, nil
+}
+
+func (s *provisioningMemberService) EnsureOwner(_ context.Context, userID string, tenantID uint64) (*types.TenantMember, error) {
+	return &types.TenantMember{UserID: userID, TenantID: tenantID, Role: types.TenantRoleOwner, Status: types.TenantMemberStatusActive}, nil
+}
+
+func (s *provisioningMemberService) AddMember(_ context.Context, userID string, tenantID uint64, role types.TenantRole, _ *string) (*types.TenantMember, error) {
+	s.addCalls = append(s.addCalls, provisioningAddCall{userID: userID, tenantID: tenantID, role: role})
+	if s.addErr != nil {
+		return nil, s.addErr
+	}
+	return &types.TenantMember{UserID: userID, TenantID: tenantID, Role: role, Status: types.TenantMemberStatusActive}, nil
+}
+
+// stubDefaultSharedSpaceSettings serves a fixed tenant.default_shared_space_id
+// value through the SystemSettingService interface.
+type stubDefaultSharedSpaceSettings struct {
+	interfaces.SystemSettingService
+	value string
+}
+
+func (s *stubDefaultSharedSpaceSettings) GetString(context.Context, string, string, string) string {
+	return s.value
 }
 
 func TestUserServiceRegisterTenantlessSkipsTenantCreation(t *testing.T) {
@@ -86,6 +121,104 @@ func TestUserServiceRegisterTenantlessSkipsTenantCreation(t *testing.T) {
 	if user.TenantID != 0 || repo.created == nil || repo.created.TenantID != 0 {
 		t.Fatalf("tenantless user persisted with tenant: user=%d created=%v", user.TenantID, repo.created)
 	}
+}
+
+func TestUserServiceRegisterDefaultSharedSpace(t *testing.T) {
+	ctx := context.Background()
+	newSvc := func(settingsValue string, memberSvc *provisioningMemberService, tenantSvc *provisioningTenantService) *userService {
+		svc := &userService{
+			userRepo:      &provisioningUserRepo{},
+			tenantService: tenantSvc,
+			memberService: memberSvc,
+		}
+		if settingsValue != "" || memberSvc != nil {
+			// Attach the stub whenever a member service is present so the
+			// "setting unset" case is exercised through the same path.
+			svc.systemSettingSvc = &stubDefaultSharedSpaceSettings{value: settingsValue}
+		}
+		return svc
+	}
+	register := func(t *testing.T, svc *userService, provisioning types.TenantProvisioningMode) *types.User {
+		t.Helper()
+		user, err := svc.Register(ctx, &types.RegisterRequest{
+			Username:           "alice",
+			Email:              "alice@example.com",
+			Password:           "supersecret",
+			TenantProvisioning: provisioning,
+		})
+		if err != nil {
+			t.Fatalf("Register: %v", err)
+		}
+		return user
+	}
+
+	t.Run("setting unset grants nothing", func(t *testing.T) {
+		memberSvc := &provisioningMemberService{}
+		user := register(t, newSvc("", memberSvc, &provisioningTenantService{}), types.TenantProvisioningTenantless)
+		if len(memberSvc.addCalls) != 0 {
+			t.Fatalf("AddMember calls = %+v, want none", memberSvc.addCalls)
+		}
+		if user == nil || user.ID == "" {
+			t.Fatal("expected a registered user")
+		}
+	})
+
+	t.Run("setting set grants viewer membership to exactly that space", func(t *testing.T) {
+		memberSvc := &provisioningMemberService{}
+		user := register(t, newSvc("42", memberSvc, &provisioningTenantService{}), types.TenantProvisioningTenantless)
+		if len(memberSvc.addCalls) != 1 {
+			t.Fatalf("AddMember calls = %d, want 1", len(memberSvc.addCalls))
+		}
+		call := memberSvc.addCalls[0]
+		if call.userID != user.ID || call.tenantID != 42 || call.role != types.TenantRoleViewer {
+			t.Fatalf("AddMember call = %+v, want user=%s tenant=42 role=viewer", call, user.ID)
+		}
+	})
+
+	t.Run("non-existent space grants nothing but registration succeeds", func(t *testing.T) {
+		memberSvc := &provisioningMemberService{}
+		tenantSvc := &provisioningTenantService{getErrIDs: map[uint64]bool{42: true}}
+		register(t, newSvc("42", memberSvc, tenantSvc), types.TenantProvisioningTenantless)
+		if len(memberSvc.addCalls) != 0 {
+			t.Fatalf("AddMember calls = %+v, want none", memberSvc.addCalls)
+		}
+	})
+
+	t.Run("invalid setting value grants nothing but registration succeeds", func(t *testing.T) {
+		memberSvc := &provisioningMemberService{}
+		register(t, newSvc("not-a-workspace-id", memberSvc, &provisioningTenantService{}), types.TenantProvisioningTenantless)
+		if len(memberSvc.addCalls) != 0 {
+			t.Fatalf("AddMember calls = %+v, want none", memberSvc.addCalls)
+		}
+	})
+
+	t.Run("grant failure does not block registration", func(t *testing.T) {
+		memberSvc := &provisioningMemberService{addErr: errors.New("db unavailable")}
+		register(t, newSvc("42", memberSvc, &provisioningTenantService{}), types.TenantProvisioningTenantless)
+		if len(memberSvc.addCalls) != 1 {
+			t.Fatalf("AddMember calls = %d, want 1 attempted grant", len(memberSvc.addCalls))
+		}
+	})
+
+	t.Run("already a member is a no-op success", func(t *testing.T) {
+		memberSvc := &provisioningMemberService{addErr: ErrMembershipAlreadyExists}
+		register(t, newSvc("42", memberSvc, &provisioningTenantService{}), types.TenantProvisioningTenantless)
+		if len(memberSvc.addCalls) != 1 {
+			t.Fatalf("AddMember calls = %d, want 1", len(memberSvc.addCalls))
+		}
+	})
+
+	t.Run("default space equal to the new personal space is skipped", func(t *testing.T) {
+		// provisioningTenantService.CreateTenant always returns ID 99.
+		memberSvc := &provisioningMemberService{}
+		user := register(t, newSvc("99", memberSvc, &provisioningTenantService{}), types.TenantProvisioningCreatePersonal)
+		if user.TenantID != 99 {
+			t.Fatalf("personal tenant = %d, want 99", user.TenantID)
+		}
+		if len(memberSvc.addCalls) != 0 {
+			t.Fatalf("AddMember calls = %+v, want none (already owner)", memberSvc.addCalls)
+		}
+	})
 }
 
 func TestResolveLoginTenantIDRepairsTenantlessUserWithMembership(t *testing.T) {
