@@ -476,6 +476,24 @@ func (p *PluginSearch) searchByTargets(
 			errOnce.Do(func() { firstErr = err })
 		}
 	}
+	// A skipped target produced nothing while other targets still returned
+	// hits: the client sees only the hits, so the gap goes into the
+	// diagnostics. A partial result that looks like an answer is worse than
+	// a visible one.
+	recordSkipped := func(targets []*types.SearchTarget, err error) {
+		if err == nil || len(targets) == 0 {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if chatManage.SearchDiagnostics == nil {
+			chatManage.SearchDiagnostics = &types.SearchDiagnostics{}
+		}
+		for _, t := range targets {
+			diag := &types.SkippedTarget{KnowledgeBaseID: t.KnowledgeBaseID, Reason: err.Error()}
+			chatManage.SearchDiagnostics.SkippedTargets = append(chatManage.SearchDiagnostics.SkippedTargets, *diag)
+		}
+	}
 
 	for modelKey, targets := range groups {
 		wg.Add(1)
@@ -498,6 +516,7 @@ func (p *PluginSearch) searchByTargets(
 								"knowledge base %s cannot embed the query image: %w",
 								t.KnowledgeBaseID, err,
 							))
+							recordSkipped([]*types.SearchTarget{t}, err)
 							return
 						}
 						recordError(p.searchSingleTarget(
@@ -527,6 +546,8 @@ func (p *PluginSearch) searchByTargets(
 								target.KnowledgeBaseID, err,
 							))
 						}
+
+						recordSkipped(targets, err)
 						pipelineWarn(ctx, "Search", "group_image_embed_failed", map[string]interface{}{
 							"model_key":      modelKey,
 							"kb_id":          targets[0].KnowledgeBaseID,

@@ -35228,6 +35228,14 @@
             "properties": {
                 "rerank": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RerankDiagnostics"
+                },
+                "search": {
+                    "description": "Search records what the search stage skipped: targets left out of a\npartial result, so a gap in the hits is visible instead of silent.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SearchDiagnostics"
+                        }
+                    ]
                 }
             }
         },
@@ -35597,6 +35605,18 @@
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.E2BHostRule"
+                    }
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.SearchDiagnostics": {
+            "type": "object",
+            "properties": {
+                "skipped_targets": {
+                    "description": "SkippedTargets lists every knowledge base that produced nothing because\nits group could not serve the query, with the reason it was left out.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SkippedTarget"
                     }
                 }
             }
@@ -36187,6 +36207,17 @@
                 },
                 "snapshot_id": {
                     "description": "SnapshotID is the currently effective snapshot; empty = base template.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.SkippedTarget": {
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "reason": {
                     "type": "string"
                 }
             }
