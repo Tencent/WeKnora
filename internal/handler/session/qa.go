@@ -1060,7 +1060,7 @@ func decodeQueryImage(raw string) ([]byte, string, error) {
 	if raw == "" {
 		return nil, "", nil
 	}
-	mediaType := ""
+	declared := ""
 	if strings.HasPrefix(raw, "data:") {
 		header, payload, ok := strings.Cut(raw, ",")
 		if !ok {
@@ -1069,7 +1069,7 @@ func decodeQueryImage(raw string) ([]byte, string, error) {
 		if !strings.HasSuffix(header, ";base64") {
 			return nil, "", fmt.Errorf("query_image data URI must be base64 encoded")
 		}
-		mediaType = strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64")
+		declared = strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64")
 		raw = payload
 	}
 	decoded, err := base64.StdEncoding.DecodeString(raw)
@@ -1082,13 +1082,28 @@ func decodeQueryImage(raw string) ([]byte, string, error) {
 	if len(decoded) > maxQueryImageBytes {
 		return nil, "", fmt.Errorf("query_image exceeds %d bytes", maxQueryImageBytes)
 	}
-	if mediaType == "" {
-		mediaType = http.DetectContentType(decoded)
+	// The bytes decide, not the declaration: whatever the label says, the
+	// embedder receives these bytes as this type, and a text payload labelled
+	// image/png used to pass this gate only to fail downstream as a 500. A
+	// declaration that disagrees with the content is a client bug worth
+	// naming here, not a label to quietly adopt.
+	mediaType := http.DetectContentType(decoded)
+	if declared != "" && normalizeImageMediaType(declared) != mediaType {
+		return nil, "", fmt.Errorf("query_image is declared as %q but its content is %s", declared, mediaType)
 	}
 	if _, ok := queryImageMediaTypes[mediaType]; !ok {
 		return nil, "", fmt.Errorf("query_image must be one of png, jpeg, webp or gif, got %q", mediaType)
 	}
 	return decoded, mediaType, nil
+}
+
+// normalizeImageMediaType folds the common "image/jpg" spelling into the
+// registered name so a harmless alias does not read as a mismatch.
+func normalizeImageMediaType(mediaType string) string {
+	if mediaType == "image/jpg" {
+		return "image/jpeg"
+	}
+	return mediaType
 }
 
 // knowledgeSearchOptions validates the retrieval overrides of a
