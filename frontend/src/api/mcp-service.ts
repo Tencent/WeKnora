@@ -227,9 +227,11 @@ export async function deleteMCPCredentialField(
 // server redirects to.
 // ----------------------------------------------------------------------------
 
-// Path of the public backend OAuth callback (registered outside /mcp-services
+// Suffix of the public backend OAuth callback (registered outside /mcp-services
 // to avoid a route conflict, and allow-listed for no-auth in the backend).
-export const MCP_OAUTH_CALLBACK_PATH = '/api/v1/mcp-oauth/callback'
+// Callers prepend `getAbsoluteApiBaseUrl()` (origin + VITE BASE_URL + /api/v1)
+// so sub-path reverse proxy deployments (e.g. /weknora/) keep working.
+export const MCP_OAUTH_CALLBACK_PATH = '/mcp-oauth/callback'
 
 export interface MCPOAuthAuthorization {
   authorizationUrl: string

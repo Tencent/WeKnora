@@ -692,7 +692,7 @@ import {
   type TenantAPIKey,
   type TenantAPIKeyCapability,
 } from '@/api/tenant'
-import { getApiBaseUrl } from '@/utils/api-base'
+import { getAbsoluteApiBaseUrl } from '@/utils/api-base'
 import {
   DEFAULT_TENANT_API_KEY_CAPABILITIES,
   KB_SCOPED_API_KEY_CAPABILITIES,
@@ -952,9 +952,10 @@ const apiBaseUrl = computed(() => {
   if (wailsApiBaseURL.value) {
     return wailsApiBaseURL.value
   }
-  const configured = getApiBaseUrl().trim().replace(/\/$/, '')
-  const origin = typeof window !== 'undefined' && window.location.origin !== 'null' ? window.location.origin : ''
-  return `${configured || origin}/api/v1`
+  // VITE BASE_URL may be a sub-path (e.g. `/app/weknora/`). Resolve it against
+  // the page origin so the UI, the copy button and the curl examples all show
+  // a full URL instead of a bare path.
+  return getAbsoluteApiBaseUrl()
 })
 
 const showLanUrlUnavailableHint = computed(() => (

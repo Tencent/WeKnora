@@ -1,5 +1,5 @@
 import { computed, onMounted, ref } from 'vue'
-import { getApiBaseUrl } from '@/utils/api-base'
+import { getAbsoluteApiBaseUrl } from '@/utils/api-base'
 
 type WeKnoraDesktopWindow = Window & {
   __WEKNORA_API_BASE__?: string
@@ -19,13 +19,9 @@ export function useApiBaseUrlDisplay() {
     if (wailsApiBaseURL.value) {
       return wailsApiBaseURL.value
     }
-    const configured = getApiBaseUrl().trim().replace(/\/$/, '')
-    let origin = typeof window !== 'undefined' ? window.location.origin : ''
-    if (!origin || origin === 'null') {
-      origin = ''
-    }
-    const base = configured || origin
-    return `${base}/api/v1`
+    // Resolve VITE BASE_URL against the page origin so a sub-path deployment
+    // (e.g. `/app/weknora/`) still shows a full, copy-pasteable URL.
+    return getAbsoluteApiBaseUrl()
   })
 
   async function loadApiBaseUrl() {

@@ -32,8 +32,9 @@ function fixture(generate: () => Promise<string> = async () => 'Query logs by mo
       if (name === 'vue') return require('vue')
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key, locale: ref('zh-CN') }) }
       if (name === 'tdesign-vue-next') return { MessagePlugin: { warning: (text: string) => warnings.push(text), success: (text: string) => successes.push(text), error: (text: string) => errors.push(text) } }
+      if (name === '@/utils/api-base') return { getAbsoluteApiBaseUrl: () => 'https://weknora.example/api/v1', withApiBasePath: (path: string) => path }
       if (name === '@/api/mcp-service') return {
-        MCP_OAUTH_CALLBACK_PATH: '/callback',
+        MCP_OAUTH_CALLBACK_PATH: '/mcp-oauth/callback',
         getMCPOAuthAuthorizationStatus: async () => ({ authorized: false, state: 'reauth_required' }),
         getMCPOAuthAuthorizeURL: async () => ({ authorizationUrl: 'https://auth.example/consent', authorizationAttempt: 'attempt' }),
         getMCPOAuthStatus: async () => false,

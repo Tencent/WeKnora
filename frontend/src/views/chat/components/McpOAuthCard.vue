@@ -45,6 +45,7 @@ import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { getAbsoluteApiBaseUrl, withApiBasePath } from '@/utils/api-base'
 import {
   cancelMCPOAuth,
   getMCPOAuthAuthorizeURL,
@@ -199,10 +200,10 @@ const authorize = async () => {
   if (props.resolved || authorizing.value) return
   authorizing.value = true
   try {
-    const redirectUri = window.location.origin + MCP_OAUTH_CALLBACK_PATH
+    const redirectUri = getAbsoluteApiBaseUrl() + MCP_OAUTH_CALLBACK_PATH
     const frontendRedirect = useEmbedOAuth()
       ? window.location.pathname + window.location.search
-      : '/'
+      : withApiBasePath('/')
     const authorization = useEmbedOAuth()
       ? await getEmbedMCPOAuthAuthorizeURL(
         props.embedChannelId!,

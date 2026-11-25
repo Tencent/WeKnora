@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { runInNewContext } from 'node:vm'
+import ts from 'typescript'
 
+import { withApiBasePath } from './api-base.ts'
 import {
   buildProtectedFileRequest,
   isProtectedFileProxyPath,
@@ -11,6 +15,30 @@ import {
 } from './protectedFileAccess.ts'
 
 const RESOURCE = 'resource://AbCdEfGhIjKlMnOpQrStUv'
+
+/**
+ * Compile a second copy of the module whose api-base reports the given
+ * Vite BASE_URL, so the sub-path wiring is exercised without a Vite build.
+ */
+function buildProtectedFileModule(base: string): typeof import('./protectedFileAccess.ts') {
+  const source = readFileSync(new URL('./protectedFileAccess.ts', import.meta.url), 'utf8')
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  const state: Record<string, unknown> = {}
+  runInNewContext(compiled, {
+    exports: state,
+    URLSearchParams,
+    localStorage: { getItem: () => null },
+    require: (id: string) => {
+      if (id === './api-base') {
+        return { withApiBasePath: (path: string) => withApiBasePath(path, base) }
+      }
+      throw new Error(`Unexpected import: ${id}`)
+    },
+  })
+  return state as unknown as typeof import('./protectedFileAccess.ts')
+}
 
 test.afterEach(() => {
   setDefaultProtectedFileAccess(null)
@@ -88,6 +116,32 @@ test('a component scope refines the default tenant plane', () => {
   assert.deepEqual(
     resolveProtectedFileAccess({ mode: 'message', sessionId: 'session-1', messageId: '  ' }),
     { mode: 'tenant' },
+  )
+})
+
+test('sub-path deployments prefix every protected file proxy with the app base', () => {
+  const mod = buildProtectedFileModule('/app/weknora')
+  const query = `file_path=${encodeURIComponent(RESOURCE)}`
+
+  assert.equal(
+    mod.buildProtectedFileRequest(RESOURCE, { mode: 'tenant' })?.url,
+    `/app/weknora/files?${query}`,
+  )
+  assert.equal(
+    mod.buildProtectedFileRequest(RESOURCE, { mode: 'knowledgeBase', kbId: 'kb-1' })?.url,
+    `/app/weknora/api/v1/knowledge-bases/kb-1/files?${query}`,
+  )
+  assert.equal(
+    mod.buildProtectedFileRequest(RESOURCE, {
+      mode: 'message',
+      sessionId: 's-1',
+      messageId: 'm-1',
+    })?.url,
+    `/app/weknora/api/v1/sessions/s-1/messages/m-1/files?${query}`,
+  )
+  assert.equal(
+    mod.buildProtectedFileRequest(RESOURCE, { mode: 'embed', channelId: 'ch-1', token: 'tok-1' })?.url,
+    `/app/weknora/api/v1/embed/ch-1/files?${query}`,
   )
 })
 

@@ -19,6 +19,7 @@ import {
   resolveProtectedFileAccess,
   type ProtectedFileAccessContext,
 } from './protectedFileAccess.ts';
+import { stripApiBasePath } from './api-base';
 
 const PROVIDER_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 const PROVIDER_IMG_SRC_RE = new RegExp(
@@ -271,7 +272,8 @@ function providerSourceFromImageSrc(src: string): string | null {
   try {
     const baseURL = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
     const url = new URL(decodedSrc, baseURL);
-    if (!isProtectedFileProxyPath(url.pathname)) {
+    const proxyPath = stripApiBasePath(url.pathname);
+    if (!isProtectedFileProxyPath(proxyPath)) {
       return null;
     }
 
@@ -614,7 +616,7 @@ export async function hydrateProtectedFileImages(
   ensureProtectedResourceCardClicks();
 
   const images = root.querySelectorAll<HTMLImageElement>(
-    'img[data-protected-src], img[src^="resource://"], img[src^="storage://"], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"], img[src^="oss://"], img[src^="ks3://"], img[src^="obs://"]',
+    'img[data-protected-src], img[src^="resource://"], img[src^="storage://"], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"], img[src^="oss://"], img[src^="ks3://"], img[src^="obs://"], img[src*="file_path="]',
   );
   if (!images.length) {
     return;
@@ -638,6 +640,8 @@ export async function hydrateProtectedFileImages(
       img.dataset.authHydrated = '0';
       return;
     }
+    // buildProtectedFileRequest 返回的 URL 已带 Vite BASE_URL 前缀
+    // （子路径部署如 /app/weknora），直接使用即可。
     const { url: requestURL, headers } = request;
     const requestKey = JSON.stringify([requestURL, headers]);
     if (img.dataset.authHydrated === '1' && src.startsWith('blob:') && protectedImageRequests.get(img) === requestKey) {

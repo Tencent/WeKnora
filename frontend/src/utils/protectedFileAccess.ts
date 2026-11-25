@@ -9,7 +9,11 @@
  *
  * 选哪条代理取决于当前请求的鉴权平面，而不是取决于哪个组件在渲染图片。
  * 这里把该决策收敛成单一真相源，渲染组件只需声明作用域，不再各自拼 URL。
+ *
+ * 返回的 URL 已带 Vite BASE_URL 前缀（子路径部署），调用方可直接 fetch。
  */
+
+import { withApiBasePath } from './api-base';
 
 export const PROVIDER_SCHEME_PATTERN = 'resource|local|minio|cos|tos|s3|oss|ks3|obs';
 
@@ -34,6 +38,7 @@ export type ProtectedFileAccessContext =
   | { mode: 'message'; sessionId: string; messageId: string };
 
 export interface ProtectedFileRequest {
+  /** 已带 Vite BASE_URL 前缀（子路径部署），可直接 fetch。 */
   url: string;
   headers: Record<string, string>;
 }
@@ -150,24 +155,24 @@ export function buildProtectedFileRequest(
     // 不如跳过等待 bootstrap 完成后的下一次水合。
     if (!channelId || !token) return null;
     return {
-      url: `/api/v1/embed/${encodeURIComponent(channelId)}/files?${query}`,
+      url: withApiBasePath(`/api/v1/embed/${encodeURIComponent(channelId)}/files?${query}`),
       headers: { Authorization: `Embed ${token}` },
     };
   }
 
   if (access.mode === 'knowledgeBase') {
     return {
-      url: `/api/v1/knowledge-bases/${encodeURIComponent(access.kbId.trim())}/files?${query}`,
+      url: withApiBasePath(`/api/v1/knowledge-bases/${encodeURIComponent(access.kbId.trim())}/files?${query}`),
       headers: tenantRequestHeaders(),
     };
   }
 
   if (access.mode === 'message') {
     return {
-      url: `/api/v1/sessions/${encodeURIComponent(access.sessionId.trim())}/messages/${encodeURIComponent(access.messageId.trim())}/files?${query}`,
+      url: withApiBasePath(`/api/v1/sessions/${encodeURIComponent(access.sessionId.trim())}/messages/${encodeURIComponent(access.messageId.trim())}/files?${query}`),
       headers: tenantRequestHeaders(),
     };
   }
 
-  return { url: `/files?${query}`, headers: tenantRequestHeaders() };
+  return { url: withApiBasePath(`/files?${query}`), headers: tenantRequestHeaders() };
 }

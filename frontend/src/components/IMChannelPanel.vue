@@ -592,6 +592,7 @@ import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { copyWithToast } from '@/utils/clipboard';
 import { normalizeOptionalString } from '@/utils/optionalString';
+import { getAbsoluteApiBaseUrl } from '@/utils/api-base';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
   getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels,
@@ -957,8 +958,9 @@ async function loadChannels() {
 }
 
 function getCallbackUrl(channel: IMChannel): string {
-  const base = window.location.origin;
-  return `${base}/api/v1/im/callback/${channel.id}`;
+  // Absolute base (origin + optional VITE BASE_URL sub-path + /api/v1) so the
+  // callback URL is directly copy-pasteable into the IM platform console.
+  return `${getAbsoluteApiBaseUrl()}/im/callback/${channel.id}`;
 }
 
 async function copyUrl(channel: IMChannel) {

@@ -1,5 +1,5 @@
 import { get, post, put, del } from '@/utils/request'
-import { resolveEmbedBaseUrl } from '@/utils/embedBaseUrl'
+import { normalizeEmbedBaseUrl, resolveEmbedBaseUrl } from '@/utils/embedBaseUrl'
 
 export interface EmbedChannel {
   id: string
@@ -584,7 +584,7 @@ export function buildEmbedURL(
   token?: string,
   opts?: { locale?: string; refreshKey?: number; baseUrl?: string },
 ) {
-  const base = safeBaseUrl(opts?.baseUrl) || resolveEmbedBaseUrl()
+  const base = safeBaseUrl(opts?.baseUrl)
   let path = `${base}/embed/${encodeURIComponent(channelId)}`
   const params = new URLSearchParams()
   if (opts?.locale?.trim()) params.set('locale', opts.locale.trim())
@@ -604,17 +604,15 @@ function escapeHtmlAttr(value: string): string {
     .replace(/>/g, '&gt;')
 }
 
-/** Validate that a base URL is a well-formed http(s) origin; fall back otherwise. */
+/**
+ * Validate a base URL and use it verbatim (path prefix preserved, no build-time
+ * sub-path inheritance); fall back to the current embed base.
+ */
 function safeBaseUrl(raw?: string): string {
-  const fallback = window.location.origin
+  const fallback = typeof window !== 'undefined' ? resolveEmbedBaseUrl() : ''
   if (!raw) return fallback
-  try {
-    const u = new URL(raw, window.location.href)
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return fallback
-    return u.origin
-  } catch {
-    return fallback
-  }
+  const pageHref = typeof window !== 'undefined' ? window.location.href : undefined
+  return normalizeEmbedBaseUrl(raw, pageHref) || fallback
 }
 
 export function buildEmbedSnippet(channelId: string, token?: string) {

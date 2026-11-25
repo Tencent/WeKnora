@@ -47,6 +47,7 @@ async function setup(t: TestContext) {
     '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true, canAccessAllTenants: false }) },
     '@/composables/useModalShell': { useModalShell: () => ({ markClean() {}, requestClose() {} }) },
     '@/utils/clipboard': { copyWithToast: async () => undefined },
+    '@/utils/api-base': { getAbsoluteFrontendBaseUrl: () => 'https://weknora.example' },
     '@/assets/img/agent.svg': { default: '' },
     '@/assets/img/agent-green.svg': { default: '' },
     '@/api/organization': {
