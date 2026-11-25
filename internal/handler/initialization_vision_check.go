@@ -19,7 +19,8 @@ import (
 func (h *InitializationHandler) checkVisionModelConnection(
 	ctx context.Context, model *types.Model, appID, appSecret string,
 ) (bool, string) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Allow local model cold-loading and reasoning VLMs time to finish the first probe.
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	instance, err := vlm.NewVLM(vlm.ConfigFromModel(model, appID, appSecret), h.ollamaService)

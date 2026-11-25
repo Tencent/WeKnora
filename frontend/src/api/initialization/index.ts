@@ -329,8 +329,10 @@ export function checkRemoteModel(modelConfig: {
     available: boolean;
     message?: string;
 }> {
+    // Let the 60s vision probe return its result without changing the chat timeout.
+    const requestConfig = modelConfig.modelType === 'VLLM' ? { timeout: 65000 } : undefined;
     return new Promise((resolve, reject) => {
-        post('/api/v1/initialization/remote/check', modelConfig)
+        post('/api/v1/initialization/remote/check', modelConfig, requestConfig)
             .then((response: any) => {
                 resolve(response.data || {});
             })
