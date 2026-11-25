@@ -201,8 +201,10 @@ func TestSplitCloudPDFPreservesImagePagesThroughStorage(t *testing.T) {
 		if strings.HasPrefix(image.OriginalRef, "part-2/") {
 			page, source = 103, "part-2/mineru:legacy:2:1"
 		}
-		if len(image.SourceLocators) != 1 || image.SourceLocators[0].Page != page || image.SourceLocators[0].SourceID != source {
-			t.Fatalf("image %s lost its original page and source identity: %+v", image.OriginalRef, image.SourceLocators)
+		if len(image.SourceLocators) != 1 || image.SourceLocators[0].Page != page ||
+			image.SourceLocators[0].SourceID != source {
+			t.Fatalf("image %s lost its original page and source identity: %+v",
+				image.OriginalRef, image.SourceLocators)
 		}
 	}
 }

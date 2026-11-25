@@ -360,8 +360,11 @@ func attachMinerUImageLocators(refs []types.ImageRef, raw []byte, fileType strin
 			if item.PageIdx == nil || *item.PageIdx < 0 {
 				continue
 			}
-			loc := types.SourceLocator{Type: types.SourceLocatorPDF, Page: *item.PageIdx + 1,
-				SourceID: fmt.Sprintf("mineru:legacy:%d:%d", *item.PageIdx, i)}
+			loc := types.SourceLocator{
+				Type:     types.SourceLocatorPDF,
+				Page:     *item.PageIdx + 1,
+				SourceID: fmt.Sprintf("mineru:legacy:%d:%d", *item.PageIdx, i),
+			}
 			if box, ok := minerUBBox(item.BBox); ok {
 				loc.BBox = box
 			}
