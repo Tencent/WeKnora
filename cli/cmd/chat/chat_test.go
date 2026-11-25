@@ -79,7 +79,7 @@ func TestChat_StreamMode(t *testing.T) {
 			{ResponseType: sdk.ResponseTypeComplete, Done: true},
 		},
 	}
-	opts := &Options{Query: "hi", KBID: "kb_1"}
+	opts := &Options{Query: "hi", KBID: "kb_1", ModelID: "selected"}
 	if err := runChat(context.Background(), opts, textOpts(), svc); err != nil {
 		t.Fatalf("runChat: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestChat_StreamMode(t *testing.T) {
 	if svc.gotSessionID != "sess_auto" {
 		t.Errorf("stream sessionID: got %q want sess_auto", svc.gotSessionID)
 	}
-	if svc.gotRequest == nil || svc.gotRequest.Channel != "api" {
+	if svc.gotRequest == nil || svc.gotRequest.Channel != "api" || svc.gotRequest.SummaryModelID != "selected" {
 		t.Errorf("expected Channel=api, got %+v", svc.gotRequest)
 	}
 }
