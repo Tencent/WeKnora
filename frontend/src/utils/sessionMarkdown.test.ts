@@ -116,3 +116,8 @@ test('missing and invalid export timestamps have a deterministic fallback', asyn
   ])
   assert.deepEqual(result.map(message => message.id), ['missing', 'invalid', 'valid'])
 })
+
+test('copying a session rejects a full page that cannot advance the history cursor', async () => {
+  const page = [{ id: 'm', role: 'user', created_at: '2026-01-01T00:00:00Z' }]
+  await assert.rejects(collectAllSessionMessages(async () => page, 1), /cursor/)
+})
