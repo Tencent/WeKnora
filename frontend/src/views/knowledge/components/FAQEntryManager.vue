@@ -1089,6 +1089,9 @@ const cardListRef = ref<HTMLElement | null>(null)
 const hasMore = ref(true)
 const pageSize = 20
 let currentPage = 1
+// 请求代次：搜索词/标签/kb 变化触发重置加载后，仍在途的旧分页响应落地时必须丢弃，
+// 否则会污染新过滤结果并错误推进 currentPage（与 getKnowled/loadRuns 等模块同款防护）。
+let loadRequestSeq = 0
 const entrySearchKeyword = ref('')
 let entrySearchDebounce: number | null = null
 
@@ -1498,10 +1501,13 @@ const editorRules: FormRules<FAQEntryPayload> = {
 
 const loadEntries = async (append = false) => {
   if (!props.kbId) return
+  const seq = ++loadRequestSeq
   if (append) {
     loadingMore.value = true
   } else {
     loading.value = true
+    // 重置时一并复位加载更多标志，避免在途的旧 append 被丢弃后 loadingMore 卡死
+    loadingMore.value = false
     currentPage = 1
     entries.value = []
     selectedRowKeys.value = []
@@ -1517,6 +1523,7 @@ const loadEntries = async (append = false) => {
         page: 1,
         page_size: 1,
       })
+      if (seq !== loadRequestSeq) return
       const totalData = (totalRes.data || {}) as { total: number }
       overallFAQTotal.value = totalData.total || 0
     }
@@ -1527,6 +1534,8 @@ const loadEntries = async (append = false) => {
       tag_ids: selectedTagIds.value.length > 0 ? selectedTagIds.value.join(',') : undefined,
       keyword: entrySearchKeyword.value ? entrySearchKeyword.value.trim() : undefined,
     })
+    // 过期响应直接丢弃：过滤条件可能已变，旧数据既不是当前页也不是当前过滤集
+    if (seq !== loadRequestSeq) return
     const pageData = (res.data || {}) as {
       data: FAQEntry[]
       total: number
@@ -1553,8 +1562,12 @@ const loadEntries = async (append = false) => {
     await nextTick()
     arrangeCards()
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'))
+    if (seq === loadRequestSeq) {
+      MessagePlugin.error(error?.message || t('common.operationFailed'))
+    }
   } finally {
+    // 过期请求的 finally 不得触碰标志位、也不得触发自动填充，全部交给最新请求
+    if (seq !== loadRequestSeq) return
     loading.value = false
     loadingMore.value = false
 
