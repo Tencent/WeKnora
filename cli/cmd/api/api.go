@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -275,7 +276,10 @@ func inferFieldValue(v string) any {
 	if i, err := strconv.ParseInt(v, 10, 64); err == nil {
 		return i
 	}
-	if f, err := strconv.ParseFloat(v, 64); err == nil {
+	if len(v) > 0 && (v[0] == '-' || v[0] >= '0' && v[0] <= '9') && json.Valid([]byte(v)) {
+		return json.Number(v)
+	}
+	if f, err := strconv.ParseFloat(v, 64); err == nil && !math.IsInf(f, 0) && !math.IsNaN(f) {
 		return f
 	}
 	return v

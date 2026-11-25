@@ -432,6 +432,8 @@ export default {
     referenceChunkCount: '{count}件のチャンク',
     fallbackHint: 'ナレッジベースから関連する内容が見つかりませんでした。上記はモデルの直接回答です。',
     truncatedHint: 'モデルの1回あたりの出力上限で回答が途中で打ち切られました。上記は打ち切り前に生成された内容です。',
+    branchFromHere: 'ここから新しい会話を開始',
+    branchFromReply: 'この回答から分岐する',
     rewind: {
       tooltip: 'ここに巻き戻す',
       confirmTitle: 'ここに巻き戻しますか？',

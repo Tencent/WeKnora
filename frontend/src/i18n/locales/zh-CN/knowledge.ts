@@ -1231,6 +1231,8 @@ export default {
       DOCREADER_PARSE_FAILED_SUGGESTION: '请检查文件格式，并让管理员查看本次解析对应的 DocReader 日志。',
       TASK_STALLED: '长时间无进展，已自动终止',
       TASK_STALLED_SUGGESTION: '处理超过阈值仍没有任何进展，且队列中已无对应任务，已被系统标记为失败。请点击「重试」；如反复出现，请检查该阶段依赖的服务（文档解析、模型、向量库）是否正常。',
+      STORAGE_QUOTA_EXCEEDED: '存储空间不足',
+      STORAGE_QUOTA_EXCEEDED_SUGGESTION: '文档本身解析成功，但写入索引会超出当前空间的存储配额，因此没有写入任何内容。请删除不再需要的文档释放空间，或联系管理员提高配额后重试。',
       UNKNOWN_SUGGESTION: '请查看应用日志获取详细信息。'
     },
     status: {

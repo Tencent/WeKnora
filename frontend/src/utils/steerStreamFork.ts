@@ -149,7 +149,9 @@ export function forkAfterInjectedUser(
     knowledge_references: [],
   }
   list.splice(userIdx + 1, 0, continuation)
-  return continuation
+  // Replay keeps this reference and mutates it as chunks arrive. Read it back
+  // from the list so a reactive transcript gives replay its Vue proxy.
+  return list[userIdx + 1]
 }
 
 function eventTime(event: ChatMessage): number {

@@ -119,3 +119,68 @@ func TestAgentStallIncludesHTTPHeaders(t *testing.T) {
 	require.NoError(t, ctx.Err(), "the per-call stall must not cancel the parent")
 	require.True(t, isTransientError(err), "startup stalls must use the existing retry path")
 }
+
+type lingeringProviderStream struct {
+	mockChat
+	stream <-chan types.StreamResponse
+}
+
+func (m *lingeringProviderStream) ChatStream(
+	context.Context, []chat.Message, *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	return m.stream, nil
+}
+
+func TestAgentStopsReadingAnOpenProviderStream(t *testing.T) {
+	for _, name := range []string{"caller canceled", "provider stalled"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stream := make(chan types.StreamResponse, 2)
+			defer close(stream)
+			stream <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Content: "partial answer"}
+			if name == "caller canceled" {
+				stream <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Content: "late answer"}
+			}
+			engine := &AgentEngine{
+				config:       &types.AgentConfig{LLMCallTimeout: 1},
+				chatModel:    &lingeringProviderStream{stream: stream},
+				modelContext: modelcontext.NewRegistry(false),
+			}
+			type outcome struct {
+				result *streamLLMResult
+				err    error
+				emits  int
+			}
+			finished := make(chan outcome, 1)
+			go func() {
+				emits := 0
+				emit := func(*types.StreamResponse, string) {
+					emits++
+					if name == "caller canceled" {
+						cancel()
+					}
+				}
+				result, err := engine.streamLLMToEventBus(ctx, nil, nil, emit)
+				finished <- outcome{result: result, err: err, emits: emits}
+			}()
+
+			select {
+			case got := <-finished:
+				if name == "caller canceled" {
+					require.Equal(t, 1, got.emits)
+					require.ErrorIs(t, got.err, context.Canceled)
+					require.False(t, isTransientError(got.err))
+					return
+				}
+				require.ErrorContains(t, got.err, "LLM stream stalled")
+				require.True(t, isTransientError(got.err))
+				require.NoError(t, ctx.Err())
+				require.NotNil(t, got.result)
+				require.Equal(t, "partial answer", got.result.Content)
+			case <-time.After(3 * time.Second):
+				t.Fatal("agent waited for the provider to close its stream")
+			}
+		})
+	}
+}

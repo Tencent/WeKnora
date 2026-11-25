@@ -1,10 +1,28 @@
 package im
 
 import (
+	"context"
 	"strings"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/types"
 )
+
+// ThinkingPlaceholder returns the initial IM progress text for the channel locale.
+func ThinkingPlaceholder(ctx context.Context) string {
+	switch types.NormalizeSupportedLocale(types.LanguageFromContextOrDefault(ctx)) {
+	case "en-US":
+		return "Thinking..."
+	case "ja-JP":
+		return "考え中..."
+	case "ko-KR":
+		return "생각 중..."
+	case "ru-RU":
+		return "Думаю..."
+	default:
+		return "正在思考..."
+	}
+}
 
 // StreamDisplayPhase controls how raw IM stream content is rendered.
 type StreamDisplayPhase int

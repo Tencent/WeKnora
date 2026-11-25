@@ -1112,3 +1112,69 @@ func TestCreateWikiPageWaitsForKnowledgeBaseDeletionPostgres(t *testing.T) {
 	require.NoError(t, deleting.Commit().Error)
 	require.ErrorIs(t, NewWikiPageRepository(db).Create(ctx, late), ErrKnowledgeBaseNotFound)
 }
+
+// TestWikiPageRepositoryGetOrCreate covers the idempotent insert behind
+// Tencent/WeKnora#5656: two ingest batches can both decide a slug is
+// missing from the pre-reduce snapshot and then collide on the unique
+// index idx_wiki_pages_kb_slug. The loser must get the winner's row
+// back instead of a 23505 that every retry replays.
+func TestWikiPageRepositoryGetOrCreate(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}))
+	require.NoError(t, db.Exec(`
+		CREATE UNIQUE INDEX idx_wiki_pages_kb_slug
+		ON wiki_pages (knowledge_base_id, slug)
+		WHERE deleted_at IS NULL
+	`).Error)
+
+	ctx := context.Background()
+	repo := NewWikiPageRepository(db)
+
+	kbA := makeKB(nil)
+	kbB := makeKB(nil)
+	require.NoError(t, db.Create(kbA).Error)
+	require.NoError(t, db.Create(kbB).Error)
+
+	// First writer wins and is reported as created.
+	first := makeWikiPage(kbA.ID, "entity/acme", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	got, created, err := repo.GetOrCreate(ctx, first)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.Equal(t, first.ID, got.ID)
+
+	// Second writer with the same slug loses the race: no error, the
+	// winner's row comes back untouched.
+	loser := makeWikiPage(kbA.ID, "entity/acme", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	loser.Content = "loser content must not overwrite the winner"
+	got, created, err = repo.GetOrCreate(ctx, loser)
+	require.NoError(t, err)
+	require.False(t, created)
+	require.Equal(t, first.ID, got.ID)
+	require.Equal(t, "body of entity/acme", got.Content)
+
+	// The strict Create still rejects the duplicate, so interactive
+	// page creation keeps failing loudly instead of silently no-opping.
+	duplicate := makeWikiPage(kbA.ID, "entity/acme", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	require.Error(t, repo.Create(ctx, duplicate))
+
+	// Same slug in another knowledge base is a different page.
+	otherKB := makeWikiPage(kbB.ID, "entity/acme", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	got, created, err = repo.GetOrCreate(ctx, otherKB)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.Equal(t, otherKB.ID, got.ID)
+
+	// A soft-deleted row does not block a fresh insert under the same
+	// slug: the partial index only covers live rows.
+	require.NoError(t, db.Delete(&types.WikiPage{}, "id = ?", first.ID).Error)
+	revival := makeWikiPage(kbA.ID, "entity/acme", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	got, created, err = repo.GetOrCreate(ctx, revival)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.Equal(t, revival.ID, got.ID)
+
+	// A page for a missing knowledge base is still refused.
+	ghost := makeWikiPage("kb-does-not-exist", "entity/ghost", types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+	_, _, err = repo.GetOrCreate(ctx, ghost)
+	require.ErrorIs(t, err, ErrKnowledgeBaseNotFound)
+}

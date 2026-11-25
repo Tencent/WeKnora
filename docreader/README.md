@@ -83,6 +83,16 @@ docreader:
 - `DOCREADER_PDF_RENDER_MAX_WORKERS`: 扫描 PDF 渲染为图片的最大并发数（默认：1，设为 0 可关闭限流）
 - `DOCREADER_PDF_RENDER_DPI`: 扫描 PDF 渲染 DPI（默认：200）
 - `DOCREADER_PDF_JPEG_QUALITY`: 扫描 PDF 输出 JPEG 质量（默认：85，范围会自动限制在 1-95）
+- `DOCREADER_DOCX_MAX_PAGES`: DOCX 解析的最大页数（默认：0）
+- `DOCREADER_ODL_MAX_WORKERS`: OpenDataLoader 解析的最大并发数（默认：1；每次转换会启动一个 JVM）
+- `DOCREADER_ODL_HYBRID`: OpenDataLoader 混合模式引擎（如 `docling-fast`；默认：`off`，关闭混合模式）
+- `DOCREADER_ODL_HYBRID_URL`: 混合模式服务地址（默认：`http://127.0.0.1:5002`；启动时会做 `/health` 检查）
+- `DOCREADER_ODL_HYBRID_MODE`: 混合模式的工作模式（默认：`auto`）
+- `DOCREADER_ODL_HYBRID_FALLBACK`: 混合模式失败时是否回退（默认：`false`）
+- `DOCREADER_ODL_MARKDOWN_WITH_HTML`: OpenDataLoader 输出的 Markdown 是否保留 HTML（默认：`false`）
+- `DOCREADER_PDF_RENDER_PARALLELISM`: 单个 PDF 内多页并行渲染的进程数（默认：随 CPU 数量变化，上限 4；pdfium 非线程安全，按进程扇出）
+- `DOCREADER_PDF_RENDER_MAX_EDGE`: 渲染 / 提取页图的最长边上限，单位 px（默认：2000）
+- `DOCREADER_IMAGE_OUTPUT_DIR`: 临时图片输出目录（默认：`/tmp/docreader`；与 Go 应用通过共享卷配合）
 
 ### 上传 HTML 的正文抽取
 
