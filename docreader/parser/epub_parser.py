@@ -307,6 +307,8 @@ class EPUBParser(BaseParser):
             self._strip_internal_links(soup)
             if image_aliases:
                 self._rewrite_image_sources(soup, image_aliases, base_path)
+            # A literal pipe in a cell must not become a GFM column delimiter.
+            MHTMLParser._escape_table_cell_pipes(soup)
             markdown_text = md(str(soup), heading_style="ATX")
             # Keep the blank lines and indentation that delimit Markdown blocks
             # (paragraphs, quotes, lists, tables, fenced code) and only collapse
