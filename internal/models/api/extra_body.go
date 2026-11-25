@@ -11,16 +11,32 @@ var IsolatedExtraBodyKeys = []string{
 }
 
 // MergeExtraBody copies configured extra_body keys the request does not
-// already set. An isolated call skips IsolatedExtraBodyKeys.
+// already set. When both sides hold an object under the same key, the
+// configured object's missing fields are added to a copy of the request's
+// object, so extra_body can extend a field the request builds itself (for
+// example thinking.block_binding) without replacing it. An isolated call skips
+// IsolatedExtraBodyKeys.
 func MergeExtraBody(body, extra map[string]any, isolated bool) {
 	for k, v := range extra {
-		if _, exists := body[k]; exists {
-			continue
-		}
 		if isolated && isIsolatedKey(k) {
 			continue
 		}
-		body[k] = v
+		existing, exists := body[k]
+		if !exists {
+			body[k] = v
+			continue
+		}
+		dst, ok := existing.(map[string]any)
+		src, ok2 := v.(map[string]any)
+		if !ok || !ok2 {
+			continue
+		}
+		merged := make(map[string]any, len(dst)+len(src))
+		for dk, dv := range dst {
+			merged[dk] = dv
+		}
+		MergeExtraBody(merged, src, false)
+		body[k] = merged
 	}
 }
 
