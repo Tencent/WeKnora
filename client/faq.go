@@ -379,7 +379,7 @@ func (c *Client) ExportFAQEntries(ctx context.Context, knowledgeBaseID string) (
 // FAQFailedEntry represents a failed entry during FAQ import/validation.
 type FAQFailedEntry struct {
 	FailureType              string   `json:"failure_type,omitempty"`       // pre_validation or post_validation
-	IsPartialFailure         bool     `json:"is_partial_failure,omitempty"` // Entry imported with some questions removed
+	IsPartialFailure         bool     `json:"is_partial_failure,omitempty"` // Imported with questions removed
 	RemovedSimilarQuestions  []string `json:"removed_similar_questions,omitempty"`
 	RemovedNegativeQuestions []string `json:"removed_negative_questions,omitempty"`
 	Index                    int      `json:"index"`

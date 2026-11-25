@@ -52,7 +52,7 @@ func TestFAQImportFailureDetails(t *testing.T) {
 					t.Errorf("%s = %s, want %s", key, gotJSON, wantJSON)
 				}
 			}
-			if got["is_partial_failure"] != partial && !(got["is_partial_failure"] == nil && !partial) {
+			if got["is_partial_failure"] != partial && (got["is_partial_failure"] != nil || partial) {
 				t.Errorf("is_partial_failure = %v, want %v", got["is_partial_failure"], partial)
 			}
 		})
@@ -64,7 +64,8 @@ func TestFAQFailureDetailsOlderServer(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"index":1,"reason":"invalid","standard_question":"q"}`), &entry); err != nil {
 		t.Fatal(err)
 	}
-	if entry.FailureType != "" || entry.IsPartialFailure || entry.RemovedSimilarQuestions != nil || entry.RemovedNegativeQuestions != nil {
+	if entry.FailureType != "" || entry.IsPartialFailure ||
+		entry.RemovedSimilarQuestions != nil || entry.RemovedNegativeQuestions != nil {
 		t.Fatalf("absent details should have zero values: %#v", entry)
 	}
 	if entry.Index != 1 || entry.Reason != "invalid" || entry.StandardQuestion != "q" {
