@@ -1251,7 +1251,7 @@ const emit = defineEmits<{
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
 const canRewind = computed(() => props.canRewind === true && !props.embeddedMode)
-const forkTooltip = '从这条回答继续分叉'
+const forkTooltip = computed(() => t('chat.branchFromReply'))
 const rewindTooltip = computed(() => t('chat.rewind.tooltip'))
 const emitFork = () => {
   const messageId = persistedAssistantId(props.session) || String(props.session?.id || '')
