@@ -26961,6 +26961,9 @@
         "github_com_Tencent_WeKnora_internal_im.IMChannel": {
             "type": "object",
             "properties": {
+                "admin_digest": {
+                    "type": "object"
+                },
                 "agent_id": {
                     "type": "string"
                 },
