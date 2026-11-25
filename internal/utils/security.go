@@ -57,6 +57,15 @@ func SanitizeHTML(input string) string {
 	// 检查输入长度
 	if len(input) > 10000 {
 		input = input[:10000]
+		// 回退到最后一个完整的 rune 边界，避免在多字节字符中间截断，
+		// 否则会返回非法的 UTF-8 字符串。
+		for len(input) > 0 {
+			if r, size := utf8.DecodeLastRuneInString(input); r == utf8.RuneError && size == 1 {
+				input = input[:len(input)-1]
+				continue
+			}
+			break
+		}
 	}
 
 	// 检查是否包含潜在的 XSS 攻击
