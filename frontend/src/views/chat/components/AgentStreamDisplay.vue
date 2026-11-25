@@ -3680,8 +3680,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   &.markdown-content {
     // Compact thinking-panel Markdown is intentionally not the chat answer body.
-    // Answer Markdown typography belongs to chat-markdown.less.
+    // Answer Markdown typography belongs to chat-markdown.less. Images still need
+    // the shared size caps: thinking renders model-authored Markdown through the
+    // same pipeline, and a native-size <img> would blow out the step panel.
     .chat-citation-pills();
+    .chat-markdown-images();
   }
 }
 
@@ -4298,6 +4301,9 @@ const handleAddToKnowledge = (answerEvent: any) => {
     line-height: 1.6;
     overflow-wrap: anywhere;
     user-select: text;
+    // Same rationale as .thinking-detail-content: bare <img> from model
+    // Markdown must not escape the inline reasoning row.
+    .chat-markdown-images();
 
     :deep(.thinking-inline-markdown > :first-child) {
       margin-top: 0;
