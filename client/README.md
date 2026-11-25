@@ -235,24 +235,6 @@ err = agentSession.Ask(context.Background(), "什么是深度学习?",
 | `AgentResponseTypeReflection` | 自我反思 | Agent评估自己的回答时 |
 | `AgentResponseTypeError` | 错误 | 发生错误时 |
 
-### Agent问答测试工具
-
-我们提供了一个交互式命令行工具用于测试Agent功能：
-
-```bash
-cd client/cmd/agent_test
-go build -o agent_test
-./agent_test -url http://localhost:8080 -kb <knowledge_base_id>
-```
-
-该工具支持：
-- 创建和管理会话
-- 交互式Agent问答
-- 实时显示所有Agent事件
-- 性能统计和调试信息
-
-详细使用说明请参考 `client/cmd/agent_test/README.md`。
-
 ### Agent问答的高级用法
 
 更多高级用法示例，见上文「示例：Agent智能问答」一节与 `agent.go`（`NewAgentSession` / `Ask` / `AskWithRequest`），包括：
