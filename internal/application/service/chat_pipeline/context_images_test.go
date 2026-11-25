@@ -191,6 +191,36 @@ func TestSequentialMergeKeepsAllMatchedImages(t *testing.T) {
 	require.Equal(t, []int{0, 0}, positions)
 }
 
+func TestParentSlotAggregationKeepsImageEvidence(t *testing.T) {
+	text := &types.SearchResult{
+		ID: "page", KnowledgeID: "doc", KnowledgeBaseID: "kb", Score: 0.9,
+		ChunkType: string(types.ChunkTypeText), Content: "Page text",
+	}
+	image := withImage(&types.SearchResult{
+		ID: "chart", KnowledgeID: "doc", KnowledgeBaseID: "kb", ParentChunkID: text.ID,
+		Score: 0.8, ChunkType: string(types.ChunkTypeImageVector), Content: "Chart caption",
+	}, "resource://chart")
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 1, ParentSlotAggregation: true},
+		PipelineState:   types.PipelineState{MergeResult: []*types.SearchResult{text, image}},
+	}
+
+	err := (&PluginFilterTopK{}).OnEvent(
+		t.Context(), types.FILTER_TOP_K, cm, func() *PluginError { return nil },
+	)
+	require.Nil(t, err)
+	require.Equal(t, []string{"page"}, searchResultIDs(cm.MergeResult))
+	require.Equal(t, []string{"chart"}, cm.MergeResult[0].SubChunkID)
+	require.Equal(t, []types.MatchedImage{{ChunkID: "chart", KnowledgeBaseID: "kb", URL: "resource://chart"}},
+		cm.MergeResult[0].MatchedImages)
+
+	kb := &imageKBService{}
+	images, positions := searchutil.ContextImages(t.Context(), cm.MergeResult, kb.ReadChunkImage, 1)
+	require.Len(t, images, 1)
+	require.Equal(t, []string{"chart"}, kb.reads)
+	require.Equal(t, []int{0}, positions)
+}
+
 func TestFAQImageNoteUsesFinalHandlesAfterCitationExpansion(t *testing.T) {
 	cm := contextImagesManage(true)
 	cm.FAQPriorityEnabled = true
