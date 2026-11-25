@@ -392,15 +392,19 @@ func (c *Client) exportFAQEntries(ctx context.Context, path string) ([]byte, err
 
 // FAQFailedEntry represents a failed entry during FAQ import/validation.
 type FAQFailedEntry struct {
-	Index             int      `json:"index"`
-	Reason            string   `json:"reason"`
-	TagName           string   `json:"tag_name,omitempty"`
-	StandardQuestion  string   `json:"standard_question"`
-	SimilarQuestions  []string `json:"similar_questions,omitempty"`
-	NegativeQuestions []string `json:"negative_questions,omitempty"`
-	Answers           []string `json:"answers,omitempty"`
-	AnswerAll         bool     `json:"answer_all,omitempty"`
-	IsDisabled        bool     `json:"is_disabled,omitempty"`
+	FailureType              string   `json:"failure_type,omitempty"`       // pre_validation or post_validation
+	IsPartialFailure         bool     `json:"is_partial_failure,omitempty"` // Imported with questions removed
+	RemovedSimilarQuestions  []string `json:"removed_similar_questions,omitempty"`
+	RemovedNegativeQuestions []string `json:"removed_negative_questions,omitempty"`
+	Index                    int      `json:"index"`
+	Reason                   string   `json:"reason"`
+	TagName                  string   `json:"tag_name,omitempty"`
+	StandardQuestion         string   `json:"standard_question"`
+	SimilarQuestions         []string `json:"similar_questions,omitempty"`
+	NegativeQuestions        []string `json:"negative_questions,omitempty"`
+	Answers                  []string `json:"answers,omitempty"`
+	AnswerAll                bool     `json:"answer_all,omitempty"`
+	IsDisabled               bool     `json:"is_disabled,omitempty"`
 }
 
 // FAQSuccessEntry represents a successfully imported FAQ entry.
