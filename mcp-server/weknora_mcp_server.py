@@ -616,8 +616,10 @@ class WeKnoraClient:
                             f"Server error: {event_data.get('content', 'unknown error')}"
                         )
                     elif response_type in ("complete", "stop"):
+                        metadata = event_data.get("data")
+                        final = metadata.get("final_content") if isinstance(metadata, dict) else None
                         result = {
-                            "answer": "".join(answer_chunks),
+                            "answer": final if response_type == "complete" and isinstance(final, str) and final else "".join(answer_chunks),
                             "references": references,
                             "_debug_events": debug_events,
                         }
