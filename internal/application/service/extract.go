@@ -24,6 +24,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"go.uber.org/dig"
 )
 
 const (
@@ -188,30 +189,38 @@ type ChunkExtractService struct {
 	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	taskInspector     *asynq.Inspector
 	// spanTracker records this graph-extract task's subspan under the
 	// parent attempt's postprocess stage so the trace viewer shows real
 	// per-chunk graph extraction time rather than the upstream's enqueue.
 	spanTracker SpanTracker
 }
 
-// NewChunkExtractService creates a new chunk extract service
-func NewChunkExtractService(
-	config *config.Config,
-	modelService interfaces.ModelService,
-	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
-	knowledgeRepo interfaces.KnowledgeRepository,
-	chunkRepo interfaces.ChunkRepository,
-	graphEngine interfaces.RetrieveGraphRepository,
-	spanTracker SpanTracker,
-) interfaces.TaskHandler {
+// ChunkExtractDependencies resolves the worker's services, including its Standard-mode queue.
+type ChunkExtractDependencies struct {
+	dig.In
+
+	Config            *config.Config
+	ModelService      interfaces.ModelService
+	KnowledgeBaseRepo interfaces.KnowledgeBaseRepository
+	KnowledgeRepo     interfaces.KnowledgeRepository
+	ChunkRepo         interfaces.ChunkRepository
+	GraphEngine       interfaces.RetrieveGraphRepository
+	SpanTracker       SpanTracker
+	Inspector         *asynq.Inspector `optional:"true"`
+}
+
+// NewChunkExtractService creates a new chunk extract service.
+func NewChunkExtractService(deps ChunkExtractDependencies) interfaces.TaskHandler {
 	return &ChunkExtractService{
-		template:          config.ExtractManager.ExtractGraph,
-		modelService:      modelService,
-		knowledgeBaseRepo: knowledgeBaseRepo,
-		knowledgeRepo:     knowledgeRepo,
-		chunkRepo:         chunkRepo,
-		graphEngine:       graphEngine,
-		spanTracker:       spanTracker,
+		template:          deps.Config.ExtractManager.ExtractGraph,
+		modelService:      deps.ModelService,
+		knowledgeBaseRepo: deps.KnowledgeBaseRepo,
+		knowledgeRepo:     deps.KnowledgeRepo,
+		chunkRepo:         deps.ChunkRepo,
+		graphEngine:       deps.GraphEngine,
+		spanTracker:       deps.SpanTracker,
+		taskInspector:     deps.Inspector,
 	}
 }
 
@@ -334,38 +343,26 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		return nil
 	}
 
-	chatModel, err := s.modelService.GetChatModel(ctx, p.ModelID)
-	if err != nil {
-		logger.Errorf(ctx, "failed to get chat model: %v", err)
-		handleErr = err
-		return err
+	source := graphWriteCheckpoint{
+		Revision: chunk.ContentRevision, UpdatedAt: chunk.UpdatedAt,
+		KnowledgeID: chunk.KnowledgeID, KBID: chunk.KnowledgeBaseID,
 	}
-
-	template := &types.PromptTemplateStructured{
-		Description: types.AppendCustomPromptInstructions(
-			s.template.Description, extractCfg.CustomInstructions, "graph_extraction"),
-		Tags: extractCfg.Tags,
-		Examples: []types.GraphData{
-			{
-				Text:     extractCfg.Text,
-				Node:     extractCfg.Nodes,
-				Relation: extractCfg.Relations,
-			},
-		},
-	}
-	extractor := chatpipeline.NewExtractor(chatModel, template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
-	if errors.Is(err, chatpipeline.ErrModelDeclined) {
-		// The model answered in prose (e.g. declined a table-of-contents
-		// chunk). Replaying the same input cannot help, so finish the task
-		// instead of letting asynq retry it (issue #3600).
-		logger.Warnf(ctx, "graph extraction skipped for chunk %s: %v", p.ChunkID, err)
-		graphOut["skipped"] = "model_declined"
-		return nil
-	}
-	if err != nil {
-		handleErr = err
-		return err
+	graph := s.loadGraphWriteCheckpoint(ctx, t, chunk)
+	reusedGraph := graph != nil
+	if reusedGraph {
+		graphOut["reused_extract"] = true
+	} else {
+		graph, err = s.extractChunkGraph(ctx, p.ModelID, chunk.Content, extractCfg)
+		if errors.Is(err, chatpipeline.ErrModelDeclined) {
+			// The model declined this input. Replaying it cannot help (#3600).
+			logger.Warnf(ctx, "graph extraction skipped for chunk %s: %v", p.ChunkID, err)
+			graphOut["skipped"] = "model_declined"
+			return nil
+		}
+		if err != nil {
+			handleErr = err
+			return err
+		}
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
@@ -375,6 +372,12 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		return nil
 	}
 
+	// A retry must never write an older snapshot after a concurrent edit.
+	if reusedGraph && !source.matches(chunk) {
+		handleErr = errors.New("source chunk changed during graph write retry")
+		return handleErr
+	}
+
 	for _, node := range graph.Node {
 		node.Chunks = []string{chunk.ID}
 	}
@@ -382,6 +385,9 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},
 		[]*types.GraphData{graph},
 	); err != nil {
+		if !reusedGraph {
+			s.saveGraphWriteCheckpoint(ctx, t, source, graph, err)
+		}
 		logger.Errorf(ctx, "failed to add graph: %v", err)
 		handleErr = err
 		return err
@@ -415,6 +421,31 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		graphOut["sample_relations"] = out
 	}
 	return nil
+}
+
+func (s *ChunkExtractService) extractChunkGraph(
+	ctx context.Context, modelID, content string, extractCfg types.ExtractConfig,
+) (*types.GraphData, error) {
+	chatModel, err := s.modelService.GetChatModel(ctx, modelID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get chat model: %v", err)
+		return nil, err
+	}
+
+	template := &types.PromptTemplateStructured{
+		Description: types.AppendCustomPromptInstructions(
+			s.template.Description, extractCfg.CustomInstructions, "graph_extraction"),
+		Tags: extractCfg.Tags,
+		Examples: []types.GraphData{
+			{
+				Text:     extractCfg.Text,
+				Node:     extractCfg.Nodes,
+				Relation: extractCfg.Relations,
+			},
+		},
+	}
+	extractor := chatpipeline.NewExtractor(chatModel, template)
+	return extractor.Extract(ctx, content)
 }
 
 // DataTableExtractPayload represents the table extract task payload
