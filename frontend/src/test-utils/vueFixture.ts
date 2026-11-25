@@ -64,7 +64,9 @@ export function fixture(
       .replace('return __returned__', '__expose(__returned__); return __returned__')
     const require = createRequire(file)
     const compiled = evaluate(script, {
-      vue, '@/utils/assistantDataChange': dataChange, ...dependencies,
+      vue, '@/utils/assistantDataChange': dataChange,
+      '@/utils/api-base': { getApiBaseUrl: () => '' },
+      ...dependencies,
     }, name => {
       if (name.endsWith('.vue')) return { default: {} }
       if (name.startsWith('.')) return require(name)

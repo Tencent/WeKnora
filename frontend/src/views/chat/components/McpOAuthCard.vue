@@ -53,6 +53,7 @@ import {
   refreshMCPMetadata,
   MCP_OAUTH_CALLBACK_PATH,
 } from '@/api/mcp-service'
+import { getApiBaseUrl } from '@/utils/api-base'
 import {
   cancelEmbedMCPOAuth,
   getEmbedMCPOAuthAuthorizeURL,
@@ -199,10 +200,10 @@ const authorize = async () => {
   if (props.resolved || authorizing.value) return
   authorizing.value = true
   try {
-    const redirectUri = window.location.origin + MCP_OAUTH_CALLBACK_PATH
+    const redirectUri = window.location.origin + getApiBaseUrl() + MCP_OAUTH_CALLBACK_PATH
     const frontendRedirect = useEmbedOAuth()
       ? window.location.pathname + window.location.search
-      : '/'
+      : `${getApiBaseUrl()}/`
     const authorization = useEmbedOAuth()
       ? await getEmbedMCPOAuthAuthorizeURL(
         props.embedChannelId!,

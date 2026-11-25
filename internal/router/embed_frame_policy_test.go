@@ -92,4 +92,23 @@ func TestEmbedFramePolicy(t *testing.T) {
 		r.ServeHTTP(w, req)
 		require.Equal(t, 403, w.Code, uri)
 	}
+
+	// A prefixed page URI resolves the same channel once APP_BASE_PATH is
+	// set (nginx forwards the original request URI in X-Embed-Page-URI).
+	t.Setenv("APP_BASE_PATH", "/weknora")
+	for _, tc := range []struct {
+		uri    string
+		status int
+	}{
+		{"/weknora/embed/active", 204},
+		{"/weknora/embed/active?token=<redacted>", 204},
+		{"/weknora/embed/disabled", 403},
+		{"/embed/active", 204},
+	} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/embed-frame-policy", nil)
+		req.Header.Set("X-Embed-Page-URI", tc.uri)
+		r.ServeHTTP(w, req)
+		require.Equal(t, tc.status, w.Code, tc.uri)
+	}
 }

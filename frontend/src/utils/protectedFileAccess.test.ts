@@ -98,3 +98,36 @@ test('all file proxies are recognized as protected proxy paths', () => {
   assert.equal(isProtectedFileProxyPath('/api/v1/embed/ch-1/files'), true)
   assert.equal(isProtectedFileProxyPath('/api/v1/embed/ch-1/config'), false)
 })
+
+test('prefixed deployment: proxy URLs carry the app base path', () => {
+  const base = '/weknora'
+  const encoded = encodeURIComponent(RESOURCE)
+
+  assert.equal(
+    buildProtectedFileRequest(RESOURCE, { mode: 'tenant' }, base)?.url,
+    `/weknora/files?file_path=${encoded}`,
+  )
+  assert.equal(
+    buildProtectedFileRequest(RESOURCE, { mode: 'embed', channelId: 'ch-1', token: 'tok-1' }, base)
+      ?.url,
+    `/weknora/api/v1/embed/ch-1/files?file_path=${encoded}`,
+  )
+  assert.equal(
+    buildProtectedFileRequest(RESOURCE, { mode: 'knowledgeBase', kbId: 'kb-1' }, base)?.url,
+    `/weknora/api/v1/knowledge-bases/kb-1/files?file_path=${encoded}`,
+  )
+})
+
+test('prefixed deployment: prefixed proxy paths still classify', () => {
+  const base = '/weknora'
+
+  assert.equal(isProtectedFileProxyPath('/weknora/files', base), true)
+  assert.equal(isProtectedFileProxyPath('/weknora/api/v1/embed/ch-1/files', base), true)
+  assert.equal(
+    isProtectedFileProxyPath('/weknora/api/v1/knowledge-bases/kb-1/files', base),
+    true,
+  )
+  assert.equal(isProtectedFileProxyPath('/weknora/api/v1/embed/ch-1/config', base), false)
+  // A path that merely shares the textual prefix is not a proxy path.
+  assert.equal(isProtectedFileProxyPath('/weknora2/files', base), false)
+})

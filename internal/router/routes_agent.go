@@ -365,7 +365,15 @@ func embedFramePolicyHandler(svc interfaces.EmbedChannelService) gin.HandlerFunc
 			c.AbortWithStatus(http.StatusForbidden)
 			return
 		}
-		channelID := embedChannelIDFromPath(u.Path)
+		// The header carries the public page URI, which includes APP_BASE_PATH
+		// when the deployment serves under a prefix (nginx forwards the
+		// original request URI). Strip it so the channel id resolves the same
+		// way as for a root deployment.
+		pagePath := u.Path
+		if stripped, ok := stripBasePathPrefix(pagePath, AppBasePath()); ok {
+			pagePath = stripped
+		}
+		channelID := embedChannelIDFromPath(pagePath)
 		if channelID == "" {
 			c.AbortWithStatus(http.StatusForbidden)
 			return

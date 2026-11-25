@@ -399,6 +399,7 @@ import {
   type McpCredentialField,
   type MCPOAuthTokenState,
 } from '@/api/mcp-service'
+import { getApiBaseUrl } from '@/utils/api-base'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import McpMetadataPanel from './McpMetadataPanel.vue'
 import CredentialResource, {
@@ -687,11 +688,11 @@ async function startAuthorize(serviceId: string) {
   const generation = oauthGeneration
   oauthAuthorizing.value = true
   try {
-    const redirectUri = window.location.origin + MCP_OAUTH_CALLBACK_PATH
+    const redirectUri = window.location.origin + getApiBaseUrl() + MCP_OAUTH_CALLBACK_PATH
     // After the backend completes the exchange it bounces the popup here. The
     // app root is harmless; the popup is closed by the opener below once the
     // authorization status flips, so this page is only shown briefly.
-    const frontendRedirect = '/'
+    const frontendRedirect = `${getApiBaseUrl()}/`
     const authorization = await getMCPOAuthAuthorizeURL(serviceId, {
       redirect_uri: redirectUri,
       frontend_redirect: frontendRedirect,

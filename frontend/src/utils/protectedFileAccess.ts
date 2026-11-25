@@ -23,6 +23,29 @@ const KB_FILE_PROXY_PATH_RE = /^\/api\/v1\/knowledge-bases\/[^/]+\/files$/;
 const EMBED_FILE_PROXY_PATH_RE = /^\/api\/v1\/embed\/[^/]+\/files$/;
 const MESSAGE_FILE_PROXY_PATH_RE = /^\/api\/v1\/sessions\/[^/]+\/messages\/[^/]+\/files$/;
 
+/**
+ * The Vite base path the SPA was built with (`/weknora`, or '' when served
+ * at root). Safe under node:test, where import.meta.env is undefined.
+ * The `base` parameter exists so tests can exercise a prefixed deployment
+ * without a Vite build; callers leave it at the default.
+ */
+export function viteBasePath(): string {
+  return (import.meta.env?.BASE_URL || '/').replace(/\/+$/, '')
+}
+
+/** Prefix a root-relative path with the app base path (no-op at root). */
+export function withAppBasePath(path: string, base: string = viteBasePath()): string {
+  return `${base}${path}`
+}
+
+/** Remove the app base path from the front of a pathname, if present. */
+export function stripAppBasePath(pathname: string, base: string = viteBasePath()): string {
+  if (!base) return pathname
+  if (pathname === base) return '/'
+  if (pathname.startsWith(`${base}/`)) return pathname.slice(base.length)
+  return pathname
+}
+
 export type ProtectedFileAccessContext =
   /** 登录态用户：Bearer + 选中租户。 */
   | { mode: 'tenant' }
@@ -96,13 +119,16 @@ export function isProviderFileURL(url: string): boolean {
   return PROVIDER_FILE_SCHEME_RE.test(trimmed) || STORAGE_BACKEND_FILE_SCHEME_RE.test(trimmed);
 }
 
-/** 是否为受保护文件代理之一的路径。 */
-export function isProtectedFileProxyPath(pathname: string): boolean {
+/** Whether a pathname is one of the protected file proxies. The pathname is
+ * matched after removing the app base path, so both `/files` and
+ * `/weknora/files` classify under a `/weknora` deployment. */
+export function isProtectedFileProxyPath(pathname: string, base: string = viteBasePath()): boolean {
+  const path = stripAppBasePath(pathname, base);
   return (
-    pathname === '/files'
-    || KB_FILE_PROXY_PATH_RE.test(pathname)
-    || MESSAGE_FILE_PROXY_PATH_RE.test(pathname)
-    || EMBED_FILE_PROXY_PATH_RE.test(pathname)
+    path === '/files'
+    || KB_FILE_PROXY_PATH_RE.test(path)
+    || MESSAGE_FILE_PROXY_PATH_RE.test(path)
+    || EMBED_FILE_PROXY_PATH_RE.test(path)
   );
 }
 
@@ -137,6 +163,7 @@ function tenantRequestHeaders(): Record<string, string> {
 export function buildProtectedFileRequest(
   sourceURL: string,
   access: ProtectedFileAccessContext,
+  base: string = viteBasePath(),
 ): ProtectedFileRequest | null {
   const filePath = sourceURL.trim();
   if (!isProviderFileURL(filePath)) return null;
@@ -150,24 +177,32 @@ export function buildProtectedFileRequest(
     // 不如跳过等待 bootstrap 完成后的下一次水合。
     if (!channelId || !token) return null;
     return {
-      url: `/api/v1/embed/${encodeURIComponent(channelId)}/files?${query}`,
+      url: withAppBasePath(`/api/v1/embed/${encodeURIComponent(channelId)}/files?${query}`, base),
       headers: { Authorization: `Embed ${token}` },
     };
   }
 
   if (access.mode === 'knowledgeBase') {
     return {
-      url: `/api/v1/knowledge-bases/${encodeURIComponent(access.kbId.trim())}/files?${query}`,
+      url: withAppBasePath(
+        `/api/v1/knowledge-bases/${encodeURIComponent(access.kbId.trim())}/files?${query}`,
+        base,
+      ),
       headers: tenantRequestHeaders(),
     };
   }
 
   if (access.mode === 'message') {
     return {
-      url: `/api/v1/sessions/${encodeURIComponent(access.sessionId.trim())}/messages/${encodeURIComponent(access.messageId.trim())}/files?${query}`,
+      url: withAppBasePath(
+        `/api/v1/sessions/${encodeURIComponent(access.sessionId.trim())}/messages/${encodeURIComponent(access.messageId.trim())}/files?${query}`,
+        base,
+      ),
       headers: tenantRequestHeaders(),
     };
   }
 
-  return { url: `/files?${query}`, headers: tenantRequestHeaders() };
+  // Proxy URLs are fetched with plain fetch(), not the axios instance, so
+  // they must carry the app base path themselves under a prefixed deployment.
+  return { url: withAppBasePath(`/files?${query}`, base), headers: tenantRequestHeaders() };
 }

@@ -30,6 +30,11 @@ function resolveFrontendCommit(): string {
 
 const FRONTEND_COMMIT = resolveFrontendCommit()
 
+// The subpath prefix the app is served under ('/weknora', or '' at root).
+// Dev/preview proxy rules and the embed fallback must match the prefixed
+// paths the browser actually requests, e.g. /weknora/api/...
+const APP_BASE_PATH = (process.env.VITE_BASE_PATH || '/').replace(/\/+$/, '')
+
 /** Dev parity with nginx: serve embed.html for /embed/:channelId (not the main SPA). */
 function embedHtmlDevFallback(): Plugin {
   return {
@@ -40,8 +45,8 @@ function embedHtmlDevFallback(): Plugin {
         const qIdx = raw.indexOf('?')
         const path = qIdx >= 0 ? raw.slice(0, qIdx) : raw
         const qs = qIdx >= 0 ? raw.slice(qIdx) : ''
-        if (path.startsWith('/embed/') && path !== '/embed.html' && !path.includes('.')) {
-          req.url = `/embed.html${qs}`
+        if (path.startsWith(`${APP_BASE_PATH}/embed/`) && path !== `${APP_BASE_PATH}/embed.html` && !path.includes('.')) {
+          req.url = `${APP_BASE_PATH}/embed.html${qs}`
         }
         next()
       })
@@ -156,7 +161,7 @@ export default defineConfig({
     host: true,
     // 代理配置，用于开发环境
     proxy: {
-      '/mcp/': {
+      [`${APP_BASE_PATH}/mcp/`]: {
         target: DEV_PROXY_TARGET,
         changeOrigin: true,
         secure: false,
@@ -164,7 +169,7 @@ export default defineConfig({
         timeout: 3_600_000,
         proxyTimeout: 3_600_000,
       },
-      '/api': {
+      [`${APP_BASE_PATH}/api`]: {
         target: DEV_PROXY_TARGET,
         changeOrigin: true,
         secure: false,
@@ -176,7 +181,7 @@ export default defineConfig({
         timeout: 180_000,
         proxyTimeout: 180_000,
       },
-      '/files': {
+      [`${APP_BASE_PATH}/files`]: {
         target: DEV_PROXY_TARGET,
         changeOrigin: true,
         secure: false,
@@ -190,14 +195,14 @@ export default defineConfig({
     port: 4173,
     host: true,
     proxy: {
-      '/mcp/': {
+      [`${APP_BASE_PATH}/mcp/`]: {
         target: DEV_PROXY_TARGET,
         changeOrigin: true,
         secure: false,
         timeout: 3_600_000,
         proxyTimeout: 3_600_000,
       },
-      '/api': {
+      [`${APP_BASE_PATH}/api`]: {
         target: DEV_PROXY_TARGET,
         changeOrigin: true,
         secure: false,
@@ -205,7 +210,7 @@ export default defineConfig({
         timeout: 180_000,
         proxyTimeout: 180_000,
       },
-      '/files': {
+      [`${APP_BASE_PATH}/files`]: {
         target: DEV_PROXY_TARGET,
         changeOrigin: true,
         secure: false,

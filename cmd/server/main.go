@@ -38,6 +38,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/envfile"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
+	routerpkg "github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -83,9 +84,12 @@ func main() {
 		systemSettingSvc interfaces.SystemSettingService,
 		modelCatalogSvc *service.ModelCatalogService,
 	) error {
-		// Create HTTP server
+		// Create HTTP server. The router is wrapped so the application can
+		// be served under APP_BASE_PATH (for example "/weknora") when a
+		// gateway forwards the prefixed path without stripping it; with the
+		// variable unset this is a pass-through.
 		server := &http.Server{
-			Handler: router,
+			Handler: routerpkg.StripAppBasePath(router),
 		}
 
 		addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

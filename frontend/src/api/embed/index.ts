@@ -1,4 +1,5 @@
 import { get, post, put, del } from '@/utils/request'
+import { getApiBaseUrl } from '@/utils/api-base'
 import { resolveEmbedBaseUrl } from '@/utils/embedBaseUrl'
 
 export interface EmbedChannel {
@@ -604,14 +605,16 @@ function escapeHtmlAttr(value: string): string {
     .replace(/>/g, '&gt;')
 }
 
-/** Validate that a base URL is a well-formed http(s) origin; fall back otherwise. */
+/** Validate that a base URL is a well-formed http(s) URL; fall back otherwise.
+ * The path is kept, so a base URL of https://host/weknora keeps the subpath
+ * prefix instead of dropping it. */
 function safeBaseUrl(raw?: string): string {
-  const fallback = window.location.origin
+  const fallback = window.location.origin + getApiBaseUrl()
   if (!raw) return fallback
   try {
     const u = new URL(raw, window.location.href)
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return fallback
-    return u.origin
+    return u.origin + u.pathname.replace(/\/+$/, '')
   } catch {
     return fallback
   }
