@@ -331,9 +331,8 @@ def page_blocks(
     usual_gap = min(statistics.median(gaps), line_h * 1.5) if gaps else line_h * 0.5
 
     norm, positions = normalize_with_positions(page_text)
-    def line_end(at, line):
+    def line_end(at, line, norm_start):
         key = normalize(line["text"])
-        norm_start = next((i for i, p in enumerate(positions) if p >= at), len(norm))
         hit = norm.find(key, norm_start)
         if hit < 0:
             return at
@@ -345,8 +344,14 @@ def page_blocks(
         return end_at
 
     paragraphs: List[Tuple[int, List[dict]]] = []
+    norm_start = 0
     for at, ln in placed:
-        ln = {**ln, "_source_end": line_end(at, ln)}
+        # Line starts are sorted, so earlier offsets cannot qualify again.
+        # This also works when combining-mark reordering makes positions
+        # locally non-monotonic.
+        while norm_start < len(positions) and positions[norm_start] < at:
+            norm_start += 1
+        ln = {**ln, "_source_end": line_end(at, ln, norm_start)}
         if paragraphs:
             prev = paragraphs[-1][1][-1]
             col_right = max(p["bbox"][2] for p in paragraphs[-1][1])
