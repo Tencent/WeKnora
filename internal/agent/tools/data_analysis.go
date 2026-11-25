@@ -23,7 +23,7 @@ import (
 )
 
 // DataAnalysisTableName is the only table name the model needs to know when
-// querying a CSV/Excel document through data_analysis. Each document is loaded
+// querying a CSV/Excel/Word document through data_analysis. Each document is loaded
 // into a physical DuckDB table named after its knowledge ID; that name is
 // never shown to the model. Every query runs on a private connection where
 // "dataset" is a temporary view over the selected document, so the model
@@ -33,12 +33,16 @@ const DataAnalysisTableName = "dataset"
 
 var dataAnalysisTool = BaseTool{
 	name: ToolDataAnalysis,
-	description: "Use this tool when the knowledge is CSV or Excel files. It loads the document into DuckDB " +
-		"and executes a read-only SQL query for data analysis. The selected document is always exposed as " +
+	description: "Use this tool when the knowledge is CSV, Excel, or Word (DOCX) files. " +
+		"It loads the document into DuckDB and executes a read-only SQL query for data analysis. " +
+		"The selected document is always exposed as " +
 		"the single table \"" + DataAnalysisTableName + "\"; write SQL against that table name and never put " +
 		"the document ID inside the SQL. For Excel files with multiple sheets, non-empty sheets are loaded into " +
 		"the same table and the source sheet name is exposed as a '__sheet_name' column so you can " +
-		"filter/aggregate per sheet. A legacy binary .xls is converted to .xlsx before it is read; " +
+		"filter/aggregate per sheet. For Word documents, every table with a header row and at least one data row " +
+		"is loaded into the same table and the source table number is exposed as a '__table_index' column " +
+		"so you can filter/aggregate per table; all values are loaded as text. " +
+		"A legacy binary .xls is converted to .xlsx before it is read; " +
 		"if that conversion fails, re-save the workbook as .xlsx or export the sheet as .csv. " +
 		"If the user's question requires data statistics, convert the question into SQL and execute it.",
 	schema: utils.GenerateSchema[DataAnalysisInput](),
@@ -856,10 +860,12 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 		return t.LoadFromCSV(ctx, localPath, tableName)
 	case "xlsx", "xls":
 		return t.LoadFromExcel(ctx, localPath, tableName)
+	case "docx":
+		return t.LoadFromDocx(ctx, localPath, tableName)
 	default:
 		logger.Warnf(ctx, "[Tool][DataAnalysis] Unsupported file type '%s' for knowledge '%s' in session %s",
 			fileType, knowledge.ID, t.sessionID)
-		return nil, fmt.Errorf("unsupported file type: %s (supported types: csv, xlsx, xls)", fileType)
+		return nil, fmt.Errorf("unsupported file type: %s (supported types: csv, xlsx, xls, docx)", fileType)
 	}
 }
 

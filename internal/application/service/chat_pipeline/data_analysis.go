@@ -66,7 +66,7 @@ func (p *PluginDataAnalysis) OnEvent(
 	if !chatManage.NeedsRetrieval() {
 		return next()
 	}
-	// 1. Check if there are any CSV/Excel files in MergeResult
+	// 1. Check if there are any CSV/Excel/Word files in MergeResult
 	var dataFiles []*types.SearchResult
 	for _, result := range chatManage.MergeResult {
 		if isDataFile(result.KnowledgeFilename) {
@@ -298,7 +298,12 @@ func parseDataAnalysisPlan(content string) (*dataAnalysisPlan, error) {
 
 func isDataFile(filename string) bool {
 	lower := strings.ToLower(filename)
-	return strings.HasSuffix(lower, ".csv") || strings.HasSuffix(lower, ".xlsx") || strings.HasSuffix(lower, ".xls")
+	for _, suffix := range []string{".csv", ".xlsx", ".xls", ".docx"} {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // filterOutTableChunks filters out table column and table summary chunks from search results

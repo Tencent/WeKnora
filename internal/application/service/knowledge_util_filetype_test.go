@@ -91,7 +91,7 @@ func TestImportExtensionSetIsSharedAcrossPaths(t *testing.T) {
 }
 
 func TestIsDataTableFileType(t *testing.T) {
-	for _, ext := range []string{"csv", "xlsx", "xls", ".XLSX"} {
+	for _, ext := range []string{"csv", "xlsx", "xls", ".XLSX", "docx", ".DOCX"} {
 		if !isDataTableFileType(ext) {
 			t.Errorf("isDataTableFileType(%q) = false, want true", ext)
 		}

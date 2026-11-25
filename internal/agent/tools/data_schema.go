@@ -12,7 +12,8 @@ import (
 
 var dataSchemaTool = BaseTool{
 	name: ToolDataSchema,
-	description: "Use this tool to get the schema information of a CSV or Excel file loaded into DuckDB. " +
+	description: "Use this tool to get the schema information of a CSV, Excel, " +
+		"or Word (DOCX) file loaded into DuckDB. " +
 		"It returns the columns and row count. When querying the document with data_analysis, " +
 		"reference it as the table \"" + DataAnalysisTableName + "\".",
 	schema: utils.GenerateSchema[DataSchemaInput](),
