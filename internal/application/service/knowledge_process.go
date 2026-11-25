@@ -4415,6 +4415,11 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		for i := range sourceBlocks {
 			sourceBlocks[i].Locator.SourceHash = knowledge.FileHash
 		}
+		for i := range convertResult.ImageRefs {
+			for j := range convertResult.ImageRefs[i].SourceLocators {
+				convertResult.ImageRefs[i].SourceLocators[j].SourceHash = knowledge.FileHash
+			}
+		}
 	}
 	sanitizeReadResult(convertResult)
 	normalizeStarted := time.Now()
