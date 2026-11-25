@@ -114,6 +114,13 @@ const blocks = computed(() => {
         margin: 8px 0;
         line-height: 1.7;
       }
+
+      // Reference chunks can embed <img>. The wrapper clips overflow-x, so an
+      // uncapped native-size image would be cut off with no way to see the rest.
+      :deep(img) {
+        max-width: 100%;
+        height: auto;
+      }
     }
   }
 

@@ -212,7 +212,9 @@ func PreviewChunking(c *gin.Context) {
 	logger.Debugf(ctx, "chunker preview: tier=%s chunks=%d", diag.SelectedTier, len(chunks))
 
 	lang := chunker.LangMixed
-	if len(profile.DetectedLangs) > 0 {
+	if cfg.TokenLimit > 0 {
+		lang = chunker.TokenBudgetLanguage(cfg)
+	} else if len(profile.DetectedLangs) > 0 {
 		lang = profile.DetectedLangs[0]
 	}
 

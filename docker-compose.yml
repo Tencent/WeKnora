@@ -368,6 +368,8 @@ services:
       # Built-in MCP ask deadline (Go duration or bare seconds; defaults to 4m).
       - WEKNORA_MCP_ASK_TIMEOUT=${WEKNORA_MCP_ASK_TIMEOUT:-}
       - WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT=${WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT:-}
+      # 已保存 MCP 工具目录超过此时长后，下次使用时在后台重新拉取（默认 1h，负数关闭）
+      - WEKNORA_AGENT_MCP_DIRECTORY_MAX_AGE=${WEKNORA_AGENT_MCP_DIRECTORY_MAX_AGE:-}
       # MCP 工具人工审批失败时是否放行（true 放行 / 默认 fail-close 拒绝）
       - WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=${WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN:-}
       # Tenant / RBAC（详见 website-docs/03-features/01-tenant-auth.md 与 .env.example 注释）
@@ -709,6 +711,12 @@ services:
     ports:
       - "7474:7474"
       - "7687:7687"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7474/"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: always
     networks:
       - WeKnora-network

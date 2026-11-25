@@ -24,6 +24,7 @@ var chunksFields = []string{
 }
 
 type ChunksOptions struct {
+	DocumentIDs      []string
 	Query            string
 	KB               string // raw --kb (UUID or name)
 	KBID             string // resolved id; populated before HybridSearch
@@ -58,6 +59,7 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 		Use:   `chunks "<query>"`,
 		Short: "Hybrid (vector + keyword) chunk retrieval against a knowledge base",
 		Example: `  weknora search chunks "what is RAG?" --kb engineering
+  weknora search chunks "return period" --kb policies --doc <document-id>
   weknora search chunks "embedding model" --kb kb_abc --limit 20
   weknora search chunks "retry policy" --kb engineering --no-keyword  # vector-only`,
 		Long: `Hybrid (vector + keyword) retrieval against the knowledge base. Pass
@@ -108,6 +110,7 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 // the constructor readable. --kb is optional: when omitted it falls back to
 // WEKNORA_KB_ID / the linked directory via Factory.ResolveKB.
 func bindChunksFlags(cmd *cobra.Command, opts *ChunksOptions) {
+	cmd.Flags().StringArrayVar(&opts.DocumentIDs, "doc", nil, "Restrict retrieval to this document ID (repeatable)")
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name (overrides env / project link)")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 8, "Maximum results to return (default 8 - tuned for RAG context window; list commands default to 30)")
 	cmd.Flags().Float64Var(&opts.VectorThreshold, "vector-threshold", 0, "Vector retrieval similarity floor (per-channel, pre-fusion); 0 = no filter")
@@ -139,6 +142,7 @@ func runChunks(ctx context.Context, opts *ChunksOptions, fopts *cmdutil.FormatOp
 	}
 
 	params := &sdk.SearchParams{
+		KnowledgeIDs:         opts.DocumentIDs,
 		QueryText:            opts.Query,
 		MatchCount:           opts.Limit,
 		VectorThreshold:      opts.VectorThreshold,

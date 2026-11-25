@@ -63,6 +63,10 @@ func (t *MCPRegisteredTool) Execute(ctx context.Context, args json.RawMessage) (
 			current.authWaitTimeoutSeconds,
 		)
 		target.registeredName = t.Name()
+		target.serverInstructions = current.serverInstructions
+		target.serverVersion = current.serverVersion
+		target.savedAt = current.savedAt
+		target.revalidate = current.revalidate
 		return target.Execute(ctx, args)
 	}
 	return mcpDiscoveryFailure(

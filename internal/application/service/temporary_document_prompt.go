@@ -32,16 +32,12 @@ func (s *temporaryDocumentService) ResolveForPrompt(
 	if len(documentIDs) > types.MaxTemporaryAttachmentsPerMessage {
 		return nil, fmt.Errorf("a message can use at most %d attachments", types.MaxTemporaryAttachmentsPerMessage)
 	}
+	documentIDs = uniqueStrings(documentIDs)
 	perDocumentBudget := temporaryDocumentPromptBudget
 	if len(documentIDs) > 0 {
 		perDocumentBudget = temporaryDocumentPromptBudget / len(documentIDs)
 	}
-	seen := make(map[string]struct{}, len(documentIDs))
 	for _, documentID := range documentIDs {
-		if _, duplicate := seen[documentID]; duplicate {
-			continue
-		}
-		seen[documentID] = struct{}{}
 		document, err := s.resolveInSession(ctx, tenantID, sessionID, documentID)
 		if err != nil {
 			return nil, err
@@ -86,13 +82,9 @@ func (s *temporaryDocumentService) DescribeForAgent(
 	if len(documentIDs) > types.MaxTemporaryAttachmentsPerMessage {
 		return nil, fmt.Errorf("a message can use at most %d attachments", types.MaxTemporaryAttachmentsPerMessage)
 	}
+	documentIDs = uniqueStrings(documentIDs)
 	inlineBudget := agentAttachmentInlineBudget
-	seen := make(map[string]struct{}, len(documentIDs))
 	for _, documentID := range documentIDs {
-		if _, duplicate := seen[documentID]; duplicate {
-			continue
-		}
-		seen[documentID] = struct{}{}
 		document, err := s.resolveInSession(ctx, tenantID, sessionID, documentID)
 		if err != nil {
 			return nil, err

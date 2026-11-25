@@ -1,4 +1,4 @@
-.PHONY: proto build run docker-build docker-run clean
+.PHONY: proto build run clean
 
 # 生成 protobuf 代码
 proto:

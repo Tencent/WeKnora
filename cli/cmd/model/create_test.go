@@ -50,7 +50,9 @@ func TestModelCreate_BuildsRequest(t *testing.T) {
 		BaseURL: "http://localhost:11434", Dimension: 768, Default: true,
 	}
 	require.NoError(t, runCreate(context.Background(), opts,
-		&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, map[string]any{"provider": "ollama"}))
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, map[string]any{
+			"provider": "ollama", "embedding_parameters": map[string]any{"truncate_prompt_tokens": 512},
+		}))
 
 	require.NotNil(t, svc.got)
 	assert.Equal(t, "nomic-embed-text", svc.got.Name)
@@ -62,6 +64,7 @@ func TestModelCreate_BuildsRequest(t *testing.T) {
 	emb, ok := svc.got.Parameters["embedding_parameters"].(map[string]any)
 	require.True(t, ok, "embedding_parameters should be a nested map")
 	assert.Equal(t, 768, emb["dimension"])
+	assert.Equal(t, 512, emb["truncate_prompt_tokens"])
 
 	var env struct {
 		OK   bool      `json:"ok"`

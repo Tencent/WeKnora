@@ -31,7 +31,7 @@ function highlightPreviewCode(source: string, lang?: string): string {
   return hljs.highlightAuto(source).value
 }
 
-function createPreviewMarkdownRenderer(): Renderer {
+function createPreviewMarkdownRenderer(renderMermaid = false): Renderer {
   const renderer = new Renderer()
   // GFM task lists: marked emits <input type="checkbox">, which the DOMPurify
   // tag allowlist strips (leaving a plain bullet) — render a styled span.
@@ -45,6 +45,9 @@ function createPreviewMarkdownRenderer(): Renderer {
   }
   renderer.code = ({ text, lang }) => {
     const source = typeof text === 'string' ? text : ''
+    if (renderMermaid && /^mermaid(?:\s|$)/i.test(lang?.trim() ?? '')) {
+      return `<pre data-preview-mermaid><code class="hljs">${escapeHTML(source)}</code></pre>`
+    }
     return `<pre><code class="hljs">${highlightPreviewCode(source, lang)}</code></pre>`
   }
   return renderer
@@ -57,6 +60,7 @@ const previewMarked = new Marked({
 })
 previewMarked.use(markedKatex({ throwOnError: false, nonStandard: true }))
 previewMarked.use(literalSingleTildeExtension)
+const mermaidPreviewRenderer = createPreviewMarkdownRenderer(true)
 
 function preprocessMathDelimiters(rawText: string): string {
   if (!rawText || typeof rawText !== 'string') return ''
@@ -72,6 +76,7 @@ export interface DocumentPreviewMarkdownOptions {
    * dropped so the document title is not rendered twice.
    */
   titles?: Array<string | null | undefined>
+  renderMermaid?: boolean
 }
 
 export function renderDocumentPreviewMarkdown(
@@ -85,5 +90,6 @@ export function renderDocumentPreviewMarkdown(
     ? stripDuplicateLeadingH1(markdown, options.titles)
     : markdown
   const mathSafe = preprocessMathDelimiters(deduped)
-  return sanitize(previewMarked.parse(safeMarkdownToHTML(mathSafe)) as string)
+  const markedOptions = options.renderMermaid ? { renderer: mermaidPreviewRenderer } : undefined
+  return sanitize(previewMarked.parse(safeMarkdownToHTML(mathSafe), markedOptions) as string)
 }

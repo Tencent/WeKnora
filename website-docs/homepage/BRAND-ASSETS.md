@@ -20,7 +20,7 @@ Paths below written as `public/brand/…`, `public/brands/…` and `public/produ
 
 ## Community showcase
 
-The eight logos below were copied from the maintainer-supplied `素材包.zip` on 2026-10-29. They are served locally from `public/docs/_home/adopters/`, preserving the original artwork and proportions; only trailing whitespace in the Lighthouse SVG was normalized. Cards and company names follow the site theme; only the logo image has a light backing, softened to blue-gray in dark mode. Multiply blending merges white image backgrounds into that backing without inverting or redrawing the marks. `app/adopters.ts` contains concise display copy based on the supplied use cases and [the public showcase issue](https://github.com/Tencent/WeKnora/issues/4801).
+The first eight logos below were copied from the maintainer-supplied `素材包.zip` on 2026-10-29. Eight more brands were added from `合作素材_20261119.zip` on 2026-11-19; existing brands in that pack are not duplicated. The new logos are copied byte-for-byte. All logos are served locally from `public/docs/_home/adopters/`, preserving the original artwork and proportions; only trailing whitespace in the original Lighthouse SVG was normalized. The entire logo card keeps a white background and dark company names in both themes, so white image canvases share the same surface. Original logo colors are preserved without filters or blending; there is no separate inner backing. The section and hover details follow the site theme. `app/adopters.ts` contains concise display copy based on the supplied use cases and [the public showcase issue](https://github.com/Tencent/WeKnora/issues/4801).
 
 | Brand | Supplied file | Local file | Source |
 | --- | --- | --- | --- |
@@ -32,11 +32,20 @@ The eight logos below were copied from the maintainer-supplied `素材包.zip` o
 | 腾讯客服 | `img/06_logo.png` | `tencent-customer-service.png` | Maintainer collection |
 | 微信游戏 | `img/07_logo.png` | `wechat-games.png` | Maintainer collection |
 | 腾讯云轻量应用服务器 | `img/08_logo.svg` | `lighthouse.svg` | Maintainer collection |
+| Shade 壹匣 | `img/09_Shade.svg` | `shade.svg` | `合作素材_20261119.zip` |
+| 随信云链 | `img/10_logo.png` | `suixin-yunlian.png` | `合作素材_20261119.zip` |
+| 检一网络科技 | `img/11_logo.svg` | `jianyi-network.svg` | `合作素材_20261119.zip` |
+| 浙江博圣生物技术股份有限公司 | `img/12_logo.png` | `biosan.png` | `合作素材_20261119.zip` |
+| 诺瓦星云科技股份有限公司 | `img/13_logo.png` | `novastar.png` | `合作素材_20261119.zip` |
+| 智述AI | `img/14_AI.png` | `aistory.png` | `合作素材_20261119.zip` |
+| 深圳盈绰数据科技集团有限公司 | `img/15_logo.png` | `evertro.png` | `合作素材_20261119.zip` |
+| 星知云 | `img/16_logo.png` | `xingzhiyun.png` | `合作素材_20261119.zip` |
 
 - The retained metadata records 智达创客 as POC according to its public submission, correcting `status: "online"` in the supplied JSON. ClawPro and Lighthouse are recorded as ecosystem integrations to describe their knowledge-base integration and deployment-template roles. Adoption stages are not displayed in the cards.
-- The pack's reversed settings for 赛乐医疗 and 智达创客 are corrected to match the artwork: 赛乐医疗 uses A (horizontal logo only); 智达创客, ClawPro, and Lighthouse use B (square logo beside the name). The other four brands use A. Logos keep their original proportions in both layouts. 智达创客 uses CSS scaling to hide only the source image's excessive blank margin; the complete mark and original file are preserved.
-- The retained ClawPro link points to its [official product overview](https://cloud.tencent.com/document/product/213/129156), instead of the general cloud-server documentation index in the pack. Public website/product links are currently not displayed in the cards.
-- Descriptions summarize reported use cases; they are not attributed testimonials. The displayed roster is limited to the eight brands in the supplied pack. Issue #4801 provides source references and accepts submissions/removal requests; additional submissions are not added to the display automatically.
+- The November pack's `online` value is an editorial listing status, not a deployment stage. New brands omit the optional adoption stage unless explicitly stated; 诺瓦星云 reports production use in its supplied description.
+- The original pack's reversed settings for 赛乐医疗 and 智达创客 are corrected to match the artwork: 赛乐医疗 uses A (horizontal logo only); 智达创客, ClawPro, and Lighthouse use B (square logo beside the name). The other four original brands use A. New brands follow the November pack's A/B settings. Logos keep their original proportions in both layouts. 智达创客, 检一网络科技, and 星知云 use CSS scaling to hide only excessive blank canvas; the complete marks and original files are preserved.
+- The retained ClawPro link points to its [official product overview](https://cloud.tencent.com/document/product/213/129156), instead of the general cloud-server documentation index in the pack. Brands with a public website/product link display an external-link icon beside the hover-detail title.
+- Descriptions summarize reported use cases; they are not attributed testimonials. Long introductions in the November pack are condensed for the detail cards; blank introductions for 随信云链 and 检一网络科技 are summarized from their supplied use cases. The displayed roster is limited to the sixteen brands in the supplied packs. Issue #4801 provides source references and accepts submissions/removal requests; additional submissions are not added to the display automatically.
 
 ## Product screenshots
 

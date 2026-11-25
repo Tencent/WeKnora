@@ -5,6 +5,7 @@ import { renderDocumentPreviewMarkdown } from './documentPreviewMarkdown.ts'
 import { isSafePreviewImageHref } from './documentPreviewMarkdown.ts'
 import {
   neutralizeRelativePreviewImages,
+  PREVIEW_IMAGE_PLACEHOLDER,
   resolvePreviewImageLocation,
   rewriteKnowledgeMarkdownImages,
   type PreviewImageFileRow,
@@ -121,6 +122,40 @@ test('neutralize and rewrite leave indented code images unchanged', async () => 
   const rewritten = await rewriteKnowledgeMarkdownImages(markdown, 'doc', deps)
   assert.match(rewritten.markdown, /    !\[example\]\(images\/a\.png\)/)
   assert.match(rewritten.markdown, /\t!\[example\]\(images\/b\.png\)/)
+})
+
+test('preview resolves a balanced parenthesized filename with an image title', async () => {
+  const markdown = '![chart](images/chart(2026).png "Annual chart")'
+  const deps = fakeDeps({
+    folderPath: '',
+    listFiles: async () => ({
+      rows: [{ id: 'chart', fileName: 'chart(2026).png', folderPath: 'images' }],
+      total: 1,
+    }),
+  })
+
+  assert.equal(neutralizeRelativePreviewImages(markdown), `![chart](${PREVIEW_IMAGE_PLACEHOLDER} "Annual chart")`)
+  const rewritten = await rewriteKnowledgeMarkdownImages(markdown, 'doc', deps)
+  assert.equal(rewritten.markdown, '![chart](blob:preview-chart "Annual chart")')
+})
+
+test('preview resolves an indented image in a list but preserves identical code examples', async () => {
+  const image = '![chart](images/chart.png)'
+  const markdown = `    ${image}\n\n- Item\n    ${image}\n\n      ${image}`
+  const deps = fakeDeps({
+    folderPath: '',
+    listFiles: async () => ({
+      rows: [{ id: 'chart', fileName: 'chart.png', folderPath: 'images' }],
+      total: 1,
+    }),
+  })
+
+  assert.equal(neutralizeRelativePreviewImages(markdown), `    ${image}\n\n- Item\n    ![chart](${PREVIEW_IMAGE_PLACEHOLDER})\n\n      ${image}`)
+  const rewritten = await rewriteKnowledgeMarkdownImages(markdown, 'doc', deps)
+  assert.equal(rewritten.markdown, `    ${image}\n\n- Item\n    ![chart](blob:preview-chart)\n\n      ${image}`)
+  const html = renderDocumentPreviewMarkdown(rewritten.markdown, value => value)
+  assert.equal(html.match(/<img\b/g)?.length, 1)
+  assert.match(html, /<img src="blob:preview-chart"/)
 })
 
 test('rewrite leaves the href alone when the object URL fails the preview sanitizer', async () => {

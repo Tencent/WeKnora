@@ -78,6 +78,8 @@ func (e *AgentEngine) streamLLMToEventBus(
 	}
 
 	result := &streamLLMResult{}
+	// Keep incremental answer snapshots without copying the accumulated text on each chunk.
+	var answerText, reasoningText strings.Builder
 	chunkCount := 0
 	responseTypeCounts := make(map[string]int)
 	firstChunkTime := time.Time{}
@@ -86,7 +88,20 @@ func (e *AgentEngine) streamLLMToEventBus(
 	answerDecoder := e.modelContext.StreamDecoder()
 	thinkingDecoder := e.modelContext.StreamDecoder()
 
-	for chunk := range stream {
+	// A provider may take time to close its channel after cancellation.
+streamLoop:
+	for {
+		var chunk types.StreamResponse
+		var ok bool
+		select {
+		case <-llmCtx.Done():
+			break streamLoop
+		case chunk, ok = <-stream:
+			// A buffered chunk and cancellation can both be ready.
+			if !ok || llmCtx.Err() != nil {
+				break streamLoop
+			}
+		}
 		lastChunkAt.Store(time.Now().UnixNano())
 		chunkCount++
 		if chunkCount == 1 {
@@ -138,9 +153,9 @@ func (e *AgentEngine) streamLLMToEventBus(
 			isExtracted := chunk.Data != nil && chunk.Data["source"] != nil
 			if !isExtracted {
 				if chunk.ResponseType == types.ResponseTypeThinking {
-					result.ReasoningContent += chunk.Content
+					reasoningText.WriteString(chunk.Content)
 				} else {
-					result.Content += chunk.Content
+					answerText.WriteString(chunk.Content)
 				}
 			}
 		}
@@ -164,8 +179,11 @@ func (e *AgentEngine) streamLLMToEventBus(
 		}
 
 		if emitFunc != nil {
-			emitFunc(&chunk, result.Content)
+			emitFunc(&chunk, answerText.String())
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
 	}
 	guardTail, guardErr := answerGuard.Flush()
 	if guardErr != nil {
@@ -176,8 +194,10 @@ func (e *AgentEngine) streamLLMToEventBus(
 	}
 	answerTail := guardTail + answerDecoder.Flush()
 	thinkingTail := thinkingDecoder.Flush()
-	result.Content += answerTail
-	result.ReasoningContent += thinkingTail
+	answerText.WriteString(answerTail)
+	reasoningText.WriteString(thinkingTail)
+	result.Content = answerText.String()
+	result.ReasoningContent = reasoningText.String()
 	if emitFunc != nil {
 		if thinkingTail != "" {
 			emitFunc(

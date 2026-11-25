@@ -25,6 +25,28 @@ import (
 
 const FeishuWikiNodeResourceSeparator = ":"
 
+// SelectedResourceDeletedError reports that a directly selected wiki node or
+// Drive item in config.resource_ids has been deleted in Feishu. The sync engine
+// reconciles its deletion and continues processing remaining selected resources.
+type SelectedResourceDeletedError struct {
+	Token string
+	Cause error
+}
+
+func (e *SelectedResourceDeletedError) Error() string {
+	if e == nil {
+		return "selected resource has been deleted in source"
+	}
+	return fmt.Sprintf("selected resource %s has been deleted: %v", e.Token, e.Cause)
+}
+
+func (e *SelectedResourceDeletedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
 // shared.go holds the helpers used by BOTH the wiki Connector (connector.go)
 // and the Drive DriveConnector (connector.go): error classification,
 // config parsing, stream-Checkpoint tuning, the fetch tally, filename/time
@@ -100,7 +122,27 @@ func feishuFailure(err error) (code, codeValue, fallback string) {
 	}
 	s := strings.ToLower(err.Error())
 
+	// App authorization errors take precedence over document-level restrictions.
+	if strings.Contains(s, "auth error") || strings.Contains(s, "access token") ||
+		strings.Contains(s, "missing scope") || strings.Contains(s, "999916") {
+		return "feishu_auth_or_permission", "",
+			"Authentication or app scope error; check credentials and authorized app scopes"
+	}
+	permissionDenied := strings.Contains(s, "permission") ||
+		strings.Contains(s, "forbidden") || strings.Contains(s, "status=403")
 	switch {
+	case errors.Is(err, ErrDownloadTooLarge), strings.Contains(s, "download exceeds max size"):
+		return "feishu_file_too_large", "", "File exceeds the connector download size limit; reduce or split the file"
+	case errors.Is(err, errExportPollsExhausted), strings.Contains(s, "export task timed out"):
+		return "feishu_export_timeout", "", "Document export did not finish in time; retry later or split the document"
+	case permissionDenied && strings.Contains(s, "create export task"):
+		return "feishu_export_forbidden", "",
+			"Export is forbidden; read access alone is insufficient. " +
+				"Ask the owner to grant export permission to the sync identity"
+	case permissionDenied && strings.Contains(s, "download failed"):
+		return "feishu_download_forbidden", "",
+			"Download is forbidden; read access alone is insufficient. " +
+				"Ask the owner to grant download permission to the sync identity"
 	case strings.Contains(s, "auth error"),
 		strings.Contains(s, "invalid access token"),
 		strings.Contains(s, "permission"),
@@ -109,8 +151,7 @@ func feishuFailure(err error) (code, codeValue, fallback string) {
 		return "feishu_auth_or_permission", "", "Authentication or permission error; check credentials and app scopes"
 	case strings.Contains(s, "rate limited"), strings.Contains(s, "status=429"):
 		return "feishu_rate_limited", "", "Feishu API rate limited; will retry on the next sync"
-	case errors.Is(err, errExportPollsExhausted),
-		strings.Contains(s, "timed out"),
+	case strings.Contains(s, "timed out"),
 		strings.Contains(s, "timeout"),
 		strings.Contains(s, "deadline exceeded"):
 		return "feishu_timeout", "", "Export or request timed out; will retry on the next sync"

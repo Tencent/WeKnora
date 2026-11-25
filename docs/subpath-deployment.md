@@ -83,4 +83,7 @@ The internal frontend Nginx configuration continues to serve files and proxy API
 - Changing `VITE_BASE_PATH` requires rebuilding the frontend assets or image.
 - This configuration does not provide runtime-switchable base paths.
 - Auxiliary integrations and complete embedded-page workflows require separate validation.
+- MCP OAuth popup/callback targets and IM webhook callback URLs include the base-path prefix.
+- Keep `APP_EXTERNAL_URL` set to the full external base including the subpath:
+  IM MCP OAuth links and `/r/<token>` image links derive from it.
 - Full OIDC login with a live identity provider should be verified before production rollout.
