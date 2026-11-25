@@ -184,7 +184,13 @@ export function wallClockToISO(local: string, timeZone: string): string {
 export function zonedWallClock(iso: string, timeZone?: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return ''
-  const p = zoneParts(date, timeZone || 'UTC')
+  let p: ReturnType<typeof zoneParts>
+  try {
+    p = zoneParts(date, timeZone || 'UTC')
+  } catch (error) {
+    if (error instanceof RangeError) return ''
+    throw error
+  }
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${p.y}-${pad(p.mo)}-${pad(p.d)} ${pad(p.h)}:${pad(p.mi)}`
 }
