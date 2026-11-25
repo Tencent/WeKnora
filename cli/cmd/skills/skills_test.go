@@ -87,6 +87,9 @@ func TestResolveDir_ExpandsTilde(t *testing.T) {
 	assert.Equal(t, filepath.Join(home, "agents", "skills"), got)
 	assert.NotContains(t, got, "~", "~ must be expanded, not left literal")
 
+	native, err := resolveDir("~" + string(filepath.Separator) + "agents" + string(filepath.Separator) + "skills")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "agents", "skills"), native)
 	bare, err := resolveDir("~")
 	require.NoError(t, err)
 	assert.Equal(t, home, bare)

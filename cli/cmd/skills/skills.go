@@ -170,7 +170,7 @@ func resolveDir(dir string) (string, error) {
 // segment) are returned unchanged — matching the common shell behavior a CLI
 // is expected to reproduce when it receives an unexpanded literal tilde.
 func expandTilde(path string) (string, error) {
-	if path != "~" && !strings.HasPrefix(path, "~/") {
+	if path != "~" && !strings.HasPrefix(filepath.ToSlash(path), "~/") {
 		return path, nil
 	}
 	home, err := os.UserHomeDir()
