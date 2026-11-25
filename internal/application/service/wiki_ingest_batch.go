@@ -273,6 +273,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	retractHandled := 0
 	followUpScheduled := false
 	totalPagesAffected := 0
+	finalizeRowsFailed := 0
 	docPreview := make([]string, 0, 6)
 	// Tunables resolved from KB.WikiConfig once we've loaded the KB.
 	// Captured up here so the deferred stats log can observe them
@@ -287,7 +288,10 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	defer func() {
 		logger.Infof(
 			ctx,
-			"wiki ingest stats: kb=%s tenant=%d retry=%d/%d status=%s elapsed=%s mode=%s pending_ops=%d ops(ingest=%d,retract=%d) ingest(success=%d,failed=%d) retract_handled=%d pages(total=%d) followup=%v tunables(batch=%d,map_par=%d,reduce_par=%d,max_inflight=%d) preview=%s",
+			"wiki ingest stats: kb=%s tenant=%d retry=%d/%d status=%s elapsed=%s mode=%s pending_ops=%d "+
+				"ops(ingest=%d,retract=%d) ingest(success=%d,failed=%d) retract_handled=%d pages(total=%d) "+
+				"finalize_rows_failed=%d followup=%v "+
+				"tunables(batch=%d,map_par=%d,reduce_par=%d,max_inflight=%d) preview=%s",
 			payload.KnowledgeBaseID,
 			payload.TenantID,
 			retryCount,
@@ -302,6 +306,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			ingestFailed,
 			retractHandled,
 			totalPagesAffected,
+			finalizeRowsFailed,
 			followUpScheduled,
 			loggedBatchSize,
 			loggedMapPar,
@@ -459,7 +464,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	if !gotSlot {
 		exitStatus = "inflight_cap"
 		logger.Infof(ctx, "wiki ingest: KB %s at in-flight cap (%d), rescheduling", payload.KnowledgeBaseID, maxInflight)
-		s.scheduleCappedRetry(ctx, payload)
+		// Keep the shared per-KB capped-retry task KB-scoped rather than
+		// pinning it to one operator-selected document.
+		retryPayload := payload
+		retryPayload.KnowledgeID = ""
+		s.scheduleCappedRetry(ctx, retryPayload)
 		return nil
 	}
 	defer releaseSlot()
@@ -506,7 +515,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// re-triggered afterwards — stranding the KB indefinitely. Schedule a
 		// coalesced recheck timed past the stale threshold so those rows are
 		// reclaimed automatically once eligible.
-		followUpScheduled = s.scheduleStaleClaimRecheck(ctx, payload)
+		recheckPayload := payload
+		recheckPayload.KnowledgeID = ""
+		followUpScheduled = s.scheduleStaleClaimRecheck(ctx, recheckPayload)
 		return nil
 	}
 
@@ -927,7 +938,22 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				})
 			}
 		}
-		s.enqueueFinalize(tailCtx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs)
+		var enqueueErr error
+		finalizeRowsFailed, enqueueErr = s.enqueueFinalize(
+			ctx, payload, allPagesAffected, freshTitleBySlug, changes, retractFolderIDs)
+		if enqueueErr != nil {
+			exitStatus = "finalize_enqueue_failed"
+			failCtx, failCancel := wikiIngestCleanupContext(ctx)
+			for _, r := range docResults {
+				if r != nil && r.WikiSpan != nil {
+					s.tracker().FailSpan(failCtx, r.WikiSpan, "FINALIZE_ENQUEUE_FAILED", enqueueErr.Error(), enqueueErr)
+				}
+			}
+			failCancel()
+			// Keep source operations and finalizing slots intact. The claim-release
+			// defer and asynq retry can recover work that never became durable.
+			return enqueueErr
+		}
 	}
 
 	// Close postprocess.wiki spans for every successfully-mapped doc.
@@ -1718,11 +1744,10 @@ func (s *wikiIngestService) mapOneDocument(
 	//
 	// Three cases:
 	//
-	//  (a) oldSlug ∉ new  → "retractStale": the doc no longer mentions this
-	//      page's subject, so strip its ref (and possibly delete the page
-	//      if this was the only source). Passes the NEW content as the
-	//      retract context — if the LLM finds matching facts it trims
-	//      them, otherwise the retract is a near no-op, which is fine.
+	//  (a) oldSlug ∉ new → preserve the page and its source refs. Extraction
+	//      can omit previously produced slugs even when the document still
+	//      supports them. Only actual document deletion should remove their
+	//      source refs; cleanupWikiOnKnowledgeDelete handles that path.
 	//
 	//  (b) oldSlug ∈ new AND slug is an entity/concept page  → reparse
 	//      swap: emit BOTH a "retract" (carrying the doc's PRIOR summary
@@ -1750,7 +1775,7 @@ func (s *wikiIngestService) mapOneDocument(
 		newSlugSet[ns.Slug] = true
 	}
 
-	var reparseOverlap, staleCount int
+	var reparseOverlap, preservedCount int
 	for oldSlug := range oldPageSlugs {
 		if newSlugSet[oldSlug] {
 			// Skip summary slugs — they're overwritten wholesale by the
@@ -1769,22 +1794,16 @@ func (s *wikiIngestService) mapOneDocument(
 			})
 			continue
 		}
-		staleCount++
-		updates = append(updates, SlugUpdate{
-			Slug:              oldSlug,
-			Type:              "retractStale",
-			RetractDocContent: content,
-			DocTitle:          docTitle,
-			KnowledgeID:       knowledgeID,
-			Language:          lang,
-		})
+		preservedCount++
 	}
 
 	logger.Infof(ctx,
-		"wiki ingest: mapped knowledge %s title=%q candidates=%d chunks=%d batches=%d cited_chunks=%d uncited_slugs=%d new_slugs=%d updates=%d reparse_slugs=%d stale_slugs=%d pass0_fallback=%v elapsed=%s",
+		"wiki ingest: mapped knowledge %s title=%q candidates=%d chunks=%d batches=%d "+
+			"cited_chunks=%d uncited_slugs=%d new_slugs=%d updates=%d reparse_slugs=%d "+
+			"preserved_slugs=%d pass0_fallback=%v elapsed=%s",
 		knowledgeID, previewText(docTitle, 80),
 		len(slugItems), len(chunks), batchCount, len(citedChunkSet), uncited, len(newSlugs),
-		len(updates), reparseOverlap, staleCount, pass0Failed,
+		len(updates), reparseOverlap, preservedCount, pass0Failed,
 		time.Since(docStartedAt).Round(time.Millisecond),
 	)
 
@@ -1804,7 +1823,7 @@ func (s *wikiIngestService) mapOneDocument(
 		"new_slugs":        len(newSlugs),
 		"updates":          len(updates),
 		"reparse_slugs":    reparseOverlap,
-		"stale_slugs":      staleCount,
+		"preserved_slugs":  preservedCount,
 		"extracted_pages":  len(extractedPages),
 		"summary_chars":    utf8.RuneCountInString(docSummary),
 		"pass0_fallback":   pass0Failed,
@@ -2141,7 +2160,7 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 			_, writeErr := s.wikiService.UpdatePage(ctx, page)
 			updateDeferred, err = classifyWikiPageWrite(writeErr)
 		} else {
-			_, err = s.wikiService.CreatePage(ctx, page)
+			updateDeferred, err = s.createWikiPageOrUpdate(ctx, ctx, page)
 		}
 		return changed, affectedType, false, updateDeferred, err
 	}
@@ -2422,12 +2441,41 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 			_, updateErr := s.wikiService.UpdatePage(writeCtx, page)
 			updateDeferred, err = classifyWikiPageWrite(updateErr)
 		} else {
-			_, err = s.wikiService.CreatePage(ctx, page)
+			writeCtx := ctx
+			if len(retracts) > 0 {
+				writeCtx = types.WithWikiShrinkAllowed(ctx)
+			}
+			updateDeferred, err = s.createWikiPageOrUpdate(ctx, writeCtx, page)
 		}
 		return true, affectedType, additionFailed, updateDeferred, err
 	}
 
 	return false, "", additionFailed, false, err
+}
+
+// createWikiPageOrUpdate persists a page the exists snapshot said was
+// missing. When a concurrent batch created the same slug after the
+// snapshot, GetOrCreatePage reports created=false and the content is
+// applied through the normal versioned UpdatePage instead of failing
+// the batch on the unique-key conflict (Tencent/WeKnora#5656).
+func (s *wikiIngestService) createWikiPageOrUpdate(
+	ctx, writeCtx context.Context, page *types.WikiPage,
+) (updateDeferred bool, err error) {
+	existing, created, err := s.wikiService.GetOrCreatePage(ctx, page)
+	if err != nil {
+		return false, err
+	}
+	if created {
+		return false, nil
+	}
+	// Lost the slug race: adopt the winner's identity so the versioned
+	// update below targets the stored row, and snapshot it so the
+	// conflict check in UpdatePage compares against the row just read.
+	page.ID = existing.ID
+	page.Version = existing.Version
+	writeCtx = types.WithWikiPageWriteSnapshot(writeCtx, existing)
+	_, writeErr := s.wikiService.UpdatePage(writeCtx, page)
+	return classifyWikiPageWrite(writeErr)
 }
 
 // classifyWikiPageWrite turns the result of one guarded UpdatePage call into

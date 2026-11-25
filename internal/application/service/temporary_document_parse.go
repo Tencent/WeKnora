@@ -212,6 +212,9 @@ func (s *temporaryDocumentService) parse(
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("parse document: %w", err)
 	}
+	if result != nil && result.Error != "" {
+		return "", nil, nil, fmt.Errorf("parse document: %s", result.Error)
+	}
 	if result != nil && result.MarkdownContent != "" {
 		result.MarkdownContent = chunker.NormalizeLineEndings(result.MarkdownContent)
 		result.MarkdownContent = docparser.NormalizeHTMLTables(result.MarkdownContent)

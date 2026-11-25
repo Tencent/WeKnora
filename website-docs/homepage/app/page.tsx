@@ -7,6 +7,7 @@ import { homeAssets } from "../../shared/header";
 import { ProductGallery, type GalleryShot, type GallerySlide } from "./product-gallery";
 import { Header, ProductVideo } from "./interactive";
 import { AdopterShowcase } from "./adopter-showcase";
+import { ChapterHeading } from "./chapter-heading";
 import { clients, dataSources, modelProviders, IntegrationMark } from "./brands";
 import s from "./home.module.css";
 
@@ -14,20 +15,22 @@ const repo = "https://github.com/Tencent/WeKnora";
 const docs = "/docs/";
 const guide = (path: string) => `${docs}${path}.html`;
 const modes = [
-  { number: "01", icon: "search", label: "RAG", title: "回答有据可查", description: "通过语义与关键词检索文字，结合多模态 Embedding 查找图片。点击回答中的引用，可以直接定位原文核对。", tags: ["混合检索", "多模态 Embedding", "原文引用定位"], link: "03-features/05-retrieval-engines", related: [
+  { icon: "search", label: "RAG", title: "回答有据可查", description: "通过语义与关键词检索文字，结合多模态 Embedding 查找图片。点击回答中的引用，可以直接定位原文核对。", tags: ["混合检索", "多模态 Embedding", "原文引用定位"], link: "03-features/05-retrieval-engines", related: [
     { label: "图文检索", href: guide("03-features/02-knowledge-base") + "#multimodal-embedding" },
+    { label: "文档解析与 OCR", href: guide("03-features/03-document-parsing") },
     { label: "引用与来源", href: guide("03-features/18-chat-experience") },
   ] },
-  { number: "02", icon: "agent", label: "Agent", title: "用知识和工具完成任务", description: "按需阅读附件中的正文与图片，检索知识，调用 MCP 工具与技能。在沙箱或本机浏览器中执行任务，对话中可追加要求、分叉或回滚。", tags: ["附件按需读取", "多步推理", "技能与沙箱", "本机浏览器", "MCP 工具", "长期记忆"], link: "03-features/07-agent", related: [
+  { icon: "agent", label: "Agent", title: "用知识和工具完成任务", description: "按需阅读附件中的正文与图片，检索知识，调用 MCP 工具与技能。在沙箱或本机浏览器中执行任务，对话中可追加要求、分叉或回滚。", tags: ["附件按需读取", "多步推理", "技能与沙箱", "本机浏览器", "MCP 工具", "长期记忆"], link: "03-features/07-agent", related: [
     { label: "附件与对话", href: guide("03-features/18-chat-experience") },
+    { label: "工作助手与多智能体协作", href: "#work-assistant" },
+    { label: "自动化与执行审批", href: "#automations" },
   ] },
-  { number: "03", icon: "wiki", label: "Wiki", title: "把文档整理成 Wiki", description: "从原始文档生成相互链接的 Wiki 页面与知识图谱，支持浏览、编辑和版本回滚。", tags: ["自动组织", "知识图谱", "版本回滚"], link: "03-features/14-wiki", related: [] },
+  { icon: "wiki", label: "Wiki", title: "把文档整理成 Wiki", description: "从原始文档生成相互链接的 Wiki 页面与知识图谱，支持浏览、编辑和版本回滚。", tags: ["自动组织", "知识图谱", "版本回滚"], link: "03-features/14-wiki", related: [] },
 ];
 const releaseExtras = [
-  { name: "按用户复用沙箱", link: "03-features/22-skills-sandbox" },
-  { name: "图像处理管线", link: "03-features/03-document-parsing" },
-  { name: "飞书 / Lark 同步", link: "03-features/24-feishu-drive" },
-  { name: "检索与解析改进", link: "03-features/05-retrieval-engines" },
+  { name: "资料与 Wiki 进度", link: "07-releases/v0.9.1", anchor: "#document-progress" },
+  { name: "文档重建与向量索引", link: "07-releases/v0.9.1", anchor: "#knowledge" },
+  { name: "升级须知", link: "07-releases/v0.9.1", anchor: "#upgrade-notes" },
 ];
 
 const productShotExists = (src: string) => existsSync(join(process.cwd(), "public", src));
@@ -37,16 +40,68 @@ const withAvailability = (slide: SlideSource): GallerySlide => {
   return { name: slide.name, icon: slide.icon, title: slide.title, description: slide.description, link: slide.link, external: slide.external, shots: shots.map(shot => ({ ...shot, available: productShotExists(`${homeAssets}/product/${shot.image}.png`) })) };
 };
 const releaseSlides = [
-  { name: "WeKnora 助手", icon: "agent", shots: [
-    { label: "产品问答", icon: "file", image: "assistant-release-guide", alt: "向 WeKnora 助手询问 v0.9.0 的更新，依据产品文档了解新增能力" },
-    { label: "任务协助", icon: "agent", image: "assistant-overview", alt: "在知识库卡片视图中，让助手阅读活动资料并给出可执行的筹备建议" },
-  ], title: "了解 WeKnora，也帮你处理任务", description: "询问版本更新、功能用法与配置问题。助手结合当前页面，以你的身份查资料、创建智能体、设置定时任务，或修改有权管理的内容。", link: guide("03-features/26-weknora-assistant") },
-  { name: "多智能体协作", icon: "channels", image: "agent-collaboration", title: "多个智能体同时处理任务", description: "把搜集、整理、核对分给多个智能体同时处理。子任务有独立对话，进度和结果都能查看。", alt: "多个智能体分别整理读书会资料并汇总结果", link: guide("03-features/26-weknora-assistant") + "#collaboration" },
-  { name: "自动化", icon: "history", shots: [
-    { label: "一句话设置", icon: "agent", image: "automation-conversation", alt: "用一句话请 WeKnora 助手设置自动化，核对任务和执行时间" },
-    { label: "手动设置", icon: "history", image: "automation-setup", alt: "在自动化表单中手动设置重复频率、时间和时区，并预览后续运行时间" },
-  ], title: "一句话安排，也能手动设置", description: "告诉助手要做什么、何时执行，或在表单中逐项设置。任务以你的身份按计划运行，结果和待审批事项会通知你。", link: guide("03-features/27-automations") },
-  { name: "执行权限与审批", icon: "shield", image: "assistant-permissions", title: "决定哪些操作需要确认", description: "选择只读、修改前确认或自动执行。确认前可查看具体操作；删除等高影响操作仍须批准。", alt: "在卡片知识库中，核对助手要修改的文档和新标题后批准", link: guide("03-features/28-agent-permissions") },
+  {
+    name: "语音输入", icon: "mic", title: "按住说话，改好文字再发送",
+    description: "给智能体开启「语音上传」、选好语音识别模型，就可以对着输入框说话。松开麦克风，文字会出现在光标处，你可以改人名、补日期，再发出去。",
+    shots: [
+      { label: "按住录音", icon: "mic", image: "release-v091-voice", alt: "读书会对话的输入框正在录音，麦克风旁显示已录时长" },
+      { label: "编辑文字", icon: "file", image: "release-v091-dictation", alt: "口述的活动报名问题已经转成文字，停留在待发送的输入框中" },
+    ], link: guide("07-releases/v0.9.1") + "#voice",
+  },
+  {
+    name: "沙箱浏览器", icon: "browser", title: "你完成登录，智能体接着操作",
+    description: "在当前会话的沙箱桌面登录网站，再回到对话，智能体就能接着用刚才的页面办事。不同会话各自保留自己的桌面和登录状态。",
+    image: "release-v091-login", alt: "在读书会报名对话里为指定网站填写安全登录表单",
+    link: guide("07-releases/v0.9.1") + "#sandbox",
+  },
+  {
+    name: "凭据保险库", icon: "shield", title: "下次登录，直接选已保存的账号",
+    description: "常用网站的账号可以存进个人保险库。智能体请求登录时，你选择账号、核对域名，再点「填写」。在设置里可以更换密码、调整允许的域名或删除账号。",
+    shots: [
+      { label: "选用账号", icon: "browser", image: "release-v091-vault-fill", alt: "登录表单已选中读书会账号，等待用户确认填写" },
+      { label: "管理凭据", icon: "shield", image: "release-v091-vault", alt: "个人凭据保险库列出读书会账号及允许填入的域名" },
+    ], link: guide("07-releases/v0.9.1") + "#vault",
+  },
+  {
+    name: "知识检索", icon: "search", title: "从搜索结果跳到原文段落",
+    description: "点开全局搜索命中的文档片段，直接读到对应的上下文。回答引用也会标出来源知识库。做系统集成时，还可以通过检索 API 上传一张图，查找相似图片。",
+    shots: [
+      { label: "全局搜索", icon: "search", image: "release-v091-search", alt: "全局搜索列出包含活动报名要求的文档片段" },
+      { label: "命中原文", icon: "file", image: "release-v091-source", alt: "读书会手册在命中片段处展开，报名截止时间已高亮" },
+    ], link: guide("07-releases/v0.9.1") + "#images",
+  },
+].map(withAvailability);
+const assistantSlides = [
+  {
+    name: "WeKnora 助手", icon: "agent", title: "在当前页面直接请助手办事",
+    description: "在知识库页面请助手把活动资料整理成筹备清单，或在设置页询问模型怎么配置。助手能查阅产品文档，也能按你的权限创建智能体、整理知识。",
+    shots: [
+      { label: "任务协助", icon: "agent", image: "assistant-overview", alt: "助手在读书会知识库旁，根据活动资料整理筹备建议" },
+      { label: "产品问答", icon: "file", image: "assistant-release-guide", alt: "助手查阅产品文档，回答用户关于版本功能的问题" },
+    ], link: guide("03-features/26-weknora-assistant"),
+  },
+  {
+    name: "多智能体协作", icon: "channels", title: "把搜集、整理和核对分给不同智能体",
+    description: "多个子任务可以并行处理。打开子任务能查看各自的对话、进度和结果，再回到主对话读汇总。",
+    image: "agent-collaboration", alt: "主对话中列出分别处理读书会资料的子任务和结果",
+    link: guide("03-features/26-weknora-assistant") + "#collaboration",
+  },
+].map(withAvailability);
+const automationSlides = [
+  {
+    name: "自动化", icon: "history", title: "让任务按计划运行",
+    description: "告诉助手「每周一汇总活动资料」，或在表单里设定时间、时区和重复频率。任务按创建者的权限运行，每次的结果都能从运行记录里找到。",
+    shots: [
+      { label: "对话设置", icon: "agent", image: "automation-conversation", alt: "在对话中安排自动化任务并核对执行计划" },
+      { label: "手动设置", icon: "history", image: "automation-setup", alt: "自动化表单中的重复频率、时区及后续运行时间" },
+    ], link: guide("03-features/27-automations"),
+  },
+  {
+    name: "执行权限与审批", icon: "shield", title: "修改前看清操作，再决定是否批准",
+    description: "在允许的范围内选择只读、修改前确认或自动执行。删除等高影响操作始终需要批准。定时任务遇到审批会暂停，等你处理。",
+    image: "assistant-permissions", alt: "审批卡片展示将要修改的文档和新标题，等待用户决定",
+    link: guide("03-features/28-agent-permissions"),
+  },
 ].map(withAvailability);
 const browserSlides = [
   { name: "执行任务", icon: "browser", title: "在自己的浏览器里完成任务",
@@ -71,11 +126,11 @@ const wikiSlides = [
   { name: "版本历史", icon: "history", image: "wiki-revision-history", title: "随时编辑，改动可回溯", description: "直接修订页面，也可让智能体协助维护。查看版本差异，必要时恢复到历史内容。", alt: "Wiki 版本历史：年假页面的历史版本列表、内容差异和回滚入口" },
 ].map(withAvailability);
 const sandboxSlides = [
-  { name: "会话级沙箱", icon: "sandbox", image: "skill-sandbox-chat", title: "在同一沙箱中继续执行任务", description: "支持 Docker、E2B、Cube。同一会话的多轮任务共用一个工作区，生成的文件可预览和下载；macOS Lite 还可绑定本机项目目录。", alt: "WeKnora 实际界面：智能体根据知识库生成 Word 文档，并在对话旁打开产物预览", link: guide("03-features/22-skills-sandbox") },
+  { name: "会话级沙箱", icon: "sandbox", image: "skill-sandbox-chat", title: "在同一沙箱中继续执行任务", description: "同一会话的多轮任务共用工作区，生成的文件可预览和下载。远程部署也可让同一用户复用一台沙箱，各会话保留各自的工作目录。macOS Lite 可绑定本机项目目录。", alt: "智能体根据知识库生成 Word 文档，并在对话旁打开预览", link: guide("03-features/22-skills-sandbox") },
   { name: "图形桌面与终端", icon: "monitor", shots: [
     { label: "图形桌面", icon: "monitor", image: "sandbox-desktop", alt: "WeKnora 实际界面：对话右侧沙箱面板的桌面页签，显示沙箱内的 XFCE 图形桌面与文件管理器" },
     { label: "交互终端", icon: "terminal", image: "sandbox-terminal", alt: "WeKnora 实际界面：对话右侧的沙箱终端，列出工作区 output 目录中生成的 Word 文件" },
-  ], title: "打开桌面和终端，看清每一步", description: "在对话旁连接 Docker、E2B 或 Cube 的交互终端；使用 E2B、Cube 的桌面模板时，还可打开图形桌面并亲自操作。", link: guide("03-features/22-skills-sandbox") },
+  ], title: "打开桌面和终端，看清每一步", description: "Docker、E2B 和 Cube 支持交互终端。智能体的长命令可在后台运行，稍后查看输出或取消。使用 E2B 或 Cube 的桌面模板，还能打开图形桌面亲自操作。", link: guide("03-features/22-skills-sandbox") },
   { name: "技能目录", icon: "skills", image: "skill-catalog", title: "安装、管理和复用技能", description: "从 ClawHub、SkillHub、Git 或 ZIP 安装技能，在空间内管理和复用；macOS Lite 也支持安装并运行本机技能。", alt: "WeKnora 实际界面：工具箱的技能管理页，列出 docx、pptx、pdf 技能及其安装到的沙箱", link: guide("03-features/22-skills-sandbox") },
 ].map(withAvailability);
 
@@ -85,7 +140,7 @@ export default function Home() {
     <Header />
     <main id="main">
       <section className={`${s.shell} ${s.hero}`} aria-labelledby="hero-title">
-        <a href="#release" className={s.releaseLink}><span>v0.9.0</span> 助手 · 多智能体协作 · 自动化 · 执行权限 <Icon name="arrow" /></a>
+        <a href="#release" className={s.releaseLink}><span>v0.9.1</span> 语音输入 · 沙箱浏览器 · 凭据保险库 · 知识检索 <Icon name="arrow" /></a>
         <div className={s.heroGrid}>
           <h1 id="hero-title">帮你找到答案，<br /><em>并将知识付诸实践。</em></h1>
           <div className={s.heroAside}>
@@ -100,9 +155,9 @@ export default function Home() {
       </section>
       <AdopterShowcase />
       <section id="capabilities" className={`${s.chapter}`} data-tone="base" aria-labelledby="capabilities-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>01 / KNOWLEDGE AT WORK</p><h2 id="capabilities-title">知识问答、任务执行与自动 Wiki</h2></div><p>查询资料用 RAG，处理多步任务用 Agent，<br />整理知识用 Wiki。三种能力共享同一知识库。</p></div>
-        <div className={s.modeGrid}>{modes.map(mode => <article className={s.mode} key={mode.label}>
-          <div className={s.modeTop}><Icon name={mode.icon} /><span>{mode.number} / {mode.label.toUpperCase()}</span></div>
+        <div className={s.sectionHeading}><ChapterHeading id="capabilities-title" label="KNOWLEDGE AT WORK">知识问答、任务执行与自动 Wiki</ChapterHeading><p>查询资料用 RAG，处理多步任务用 Agent，<br />整理知识用 Wiki。三种能力共享同一知识库。</p></div>
+        <div className={s.modeGrid}>{modes.map((mode, index) => <article className={s.mode} key={mode.label}>
+          <div className={s.modeTop}><Icon name={mode.icon} /><span>{String(index + 1).padStart(2, "0")} / {mode.label.toUpperCase()}</span></div>
           <h3>{mode.title}</h3><p>{mode.description}</p><ul className={s.tags}>{mode.tags.map(tag => <li key={tag}>{tag}</li>)}</ul>
           <div className={s.slideLinks}>
             <a className={s.textLink} href={mode.label === "Wiki" ? "#wiki" : guide(mode.link)}>了解 {mode.label} <Icon name="arrow" /></a>
@@ -111,44 +166,52 @@ export default function Home() {
         </article>)}</div>
       </div></section>
       <section id="release" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="release-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>02 / INTRODUCING v0.9.0</p><h2 id="release-title">WeKnora 助手、多智能体协作与自动化</h2></div><a className={s.textLink} href={guide("07-releases/v0.9.0")}>版本说明与发布视频 <Icon name="arrow" /></a></div>
-        <ProductGallery id="release-gallery" label="v0.9.0" slides={releaseSlides} layout="compact" />
-        <div className={s.releaseExtras}><span>本次更新还包括</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link)}>{item.name} <Icon name="arrow" /></a>)}</div>
+        <div className={s.sectionHeading}><ChapterHeading id="release-title" label="v0.9.1">语音输入、沙箱浏览器、凭据保险库与知识检索</ChapterHeading><a className={s.textLink} href={guide("07-releases/v0.9.1")}>完整图文与升级说明 <Icon name="arrow" /></a></div>
+        <ProductGallery id="release-gallery" label="v0.9.1" slides={releaseSlides} layout="compact" />
+        <div className={s.releaseExtras}><span>部署与维护</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link) + item.anchor}>{item.name} <Icon name="arrow" /></a>)}</div>
+      </div></section>
+      <section id="work-assistant" className={s.chapter} data-tone="base" aria-labelledby="work-assistant-title"><div className={s.shell}>
+        <div className={s.sectionHeading}><ChapterHeading id="work-assistant-title" label="ASSISTANT &amp; COLLABORATION">工作助手与多智能体协作</ChapterHeading><a className={s.textLink} href={guide("03-features/26-weknora-assistant")}>工作助手指南 <Icon name="arrow" /></a></div>
+        <ProductGallery id="assistant-gallery" label="工作助手与多智能体协作" slides={assistantSlides} layout="compact" />
+      </div></section>
+      <section id="automations" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="automations-title"><div className={s.shell}>
+        <div className={s.sectionHeading}><ChapterHeading id="automations-title" label="AUTOMATION &amp; APPROVALS">自动化任务与执行审批</ChapterHeading><a className={s.textLink} href={guide("03-features/27-automations")}>自动化指南 <Icon name="arrow" /></a></div>
+        <ProductGallery id="automation-gallery" label="自动化任务与执行审批" slides={automationSlides} layout="compact" />
       </div></section>
       <section id="agent-workflow" className={`${s.chapter}`} data-tone="base" aria-labelledby="agent-workflow-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>03 / YOUR LOCAL BROWSER</p><h2 id="agent-workflow-title">让智能体操作你自己的浏览器</h2></div><a className={s.textLink} href={guide("05-clients/09-local-browser")}>连接本机浏览器 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><ChapterHeading id="agent-workflow-title" label="YOUR LOCAL BROWSER">让智能体操作你自己的浏览器</ChapterHeading><a className={s.textLink} href={guide("05-clients/09-local-browser")}>连接本机浏览器 <Icon name="arrow" /></a></div>
         <ProductGallery id="browser-gallery" label="本机浏览器" slides={browserSlides} layout="compact" />
       </div></section>
       <section id="skills-sandbox" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="skills-sandbox-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>04 / SKILLS &amp; SANDBOX</p><h2 id="skills-sandbox-title">智能体可以运行技能，也能生成文件。</h2></div><a className={s.textLink} href={guide("03-features/22-skills-sandbox")}>了解技能与沙箱 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><ChapterHeading id="skills-sandbox-title" label="SKILLS &amp; SANDBOX">智能体可以运行技能，也能生成文件。</ChapterHeading><a className={s.textLink} href={guide("03-features/22-skills-sandbox")}>了解技能与沙箱 <Icon name="arrow" /></a></div>
         <ProductGallery id="sandbox-gallery" label="技能与沙箱" slides={sandboxSlides} />
       </div></section>
       <section id="knowledge-gallery" className={s.chapter} data-tone="base" aria-labelledby="knowledge-gallery-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>05 / KNOWLEDGE &amp; GALLERY</p><h2 id="knowledge-gallery-title">用画廊浏览知识库里的图片</h2></div><a className={s.textLink} href={guide("03-features/02-knowledge-base") + "#image-gallery"}>了解知识库与画廊 <Icon name="arrow" /></a></div>
+        <div className={s.sectionHeading}><ChapterHeading id="knowledge-gallery-title" label="KNOWLEDGE &amp; GALLERY">用画廊浏览知识库里的图片</ChapterHeading><a className={s.textLink} href={guide("03-features/02-knowledge-base") + "#image-gallery"}>了解知识库与画廊 <Icon name="arrow" /></a></div>
         <ProductGallery id="knowledge-gallery-views" label="知识库与画廊" slides={knowledgeSlides} layout="compact" />
       </div></section>
       <section id="wiki" className={`${s.chapter} ${s.chapterTint} ${s.wiki}`} data-tone="subtle" aria-labelledby="wiki-title"><div className={s.shell}>
         <div className={s.sectionHeading}>
-          <div><p className={s.eyebrow}>06 / AUTOMATIC WIKI</p><h2 id="wiki-title">把文档整理成可浏览的 Wiki。</h2></div>
+          <ChapterHeading id="wiki-title" label="AUTOMATIC WIKI">把文档整理成可浏览的 Wiki。</ChapterHeading>
           <a className={s.textLink} href={guide("03-features/14-wiki")}>了解 Wiki 的使用方式 <Icon name="arrow" /></a>
         </div>
         <ProductGallery id="wiki-gallery" label="Wiki" slides={wikiSlides} />
       </div></section>
       <section id="ecosystem" className={s.chapter} data-tone="base" aria-labelledby="ecosystem-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>07 / INTEGRATIONS</p><h2 id="ecosystem-title">数据源与工具集成</h2></div><p>同步飞书、Confluence、GitLab 等平台的资料，<br />通过 IM、浏览器插件、MCP Server 或 API 查询和使用。</p></div>
+        <div className={s.sectionHeading}><ChapterHeading id="ecosystem-title" label="INTEGRATIONS">数据源与工具集成</ChapterHeading><p>同步飞书、Confluence、GitLab 等平台的资料，<br />通过 IM、浏览器插件、MCP Server 或 API 查询和使用。</p></div>
         <div className={s.ecosystem}>
-          <div className={s.ecosystemColumn}><Icon name="sources" /><h3>导入与同步资料</h3><p>上传文件、导入网页，或连接外部数据源。Seafile 等目录型数据源支持按目录同步与增量更新。</p><div className={s.integrations}>{dataSources.map(item => <span key={item.name}><IntegrationMark item={item} /></span>)}</div><div className={s.slideLinks}><a className={s.textLink} href={guide("03-features/10-datasource")}>数据源集成 <Icon name="arrow" /></a><a className={s.textLink} href={guide("03-features/25-seafile")}>连接 Seafile <Icon name="arrow" /></a></div></div>
+          <div className={s.ecosystemColumn}><Icon name="sources" /><h3>导入与同步资料</h3><p>上传文件、导入网页，或连接外部数据源。飞书 / Lark 可同步云文档中的表格和附件，Seafile 支持按目录增量同步。</p><div className={s.integrations}>{dataSources.map(item => <span key={item.name}><IntegrationMark item={item} /></span>)}</div><div className={s.slideLinks}><a className={s.textLink} href={guide("03-features/10-datasource")}>数据源集成 <Icon name="arrow" /></a><a className={s.textLink} href={guide("03-features/24-feishu-drive")}>连接飞书 / Lark <Icon name="arrow" /></a><a className={s.textLink} href={guide("03-features/25-seafile")}>连接 Seafile <Icon name="arrow" /></a></div></div>
           <div className={s.ecosystemCore}><BrandLogo /><span>团队知识库与智能体</span><div>理解 · 检索 · 推理 · 行动</div></div>
           <div className={s.ecosystemColumn}><Icon name="channels" /><h3>在常用工具中访问</h3><p>支持 IM 问答、浏览器插件、MCP 客户端和开发工具集成。</p><div className={s.integrations}>{clients.map(item => <span key={item.name}><IntegrationMark item={item} /></span>)}</div><a className={s.textLink} href={guide("03-features/12-im-integration")}>客户端与渠道 <Icon name="arrow" /></a><div className={s.mcpEntry}><h4>通过 MCP Server 共享知识</h4><p>让 Claude、Cursor 等 AI 工具连接团队知识库，直接检索资料和提问。</p><a className={s.textLink} href={guide("03-features/08-mcp")}>配置 MCP 端点 <Icon name="arrow" /></a></div></div>
         </div>
-        <div className={s.models}><span>模型由你选择 · 内置 30 家厂商 <a className={s.textLink} href={guide("03-features/06-models")}>查看全部 <Icon name="arrow" /></a></span>{modelProviders.map(item => <p key={item.name}><IntegrationMark item={item} /></p>)}</div>
+        <div className={s.models}><span>模型由你选择 · 内置 31 家厂商 <a className={s.textLink} href={guide("03-features/06-models")}>查看全部 <Icon name="arrow" /></a></span>{modelProviders.map(item => <p key={item.name}><IntegrationMark item={item} /></p>)}</div>
       </div></section>
       <section id="enterprise" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="enterprise-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>08 / BUILT FOR YOUR TEAM</p><h2 id="enterprise-title">私有化部署，<br />按团队需要管理权限。</h2></div><p>配置数据存储与成员权限，<br />查看操作记录和任务运行状态。</p></div>
+        <div className={s.sectionHeading}><ChapterHeading id="enterprise-title" label="BUILT FOR YOUR TEAM">私有化部署，<br />按团队需要管理权限。</ChapterHeading><p>配置数据存储与成员权限，<br />查看操作记录和任务运行状态。</p></div>
         <div className={s.enterpriseGrid}><article><Icon name="server" /><h3>部署与存储</h3><p>支持 Docker、Kubernetes 与 Helm，也提供 Lite 单机版和桌面应用。模型、向量数据库和存储后端可按需替换，支持本地推理。</p></article><article><Icon name="shield" /><h3>用户与资源权限</h3><p>集中创建和停用账号、设置管理员。通过空间角色、资源共享、API Key 范围和 OIDC 身份接入管理访问权限，也可限制服务只访问白名单域名。</p><a className={s.textLink} href={guide("03-features/20-platform-admin")}>平台用户管理 <Icon name="arrow" /></a></article><article><Icon name="trace" /><h3>审计与运行监控</h3><p>空间审计日志、运行时任务队列面板与 Langfuse 追踪，帮助团队定位问题、管理运行状态。</p></article></div>
       </div></section>
       <section id="get-started" className={`${s.chapter} ${s.closing}`} data-tone="base" aria-labelledby="closing-title"><div className={s.shell}>
-        <div className={s.sectionHeading}><div><p className={s.eyebrow}>GET STARTED</p><h2 id="closing-title">选择适合你的使用方式。</h2></div></div>
+        <div className={s.sectionHeading}><ChapterHeading id="closing-title" label="GET STARTED">选择适合你的使用方式。</ChapterHeading></div>
         <div className={s.startGrid}>
           <article className={s.startCard}>
             <div className={s.startLabel}><Image className={s.startBrand} src={`${homeAssets}/brands/wechat-dialog.png`} alt="微信对话开放平台 Logo" width={32} height={32} /><span>在线使用</span></div>

@@ -6,7 +6,21 @@ function splitRowCells(line: string): string[] {
   if (!inner.startsWith('|')) {
     return [];
   }
-  let parts = inner.split('|');
+  // GFM treats a pipe preceded by an odd backslash run as cell text.
+  // Keep that spelling intact; only count actual column delimiters when
+  // reconstructing the alignment row for imported tables.
+  let parts: string[] = [];
+  let start = 0;
+  let backslashes = 0;
+  for (let i = 0; i < inner.length; i += 1) {
+    const char = inner[i];
+    if (char === '|' && backslashes % 2 === 0) {
+      parts.push(inner.slice(start, i));
+      start = i + 1;
+    }
+    backslashes = char === '\\' ? backslashes + 1 : 0;
+  }
+  parts.push(inner.slice(start));
   if (parts.length && parts[0].trim() === '') {
     parts = parts.slice(1);
   }
@@ -55,7 +69,18 @@ export function normalizeSpuriousTablePrefixes(content: string): string {
   const lines = content.split('\n');
   const out: string[] = [];
   let i = 0;
+  let fence = '';
   while (i < lines.length) {
+    const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(lines[i]);
+    if (fence || delimiter) {
+      if (delimiter) {
+        const [, marker, rest] = delimiter;
+        if (!fence && !(marker[0] === '`' && rest.includes('`'))) fence = marker;
+        else if (fence && marker.startsWith(fence) && !rest.trim()) fence = '';
+      }
+      out.push(lines[i++]);
+      continue;
+    }
     if (!isTableRow(lines[i])) {
       out.push(lines[i]);
       i += 1;
@@ -70,3 +95,4 @@ export function normalizeSpuriousTablePrefixes(content: string): string {
   }
   return out.join('\n');
 }
+

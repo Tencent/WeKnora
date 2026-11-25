@@ -41,6 +41,8 @@ type AgentStep struct {
 
 // Message message information
 type Message struct {
+	Usage *TokenUsage `json:"usage,omitempty"`
+
 	ID                  string          `json:"id"`
 	SessionID           string          `json:"session_id"`
 	RequestID           string          `json:"request_id"`
@@ -219,4 +221,24 @@ func (c *Client) DeleteMessage(ctx context.Context, sessionID string, messageID 
 	}
 
 	return parseResponse(resp, &response)
+}
+
+// TokenUsage contains the provider token counts for a chat turn.
+type TokenUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+	// CachedTokens is the legacy alias for CacheReadTokens. It remains on the
+	// wire for compatibility with existing API consumers.
+	CachedTokens     int    `json:"cached_tokens,omitempty"`
+	CacheReadTokens  int    `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int    `json:"cache_write_tokens,omitempty"`
+	CacheMissTokens  int    `json:"cache_miss_tokens,omitempty"`
+	CacheReported    bool   `json:"cache_reported"`
+	CacheStatus      string `json:"cache_status,omitempty"`
+	// ContextTokenScale is provider prompt tokens per cl100k-estimated token,
+	// measured over the turn's rounds. Persisted with the turn so the next
+	// turn's history loading and first compaction check are calibrated before
+	// any provider count of their own. Zero when the turn measured none.
+	ContextTokenScale float64 `json:"context_token_scale,omitempty"`
 }

@@ -84,6 +84,7 @@ func TestWikiLintUsesCurrentMarkdownInsteadOfStaleOutLinks(t *testing.T) {
 	repo := repository.NewWikiPageRepository(db)
 	svc := NewWikiPageService(repo, nil, nil, nil, nil, nil)
 	const kbID = "kb-markdown-links"
+	seedWikiTestKnowledgeBase(t, db, kbID, 1)
 	content := "A sufficiently long explanation of this topic and its references.\n\n" +
 		`| [[CONCEPT/FOO\|显示名称]] |` + "\n\n`[[concept/example]]`\n\n```json\n[[1, 2]]\n```"
 	for _, page := range []*types.WikiPage{

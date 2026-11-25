@@ -7,6 +7,27 @@
 // individual Vue components. Non-chat document/wiki preview styles intentionally
 // live outside this file.
 //
+// Image size caps shared by every chat-markdown surface. The answer body and
+// the compact thinking/reasoning panels render model-authored Markdown through
+// the same pipeline (marked's default <img>, no width/height attributes), so an
+// unconstrained native-size image would blow out whichever panel forgot the cap.
+// Keep this mixin the single place that bounds chat Markdown images.
+.chat-markdown-images() {
+  :deep(img) {
+    max-width: 80%;
+    max-height: 300px;
+    width: auto;
+    height: auto;
+    border-radius: var(--app-radius-md);
+    display: block;
+    margin: 1.25em 0;
+    border: 0.5px solid var(--td-component-stroke);
+    object-fit: contain;
+    cursor: pointer;
+    transition: transform var(--app-motion-base) ease;
+  }
+}
+
 // Shared typography for chat answer markdown (botmsg, AgentStreamDisplay, embed).
 // Tuned against ChatGPT markdown test doc: 16px body, 24px line-height on paragraphs,
 // stepped headings, dotted links, light tables, pill inline code, kbd chips.
@@ -581,19 +602,7 @@
     text-align: right;
   }
 
-  :deep(img) {
-    max-width: 80%;
-    max-height: 300px;
-    width: auto;
-    height: auto;
-    border-radius: var(--app-radius-md);
-    display: block;
-    margin: 1.25em 0;
-    border: 0.5px solid var(--td-component-stroke);
-    object-fit: contain;
-    cursor: pointer;
-    transition: transform var(--app-motion-base) ease;
-  }
+  .chat-markdown-images();
 
   // Protected images not yet hydrated still carry the 1x1 placeholder gif.
   // Without a fixed size width:auto/height:auto collapse it to a ~1px line that

@@ -37,6 +37,12 @@ export interface SyncItemError {
   message?: string
 }
 
+export interface SyncDeletedItem {
+  external_id?: string
+  source_resource_id?: string
+  title?: string
+}
+
 export interface SyncResultDetail {
   total?: number
   created?: number
@@ -46,6 +52,8 @@ export interface SyncResultDetail {
   failed?: number
   /** Per-item failure samples (capped); localised in the sync-log drawer. */
   errors?: SyncItemError[]
+  /** Per-item source-deletion samples (capped); shown in the sync-log drawer. */
+  deleted_items?: SyncDeletedItem[]
 }
 
 export interface SyncLog {

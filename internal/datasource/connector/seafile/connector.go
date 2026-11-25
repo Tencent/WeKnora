@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	_ datasource.Connector              = (*Connector)(nil)
-	_ datasource.StreamingConnector     = (*Connector)(nil)
-	_ datasource.FullStreamingConnector = (*Connector)(nil)
+	_ datasource.Connector                     = (*Connector)(nil)
+	_ datasource.StreamingConnector            = (*Connector)(nil)
+	_ datasource.FullStreamingConnector        = (*Connector)(nil)
+	_ datasource.ItemFailureIsolatingConnector = (*Connector)(nil)
 )
 
 // Connector is stateless: every data source carries its own server URL and
@@ -28,6 +29,10 @@ func NewConnector() *Connector { return &Connector{} }
 
 // Type returns the connector type key stored on data sources.
 func (*Connector) Type() string { return types.ConnectorTypeSeafile }
+
+// IsolatesItemIngestFailures reports that Seafile tracks per-file fingerprints
+// independently so one failed item does not block syncing remaining files.
+func (*Connector) IsolatesItemIngestFailures() bool { return true }
 
 // Validate checks the selection locally, pings Seafile with the token and,
 // when resources are selected, confirms they belong to one existing,

@@ -15,6 +15,9 @@ import (
 
 // MentionedItem represents a mentioned item in the request
 type MentionedItem struct {
+	ServiceID string `json:"service_id,omitempty"`
+	SkillName string `json:"skill_name,omitempty"`
+
 	ID     string `json:"id"`
 	Name   string `json:"name"`
 	Type   string `json:"type"`    // "kb", "file", "tag", "mcp", or "skill"
@@ -68,6 +71,8 @@ const (
 
 // AgentStreamResponse agent streaming response
 type AgentStreamResponse struct {
+	Usage *TokenUsage `json:"usage,omitempty"`
+
 	ID                  string                 `json:"id"`                   // Unique identifier
 	ResponseType        AgentResponseType      `json:"response_type"`        // Response type
 	Content             string                 `json:"content,omitempty"`    // Current content fragment
