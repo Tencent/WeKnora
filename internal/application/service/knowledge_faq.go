@@ -347,17 +347,18 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	if existing, err := chunk.FAQMetadata(); err == nil && existing != nil {
-		meta.Version = existing.Version + 1
+	oldMeta, err := chunk.FAQMetadata()
+	if err != nil {
+		return nil, err
+	}
+	oldTag, oldEnabled, oldFlags := chunk.TagID, chunk.IsEnabled, chunk.Flags
+	if oldMeta != nil {
+		meta.Version = oldMeta.Version + 1
 	}
 	if err := chunk.SetFAQMetadata(meta); err != nil {
 		return nil, err
 	}
-	// 获取索引模式
-	indexMode := types.FAQIndexModeQuestionOnly
-	if kb.FAQConfig != nil && kb.FAQConfig.IndexMode != "" {
-		indexMode = kb.FAQConfig.IndexMode
-	}
+	indexMode := kb.FAQConfig.IndexMode
 	chunk.Content = buildFAQChunkContent(meta, indexMode)
 
 	// Convert tag seq_id to UUID
@@ -387,25 +388,26 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// Note: We don't need to call BatchUpdateChunkEnabledStatus here because
-	// indexFAQChunks will delete old vectors and re-insert with the latest chunk data
-	// (including the updated is_enabled status). Calling both would cause version conflicts.
-
-	faqKnowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, chunk.KnowledgeID)
-	if err != nil {
-		return nil, err
-	}
-
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Full builds and historical incremental edits can leave both positional and
-	// hashed source IDs. Replace all vectors for this chunk, including aliases
-	// no longer present in its metadata.
-	if err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, true); err != nil {
-		return nil, err
+	// Answers are never embedded in question-only mode. Preserve the existing
+	// vectors on this edit, including when the embedding provider is offline.
+	// An unchanged PUT can still retry a previously failed full rebuild.
+	answerOnly := indexMode == types.FAQIndexModeQuestionOnly && oldMeta != nil &&
+		!slices.Equal(oldMeta.Answers, meta.Answers) &&
+		oldMeta.StandardQuestion == meta.StandardQuestion && slices.Equal(oldMeta.SimilarQuestions, meta.SimilarQuestions) &&
+		oldTag == chunk.TagID && oldEnabled == chunk.IsEnabled && oldFlags == chunk.Flags
+	if !answerOnly {
+		faqKnowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, chunk.KnowledgeID)
+		if err != nil {
+			return nil, err
+		}
+		embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+		if err != nil {
+			return nil, err
+		}
+		// Full builds and historical edits can leave both positional and hashed alias IDs.
+		if err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, true); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build tag seq_id map for conversion
