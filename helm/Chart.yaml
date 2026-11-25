@@ -4,8 +4,8 @@ description: |
   WeKnora - AI-powered Knowledge RAG Platform for building intelligent knowledge bases
   with document parsing, vector search, and LLM integration.
 type: application
-version: 0.1.0
-appVersion: "0.9.0"
+version: 0.1.1
+appVersion: "v0.9.1"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/Tencent/WeKnora
 icon: https://raw.githubusercontent.com/Tencent/WeKnora/main/docs/images/logo.png

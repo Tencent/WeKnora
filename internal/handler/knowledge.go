@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -356,6 +357,9 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		logger.Error(ctx, "File size too large")
 		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", maxSizeMB)))
 		return
+	}
+	if filepath.Separator == '\\' {
+		file.Filename = recoverWindowsMultipartFilename(file)
 	}
 
 	// Get custom filename if provided (for folder uploads with path)

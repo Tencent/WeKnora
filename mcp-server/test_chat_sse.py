@@ -47,6 +47,13 @@ class ChatSSETest(unittest.TestCase):
                 self.assertEqual(result["references"], [{"id": "chunk-1"}])
                 self.assertEqual(result["session_id"], "session-1")
 
+    def test_complete_returns_the_persisted_agent_answer(self):
+        result = self.consume([
+            'data: {"response_type":"answer","content":"Inspecting the file..."}', "",
+            'data: {"response_type":"complete","data":{"final_content":"Report ready."}}', "",
+        ], agent=True)
+        self.assertEqual(result["answer"], "Report ready.")
+
     def test_dispatches_once_per_frame_not_once_per_data_line(self):
         result = self.consume(
             [

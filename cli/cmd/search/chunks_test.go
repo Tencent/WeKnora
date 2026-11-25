@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -15,10 +16,11 @@ import (
 )
 
 type fakeChunksSvc struct {
-	results []*sdk.SearchResult
-	err     error
-	gotKB   string
-	gotQ    string
+	results     []*sdk.SearchResult
+	err         error
+	gotKB       string
+	gotQ        string
+	documentIDs []string
 }
 
 func (f *fakeChunksSvc) HybridSearch(
@@ -26,6 +28,7 @@ func (f *fakeChunksSvc) HybridSearch(
 ) ([]*sdk.SearchResult, error) {
 	f.gotKB = kbID
 	f.gotQ = p.QueryText
+	f.documentIDs = p.KnowledgeIDs
 	return f.results, f.err
 }
 
@@ -246,4 +249,15 @@ func (c *capturingChunksSvc) HybridSearch(
 ) ([]*sdk.SearchResult, error) {
 	c.capture(p)
 	return nil, nil
+}
+
+func TestSearchSelectedDocuments(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	opts := &ChunksOptions{Query: "return period", KBID: "kb"}
+	cmd := &cobra.Command{}
+	bindChunksFlags(cmd, opts)
+	require.NoError(t, cmd.ParseFlags([]string{"--doc", "retail", "--doc", "partner"}))
+	svc := &fakeChunksSvc{}
+	require.NoError(t, runChunks(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
+	assert.Equal(t, []string{"retail", "partner"}, svc.documentIDs)
 }

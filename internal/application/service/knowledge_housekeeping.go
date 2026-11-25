@@ -202,10 +202,7 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 		return
 	}
 
-	stuck, heartbeat := h.filterByLastSpanActivity(ctx, candidates, cutoff)
-	spanSkipped := len(candidates) - len(stuck)
-
-	// Second-stage gate: a row can have a stale span heartbeat yet still
+	// Queue gate: a row can have a stale span heartbeat yet still
 	// be perfectly healthy when its enrichment subtasks (summary /
 	// question / graph / wiki) are merely backlogged behind a busy queue
 	// — no worker has picked them up, so no span has been written since
@@ -213,11 +210,27 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	// positive users hit under heavy upload bursts. Drop any candidate
 	// that still has a queued/active task referencing it; only rows with
 	// nothing left in the queue are treated as genuinely orphaned.
-	stuck, queueSkipped, wikiHeld := h.filterOutQueued(ctx, stuck)
+	// Probe durable Wiki ownership before the span gate: retries can keep
+	// writing fresh spans even after the KB wake-up trigger has been lost.
+	// Those rows must still reach rearmWikiTriggers.
+	stuck, queueSkipped, wikiHeld := h.filterOutQueued(ctx, candidates)
+	beforeSpan := len(stuck)
+	stuck, heartbeat := h.filterByLastSpanActivity(ctx, stuck, cutoff)
+	spanSkipped := beforeSpan - len(stuck)
+	// Wiki holds retain their heartbeat-based expiry, but a fresh heartbeat
+	// must not filter them out of trigger recovery. The filter compacts its
+	// input in place, so give it a copy and keep every held row for re-arming.
+	_, wikiHeartbeat := h.filterByLastSpanActivity(ctx, append([]types.Knowledge(nil), wikiHeld...), cutoff)
 	// A Wiki op protects its row only for so long. Re-arming covers a lost
 	// trigger, but a consumer that fails before claiming anything never
 	// consumes the op, and the row would sit in "finalizing" forever.
-	wikiHeld, wikiExpired := splitExpiredWikiHolds(wikiHeld, heartbeat, time.Now().Add(-wikiHoldLimit))
+	wikiHeld, wikiExpired := splitExpiredWikiHolds(wikiHeld, wikiHeartbeat, time.Now().Add(-wikiHoldLimit))
+	for id, beat := range wikiHeartbeat {
+		if heartbeat == nil {
+			heartbeat = make(map[string]time.Time)
+		}
+		heartbeat[id] = beat
+	}
 	queueSkipped -= len(wikiExpired)
 	stuck = append(stuck, wikiExpired...)
 	h.rearmWikiTriggers(ctx, wikiHeld, threshold)
@@ -472,11 +485,10 @@ func (h *HousekeepingService) filterByLastSpanActivity(
 		Group("knowledge_id").
 		Find(&beats).Error
 	if err != nil {
-		// On query failure, fail safe — assume nothing has a
-		// heartbeat (so all candidates are "stuck"). This matches
-		// the previous-version behaviour and never under-recovers.
-		logger.Warnf(ctx, "[Housekeeping] span heartbeat query failed: %v (will fail safe and recover all candidates)", err)
-		return candidates, nil
+		// An unreadable heartbeat is not evidence of a stalled task. Defer
+		// recovery until the next sweep can establish liveness.
+		logger.Warnf(ctx, "[Housekeeping] span heartbeat query failed: %v (deferring candidate recovery)", err)
+		return nil, nil
 	}
 	heartbeat := make(map[string]time.Time, len(beats))
 	for _, b := range beats {
@@ -498,10 +510,7 @@ func (h *HousekeepingService) filterByLastSpanActivity(
 
 // recoverStalled fails each stuck row with a message naming where it stalled
 // and when it last made progress, and closes its open spans so the timeline
-// points at that spot instead of spinning. heartbeat is nil when the span
-// heartbeat query failed; the message then gives no time rather than the
-// row's updated_at, which can predate the last span write. Returns rows
-// recovered.
+// points at that spot instead of spinning. Returns rows recovered.
 func (h *HousekeepingService) recoverStalled(
 	ctx context.Context, stuck []types.Knowledge, heartbeat map[string]time.Time, threshold time.Duration,
 ) int64 {
