@@ -86,7 +86,20 @@ func (e *AgentEngine) streamLLMToEventBus(
 	answerDecoder := e.modelContext.StreamDecoder()
 	thinkingDecoder := e.modelContext.StreamDecoder()
 
-	for chunk := range stream {
+	// A provider may take time to close its channel after cancellation.
+streamLoop:
+	for {
+		var chunk types.StreamResponse
+		var ok bool
+		select {
+		case <-llmCtx.Done():
+			break streamLoop
+		case chunk, ok = <-stream:
+			// A buffered chunk and cancellation can both be ready.
+			if !ok || llmCtx.Err() != nil {
+				break streamLoop
+			}
+		}
 		lastChunkAt.Store(time.Now().UnixNano())
 		chunkCount++
 		if chunkCount == 1 {
@@ -166,6 +179,9 @@ func (e *AgentEngine) streamLLMToEventBus(
 		if emitFunc != nil {
 			emitFunc(&chunk, result.Content)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
 	}
 	guardTail, guardErr := answerGuard.Flush()
 	if guardErr != nil {
