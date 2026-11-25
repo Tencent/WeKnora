@@ -711,6 +711,12 @@ services:
     ports:
       - "7474:7474"
       - "7687:7687"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7474/"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: always
     networks:
       - WeKnora-network
