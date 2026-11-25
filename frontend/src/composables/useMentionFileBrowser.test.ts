@@ -19,6 +19,35 @@ test('directory popup stays within the mobile visual viewport and shrinks for th
   assert.equal(Number.parseFloat(zoomed.left) * 1.25, 8);
   assert.equal(Number.parseFloat(zoomed.top) * 1.25, 8);
 });
+
+test('bottom-anchored directory popup stays attached above input without drifting upward', () => {
+  // Desktop welcome page: input top at y=650, menu anchored 8px above at y=642.
+  const desktop = fitBrowserViewport(
+    { left: 160, top: 282, width: 300, bottom: 642, layoutHeight: 900 },
+    { left: 0, top: 0, width: 1280, height: 900 },
+  );
+  assert.equal(desktop.top, 'auto');
+  assert.equal(desktop.bottom, '258px');
+  assert.equal(desktop.maxHeight, '360px');
+
+  // Tight space above input: maxHeight shrinks while bottom stays anchored.
+  const nearTop = fitBrowserViewport(
+    { left: 160, top: 0, width: 300, bottom: 200, layoutHeight: 900 },
+    { left: 0, top: 0, width: 1280, height: 900 },
+  );
+  assert.equal(nearTop.top, 'auto');
+  assert.equal(nearTop.bottom, '700px');
+  assert.equal(nearTop.maxHeight, '192px');
+
+  // Mobile keyboard shrinks visual viewport below anchor bottom: clamps above keyboard.
+  const keyboard = fitBrowserViewport(
+    { left: 40, top: 200, width: 300, bottom: 520, layoutHeight: 664 },
+    { left: 0, top: 0, width: 390, height: 250 },
+  );
+  assert.equal(keyboard.top, 'auto');
+  assert.equal(Number.parseFloat(keyboard.bottom), 664 - 242);
+  assert.equal(Number.parseFloat(keyboard.maxHeight), 234);
+});
 const tree = { success: true, data: { root_document_count: 1, total_document_count: 30,
   folders: [{ path: '中文/%_+#', name: '%_+#', document_count: 1, total_count: 2, children: [
     { path: '中文/%_+#/child', name: 'child', document_count: 1, total_count: 1 },

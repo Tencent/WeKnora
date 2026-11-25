@@ -117,3 +117,13 @@ func TestRunList_NoHasMoreEvenWhenLimitFilled(t *testing.T) {
 	require.NoError(t, runList(context.Background(), opts, jsonOpts(), svc))
 	assert.NotContains(t, out.String(), `"has_more"`)
 }
+
+func TestMessageLimitsMatchServer(t *testing.T) {
+	for _, limit := range []int{200, 201} {
+		listErr := validateListOpts(&ListOptions{Limit: limit})
+		searchErr := validateSearchOpts(&SearchOptions{Query: "return", Limit: limit})
+		if (listErr != nil) != (limit > 200) || (searchErr != nil) != (limit > 200) {
+			t.Errorf("limit %d: %v, %v", limit, listErr, searchErr)
+		}
+	}
+}

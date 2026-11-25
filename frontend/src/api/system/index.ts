@@ -361,12 +361,15 @@ export interface ListAllUsersResponse {
 
 /**
  * List every platform user across tenants (SystemAdmin only, paginated).
+ * Optional `q` filters by username or email on the server across all pages.
  * Returns {users, offset, limit, has_more} directly (no data wrapping).
  */
 export async function listAllUsers(
-  params?: { offset?: number; limit?: number },
+  params?: { offset?: number; limit?: number; q?: string },
 ): Promise<ListAllUsersResponse> {
   const qs = new URLSearchParams()
+  const q = params?.q?.trim()
+  if (q) qs.set('q', q)
   if (params?.offset != null) qs.set('offset', String(params.offset))
   if (params?.limit != null) qs.set('limit', String(params.limit))
   const suffix = qs.toString() ? `?${qs.toString()}` : ''

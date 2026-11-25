@@ -71,6 +71,30 @@ test('preview Markdown skips highlightAuto on huge unlabeled fences', () => {
   assert.doesNotMatch(html, /hljs-/)
 })
 
+test('preview Markdown marks only Mermaid fences and escapes their diagram source', () => {
+  const markdown = [
+    'Intro',
+    '',
+    '```Mermaid title="Process"',
+    'flowchart LR',
+    '  A["Left & right<br>Next"] --> B[Done]',
+    '```',
+    '',
+    '```text',
+    'flowchart LR',
+    '```',
+  ].join('\n')
+  const html = renderDocumentPreviewMarkdown(markdown, value => value, { renderMermaid: true })
+
+  assert.match(html, /<p>Intro<\/p>/)
+  assert.equal(html.match(/data-preview-mermaid/g)?.length, 1)
+  assert.match(html, /<pre data-preview-mermaid><code class="hljs">flowchart LR\n/)
+  assert.match(html, /Left &amp; right&lt;br&gt;Next/)
+  assert.doesNotMatch(html, /<br>Next/)
+  assert.match(html, /<pre><code class="hljs">/)
+  assert.doesNotMatch(renderDocumentPreviewMarkdown(markdown, value => value), /data-preview-mermaid/)
+})
+
 test('raw HTML images cannot override preview loading attributes', () => {
   const attributes = new Map([
     ['alt', 'score > 90'],

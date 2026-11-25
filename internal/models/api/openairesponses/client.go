@@ -353,11 +353,12 @@ type rawStreamEvent struct {
 // streamState tracks the function_call items seen so far so argument deltas
 // can be routed to the assembler index that announced the call.
 type streamState struct {
-	toolIndex      map[string]int    // item id -> assembler index
-	callItems      map[string]string // call id -> original stream item key
-	argsSeen       map[string]bool
-	nextToolIndex  int
-	reasoningItems []json.RawMessage
+	toolIndex         map[string]int    // item id -> assembler index
+	callItems         map[string]string // call id -> original stream item key
+	argsSeen          map[string]bool
+	terminalArguments map[int]string
+	nextToolIndex     int
+	reasoningItems    []json.RawMessage
 }
 
 func (st *streamState) indexFor(itemID string) int {
@@ -380,6 +381,7 @@ func (c *Client) processStream(
 	// response.completed / response.incomplete return before either caller,
 	// so reaching finish means the terminal event never arrived.
 	finish := func() {
+		st.applyTerminalArguments(assembler)
 		assembler.ReasoningMetadata = reasoningMetadata(st.reasoningItems)
 		assembler.EndAtEOF(ch)
 	}
@@ -524,7 +526,7 @@ func streamEventKey(itemID string, outputIndex int) string {
 
 // completeToolCall fills in a call from a complete output item. Compatible
 // gateways can omit argument deltas or the intermediate item events entirely.
-// Arguments already assembled from deltas must not be appended a second time.
+// A terminal snapshot supersedes deltas when the stream closes.
 func (st *streamState) completeToolCall(
 	ch chan<- types.StreamResponse, assembler *api.StreamAssembler, item rawOutputItem, outputIndex int,
 ) {
@@ -543,16 +545,41 @@ func (st *streamState) completeToolCall(
 	if item.CallID != "" {
 		st.callItems[item.CallID] = itemID
 	}
-	arguments := ""
-	if !st.argsSeen[itemID] && item.Arguments != "" {
-		st.argsSeen[itemID] = true
-		arguments = item.Arguments
-	}
 	index := st.indexFor(itemID)
+	arguments := ""
+	if item.Arguments != "" {
+		if st.argsSeen[itemID] {
+			if st.terminalArguments == nil {
+				st.terminalArguments = make(map[int]string)
+			}
+			st.terminalArguments[index] = item.Arguments
+		} else {
+			st.argsSeen[itemID] = true
+			arguments = item.Arguments
+		}
+	}
 	assembler.Process(ch, api.Delta{ToolCalls: []api.ToolCallDelta{{
 		Index: index, ID: item.CallID, Type: "function", Name: item.Name, Arguments: arguments,
 	}}})
 	assembler.SetToolCallMetadata(index, toolCallMetadata(item))
+}
+
+func (st *streamState) applyTerminalArguments(assembler *api.StreamAssembler) {
+	if len(st.terminalArguments) == 0 {
+		return
+	}
+	calls := assembler.OrderedToolCalls()
+	changed := false
+	// indexFor assigns consecutive indices, and OrderedToolCalls sorts by them.
+	for index := range calls {
+		if arguments, ok := st.terminalArguments[index]; ok && calls[index].Function.Arguments != arguments {
+			calls[index].Function.Arguments = arguments
+			changed = true
+		}
+	}
+	if changed {
+		assembler.ReplaceToolCalls(calls)
+	}
 }
 
 // completeStream handles the terminal response.completed / response.incomplete
@@ -584,6 +611,7 @@ func (c *Client) completeStream(
 			}
 		}
 	}
+	st.applyTerminalArguments(assembler)
 	finishReason := resp.finishReason(assembler.ToolCallCount() > 0)
 	if incomplete && (finishReason == "stop" || finishReason == "tool_calls") {
 		finishReason = "length"

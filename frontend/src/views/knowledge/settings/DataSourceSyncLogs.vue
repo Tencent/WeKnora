@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getSyncLogs, type SyncLog, type SyncItemError } from '@/api/datasource'
+import { getSyncLogs, type SyncLog, type SyncItemError, type SyncDeletedItem } from '@/api/datasource'
 import AssistantActionButton from '@/components/assistant/AssistantActionButton.vue'
 
 const props = defineProps<{
@@ -17,24 +17,36 @@ const loadingMore = ref(false)
 const hasMore = ref(false)
 const expandedId = ref('')
 const pageSize = 50
+let requestSeq = 0
 
 async function fetchLogs(reset = true) {
   if (!props.dataSourceId) return
 
+  const dataSourceId = props.dataSourceId
+  const request = ++requestSeq
+  const isCurrent = () => (
+    request === requestSeq
+    && visible.value
+    && props.dataSourceId === dataSourceId
+  )
+
   if (reset) {
     loading.value = true
+    loadingMore.value = false
   } else {
     loadingMore.value = true
   }
 
   try {
     const offset = reset ? 0 : logs.value.length
-    const res = await getSyncLogs(props.dataSourceId, pageSize, offset)
+    const res = await getSyncLogs(dataSourceId, pageSize, offset)
+    if (!isCurrent()) return
     const items = res?.data || res || []
     logs.value = reset ? items : [...logs.value, ...items]
     hasMore.value = items.length === pageSize
   } catch { /* ignore */ }
 
+  if (!isCurrent()) return
   if (reset) {
     loading.value = false
   } else {
@@ -42,11 +54,18 @@ async function fetchLogs(reset = true) {
   }
 }
 
-watch(visible, (v) => {
+watch([visible, () => props.dataSourceId], ([v, dataSourceId], [, previousDataSourceId]) => {
+  requestSeq++
+  loading.value = false
+  loadingMore.value = false
+  if (dataSourceId !== previousDataSourceId) {
+    logs.value = []
+    hasMore.value = false
+  }
   if (!v) return
   expandedId.value = ''
-  fetchLogs(true)
-})
+  void fetchLogs(true)
+}, { flush: 'sync' })
 
 function toggleExpand(id: string) {
   expandedId.value = expandedId.value === id ? '' : id
@@ -138,6 +157,21 @@ const FAILED_ITEMS_CAP = 50
 
 function failedItems(log: SyncLog): SyncItemError[] {
   return (log.result?.errors || []).slice(0, FAILED_ITEMS_CAP)
+}
+
+function deletedItems(log: SyncLog): SyncDeletedItem[] {
+  return (log.result?.deleted_items || []).slice(0, FAILED_ITEMS_CAP)
+}
+
+function deletedItemsCount(log: SyncLog): number {
+  return Math.max(log.items_deleted || 0, (log.result?.deleted_items || []).length)
+}
+
+function formatDeletedItem(item: SyncDeletedItem): string {
+  const title = (item.title || '').trim()
+  const id = (item.external_id || item.source_resource_id || '').trim()
+  if (title && id && title !== id) return `${title} (${id})`
+  return title || id
 }
 
 // Render one failure sample. The backend sends a stable i18n `code` (+ params)
@@ -303,6 +337,24 @@ const groupedLogs = computed(() => {
                       error_samples: failedItems(log).slice(0, 5).map(e => formatSyncError(e).slice(0, 300)),
                     }, null, 2),
                   }" />
+
+                <!-- Per-item source deletions: which documents were deleted upstream. -->
+                <div v-if="deletedItems(log).length" class="tl-deleted">
+                  <div class="tl-deleted-title">
+                    {{ t('datasource.logDetail.deletedItems') }} ({{ deletedItemsCount(log) }})
+                  </div>
+                  <div
+                    v-for="(item, i) in deletedItems(log)"
+                    :key="i"
+                    class="tl-deleted-item"
+                    :title="formatDeletedItem(item)"
+                  >
+                    {{ formatDeletedItem(item) }}
+                  </div>
+                  <div v-if="deletedItemsCount(log) > deletedItems(log).length" class="tl-deleted-more">
+                    {{ t('datasource.logDetail.deletedItemsMore', { n: (deletedItemsCount(log) - deletedItems(log).length) }) }}
+                  </div>
+                </div>
 
                 <!-- Per-item failures: which documents failed and why.
                      The true count is items_failed (a bounded int); result.errors
@@ -575,22 +627,29 @@ const groupedLogs = computed(() => {
   word-break: break-word;
 }
 
-/* --- Per-item failure list --- */
-.tl-failed {
+/* --- Per-item failure / deletion lists --- */
+.tl-failed,
+.tl-deleted {
   margin-top: 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.tl-failed-title {
+.tl-failed-title,
+.tl-deleted-title {
   font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-error-color);
   margin-bottom: 2px;
 }
 
-.tl-failed-item {
+.tl-deleted-title {
+  color: var(--td-warning-color);
+}
+
+.tl-failed-item,
+.tl-deleted-item {
   font-size: var(--app-text-xs);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
@@ -602,7 +661,12 @@ const groupedLogs = computed(() => {
   white-space: nowrap;
 }
 
-.tl-failed-more {
+.tl-deleted-item {
+  border-left-color: var(--td-warning-color-3);
+}
+
+.tl-failed-more,
+.tl-deleted-more {
   font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   padding: 2px 8px;

@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -19,8 +20,12 @@ type MCPMetadataService interface {
 	GetMCPMetadata(context.Context, uint64, string) (*types.MCPMetadata, error)
 	// ListMCPMetadataSummaries returns persisted directory counts for the list UI.
 	ListMCPMetadataSummaries(context.Context, uint64, []*types.MCPService) (map[string]*types.MCPMetadataSummary, error)
-	// PersistMCPMetadata stores a complete directory already listed on an authorized connection.
-	PersistMCPMetadata(context.Context, uint64, string, []*types.MCPTool, string) error
+	// PersistMCPMetadata stores a complete directory already listed on an authorized
+	// connection, with the server identity that connection reported and the time
+	// the listing started.
+	PersistMCPMetadata(
+		context.Context, uint64, string, []*types.MCPTool, string, types.MCPServerInfo, time.Time,
+	) error
 	// RefreshMCPMetadata explicitly connects and atomically replaces a complete snapshot.
 	RefreshMCPMetadata(context.Context, uint64, string) (*types.MCPMetadata, error)
 }

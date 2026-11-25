@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -409,6 +410,123 @@ type supersededChunkPurger interface {
 	PurgeSupersededChunksByKnowledgeID(context.Context, uint64, string) (int64, error)
 }
 
+// hasPreviousIndexedContent reports whether knowledge still owns live indexed
+// artifacts from an earlier completed chunking/indexing pass.
+func hasPreviousIndexedContent(knowledge *types.Knowledge) bool {
+	if knowledge == nil {
+		return false
+	}
+	return knowledge.EnableStatus == "enabled" || knowledge.StorageSize > 0 || knowledge.ProcessedAt != nil
+}
+
+func chunksReferenceURL(url string, chunks []types.ParsedChunk, parents []types.ParsedParentChunk) bool {
+	if url == "" {
+		return false
+	}
+	for i := range chunks {
+		if strings.Contains(chunks[i].Content, url) {
+			return true
+		}
+		for j := range chunks[i].Images {
+			if chunks[i].Images[j].URL == url {
+				return true
+			}
+		}
+	}
+	for i := range parents {
+		if strings.Contains(parents[i].Content, url) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *knowledgeService) collectObsoleteChunkImageURLs(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	tenantID uint64,
+	knowledgeID string,
+	chunks []types.ParsedChunk,
+	options ProcessChunksOptions,
+) []string {
+	if s.resolveFileService(ctx, kb) == nil && s.resourceCatalog == nil {
+		return nil
+	}
+	chunkRepo := s.chunkRepo
+	if s.chunkService != nil && s.chunkService.GetRepository() != nil {
+		chunkRepo = s.chunkService.GetRepository()
+	}
+	if chunkRepo == nil {
+		return nil
+	}
+	infos, err := chunkRepo.ListImageInfoByKnowledgeIDs(ctx, tenantID, []string{knowledgeID})
+	if err != nil {
+		logger.Warnf(ctx, "Failed to collect previous image URLs for %s: %v", knowledgeID, err)
+		return nil
+	}
+	if len(infos) == 0 {
+		return nil
+	}
+	raw := make([]string, 0, len(infos))
+	for _, ci := range infos {
+		raw = append(raw, ci.ImageInfo)
+	}
+	previousURLs := collectImageURLs(ctx, raw)
+	if len(previousURLs) == 0 {
+		return nil
+	}
+	retained := make(map[string]struct{}, len(options.StoredImages))
+	for _, img := range options.StoredImages {
+		if img.ServingURL != "" {
+			retained[img.ServingURL] = struct{}{}
+		}
+	}
+	obsolete := make([]string, 0, len(previousURLs))
+	for _, url := range previousURLs {
+		if _, ok := retained[url]; ok || chunksReferenceURL(url, chunks, options.ParentChunks) {
+			continue
+		}
+		obsolete = append(obsolete, url)
+	}
+	return obsolete
+}
+
+func (s *knowledgeService) failKnowledgeAfterSwapCleanup(
+	ctx context.Context,
+	tenantInfo *types.Tenant,
+	kb *types.KnowledgeBase,
+	knowledge *types.Knowledge,
+	hadPreviousContent bool,
+	previousStorageSize int64,
+	errMsg string,
+) {
+	knowledge.ParseStatus = types.ParseStatusFailed
+	knowledge.ErrorMessage = errMsg
+	if hadPreviousContent {
+		if knowledge.EnableStatus == "enabled" {
+			knowledge.EnableStatus = "disabled"
+		}
+		knowledge.Description = ""
+		knowledge.ProcessedAt = nil
+		knowledge.EmbeddingModelID = kb.EmbeddingModelID
+	}
+	knowledge.StorageSize = 0
+	knowledge.UpdatedAt = time.Now()
+	if s.repo != nil {
+		if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+			logger.Errorf(ctx, "Update knowledge status failed after chunk swap error: %v", updateErr)
+		}
+	}
+	if previousStorageSize > 0 && tenantInfo != nil {
+		tenantInfo.StorageUsed = max(int64(0), tenantInfo.StorageUsed-previousStorageSize)
+		if s.tenantRepo != nil {
+			if adjErr := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, -previousStorageSize); adjErr != nil {
+				logger.Errorf(ctx, "Adjust tenant storage failed after chunk swap error: %v", adjErr)
+			}
+		}
+	}
+}
+
 // processChunks processes chunks and creates embeddings for knowledge content
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
@@ -494,6 +612,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			"failed to resolve vector store", err)
 	}
 
+	hadPreviousContent := hasPreviousIndexedContent(knowledge)
+	previousStorageSize := max(int64(0), knowledge.StorageSize)
+	previousEmbeddingModelID := strings.TrimSpace(knowledge.EmbeddingModelID)
+	var obsoleteImageURLs []string
+	if hadPreviousContent {
+		obsoleteImageURLs = s.collectObsoleteChunkImageURLs(ctx, kb, tenantInfo.ID, knowledge.ID, chunks, options)
+	}
+
 	// 幂等性处理：清理旧的chunks和索引数据，避免重复数据
 	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
 
@@ -501,6 +627,23 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
 		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
 		// 不返回错误，继续处理（可能没有旧数据）
+	}
+	if len(obsoleteImageURLs) > 0 {
+		deleteExtractedImages(ctx, s.resolveFileService(ctx, kb),
+			knowledgeResourceOwners(s.resourceCatalog, knowledge.ID), obsoleteImageURLs)
+	}
+
+	// 若重解析前使用了不同的 Embedding 模型（或知识库后来关闭了向量索引），一并清理旧维度索引
+	if hadPreviousContent && previousEmbeddingModelID != "" &&
+		(embeddingModel == nil || previousEmbeddingModelID != kb.EmbeddingModelID) &&
+		s.modelService != nil && retrieveEngine != nil {
+		if prevModel, modelErr := s.modelService.GetEmbeddingModel(ctx, previousEmbeddingModelID); modelErr != nil {
+			logger.Warnf(ctx, "Failed to resolve previous embedding model %s during index swap: %v", previousEmbeddingModelID, modelErr)
+		} else if prevModel != nil && (embeddingModel == nil || prevModel.GetDimensions() != embeddingModel.GetDimensions()) {
+			if delErr := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, prevModel.GetDimensions(), knowledge.Type); delErr != nil {
+				logger.Warnf(ctx, "Failed to delete previous embedding model index data for %s: %v", knowledge.ID, delErr)
+			}
+		}
 	}
 
 	// 删除旧的索引数据 — only when vector/keyword indexing is enabled
@@ -696,10 +839,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		"chunks_planned": len(insertChunks),
 	})
 	if err := s.chunkRepo.CreateChunks(ctx, insertChunks); err != nil {
-		knowledge.ParseStatus = types.ParseStatusFailed
-		knowledge.ErrorMessage = err.Error()
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.failKnowledgeAfterSwapCleanup(ctx, tenantInfo, kb, knowledge, hadPreviousContent, previousStorageSize, err.Error())
 		s.failStage(ctx, knowledge.ID, types.StageChunking,
 			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
 		return nil
@@ -760,19 +900,25 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			// Re-fetch tenant storage information
 			tenantInfo, err = s.tenantRepo.GetTenantByID(ctx, tenantInfo.ID)
 			if err != nil {
-				knowledge.ParseStatus = types.ParseStatusFailed
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.failKnowledgeAfterSwapCleanup(ctx, tenantInfo, kb, knowledge, hadPreviousContent, previousStorageSize, err.Error())
+				// The embedding span is already open at this point. Returning
+				// without closing it leaves the stage "running" until the
+				// housekeeping reaper promotes it to TASK_STALLED, so the UI
+				// reports a stall instead of the lookup failure that happened.
+				s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+					werrors.ErrCodeUnknown, "reload tenant storage failed", err)
 				s.deleteUnindexedChunks(ctx, knowledge)
 				return nil
 			}
-			// Check if there's enough storage quota available
-			if tenantInfo.StorageUsed+totalStorageSize > tenantInfo.StorageQuota {
-				knowledge.ParseStatus = types.ParseStatusFailed
-				knowledge.ErrorMessage = "存储空间不足"
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
+			// Discount the storage this document's own previous index already occupies.
+			effectiveUsed := max(int64(0), tenantInfo.StorageUsed-previousStorageSize)
+			if effectiveUsed+totalStorageSize > tenantInfo.StorageQuota {
+				s.failKnowledgeAfterSwapCleanup(ctx, tenantInfo, kb, knowledge, hadPreviousContent, previousStorageSize, "存储空间不足")
+				// Same reason as above: the quota rejection is the outcome the
+				// user needs to see. A quota rejection is not a stall, and it
+				// is not retryable until the tenant frees space.
+				s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+					werrors.ErrCodeStorageQuotaExceeded, "storage quota exceeded", nil)
 				s.deleteUnindexedChunks(ctx, knowledge)
 				return nil
 			}
@@ -811,12 +957,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			// final attempt (or a caller without a retry loop) records failure.
 			willRetry := summaryTaskWillRetry(ctx)
 			if !willRetry {
-				knowledge.ParseStatus = types.ParseStatusFailed
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
-					logger.Errorf(ctx, "Update knowledge status failed after batch index error: %v", updateErr)
-				}
+				s.failKnowledgeAfterSwapCleanup(ctx, tenantInfo, kb, knowledge, hadPreviousContent, previousStorageSize, err.Error())
 			}
 
 			// delete failed chunks
@@ -902,6 +1043,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	now := time.Now()
+	if hadPreviousContent {
+		knowledge.Description = ""
+		knowledge.EmbeddingModelID = kb.EmbeddingModelID
+	}
 	finalizeIndexedKnowledgeState(
 		knowledge,
 		totalStorageSize,
@@ -910,8 +1055,23 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		now,
 	)
 
-	if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
+	sourceReplaced := s.isKnowledgeSourceReplaced(ctx, knowledge)
+	if sourceReplaced {
+		logger.Infof(ctx, "Skip knowledge update for %s: source file was replaced", knowledge.ID)
+	} else if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update knowledge failed")
+	}
+
+	// Adjust tenant storage alongside the persisted knowledge.StorageSize so a
+	// retryable failure in post-process enqueue below cannot drift the two.
+	storageDelta := totalStorageSize - previousStorageSize
+	if !sourceReplaced && storageDelta != 0 {
+		tenantInfo.StorageUsed = max(int64(0), tenantInfo.StorageUsed+storageDelta)
+		if s.tenantRepo != nil {
+			if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageDelta); err != nil {
+				logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update tenant storage used failed")
+			}
+		}
 	}
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
@@ -938,11 +1098,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 	}
 
-	// Update tenant's storage usage
-	tenantInfo.StorageUsed += totalStorageSize
-	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, totalStorageSize); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update tenant storage used failed")
-	}
 	logger.GetLogger(ctx).Infof("processChunks successfully")
 	return nil
 }
@@ -2668,6 +2823,13 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	return parseGeneratedQuestions(response.Content, questionCount), nil
 }
 
+// generatedQuestionListMarker matches one leading numbered or bullet list
+// marker (e.g. "1.", "1)", "1、", "-", "*", "•") so digits and dots that
+// belong to the question itself (5G, 2024, 3D, 3.5, .NET) are preserved.
+// "1." directly followed by a digit is a number like "3.5", not a marker; the
+// group keeps that following character when the marker has no space.
+var generatedQuestionListMarker = regexp.MustCompile(`^(?:\d+[.)、]\s+|\d+[)、]|\d+\.(\D)|[-*•]\s*)`)
+
 // parseGeneratedQuestions drops inline <think> reasoning first: servers that
 // ignore Thinking=false still emit it in content, and each reasoning line
 // would otherwise be indexed as a question.
@@ -2679,8 +2841,7 @@ func parseGeneratedQuestions(content string, questionCount int) []string {
 		if line == "" {
 			continue
 		}
-		line = strings.TrimLeft(line, "0123456789.-*) ")
-		line = strings.TrimSpace(line)
+		line = strings.TrimSpace(generatedQuestionListMarker.ReplaceAllString(line, "${1}"))
 		if line != "" && len(line) > 5 {
 			questions = append(questions, line)
 			if len(questions) >= questionCount {
@@ -3036,23 +3197,31 @@ func (s *knowledgeService) reparseKnowledge(
 		}
 		manualContent = meta.Content
 	} else {
-		// Check the parser engine before anything is deleted: parsing runs
-		// later in a worker, so a missing engine would otherwise only show
-		// up after the old chunks and vectors are already gone.
+		// Check the parser engine before accepting the reparse: parsing runs
+		// later in a worker, so a missing engine would otherwise still open a
+		// new attempt and mark the row pending before failing in convert().
 		if err := s.preflightReparseEngine(ctx, existing, reparseEff); err != nil {
 			logger.Warnf(ctx, "Reparse rejected, parser engine unavailable for knowledge %s: %v", knowledgeID, err)
 			return nil, err
 		}
-
-		// Cleanup synchronously; manual knowledge is cleaned up by its worker.
-		logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
-		if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"knowledge_id": knowledgeID,
-			})
-			return nil, err
+		if tasksDequeued {
+			// ReplaceKnowledgeFile already pointed the row at a new file and is
+			// about to delete the old one: drop the retired file's chunks,
+			// index, images and graph synchronously so search never serves the
+			// replaced file's content under the new filename.
+			logger.Infof(ctx, "Cleaning up replaced file resources for knowledge: %s", knowledgeID)
+			if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
+				logger.ErrorWithFields(ctx, err, map[string]interface{}{
+					"knowledge_id": knowledgeID,
+				})
+				return nil, err
+			}
 		}
 	}
+
+	// For an in-place reparse (!tasksDequeued), nothing is deleted here: the
+	// previous content stays searchable until processChunks swaps it out once
+	// the replacement has been parsed (#5002).
 
 	// Everything that can reject the reparse has run. From here on the
 	// previous run is superseded, so stop it before announcing the new one.
@@ -3118,8 +3287,18 @@ func (s *knowledgeService) reparseKnowledge(
 		return existing, nil
 	}
 
-	// Step 2: Update knowledge status and metadata
-	resetKnowledgeForReparse(existing, kb)
+	// Step 2: Update knowledge status and metadata.
+	// Keep EnableStatus, EmbeddingModelID, StorageSize, Description and
+	// ProcessedAt describing the live indexed content during an in-place
+	// reparse (#5002); otherwise Graph Search, Agent QA document listings and
+	// vector-store cleanup lose sight of it before processChunks swaps it out.
+	if !tasksDequeued && hasPreviousIndexedContent(existing) {
+		existing.ParseStatus = types.ParseStatusPending
+		existing.ErrorMessage = ""
+		existing.PendingSubtasksCount = 0
+	} else {
+		resetKnowledgeForReparse(existing, kb)
+	}
 
 	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
