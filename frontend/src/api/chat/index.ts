@@ -220,22 +220,3 @@ export async function getHostApprovalMode(session_id: string) {
 export async function setHostApprovalMode(session_id: string, mode: 'ask' | 'auto') {
   return put(`/api/v1/sessions/${encodeURIComponent(session_id)}/host-approval-mode`, { mode });
 }
-
-export interface MessageFeedbackView {
-  feedback_type: 'like' | 'dislike' | 'none' | string
-  reason_code?: string
-  reason_text?: string
-}
-
-export interface MessageFeedbackRequest {
-  feedback_type: string
-  reason_code?: string
-  reason_text?: string
-}
-
-export function submitMessageFeedback(sessionId: string, messageId: string, data: MessageFeedbackRequest) {
-  return put<{ success: boolean; data: MessageFeedbackView }>(
-    `/api/v1/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/feedback`,
-    data,
-  )
-}

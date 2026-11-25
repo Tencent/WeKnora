@@ -86,8 +86,6 @@
                     :title="$t('agent.copy')">
                     <ChatActionIcon name="copy" />
                 </t-button>
-                <AnswerFeedback v-if="feedbackMessageId && sessionId" :session-id="sessionId" :message-id="feedbackMessageId"
-                    :feedback="session?.feedback" />
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge"
                     :title="$t('agent.addToKnowledgeBase')">
                     <ChatActionIcon name="bookmark-add" />
@@ -155,7 +153,6 @@ import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
 import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
-import AnswerFeedback from '@/components/chat/AnswerFeedback.vue';
 import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
@@ -338,7 +335,6 @@ const messageIdForArtifacts = computed(() => {
     // persisted assistant. Keep request_id as the in-flight fallback.
     return persistedAssistantId(props.session) || String(props.session?.request_id || '');
 });
-const feedbackMessageId = computed(() => persistedAssistantId(props.session));
 // Set when the drawer is opened by clicking an inline artifact card, so it
 // lands directly on that file's preview instead of the list.
 const artifactPreviewIndex = ref(null);

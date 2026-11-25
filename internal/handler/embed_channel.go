@@ -32,7 +32,6 @@ type EmbedChannelHandler struct {
 	sessionHandler    *session.Handler
 	messageHandler    *MessageHandler
 	suggestionHandler *MessageSuggestionHandler
-	feedbackHandler   *MessageFeedbackHandler
 	mcpOAuthHandler   *MCPOAuthHandler
 	mcpServiceHandler *MCPServiceHandler
 	redis             *redis.Client
@@ -470,28 +469,6 @@ func (h *EmbedChannelHandler) EmbedDeleteSession(c *gin.Context) {
 	// The normal session route uses :id, while embed routes use :session_id.
 	c.Params = append(c.Params, gin.Param{Key: "id", Value: c.Param("session_id")})
 	h.sessionHandler.DeleteSession(c)
-}
-
-// SetMessageFeedbackHandler wires like/dislike for embed visitors. It is
-// optional so existing constructors keep working.
-func (h *EmbedChannelHandler) SetMessageFeedbackHandler(feedback *MessageFeedbackHandler) {
-	if h == nil {
-		return
-	}
-	h.feedbackHandler = feedback
-}
-
-// EmbedSubmitMessageFeedback stores a visitor vote after the embed session
-// signature has been checked.
-func (h *EmbedChannelHandler) EmbedSubmitMessageFeedback(c *gin.Context) {
-	if err := h.ensureEmbedSession(c); err != nil {
-		return
-	}
-	if h.feedbackHandler == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "feedback service unavailable"})
-		return
-	}
-	h.feedbackHandler.Submit(c)
 }
 
 func (h *EmbedChannelHandler) EmbedEnsureMessageSuggestions(c *gin.Context) {

@@ -30,7 +30,6 @@ import (
 type ChunkHandler struct {
 	service   interfaces.ChunkService
 	kgService interfaces.KnowledgeService
-	feedback  interfaces.MessageFeedbackService
 }
 
 // NewChunkHandler creates a new chunk handler.
@@ -143,18 +142,7 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 
 	// The route-level guard has rewritten the request's tenant context
 	// to the effective tenant for shared KBs.
-	filter := chunkFeedbackFilter(c)
-	var result *types.PageResult
-	var err error
-	if filter.Active() {
-		if h.feedback == nil {
-			_ = c.Error(errors.NewInternalServerError("feedback service unavailable"))
-			return
-		}
-		result, err = h.feedback.ListKnowledgeChunks(ctx, knowledgeID, &pagination, chunkType, filter)
-	} else {
-		result, err = h.service.ListPagedChunksByKnowledgeID(ctx, knowledgeID, &pagination, chunkType)
-	}
+	result, err := h.service.ListPagedChunksByKnowledgeID(ctx, knowledgeID, &pagination, chunkType)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))

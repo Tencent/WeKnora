@@ -678,21 +678,8 @@ export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agent
 
 export const KNOWLEDGE_CHUNK_PAGE_SIZE = 25;
 
-export function getKnowledgeDetailsCon(id: string, page: number, feedbackQuery = '') {
-  const extra = feedbackQuery ? `&${feedbackQuery}` : '';
-  return get(`/api/v1/chunks/${id}?page=${page}&page_size=${KNOWLEDGE_CHUNK_PAGE_SIZE}${extra}`);
-}
-
-export function getChunkFeedback(knowledgeId: string, chunkId: string) {
-  return get(`/api/v1/chunks/${encodeURIComponent(knowledgeId)}/${encodeURIComponent(chunkId)}/feedback`);
-}
-
-export function listChunkWeightLogs(knowledgeId: string, chunkId: string) {
-  return get(`/api/v1/chunks/${encodeURIComponent(knowledgeId)}/${encodeURIComponent(chunkId)}/weight-logs`);
-}
-
-export function resetChunkFeedback(knowledgeId: string, chunkId: string) {
-  return post(`/api/v1/chunks/${encodeURIComponent(knowledgeId)}/${encodeURIComponent(chunkId)}/feedback/reset`, {});
+export function getKnowledgeDetailsCon(id: string, page: number) {
+  return get(`/api/v1/chunks/${id}?page=${page}&page_size=${KNOWLEDGE_CHUNK_PAGE_SIZE}`);
 }
 
 export interface ChunkEditPayload {

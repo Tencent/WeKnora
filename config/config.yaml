@@ -40,22 +40,6 @@ conversation:
   extract_relationships_prompt_id: "default_extract_relationships"  # from prompt_templates/graph_extraction.yaml
   generate_questions_prompt_id: "default_generate_questions"        # from prompt_templates/generate_questions.yaml
 
-# Answer like/dislike rolls up to chunk approval rate and recall weight.
-# Defaults match the product rules when this section is omitted:
-#   >= 80% boost (1.2), 50%–80% unchanged (1.0), < 50% degrade (0.8),
-#   < 30% marked needs-optimization. Weight moves only after min_feedback_count votes.
-# Env overrides: WEKNORA_FEEDBACK_MIN_COUNT, WEKNORA_FEEDBACK_BOOST_THRESHOLD,
-# WEKNORA_FEEDBACK_NEUTRAL_THRESHOLD, WEKNORA_FEEDBACK_OPTIMIZATION_THRESHOLD,
-# WEKNORA_FEEDBACK_BOOST_WEIGHT, WEKNORA_FEEDBACK_NEUTRAL_WEIGHT, WEKNORA_FEEDBACK_PENALTY_WEIGHT.
-message_feedback:
-  min_feedback_count: 3
-  boost_positive_rate_threshold: 0.8
-  neutral_positive_rate_threshold: 0.5
-  needs_optimization_rate_threshold: 0.3
-  boost_recall_weight: 1.2
-  neutral_recall_weight: 1.0
-  penalty_recall_weight: 0.8
-
 # Knowledge base configuration
 knowledge_base:
   chunk_size: 512

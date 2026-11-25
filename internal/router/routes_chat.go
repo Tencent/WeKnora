@@ -141,17 +141,6 @@ func RegisterSessionRoutes(
 	}
 }
 
-// RegisterMessageFeedbackRoutes records like/dislike votes on assistant replies.
-// The path uses :id because the existing session PUT tree already bound that
-// wildcard name.
-func RegisterMessageFeedbackRoutes(r *gin.RouterGroup, feedback *handler.MessageFeedbackHandler, g *rbacGuards) {
-	if feedback == nil {
-		return
-	}
-	sessions := g.apiKeyGroup(r.Group("/sessions", g.Viewer()), apiKeyChat(apiKeyFullAccess()))
-	sessions.PUT("/:id/messages/:message_id/feedback", feedback.Submit)
-}
-
 // RegisterChatRoutes 注册路由。Chat endpoints are tenant-member usage
 // surfaces; Viewer+ is sufficient because per-session/per-agent
 // authorisation is enforced inside the handlers.

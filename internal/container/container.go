@@ -584,7 +584,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginSearchParallel))
 	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
 	must(container.Invoke(chatpipeline.NewPluginMemoryAffinity))
-	must(container.Invoke(chatpipeline.NewPluginFeedbackWeight))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
 	// TenantSkillService is provided next to SessionService (handlers need
@@ -697,19 +696,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewFAQHandler))
 	must(container.Provide(handler.NewTagHandler))
 	must(container.Provide(session.NewHandler))
-	must(container.Provide(repository.NewMessageFeedbackRepository))
-	must(container.Provide(service.NewMessageFeedbackService))
-	must(container.Invoke(func(messages interfaces.MessageService, feedback interfaces.MessageFeedbackService) {
-		service.AttachAnswerChunkRecorder(messages, feedback)
-	}))
 	must(container.Provide(handler.NewMessageHandler))
-	must(container.Provide(handler.NewMessageFeedbackHandler))
-	must(container.Invoke(func(messages *handler.MessageHandler, feedback interfaces.MessageFeedbackService) {
-		messages.SetFeedbackService(feedback)
-	}))
-	must(container.Invoke(func(chunks *handler.ChunkHandler, feedback interfaces.MessageFeedbackService) {
-		chunks.SetFeedbackService(feedback)
-	}))
 	must(container.Provide(handler.NewMessageSuggestionHandler))
 	must(container.Provide(handler.NewModelHandler))
 	must(container.Provide(handler.NewSandboxConfigHandler))
@@ -818,9 +805,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(registerIMService))
 	must(container.Provide(handler.NewIMHandler))
 	must(container.Provide(handler.NewEmbedChannelHandler))
-	must(container.Invoke(func(embed *handler.EmbedChannelHandler, feedback *handler.MessageFeedbackHandler) {
-		embed.SetMessageFeedbackHandler(feedback)
-	}))
 	must(container.Provide(handler.NewMCPEndpointHandler))
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
