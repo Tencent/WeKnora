@@ -428,6 +428,7 @@ export default {
       baseUrlPlaceholder: '예: https://api.openai.com/v1',
       baseUrlPlaceholderVllm: '예: http://localhost:11434/v1',
       baseUrlPlaceholderAsr: '예: https://api.openai.com/v1',
+      apiKey: 'API 키',
       apiKeyOptional: 'API 키 (선택)',
       apiKeyPlaceholder: 'API 키 입력',
       customHeadersLabel: '사용자 정의 요청 헤더 (선택)',

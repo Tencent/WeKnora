@@ -18,6 +18,7 @@ services:
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
       - MAX_SKILL_BUNDLE_SIZE_MB=${MAX_SKILL_BUNDLE_SIZE_MB:-256}
       - DEFAULT_LOCALE=${DEFAULT_LOCALE:-}
+      - MCP_BASE_URL=${MCP_BASE_URL:-}
       - APP_HOST=${APP_HOST:-app}
       # APP_BACKEND_PORT: the port NGINX proxies to (default 8080).
       # For local deployment this is the App container's listening port, independent of host-mapped APP_PORT.
@@ -711,6 +712,12 @@ services:
     ports:
       - "7474:7474"
       - "7687:7687"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7474/"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: always
     networks:
       - WeKnora-network

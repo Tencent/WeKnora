@@ -442,7 +442,8 @@ curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `query` | string | 是（`binding:"required"`） | 查询 |
+| `query` | string | 与 `query_image` 至少提供一个 | 只传文字时执行文本检索。与图片同传时用于关键词召回及重排 |
+| `query_image` | string | 与 `query` 至少提供一个 | Base64 或 data URI，支持 PNG、JPEG、WebP、GIF，解码后最多 8 MiB。图片用于向量召回，目标知识库需要兼容的多模态嵌入模型及已索引的图片 |
 | `knowledge_base_id` | string | 否 | 单 KB（兼容旧版） |
 | `knowledge_base_ids` | []string | 否 | 多 KB |
 | `knowledge_ids` | []string | 否 | 指定文件，与 `knowledge_base_id(s)` 取并集（见下方说明） |

@@ -54,6 +54,17 @@ func (p *earlySettlementPages) CreatePage(ctx context.Context, page *types.WikiP
 	return p.WikiPageService.CreatePage(ctx, page)
 }
 
+func (p *earlySettlementPages) GetOrCreatePage(
+	ctx context.Context, page *types.WikiPage,
+) (*types.WikiPage, bool, error) {
+	if gate := p.gates[page.Slug]; gate != nil {
+		if err := gate.wait(ctx); err != nil {
+			return nil, false, err
+		}
+	}
+	return p.WikiPageService.GetOrCreatePage(ctx, page)
+}
+
 func (p *earlySettlementPages) ReconcileAppliedPage(
 	ctx context.Context, tenantID uint64, kbID string, receipt types.WikiIngestPageProgress,
 ) error {

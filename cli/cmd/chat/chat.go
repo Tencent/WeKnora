@@ -32,6 +32,7 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/output"
 	"github.com/Tencent/WeKnora/cli/internal/sse"
+	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -45,6 +46,7 @@ var chatFields = []string{
 }
 
 type Options struct {
+	ModelID   string
 	Query     string
 	KBID      string
 	SessionID string
@@ -110,6 +112,7 @@ both flags for the complete projected stream.`,
 		},
 	}
 	cmdutil.AddKBFlag(cmd)
+	cmd.Flags().StringVar(&opts.ModelID, "model-id", "", "Chat model ID for this question (overrides the default)")
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.Reference, "reference", false, "Include indexed references in JSON/text output")
 	cmd.Flags().BoolVar(&opts.Verbose, "verbose", false, "Include reasoning, tools, and lifecycle events in JSON/text output")
@@ -146,7 +149,7 @@ func runChat(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, s
 	sessionID := opts.SessionID
 	autoCreated := false
 	if sessionID == "" {
-		sess, err := svc.CreateSession(ctx, &sdk.CreateSessionRequest{Title: "weknora chat"})
+		sess, err := svc.CreateSession(ctx, &sdk.CreateSessionRequest{Title: text.OneLine(60, opts.Query)})
 		if err != nil {
 			// Ctrl-C during session creation: classify as cancelled so the
 			// hint nudges the user toward retry-with-signal-clean, not
@@ -205,6 +208,7 @@ func runChatNDJSON(ctx context.Context, opts *Options, sessionID string, svc Cha
 	req := &sdk.KnowledgeQARequest{
 		Query:            opts.Query,
 		KnowledgeBaseIDs: []string{opts.KBID},
+		SummaryModelID:   opts.ModelID,
 		AgentEnabled:     false,
 		WebSearchEnabled: false,
 		Channel:          "api",
@@ -229,6 +233,7 @@ func runChatText(ctx context.Context, opts *Options, sessionID string, autoCreat
 	req := &sdk.KnowledgeQARequest{
 		Query:            opts.Query,
 		KnowledgeBaseIDs: []string{opts.KBID},
+		SummaryModelID:   opts.ModelID,
 		AgentEnabled:     false,
 		WebSearchEnabled: false,
 		Channel:          "api",
@@ -286,6 +291,7 @@ func runChatJSON(ctx context.Context, opts *Options, fopts *cmdutil.FormatOption
 	req := &sdk.KnowledgeQARequest{
 		Query:            opts.Query,
 		KnowledgeBaseIDs: []string{opts.KBID},
+		SummaryModelID:   opts.ModelID,
 		AgentEnabled:     false,
 		WebSearchEnabled: false,
 		Channel:          "api",

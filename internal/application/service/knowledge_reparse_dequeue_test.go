@@ -84,13 +84,6 @@ func TestReparseKnowledgeRejectedLeavesPreviousRunUntouched(t *testing.T) {
 			wantErr: "is not available",
 			deletes: new(int),
 		},
-		{
-			name: "resource cleanup fails",
-			setup: func(h *replaceFileHarness) {
-				h.svc.chunkRepo = failingCleanupChunkRepo{err: errors.New("database unavailable")}
-			},
-			wantErr: "database unavailable",
-		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

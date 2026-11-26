@@ -125,6 +125,19 @@ func (p *wikiIngestProgressPages) CreatePage(ctx context.Context, page *types.Wi
 	return p.WikiPageService.CreatePage(ctx, page)
 }
 
+func (p *wikiIngestProgressPages) GetOrCreatePage(
+	ctx context.Context, page *types.WikiPage,
+) (*types.WikiPage, bool, error) {
+	p.mu.Lock()
+	p.createCalls[page.Slug]++
+	fail := p.failWriteSlug == page.Slug
+	p.mu.Unlock()
+	if fail {
+		return nil, false, errors.New("synthetic page write failure")
+	}
+	return p.WikiPageService.GetOrCreatePage(ctx, page)
+}
+
 func (p *wikiIngestProgressPages) UpdatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error) {
 	p.mu.Lock()
 	p.updateCalls[page.Slug]++

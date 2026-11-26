@@ -77,14 +77,65 @@ func NewWikiPageService(
 
 // CreatePage creates a new wiki page
 func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error) {
+	if err := s.prepareWikiPageForCreate(ctx, page); err != nil {
+		return nil, err
+	}
+
+	if err := s.repo.Create(ctx, page); err != nil {
+		return nil, fmt.Errorf("create wiki page: %w", err)
+	}
+
+	// 持久进度路径已原子记录正文成功，反链交给可恢复的收尾，避免中断后重做模型调用。
+	if types.WikiPageProgressCommitFromContext(ctx) == nil {
+		// Update inbound links on target pages
+		s.updateInLinks(ctx, page.TenantID, page.KnowledgeBaseID, page.Slug, page.OutLinks)
+	}
+
+	return page, nil
+}
+
+// GetOrCreatePage creates a new wiki page like CreatePage, or returns the
+// live page that already owns the slug when a concurrent writer created
+// it first, with created=false. The losing caller is expected to apply
+// its content through UpdatePage; the existing row is never overwritten
+// here, so a concurrent ingest batch cannot clobber the winner's
+// content or revision history.
+//
+// Only the batch ingest path uses this: interactive create (handler,
+// agent tools) keeps the strict CreatePage, where a duplicate slug is
+// still an error instead of a silent no-op.
+func (s *wikiPageService) GetOrCreatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, bool, error) {
+	if err := s.prepareWikiPageForCreate(ctx, page); err != nil {
+		return nil, false, err
+	}
+
+	createdPage, created, err := s.repo.GetOrCreate(ctx, page)
+	if err != nil {
+		return nil, false, fmt.Errorf("create wiki page: %w", err)
+	}
+	if created {
+		// 持久进度路径已原子记录正文成功，反链交给可恢复的收尾，避免中断后重做模型调用。
+		if types.WikiPageProgressCommitFromContext(ctx) == nil {
+			// Update inbound links on target pages
+			s.updateInLinks(ctx, page.TenantID, page.KnowledgeBaseID, page.Slug, page.OutLinks)
+		}
+		return createdPage, true, nil
+	}
+	return createdPage, false, nil
+}
+
+// prepareWikiPageForCreate applies the shared pre-insert normalization
+// for both strict and idempotent page creation: defaults, citation
+// stripping, out-link parsing and folder resolution.
+func (s *wikiPageService) prepareWikiPageForCreate(ctx context.Context, page *types.WikiPage) error {
 	if page.ID == "" {
 		page.ID = uuid.New().String()
 	}
 	if page.Slug == "" {
-		return nil, errors.New("wiki page slug is required")
+		return errors.New("wiki page slug is required")
 	}
 	if page.KnowledgeBaseID == "" {
-		return nil, errors.New("knowledge_base_id is required")
+		return errors.New("knowledge_base_id is required")
 	}
 	if page.Status == "" {
 		page.Status = types.WikiPageStatusPublished
@@ -99,25 +150,14 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	// Parse outbound links from content
 	page.OutLinks = s.parseOutLinks(page.Content)
 	if err := s.applyFolderToPage(ctx, page); err != nil {
-		return nil, err
+		return err
 	}
 	normalizeWikiHierarchy(page)
 
 	now := time.Now()
 	page.CreatedAt = now
 	page.UpdatedAt = now
-
-	if err := s.repo.Create(ctx, page); err != nil {
-		return nil, fmt.Errorf("create wiki page: %w", err)
-	}
-
-	// 持久进度路径已原子记录正文成功，反链交给可恢复的收尾，避免中断后重做模型调用。
-	if types.WikiPageProgressCommitFromContext(ctx) == nil {
-		// Update inbound links on target pages
-		s.updateInLinks(ctx, page.TenantID, page.KnowledgeBaseID, page.Slug, page.OutLinks)
-	}
-
-	return page, nil
+	return nil
 }
 
 // UpdatePage updates an existing wiki page.

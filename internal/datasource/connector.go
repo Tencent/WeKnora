@@ -51,6 +51,17 @@ type Connector interface {
 	FetchIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
+// ValidateCredentials uses a discovery-only check when the connector offers one.
+// Other connectors use their regular configuration validation.
+func ValidateCredentials(ctx context.Context, connector Connector, config *types.DataSourceConfig) error {
+	if validator, ok := connector.(interface {
+		ValidateCredentials(context.Context, *types.DataSourceConfig) error
+	}); ok {
+		return validator.ValidateCredentials(ctx, config)
+	}
+	return connector.Validate(ctx, config)
+}
+
 // StreamHandler receives items and progress checkpoints emitted during a
 // streaming fetch. The service implements it to ingest each item as it arrives
 // (bounding memory to one item instead of the whole wiki) and to persist the
@@ -102,6 +113,39 @@ type FullStreamingConnector interface {
 		ctx context.Context, config *types.DataSourceConfig,
 		cursor *types.SyncCursor, h StreamHandler,
 	) (*types.SyncCursor, error)
+}
+
+// ItemFailureIsolatingConnector is an optional interface for streaming
+// connectors whose cursor tracks items independently (such as a per-node or
+// per-file map rather than a linear offset or commit SHA).
+//
+// When implemented and returning true, StreamHandler.Emit may return an error
+// matching errors.Is(err, ErrItemIngestFailed) for an individual item's ingest
+// failure without aborting the stream. The connector must keep that item's
+// cursor entry unadvanced so it retries on a later sync, and continue syncing
+// remaining items and resources. Any other Emit error remains fatal.
+type ItemFailureIsolatingConnector interface {
+	StreamingConnector
+
+	IsolatesItemIngestFailures() bool
+}
+
+// UnchangedItemRecorder is an optional StreamHandler capability implemented by
+// the service's streaming handler. Connectors that skip already-up-to-date
+// items via their cursor fast-path may call RecordUnchangedItem so the service
+// can tell a quiet incremental round (healthy items already synced, only a
+// lingering failed item retried) apart from a round where every item failed.
+type UnchangedItemRecorder interface {
+	RecordUnchanged()
+}
+
+// RecordUnchangedItem notifies h that one in-scope item matched the persisted
+// cursor and was skipped as already up to date. No-op when h does not
+// implement UnchangedItemRecorder.
+func RecordUnchangedItem(h StreamHandler) {
+	if r, ok := h.(UnchangedItemRecorder); ok {
+		r.RecordUnchanged()
+	}
 }
 
 // FullSyncWithCursor is optional. The batch sync path uses it for ForceFull and

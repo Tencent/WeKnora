@@ -237,3 +237,41 @@ func TestFetchPagePropagatesTruncationFromChildDatabase(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, truncated, "a capped child database query must reach the incremental round")
 }
+
+// has_more=true with no next_cursor promises rows the client cannot ask for. The
+// query used to treat it as the end of the data source, so the missing rows were
+// read as source-side deletions.
+func TestQueryDatabaseAllReportsHasMoreWithoutCursor(t *testing.T) {
+	logs := captureNotionLogs(t)
+	server := newWindowQueryServer(t, windowQueryFake{
+		rows: []windowTestRow{
+			{id: "r1", createdTime: "2026-01-01T10:00:00Z"},
+			{id: "r2", createdTime: "2026-01-01T11:00:00Z"},
+		},
+		pageSize:   1,
+		dropCursor: true,
+	})
+	client := mustTestClient(t, "test-token", server.URL)
+
+	records, err := client.QueryDatabaseAll(context.Background(), "ds-1")
+	require.ErrorIs(t, err, errQueryResultTruncated, "an unfollowable has_more must not read as a complete result")
+	require.Equal(t, []string{"r1"}, recordIDs(records), "rows already read stay available to the caller")
+	require.Contains(t, logs.String(), "has_more=true without a next_cursor")
+}
+
+func TestFetchIncrementalHasMoreWithoutCursorSkipsDeletions(t *testing.T) {
+	server := newWindowQueryServer(t, windowQueryFake{
+		searchResults: []interface{}{truncationDataSourceRow()},
+		rows:          createdTimeRows("r1", "r2"),
+		pageSize:      1,
+		dropCursor:    true,
+	})
+	config := makeNotionConfig(&Config{APIKey: "test-token"}, server.URL, []string{"ds-1"})
+
+	items, _, err := NewConnector().FetchIncremental(context.Background(), config, truncationPrevCursor())
+	require.NoError(t, err)
+	for _, item := range items {
+		require.False(t, item.IsDeleted,
+			"row %s was missing only because the query could not be continued", item.ExternalID)
+	}
+}

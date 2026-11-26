@@ -209,12 +209,12 @@ migration `000061_wiki_page_hierarchy.up.sql` 引入独立的 `wiki_folders` 表
 | --- | --- | --- |
 | `wiki_read_page` | 按 slug 批量读取页面全文 | `slugs: string[]` |
 | `wiki_search` | 搜索页面（标题 / slug / 别名 / 摘要 / 内容；`query` 按大小写不敏感的 POSIX 正则解释，不是合法正则的文本如 `C++` 按字面匹配；`regex=false` 强制字面匹配） | `query`、`regex?`、`knowledge_base_ids?`、`limit?`（旧参数 `queries`、`knowledge_base_id` 仍接受） |
-| `wiki_write_page` | 整页修订或合并已有页面；也支持从已入库来源重建缺失衍生页，不执行文档入库 | `slug`、`title`、`summary`、`content`、`page_type`、`aliases?`、`source_refs?` |
-| `wiki_replace_text` | 页内精确文本替换 | `slug`、`old_text`、`new_text` |
-| `wiki_rename_page` | 重命名 slug，自动更新反向链接 | `slug`、`new_slug` |
-| `wiki_delete_page` | 删除页面并清理死链 | `slug` |
+| `wiki_write_page` | 整页修订或合并已有页面；也支持从已入库来源重建缺失衍生页，不执行文档入库 | `slug`、`title`、`summary`、`content`、`page_type`、`aliases?`、`source_refs?`、`knowledge_base_id?` |
+| `wiki_replace_text` | 页内精确文本替换 | `slug`、`old_text`、`new_text`、`knowledge_base_id?` |
+| `wiki_rename_page` | 重命名 slug，自动更新反向链接 | `slug`、`new_slug`、`knowledge_base_id?` |
+| `wiki_delete_page` | 删除页面并清理死链 | `slug`、`knowledge_base_id?` |
 | `read_document` | 回读源文档原文：元数据头 + 分块，可分页或用 `query` 在文档内定位（替代原 `wiki_read_source_doc`；仅 Wiki 的知识库同样可用，因为分块总会落库） | `id`（`dN` / `cN`）、`offset?`、`limit?`、`query?`、`regex?`、`context?` |
-| `wiki_flag_issue` | 标记页面问题 | `slug`、`issue_type ∈ {mixed_entities, contradictory_facts, out_of_date, other}`、`description` |
+| `wiki_flag_issue` | 标记页面问题 | `slug`、`issue_type ∈ {mixed_entities, contradictory_facts, out_of_date, other}`、`description`、`knowledge_base_id?` |
 | `wiki_read_issue` | 查看问题详情 | 问题 ID |
 | `wiki_update_issue` | 更新问题状态 | 问题 ID、`status ∈ {pending, ignored, resolved}` |
 
@@ -223,6 +223,7 @@ migration `000061_wiki_page_hierarchy.up.sql` 引入独立的 `wiki_folders` 表
 配套机制：
 
 - **Wiki Scope**：Agent 会话内维护 wiki KB 白名单，支持通过 `@mention` 把范围收窄到特定文档/标签，工具执行时自动过滤 `source_refs`（`internal/agent/tools/wiki_tools.go`）；
+- **编辑目标**：`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page` 和 `wiki_flag_issue` 支持可选的 `knowledge_base_id`（模型使用检索/读取结果中的句柄，如 `kb://1`）。跨知识库存在相同 slug 时，用它明确指定目标；该参数只能收窄到当前可写范围内的知识库。省略时仍自动定位，重名则报错并提示指定知识库。改名与删除的入链处理仅发生在选定知识库内。
 - **写权限**：检索范围只需要读权限，而改写类工具（`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_flag_issue`、`wiki_update_issue`）只作用于调用方可编辑的知识库，即本空间的知识库，或通过组织分享获得 editor 及以上权限的知识库。调用方本身还要有写权限：空间角色 Contributor 及以上，受限 API key 需要 `ingest` 能力。以 Viewer 身份运行的 IM、网页嵌入和 MCP 端点因此只读。范围内没有可编辑的 wiki 知识库时，这些工具不会注册。共享智能体始终只读；
 - **Wiki Fixer**：内置 Agent（`types.BuiltinWikiFixerID`），负责自动修复 wiki 问题（死链、实体混淆等）。跨租户访问共享 KB 时要求租户角色 ≥ Editor，并自动提升到源租户上下文（`internal/handler/session/wiki_fixer_scope.go`）。提升后使用内置默认配置，只针对这一个 KB，不启用 MCP、技能、沙箱和联网搜索，模型回退到该 KB 自己的模型，调用方对 fixer 的自定义配置不会带进源空间；
 - **问题闭环**：`wiki_page_issues` 表 + lint 接口 + `auto-fix`，人和 Agent 都可以报告/处理问题。

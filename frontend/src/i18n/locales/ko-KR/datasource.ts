@@ -778,6 +778,7 @@ export default {
       book: 'Yuque 지식베이스',
       library: 'Seafile 라이브러리'
     },
+    resourceUnavailable: '삭제됨 또는 사용 불가',
     scheduleHuman: {
       '30min': '30분마다',
       '1h': '매시간',
@@ -848,6 +849,8 @@ export default {
     logDetail: {
       startTime: '시작 시간',
       endTime: '종료 시간',
+      deletedItems: '원본에서 삭제된 문서',
+      deletedItemsMore: '표시되지 않은 삭제 문서 {n}개',
       failedItems: '실패한 문서',
       failedItemsMore: '표시되지 않은 실패 문서 {n}개',
       docsFailedSummary: '문서 {n}개 동기화 실패'
@@ -909,6 +912,12 @@ export default {
       deletion_lookup_failed: '삭제 전 항목 조회에 실패했습니다. 서버 로그를 확인하세요',
       deletion_failed: '삭제에 실패했습니다. 서버 로그를 확인하세요',
       ingest_failed: '가져오기에 실패했습니다. 서버 로그를 확인하세요',
+      unsupported_file_type: '지원되지 않는 파일 형식입니다',
+      prerequisite_not_configured: '지식 베이스에 필요한 모델이 설정되지 않았습니다(이미지는 VLM, 오디오는 ASR 필요)',
+      invalid_item_name: '파일 이름 또는 폴더 경로에 허용되지 않은 문자가 포함되어 있습니다',
+      invalid_url: 'URL이 유효하지 않거나 보안 정책에 의해 차단되었습니다',
+      invalid_json_content: 'JSON 파일 내용이 비어 있거나 형식이 올바르지 않습니다',
+      storage_quota_exceeded: '스토리지 할당량을 초과했습니다',
       nextcloud_permission_denied: 'Nextcloud 파일 접근이 거부되었습니다. 계정 권한을 확인하세요.',
       nextcloud_not_found: '목록 조회 후 Nextcloud 파일이 사라졌습니다. 다음 동기화에서 재시도합니다.',
       nextcloud_file_too_large: 'Nextcloud 파일이 MAX_FILE_SIZE_MB 제한을 초과합니다.',

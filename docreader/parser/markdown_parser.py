@@ -34,6 +34,14 @@ _ESCAPE_OR_PIPE = re.compile(r"\\.|\|", re.DOTALL)
 # Looser than ``_SEPARATOR_CELL``: any non-empty run of ``:``/``-`` qualifies.
 _ALIGNMENT_CELL = re.compile(r"^[:-]+$")
 _CODE_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
+_BLOCK_QUOTE_MARKER = re.compile(r" {0,3}>[ \t]?")
+# shortcut: explicit ATX and paragraph-interrupting list markers, use a
+# source-position-aware Markdown parser if broader block handling is needed.
+_INLINE_BLOCK_START = re.compile(
+    r"^ {0,3}(?:>[ \t]{0,4})*"
+    r"(?:(?P<heading>#{1,6}(?=[ \t]|\r?$)[^\n]*)|(?:[-+*]|1[.)])[ \t]+(?=\S))",
+    re.MULTILINE,
+)
 
 
 def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> str:
@@ -41,6 +49,7 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
     out: List[str] = []
     pending: List[str] = []
     fence: Optional[str] = None
+    fence_depth = 0
 
     def flush_pending() -> None:
         if pending:
@@ -48,11 +57,21 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
             pending.clear()
 
     for line in content.split("\n"):
-        marker = _CODE_FENCE.fullmatch(line.removesuffix("\r"))
+        prefix_end = 0
+        quote_depth = 0
+        while quote := _BLOCK_QUOTE_MARKER.match(line, prefix_end):
+            prefix_end = quote.end()
+            quote_depth += 1
+        marker = _CODE_FENCE.fullmatch(line[prefix_end:].removesuffix("\r"))
+
+        # An unclosed fence ends when its block quote ends.
+        if fence is not None and quote_depth < fence_depth:
+            fence = None
         if fence is not None:
             out.append(line)
             if (
-                marker
+                quote_depth == fence_depth
+                and marker
                 and marker[1][0] == fence[0]
                 and len(marker[1]) >= len(fence)
                 and not marker[2].strip(" \t")
@@ -61,6 +80,7 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
         elif marker and (marker[1][0] != "`" or "`" not in marker[2]):
             flush_pending()
             fence = marker[1]
+            fence_depth = quote_depth
             out.append(line)
         else:
             pending.append(line)
@@ -71,10 +91,19 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
 def _inline_code_spans(content: str) -> list[tuple[int, int]]:
     """Find paired backtick runs without rescanning unmatched suffixes."""
     tokens = list(re.finditer(r"`+|\n[ \t\r]*\n", content))
+    boundaries = []
+    for block in _INLINE_BLOCK_START.finditer(content):
+        boundaries.append(block.start())
+        if block["heading"] is not None:
+            boundaries.append(block.end())  # A heading has its own inline content.
+
     following: dict[int, int] = {}
     closers: dict[int, int] = {}
     for i in range(len(tokens) - 1, -1, -1):
         token = tokens[i]
+        while boundaries and boundaries[-1] > token.start():
+            following.clear()
+            boundaries.pop()
         if token[0].startswith("\n"):
             following.clear()  # Inline code cannot cross a blank paragraph.
             continue
@@ -470,6 +499,15 @@ class MarkdownImageUtil:
 
             def replace_image(match: Match[str]) -> str:
                 nonlocal span
+                escapes = 0
+                index = match.start() - 1
+                while index >= 0 and match.string[index] == "\\":
+                    escapes += 1
+                    index -= 1
+                if escapes % 2:
+                    # An odd backslash run escapes the marker, so Markdown
+                    # renders text here rather than an image.
+                    return match.group(0)
                 while span is not None and span[1] <= match.start():
                     span = next(spans, None)
                 if span is not None and span[0] <= match.start() < span[1]:

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -1127,4 +1128,67 @@ func TestTaskPendingOps_ClaimableCountMatchesClaimBatch(t *testing.T) {
 	pending, err := repo.PendingCount(ctx, "wiki:ingest", "knowledge_base", "kb-1")
 	require.NoError(t, err)
 	require.Equal(t, int64(7), pending, "crash recovery must still see claimed rows")
+}
+
+func TestTaskPendingOps_EnqueueBatchIfKnowledgeBaseActive(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rollback=%v", fail), func(t *testing.T) {
+			db := setupTaskQueueTestDB(t)
+			require.NoError(t, db.Exec(taskQueueKnowledgeBaseTestDDL).Error)
+			require.NoError(t, db.Exec("CREATE TABLE tenants (id INTEGER PRIMARY KEY, deleted_at DATETIME)").Error)
+			require.NoError(t, db.Exec("INSERT INTO tenants(id) VALUES (1)").Error)
+			require.NoError(t, db.Exec("INSERT INTO knowledge_bases(id, tenant_id) VALUES ('kb',1)").Error)
+			if fail {
+				// The second SQL chunk fails after the first 100 rows were inserted.
+				require.NoError(t, db.Exec(`CREATE TRIGGER fail_finalize BEFORE INSERT ON task_pending_ops
+      WHEN NEW.dedup_key = 'slug-100' BEGIN SELECT RAISE(ABORT, 'injected insert failure'); END`).Error)
+			}
+			guard := NewTaskPendingOpsRepository(db).(interfaces.TaskPendingOpsKnowledgeBaseBatchGuard)
+			rows := make([]*types.TaskPendingOp, 250)
+			for i := range rows {
+				rows[i] = makePendingOp(
+					types.TypeWikiFinalize, types.TaskScopeKnowledgeBase, "kb", "slug", fmt.Sprintf("slug-%d", i), nil)
+			}
+			accepted, err := guard.EnqueueBatchIfKnowledgeBaseActive(context.Background(), rows)
+			var count int64
+			require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&count).Error)
+			if fail {
+				require.ErrorContains(t, err, "injected insert failure")
+				require.False(t, accepted)
+				require.Zero(t, count, "a later SQL failure must roll back every chunk")
+			} else {
+				require.NoError(t, err)
+				require.True(t, accepted)
+				require.EqualValues(t, len(rows), count)
+				var stored types.TaskPendingOp
+				require.NoError(t, db.First(&stored).Error)
+				require.WithinDuration(t, time.Now(), stored.EnqueuedAt, time.Minute)
+			}
+		})
+	}
+}
+
+func TestTaskPendingOps_EnqueueBatchRejectsInvalidLanes(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	guard := NewTaskPendingOpsRepository(db).(interfaces.TaskPendingOpsKnowledgeBaseBatchGuard)
+	for _, modify := range []func(*types.TaskPendingOp){
+		func(op *types.TaskPendingOp) { op.TenantID++ },
+		func(op *types.TaskPendingOp) { op.ScopeID = "other" },
+		func(op *types.TaskPendingOp) { op.TaskType = types.TypeWikiIngest },
+		func(op *types.TaskPendingOp) { op.Scope = "other" },
+	} {
+		first := makePendingOp(types.TypeWikiFinalize, types.TaskScopeKnowledgeBase, "kb", "slug", "a", nil)
+		second := makePendingOp(types.TypeWikiFinalize, types.TaskScopeKnowledgeBase, "kb", "slug", "b", nil)
+		modify(second)
+		accepted, err := guard.EnqueueBatchIfKnowledgeBaseActive(
+			context.Background(), []*types.TaskPendingOp{first, second})
+		require.Error(t, err)
+		require.False(t, accepted)
+	}
+	accepted, err := guard.EnqueueBatchIfKnowledgeBaseActive(context.Background(), nil)
+	require.NoError(t, err)
+	require.False(t, accepted)
+	accepted, err = guard.EnqueueBatchIfKnowledgeBaseActive(context.Background(), []*types.TaskPendingOp{nil})
+	require.Error(t, err)
+	require.False(t, accepted)
 }

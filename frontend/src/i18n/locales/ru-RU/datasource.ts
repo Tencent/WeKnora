@@ -778,6 +778,7 @@ export default {
       book: 'База знаний Yuque',
       library: 'Библиотека Seafile'
     },
+    resourceUnavailable: 'Удалено или недоступно',
     scheduleHuman: {
       '30min': 'Каждые 30 мин',
       '1h': 'Каждый час',
@@ -848,6 +849,8 @@ export default {
     logDetail: {
       startTime: 'Время начала',
       endTime: 'Время окончания',
+      deletedItems: 'Удалено в источнике',
+      deletedItemsMore: 'Ещё {n} удалённых документов не показаны',
       failedItems: 'Документы с ошибкой',
       failedItemsMore: 'Ещё {n} документов с ошибкой не показаны',
       docsFailedSummary: 'Не удалось синхронизировать документов: {n}'
@@ -909,6 +912,12 @@ export default {
       deletion_lookup_failed: 'Не удалось найти элемент перед удалением; подробности в журнале сервера',
       deletion_failed: 'Не удалось удалить элемент; подробности в журнале сервера',
       ingest_failed: 'Не удалось импортировать элемент; подробности в журнале сервера',
+      unsupported_file_type: 'Неподдерживаемый тип файла',
+      prerequisite_not_configured: 'Для базы знаний не настроена необходимая модель (VLM для изображений, ASR для аудио)',
+      invalid_item_name: 'Имя файла или путь папки содержит недопустимые символы',
+      invalid_url: 'Недопустимый или небезопасный URL',
+      invalid_json_content: 'Файл JSON пуст или имеет неверный формат',
+      storage_quota_exceeded: 'Превышена квота хранилища',
       nextcloud_permission_denied: 'Нет доступа к файлу Nextcloud. Проверьте права учётной записи.',
       nextcloud_not_found: 'Файл Nextcloud исчез после получения списка. Следующая синхронизация повторит попытку.',
       nextcloud_file_too_large: 'Файл Nextcloud превышает ограничение MAX_FILE_SIZE_MB.',

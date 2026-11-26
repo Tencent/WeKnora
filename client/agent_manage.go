@@ -127,6 +127,18 @@ type AgentConfig struct {
 	FallbackResponse            string                    `json:"fallback_response"`
 	FallbackPrompt              string                    `json:"fallback_prompt"`
 	QuestionSuggestions         *QuestionSuggestionConfig `json:"question_suggestions,omitempty"`
+
+	// An update replaces the whole stored config, so a field missing here is
+	// reset by any fetch-then-update through the SDK.
+	MCPAuthWaitTimeout            int                `json:"mcp_auth_wait_timeout,omitempty"`
+	AccessLevel                   string             `json:"access_level,omitempty"`
+	SandboxConfigID               string             `json:"sandbox_config_id,omitempty"`
+	ChatParserEngineRules         []ParserEngineRule `json:"chat_parser_engine_rules,omitempty"`
+	AttachmentImageUnderstanding  bool               `json:"attachment_image_understanding"`
+	AttachmentOCRMaxPages         int                `json:"attachment_ocr_max_pages,omitempty"`
+	AttachmentParseWaitTimeoutSec int                `json:"attachment_parse_wait_timeout_sec,omitempty"`
+	MemoryEnabled                 *bool              `json:"memory_enabled,omitempty"`
+	IntentPrompts                 map[string]string  `json:"intent_prompts,omitempty"`
 }
 
 type QuestionSuggestionConfig struct {

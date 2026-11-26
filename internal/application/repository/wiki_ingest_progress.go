@@ -306,12 +306,12 @@ func (r *taskPendingOpsRepository) LoadWikiIngestPlan(
 	return state, err
 }
 
-// enqueueWikiProgressHandoff 将授权和这一条交接行的插入放在同一短事务。
-// 每行都重新取得归属/领取锁；前一行成功或页面已发布不能授权后续失主写入。
-func (r *taskPendingOpsRepository) enqueueWikiProgressHandoff(
-	ctx context.Context, op *types.TaskPendingOp, claims []types.WikiProgressClaim,
+// enqueueWikiProgressHandoffBatch 将授权和交接批行的插入放在同一短事务。
+// 每次交接都重新取得归属/领取锁；前一批成功或页面已发布不能授权后续失主写入。
+func (r *taskPendingOpsRepository) enqueueWikiProgressHandoffBatch(
+	ctx context.Context, ops []*types.TaskPendingOp, claims []types.WikiProgressClaim,
 ) (bool, error) {
-	if op.TaskType != types.TypeWikiFinalize {
+	if len(ops) == 0 || ops[0].TaskType != types.TypeWikiFinalize {
 		return false, types.ErrWikiProgressClaimLost
 	}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -320,7 +320,7 @@ func (r *taskPendingOpsRepository) enqueueWikiProgressHandoff(
 			return err
 		}
 		for _, claim := range ordered {
-			if op.TenantID != claim.TenantID || op.ScopeID != claim.KnowledgeBaseID {
+			if ops[0].TenantID != claim.TenantID || ops[0].ScopeID != claim.KnowledgeBaseID {
 				return types.ErrWikiProgressClaimLost
 			}
 			state, err := readWikiPlanSnapshotTx(tx, claim, false)
@@ -331,7 +331,7 @@ func (r *taskPendingOpsRepository) enqueueWikiProgressHandoff(
 				return types.ErrWikiProgressPlanMissing
 			}
 		}
-		return tx.Create(op).Error
+		return tx.CreateInBatches(ops, 100).Error
 	})
 	return err == nil, err
 }

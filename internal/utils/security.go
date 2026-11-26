@@ -57,6 +57,15 @@ func SanitizeHTML(input string) string {
 	// 检查输入长度
 	if len(input) > 10000 {
 		input = input[:10000]
+		// 回退到最后一个完整的 rune 边界，避免在多字节字符中间截断，
+		// 否则会返回非法的 UTF-8 字符串。
+		for len(input) > 0 {
+			if r, size := utf8.DecodeLastRuneInString(input); r == utf8.RuneError && size == 1 {
+				input = input[:len(input)-1]
+				continue
+			}
+			break
+		}
 	}
 
 	// 检查是否包含潜在的 XSS 攻击
@@ -398,6 +407,16 @@ func isSSRFSafeURL(rawURL string) (bool, string) {
 		return false, "IP-like hostname format is not allowed"
 	}
 
+	// Check for suspicious port numbers before resolving the host. The port
+	// rule does not depend on the DNS answer, so a blocked port has to be
+	// reported the same way whether or not the hostname resolves: otherwise a
+	// proxied or intercepted resolver turns this verdict into a DNS failure
+	// (or a restricted-IP verdict) and the caller loses the actionable reason.
+	port := parsed.Port()
+	if restrictedPorts[port] {
+		return false, fmt.Sprintf("port %s is blocked for security reasons", port)
+	}
+
 	// Perform DNS resolution to check the resolved IP
 	// This prevents DNS rebinding attacks where a domain resolves to internal IPs
 	ips, err := net.LookupIP(hostname)
@@ -410,12 +429,6 @@ func isSSRFSafeURL(rawURL string) (bool, string) {
 		if restricted, reason := isRestrictedIP(resolvedIP); restricted {
 			return false, fmt.Sprintf("hostname %s resolves to restricted IP %s: %s", hostname, resolvedIP.String(), reason)
 		}
-	}
-
-	// Check for suspicious port numbers
-	port := parsed.Port()
-	if restrictedPorts[port] {
-		return false, fmt.Sprintf("port %s is blocked for security reasons", port)
 	}
 
 	return true, ""
