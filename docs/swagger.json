@@ -35100,7 +35100,8 @@
                 "model_unavailable",
                 "no_model",
                 "disabled",
-                "no_candidates"
+                "no_candidates",
+                "no_query"
             ],
             "x-enum-varnames": [
                 "RerankOutcomeOK",
@@ -35111,7 +35112,8 @@
                 "RerankOutcomeModelUnavailable",
                 "RerankOutcomeNoModel",
                 "RerankOutcomeDisabled",
-                "RerankOutcomeNoCandidates"
+                "RerankOutcomeNoCandidates",
+                "RerankOutcomeNoQuery"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.Resource": {
