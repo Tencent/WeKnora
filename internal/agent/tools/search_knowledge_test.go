@@ -365,7 +365,7 @@ func TestFormatWithinBudgetCompactsSnippetsBeforeDroppingRows(t *testing.T) {
 		results[i] = &searchResultWithMeta{
 			SearchResult: &types.SearchResult{
 				ID: fmt.Sprintf("tiny-%d", i), KnowledgeID: "doc", ChunkIndex: i,
-				Content: "one two three four five six seven eight nine ten " + strings.Repeat("context ", 80),
+				Content: "needle " + strings.Repeat("&<\u6587 ", 180),
 				Score:   1 - float64(i)/100,
 			},
 			KnowledgeBaseID: "kb-1",
@@ -373,12 +373,15 @@ func TestFormatWithinBudgetCompactsSnippetsBeforeDroppingRows(t *testing.T) {
 	}
 	ctx := WithOutputBudget(context.Background(), 5000)
 
-	res, omitted := tool.formatWithinBudget(ctx, results, []string{"kb-1"}, "six", SearchModeHybrid)
+	res, omitted := tool.formatWithinBudget(ctx, results, []string{"kb-1"}, "needle", SearchModeHybrid)
 	rows, _ := res.Data["results"].([]map[string]interface{})
-	require.NotEmpty(t, rows, "a constrained budget must still return the best ranked evidence")
-	require.Equal(t, 10, len(rows)+omitted, "omitted rows must be reported, not silently lost")
-	require.LessOrEqual(t, utf8.RuneCountInString(res.Output), 4000,
-		"the fixed XML shape must still respect the published budget")
+	require.Zero(t, omitted, "escaped snippets should shrink before ranked rows are dropped")
+	require.Len(t, rows, 10)
+	require.LessOrEqual(t, utf8.RuneCountInString(res.Output), 4000)
+	snippet := rows[0]["match_snippet"].(string)
+	require.Contains(t, snippet, "needle")
+	require.True(t, strings.HasSuffix(snippet, "\u2026"))
+	require.Contains(t, res.Output, "&amp;&lt;")
 }
 
 func TestFormatWithinBudgetKeepsChunkHandleWhenNoBodyBudgetRemains(t *testing.T) {

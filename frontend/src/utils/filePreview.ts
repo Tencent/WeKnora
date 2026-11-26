@@ -243,7 +243,11 @@ export function resolveFilePreviewExt(fileName?: string, fileType?: string): str
   if (normalizedType) return normalizedType
   const name = String(fileName || '')
   const dot = name.lastIndexOf('.')
-  if (dot < 0 || dot === name.length - 1) return ''
+  if (dot < 0) {
+    const base = name.toLowerCase()
+    return base === 'dockerfile' || base === 'makefile' ? base : ''
+  }
+  if (dot === name.length - 1) return ''
   return name.slice(dot + 1).toLowerCase()
 }
 

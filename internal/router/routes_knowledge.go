@@ -73,6 +73,10 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.POST("/file", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromFile)
 		kb.POST("/url", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromURL)
 		kb.POST("/manual", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateManualKnowledge)
+		// KB-scoped aliases use :id for the KB and :knowledge_id for the document.
+		// The handlers also verify that all requested documents belong to this KB.
+		kb.POST("/:knowledge_id/reparse", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.ReparseKnowledge)
+		kb.POST("/batch-reparse", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.BatchReparseKnowledge)
 		kbRead.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledge)
 		// 原始文件下载沿用单文件下载的 Contributor + Editor 权限边界。
 		kbRead.POST("/batch-download", g.Contributor(), g.KBAccessWrite("id"), handler.BatchDownloadKnowledge)

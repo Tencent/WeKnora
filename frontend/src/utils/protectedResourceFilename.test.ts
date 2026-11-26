@@ -25,3 +25,13 @@ test('extended filename still strips unsafe path components and control bytes', 
 test('source filename remains the fallback without a disposition', () => {
   assert.equal(responseFileName(null, 'local://1/exports/report.pdf'), 'report.pdf')
 })
+
+test('ordinary quoted filenames preserve escaped quotes and embedded semicolons', () => {
+  const header = String.raw`attachment; filename="Quarterly \"draft\"; 2026.pdf"`
+  assert.equal(responseFileName(header, ''), 'Quarterly "draft"; 2026.pdf')
+})
+
+test('filename parameters inside another quoted parameter are ignored', () => {
+  const header = `attachment; note="hint; filename*=UTF-8''wrong.pdf"; filename = "report.pdf"`
+  assert.equal(responseFileName(header, 'local://1/fallback.pdf'), 'report.pdf')
+})

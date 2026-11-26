@@ -4,6 +4,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
   createDataSource,
+  getDataSource,
   updateDataSource,
   triggerSync,
   validateConnection,
@@ -254,6 +255,11 @@ const loadingChildrenIds = ref(new Set<string>())
 // Notion populate parent_id on the first call). In that case expanding a node
 // never needs an extra request.
 const treeFullyLoaded = ref(false)
+// Saved resource_ids absent from the source tree once initial load + ancestor
+// reveal settles without error; kept for the drawer session so users can see
+// deleted selections and uncheck them before saving.
+const unavailableResourceIds = ref<string[]>([])
+const refreshedSyncDeletedItems = ref<any[]>([])
 
 // Drive (云盘) root input: the Drive connectors have no "list spaces" API, so
 // the user must supply a root folder_token. We collect it here, write it into
@@ -291,6 +297,30 @@ function seafileWithin(id: string, parent: string): boolean {
   const parentPath = parent.slice(parent.indexOf(':') + 1)
   return repo === seafileLibraryOf(parent) &&
     (parentPath === '/' || path === parentPath || path.startsWith(parentPath + '/'))
+}
+
+function dingtalkWithin(sel: string, ancestorId: string): boolean {
+  if (!sel.startsWith('dingtalk:v1?')) return false
+  try {
+    const selParams = new URL('https://weknora.local/?' + sel.slice('dingtalk:v1?'.length)).searchParams
+    const selWs = selParams.get('workspace')
+    if (!selWs) return false
+    if (!ancestorId.startsWith('dingtalk:v1?')) return selWs === ancestorId
+    const ancParams = new URL('https://weknora.local/?' + ancestorId.slice('dingtalk:v1?'.length)).searchParams
+    const ancNode = ancParams.get('node')
+    return selWs === ancParams.get('workspace') && !!ancNode && selParams.getAll('ancestor').includes(ancNode)
+  } catch {
+    return false
+  }
+}
+
+function isSelectionWithin(type: string, sel: string, ancestorId: string): boolean {
+  if (isSeafileConnector(type)) return seafileWithin(sel, ancestorId)
+  if (type === 'nextcloud') return ancestorId === '/' || sel === ancestorId || sel.startsWith(ancestorId + '/')
+  if (isFeishuFamilyConnector(type)) return !ancestorId.includes(':') && sel.startsWith(`${ancestorId}:`)
+  if (type === 'confluence') return !ancestorId.includes(':') && sel.startsWith(`page:${ancestorId}:`)
+  if (type === 'dingtalk') return dingtalkWithin(sel, ancestorId)
+  return false
 }
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
@@ -344,7 +374,16 @@ async function loadDriveRoot() {
   driveFolderTokenError.value = ''
   // Normalize the input so the user sees the extracted token, not the full URL.
   driveFolderToken.value = token
-  form.value.config.resource_ids = [token]
+  if (selectedResourceIds.value.some(id => id.split(':')[0] !== token)) {
+    selectedResourceIds.value = selectedResourceIds.value.filter(id => id.split(':')[0] === token)
+  }
+  const savedRids = props.dataSource?.config?.resource_ids || []
+  const savedRoot = savedRids.length > 0 ? String(savedRids[0] || '').split(':')[0] : ''
+  const rootUnchangedInEdit = isEdit.value && savedRoot === token
+  if (!rootUnchangedInEdit) {
+    form.value.config.resource_ids =
+      selectedResourceIds.value.length > 0 ? [...selectedResourceIds.value] : [token]
+  }
   driveRootLoaded.value = false
   loadingResources.value = true
   try {
@@ -352,11 +391,10 @@ async function loadDriveRoot() {
     // picker, obtained through the same guard: an answer without an id is a
     // reported failure instead of a listing against an empty id, and two quick
     // Enter presses share one create instead of leaving a second paused row
-    // behind. Drive additionally needs the new folder_token stored before it
-    // lists (the listing reads the token from the row), so it flushes the form
-    // even in edit mode — which the generic picker deliberately does not do,
-    // leaving the existing row untouched until submit.
-    const dsId = await ensureTempDataSource(true)
+    // behind. Drive only flushes in edit mode when the user changed folder_token
+    // (otherwise the saved row already carries the root prefix and opening
+    // Step 2 + cancelling must not clobber saved sub-resource selections).
+    const dsId = await ensureTempDataSource(!rootUnchangedInEdit)
     if (!dsId) return
 
     const res = await listResources(dsId)
@@ -377,13 +415,19 @@ async function loadDriveRoot() {
           .map(r => r.external_id),
       )
       driveRootLoaded.value = true
+      unavailableResourceIds.value = []
       // In edit mode, reveal pre-existing selections that live below the
       // (not-yet-expanded) tree so they are visible and checked - mirrors
       // loadResources' behavior for non-Drive connectors.
-      if (isEdit.value && !treeFullyLoaded.value) {
-        const loaded = new Set(resources.value.map(r => r.external_id))
-        const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
-        if (hidden.length > 0) void revealExistingSelections(hidden)
+      if (isEdit.value) {
+        if (!treeFullyLoaded.value) {
+          const loaded = new Set(resources.value.map(r => r.external_id))
+          const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
+          if (hidden.length > 0) void revealExistingSelections(hidden)
+          else await syncUnavailableSelections()
+        } else {
+          await syncUnavailableSelections()
+        }
       }
     }
   } catch (e: any) {
@@ -487,12 +531,13 @@ function toggleExpand(id: string) {
 // ensureChildrenLoaded fetches the direct children of a node on demand. It is a
 // no-op when the connector already delivered the whole tree in one call (e.g.
 // Notion) or when this node's children have already been fetched.
-async function ensureChildrenLoaded(id: string) {
-  if (!tempDsId.value) return
-  if (loadedChildrenIds.value.has(id) || loadingChildrenIds.value.has(id)) return
+async function ensureChildrenLoaded(id: string): Promise<boolean> {
+  if (!tempDsId.value) return false
+  if (loadedChildrenIds.value.has(id)) return true
+  if (loadingChildrenIds.value.has(id)) return false
   if (treeFullyLoaded.value) {
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
-    return
+    return true
   }
 
   loadingChildrenIds.value = new Set(loadingChildrenIds.value).add(id)
@@ -518,12 +563,14 @@ async function ensureChildrenLoaded(id: string) {
       expandedResourceIds.value = expanded
     }
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
+    return true
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
     // Collapse again so the user can retry the expand.
     const next = new Set(expandedResourceIds.value)
     next.delete(id)
     expandedResourceIds.value = next
+    return false
   } finally {
     const s = new Set(loadingChildrenIds.value)
     s.delete(id)
@@ -844,6 +891,8 @@ watch(visible, async (v) => {
   loadedChildrenIds.value = new Set()
   loadingChildrenIds.value = new Set()
   treeFullyLoaded.value = false
+  unavailableResourceIds.value = []
+  refreshedSyncDeletedItems.value = []
   driveFolderToken.value = ''
   driveFolderTokenError.value = ''
   driveRootLoaded.value = false
@@ -1118,6 +1167,7 @@ async function ensureTempDataSource(persist = false): Promise<string> {
 
 async function loadResources() {
   loadingResources.value = true
+  unavailableResourceIds.value = []
   try {
     syncConfluencePublicFieldsToSettings()
     // No id means the form cannot be created yet (a blank connector type, or a
@@ -1148,10 +1198,15 @@ async function loadResources() {
     )
     // When editing a lazily-loaded source, reveal pre-existing selections that
     // live below the (not-yet-loaded) tree so they are visible and checked.
-    if (isEdit.value && !treeFullyLoaded.value) {
-      const loaded = new Set(resources.value.map(r => r.external_id))
-      const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
-      if (hidden.length > 0) void revealExistingSelections(hidden)
+    if (isEdit.value) {
+      if (!treeFullyLoaded.value) {
+        const loaded = new Set(resources.value.map(r => r.external_id))
+        const hidden = selectedResourceIds.value.filter(id => !loaded.has(id))
+        if (hidden.length > 0) void revealExistingSelections(hidden)
+        else await syncUnavailableSelections()
+      } else {
+        await syncUnavailableSelections()
+      }
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
@@ -1162,6 +1217,62 @@ async function loadResources() {
   }
 }
 
+function lookupKnownDeletedTitle(id: string): string {
+  const byExt = knownDeletedTitles.value.byExternalId.get(id)
+  if (byExt) return byExt
+  if (isFeishuFamilyConnector(form.value.type) && id.includes(':')) {
+    const token = id.slice(id.indexOf(':') + 1)
+    const byToken = knownDeletedTitles.value.byExternalId.get(token)
+    if (byToken) return byToken
+  }
+  return knownDeletedTitles.value.uniqueBySourceResourceId.get(id) || ''
+}
+
+function hasKnownDeletedTitle(id: string): boolean {
+  return lookupKnownDeletedTitle(id) !== ''
+}
+
+function isHiddenUnderLimitedContainer(id: string): boolean {
+  if (form.value.type !== 'confluence' || !id.startsWith('page:')) return false
+  const parts = id.split(':')
+  if (parts.length < 3) return false
+  const spaceId = parts[1]
+  return resources.value.some(
+    r => r.external_id === spaceId && r.metadata?.hierarchy_limitation === 'cloud_top_level_containers',
+  )
+}
+
+async function syncUnavailableSelections() {
+  if (!isEdit.value || isGitLabConnector(form.value.type) || form.value.type === 'rss') {
+    unavailableResourceIds.value = []
+    return
+  }
+  const loaded = new Set(resources.value.map(r => r.external_id))
+  const rawMissing = selectedResourceIds.value.filter(id => !loaded.has(id))
+  if (
+    rawMissing.length > 0 &&
+    tempDsId.value &&
+    typeof getDataSource === 'function' &&
+    !rawMissing.every(hasKnownDeletedTitle)
+  ) {
+    const ownSession = drawerSession
+    try {
+      const res = await getDataSource(tempDsId.value)
+      if (drawerSession !== ownSession) return
+      const fresh = res?.data || res
+      const items = fresh?.last_sync_result?.deleted_items
+      if (Array.isArray(items)) {
+        refreshedSyncDeletedItems.value = items
+      }
+    } catch {
+      // Fall back to resource token/id if fetching latest sync summary fails.
+    }
+  }
+  unavailableResourceIds.value = rawMissing.filter(
+    id => !isHiddenUnderLimitedContainer(id) || hasKnownDeletedTitle(id),
+  )
+}
+
 // revealExistingSelections asks the backend which ancestors must be expanded to
 // surface the current (possibly deeply nested) selection, then loads each level
 // so the saved selection becomes visible and correctly checked in the tree.
@@ -1170,13 +1281,16 @@ async function revealExistingSelections(hiddenIds: string[]) {
   try {
     const res = await resolveResourceAncestors(tempDsId.value, hiddenIds)
     const ancestors: string[] = res?.data?.ancestors || res?.ancestors || []
-    if (ancestors.length === 0) return
-    const expanded = new Set(expandedResourceIds.value)
-    for (const id of ancestors) expanded.add(id)
-    expandedResourceIds.value = expanded
-    // Load each ancestor level (children include the next ancestor / the
-    // selection itself); calls are independent and dedup on merge.
-    await Promise.all(ancestors.map(id => ensureChildrenLoaded(id)))
+    if (ancestors.length > 0) {
+      const expanded = new Set(expandedResourceIds.value)
+      for (const id of ancestors) expanded.add(id)
+      expandedResourceIds.value = expanded
+      // Load each ancestor level (children include the next ancestor / the
+      // selection itself); calls are independent and dedup on merge.
+      const results = await Promise.all(ancestors.map(id => ensureChildrenLoaded(id)))
+      if (results.some(ok => !ok)) return
+    }
+    await syncUnavailableSelections()
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
   }
@@ -1204,6 +1318,9 @@ function isCovered(id: string, cover: Set<string>): boolean {
   for (let cur: string | undefined = id; cur; cur = parentMap.value.get(cur)) {
     if (cover.has(cur)) return true
   }
+  for (const sel of cover) {
+    if (sel === id || isSelectionWithin(form.value.type, id, sel)) return true
+  }
   return false
 }
 
@@ -1211,7 +1328,9 @@ function checkResource(id: string, cover: Set<string>) {
   if (isCovered(id, cover)) return
   const descendants = new Set(getDescendantIds(id))
   for (const d of [...cover]) {
-    if (descendants.has(d)) cover.delete(d)
+    if (descendants.has(d) || (d !== id && isSelectionWithin(form.value.type, d, id))) {
+      cover.delete(d)
+    }
   }
   cover.add(id)
 }
@@ -1245,16 +1364,14 @@ function uncheckResource(id: string, cover: Set<string>) {
 function toggleResource(id: string) {
   const cover = new Set(selectedResourceIds.value)
   const seafile = isSeafileConnector(form.value.type)
-  if ((checkStates.value.get(id) || 'unchecked') === 'unchecked') {
+  if (resourceRowState(id) === 'unchecked') {
     checkResource(id, cover)
   } else {
     uncheckResource(id, cover)
-    // Unchecking also drops saved path selections below this node that
+    // Unchecking also drops saved selections below this node that
     // the tree no longer lists; otherwise they could never be cleared.
-    if (seafile || form.value.type === 'nextcloud') {
-      for (const sel of [...cover]) {
-        if (seafile ? seafileWithin(sel, id) : id === '/' || sel === id || sel.startsWith(id + '/')) cover.delete(sel)
-      }
+    for (const sel of [...cover]) {
+      if (isSelectionWithin(form.value.type, sel, id)) cover.delete(sel)
     }
   }
   if (seafile && new Set([...cover].map(seafileLibraryOf)).size > 1) {
@@ -1457,10 +1574,65 @@ async function handleDrawerConfirm() {
   }
 }
 
+const loadedResourceIdSet = computed(() => new Set(resources.value.map(r => r.external_id)))
+
+const knownDeletedTitles = computed(() => {
+  const byExternalId = new Map<string, string>()
+  const uniqueBySourceResourceId = new Map<string, string>()
+  const ambiguousSourceResourceIds = new Set<string>()
+  const lists = [
+    refreshedSyncDeletedItems.value,
+    props.dataSource?.latest_sync_log?.result?.deleted_items,
+    props.dataSource?.last_sync_result?.deleted_items,
+  ]
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue
+    for (const item of list) {
+      const title = String(item?.title || '').trim()
+      if (!title) continue
+      if (item?.external_id && !byExternalId.has(item.external_id)) {
+        byExternalId.set(item.external_id, title)
+      }
+      const srcId = item?.source_resource_id
+      if (srcId && !ambiguousSourceResourceIds.has(srcId)) {
+        const existing = uniqueBySourceResourceId.get(srcId)
+        if (!existing) {
+          uniqueBySourceResourceId.set(srcId, title)
+        } else if (existing !== title) {
+          uniqueBySourceResourceId.delete(srcId)
+          ambiguousSourceResourceIds.add(srcId)
+        }
+      }
+    }
+  }
+  return { byExternalId, uniqueBySourceResourceId }
+})
+
+function formatUnavailableResourceLabel(id: string): string {
+  const known = lookupKnownDeletedTitle(id)
+  if (known) return known
+  if (isFeishuFamilyConnector(form.value.type) && id.includes(':')) {
+    return id.slice(id.indexOf(':') + 1)
+  }
+  return id
+}
+
+const unavailableResources = computed(() =>
+  unavailableResourceIds.value
+    .filter(id => !loadedResourceIdSet.value.has(id))
+    .map(id => ({
+      external_id: id,
+      label: formatUnavailableResourceLabel(id),
+    })),
+)
+
 const selectedResourceCount = computed(() => {
   let count = 0
   for (const state of checkStates.value.values()) {
     if (state === 'checked') count++
+  }
+  for (const id of selectedResourceIds.value) {
+    if (!loadedResourceIdSet.value.has(id)) count++
   }
   return count
 })
@@ -1515,7 +1687,9 @@ function shouldShowResourceType(type: string): boolean {
 }
 
 function resourceRowState(id: string): CheckState {
-  return checkStates.value.get(id) || 'unchecked'
+  const state = checkStates.value.get(id)
+  if (state) return state
+  return selectedResourceIds.value.includes(id) ? 'checked' : 'unchecked'
 }
 
 const stepTitles = computed(() => [
@@ -1962,7 +2136,7 @@ const drawerConfirmText = computed(() => {
       </div>
 
       <div v-else-if="loadingResources" class="ds-loading-center"><t-loading /></div>
-      <div v-else-if="resources.length > 0" class="resource-picker">
+      <div v-else-if="resources.length > 0 || unavailableResources.length > 0" class="resource-picker">
         <div class="resource-picker__toolbar">
           <span class="resource-picker__count">
             {{ t('knowledgeBase.selectedCount', { count: selectedResourceCount }) }}
@@ -1978,6 +2152,51 @@ const drawerConfirmText = computed(() => {
           </div>
         </div>
         <div class="resource-picker__list" role="tree">
+          <div
+            v-for="u in unavailableResources"
+            :key="`unavailable:${u.external_id}`"
+            class="resource-picker__row resource-picker__row--unavailable"
+            :class="{ 'is-checked': resourceRowState(u.external_id) === 'checked' }"
+            role="treeitem"
+            @click="toggleResource(u.external_id)"
+          >
+            <span class="resource-picker__expand-spacer" aria-hidden="true" />
+            <span
+              class="resource-picker__check"
+              :class="{ 'is-checked': resourceRowState(u.external_id) === 'checked' }"
+              aria-hidden="true"
+            >
+              <svg
+                v-if="resourceRowState(u.external_id) === 'checked'"
+                width="10"
+                height="10"
+                viewBox="0 0 12 12"
+                fill="none"
+              >
+                <path
+                  d="M10 3L4.5 8.5L2 6"
+                  stroke="#fff"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
+            <span class="resource-picker__icon" aria-hidden="true">
+              <t-icon name="file" size="16px" />
+            </span>
+            <span class="resource-picker__label">
+              <span
+                class="resource-picker__name"
+                :title="u.label !== u.external_id ? `${u.label} (${u.external_id})` : u.external_id"
+              >
+                {{ u.label }}
+              </span>
+              <span class="resource-picker__type resource-picker__type--unavailable">
+                {{ t('datasource.resourceUnavailable') }}
+              </span>
+            </span>
+          </div>
           <template
             v-for="{ resource: r, depth, noticeAfter } in visibleTree"
             :key="noticeAfter ? `${r.external_id}__notice` : r.external_id"
@@ -2933,6 +3152,15 @@ const drawerConfirmText = computed(() => {
   border-radius: var(--app-radius-xs);
   color: var(--td-text-color-placeholder);
   background: color-mix(in srgb, var(--td-text-color-placeholder) 8%, transparent);
+}
+
+.resource-picker__type--unavailable {
+  color: var(--td-warning-color);
+  background: var(--td-warning-color-1);
+}
+
+.resource-picker__row--unavailable .resource-picker__name {
+  color: var(--td-text-color-secondary);
 }
 
 .resource-picker__notice {

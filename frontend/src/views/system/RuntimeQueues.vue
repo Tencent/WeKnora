@@ -18,26 +18,33 @@
         <button
           type="button"
           class="rq-refresh"
-          :disabled="loading"
+          :disabled="activeRefreshLoading"
           :title="t('system.globalSettings.runtime.refresh')"
           :aria-label="t('system.globalSettings.runtime.refresh')"
-          @click="reload"
+          @click="reloadActiveView"
         >
           <t-icon
-            :name="loading ? 'loading' : 'refresh'"
-            :class="{ 'rq-refresh-spin': loading }"
+            :name="activeRefreshLoading ? 'loading' : 'refresh'"
+            :class="{ 'rq-refresh-spin': activeRefreshLoading }"
           />
         </button>
       </div>
     </header>
 
-    <t-tabs v-model="activeView">
+    <t-tabs v-model="activeView" class="rq-view-tabs">
       <t-tab-panel value="queues" :label="t('documentProgress.queueView')" />
       <t-tab-panel value="documents" :label="t('documentProgress.title')" />
     </t-tabs>
-    <DocumentProgress v-if="activeView === 'documents'" :refresh-token="updatedAt" />
 
-    <template v-if="activeView === 'queues'">
+    <DocumentProgress
+      v-if="documentsVisited"
+      v-show="activeView === 'documents'"
+      :refresh-seq="documentsRefreshSeq"
+      :silent-refresh-seq="documentsSilentRefreshSeq"
+      @loading-change="documentsLoading = $event"
+    />
+
+    <div v-show="activeView === 'queues'">
 
     <div v-if="loading && !loadedOnce" class="rq-loading" aria-live="polite">
       <div class="rq-loading-metrics">
@@ -511,7 +518,7 @@
         </div>
       </section>
     </SettingDrawer>
-    </template>
+    </div>
   </div>
 </template>
 
@@ -550,6 +557,13 @@ const error = ref('')
 const autoRefresh = ref(true)
 const updatedAt = ref('')
 const activeView = ref('queues')
+const documentsVisited = ref(false)
+const documentsLoading = ref(false)
+const documentsRefreshSeq = ref(0)
+const documentsSilentRefreshSeq = ref(0)
+const activeRefreshLoading = computed(() =>
+  activeView.value === 'documents' ? documentsLoading.value : loading.value,
+)
 const taskDrawerVisible = ref(false)
 const taskQueue = ref<QueueStat | null>(null)
 const taskState = ref<RuntimeTaskState>('archived')
@@ -935,10 +949,22 @@ function reload() {
   load(true)
 }
 
+function reloadActiveView() {
+  if (activeView.value === 'documents') {
+    documentsRefreshSeq.value++
+    return
+  }
+  load(true)
+}
+
 function startPolling() {
   stopPolling()
   if (!autoRefresh.value) return
   pollTimer = setInterval(() => {
+    if (activeView.value === 'documents') {
+      if (!documentsLoading.value) documentsSilentRefreshSeq.value++
+      return
+    }
     // Silent background refresh — no spinner so the table doesn't flash.
     if (!loading.value) load(false)
   }, POLL_INTERVAL_MS)
@@ -950,6 +976,12 @@ function stopPolling() {
     pollTimer = null
   }
 }
+
+watch(activeView, (view) => {
+  if (view === 'documents') {
+    documentsVisited.value = true
+  }
+})
 
 watch(autoRefresh, (on) => {
   if (on) startPolling()
@@ -1007,7 +1039,8 @@ onUnmounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 24px;
+  padding-right: 32px;
+  margin-bottom: 18px;
 
   h2 {
     margin: 0 0 8px;
@@ -1025,6 +1058,18 @@ onUnmounted(() => {
     font-size: var(--app-text-base);
     line-height: 1.6;
     text-wrap: pretty;
+  }
+}
+
+.rq-view-tabs {
+  margin-bottom: 20px;
+
+  :deep(.t-tabs__nav-container.t-is-top:after) {
+    background-color: var(--td-component-stroke);
+  }
+
+  :deep(.t-tabs__content) {
+    display: none;
   }
 }
 
@@ -1910,6 +1955,10 @@ onUnmounted(() => {
   .rq-pools-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .rq-header {
+    padding-right: 0;
   }
 
   .rq-loading-metrics {

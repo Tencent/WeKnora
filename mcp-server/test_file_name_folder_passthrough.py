@@ -80,7 +80,7 @@ class ListKnowledgeFolderTest(unittest.TestCase):
         self.assertEqual(params["page"], 2)
         self.assertEqual(params["page_size"], 10)
         self.assertEqual(params["folder_path"], "docs")
-        self.assertEqual(params["folder_scope"], "all")
+        self.assertEqual(params["folder_recursive"], "true")
 
     def test_omits_folder_params_when_unset(self):
         client = srv.WeKnoraClient("http://localhost:8080/api/v1", "k")
@@ -88,7 +88,7 @@ class ListKnowledgeFolderTest(unittest.TestCase):
             client.list_knowledge("kb-1")
         params = req.call_args.kwargs["params"]
         self.assertNotIn("folder_path", params)
-        self.assertNotIn("folder_scope", params)
+        self.assertNotIn("folder_recursive", params)
 
 
 if __name__ == "__main__":

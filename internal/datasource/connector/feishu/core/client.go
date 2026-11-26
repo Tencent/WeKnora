@@ -46,6 +46,41 @@ const maxJSONResponseBytes = 16 << 20
 // request returns the same oversized body, so callers must not retry it.
 var errResponseTooLarge = errors.New("response exceeds maximum size")
 
+const (
+	// feishuErrCodeWikiNotFound is Feishu Wiki's "not found" error code
+	// (e.g. "not found: node has been deleted", "node not found").
+	feishuErrCodeWikiNotFound = 131005
+	// feishuErrCodeDriveNotFound is Feishu Drive's "not found" error code.
+	feishuErrCodeDriveNotFound = 1061003
+)
+
+type feishuAPIError struct {
+	statusCode int
+	code       int
+	body       string
+}
+
+func newFeishuAPIError(statusCode int, respBody []byte) error {
+	var apiResp ApiResponse
+	_ = json.Unmarshal(respBody, &apiResp)
+	return &feishuAPIError{
+		statusCode: statusCode,
+		code:       apiResp.Code,
+		body:       string(respBody),
+	}
+}
+
+func (e *feishuAPIError) Error() string {
+	return fmt.Sprintf("feishu api error: status=%d body=%s", e.statusCode, e.body)
+}
+
+func (e *feishuAPIError) Unwrap() error {
+	if e.code == feishuErrCodeWikiNotFound || e.code == feishuErrCodeDriveNotFound {
+		return datasource.ErrResourceNotFound
+	}
+	return nil
+}
+
 // readCapped reads a response body, refusing anything larger than limit instead
 // of buffering it. Oversized payloads are reported as an error: a truncated
 // body would be indexed as if it were the whole document. A non-positive limit
@@ -158,6 +193,25 @@ func (c *Client) GetTenantAccessToken(ctx context.Context) (string, error) {
 	return c.tokenCache, nil
 }
 
+// invalidateRejectedToken must not discard a newer token when a request using
+// the previous token finishes after another request has already refreshed it.
+func (c *Client) invalidateRejectedToken(token string) {
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+	if c.tokenCache == token {
+		c.tokenCache = ""
+		c.tokenExpAt = time.Time{}
+	}
+}
+
+func isFeishuTokenRejected(status int, body []byte) bool {
+	if status == http.StatusUnauthorized {
+		return true
+	}
+	var response ApiResponse
+	return json.Unmarshal(body, &response) == nil && response.Code == 99991663
+}
+
 // waitForRequestToken authenticates before pacing and rechecks the cached token
 // afterwards. A refresh must happen before rejoining the gate, otherwise requests
 // that have already been paced can pile up behind tokenMu and then burst together.
@@ -214,7 +268,8 @@ var feishuRetryBackoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * t
 // export/wiki APIs are aggressively rate limited, and a thousand-document sync
 // issues tens of thousands of calls; without backoff a single 429 burst used to
 // fail whole swathes of documents silently. HTTP 400 with code 99991400 is
-// also a rate limit. Ordinary permission/validation errors still fail fast.
+// also a rate limit. A rejected token is refreshed once within the retry budget;
+// ordinary permission/validation errors still fail fast.
 func (c *Client) DoRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
 	const (
 		maxRetries    = feishuMaxRetries
@@ -239,6 +294,7 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 	url := c.baseURL + path
 	var lastErr error
 	gate := c.requestGate(method, path)
+	authRetried := false
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		token, err := c.waitForRequestToken(ctx, gate)
@@ -290,6 +346,16 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 		logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d body=%s",
 			method, path, resp.StatusCode, len(respBody), truncate(string(respBody), 1000))
 
+		if isFeishuTokenRejected(resp.StatusCode, respBody) {
+			c.invalidateRejectedToken(token)
+			lastErr = newFeishuAPIError(resp.StatusCode, respBody)
+			if !authRetried && attempt < maxRetries {
+				authRetried = true
+				continue
+			}
+			return lastErr
+		}
+
 		if isFeishuRateLimited(resp.StatusCode, respBody) {
 			wait := feishuRateLimitWait(resp.Header, time.Now())
 			gate.cooldown(wait)
@@ -315,7 +381,7 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("feishu api error: status=%d body=%s", resp.StatusCode, string(respBody))
+			return newFeishuAPIError(resp.StatusCode, respBody)
 		}
 
 		if result != nil {
@@ -369,7 +435,7 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 	for {
 		path := "/open-apis/wiki/v2/spaces?page_size=50"
 		if pageToken != "" {
-			path += "&page_token=" + pageToken
+			path += "&page_token=" + url.QueryEscape(pageToken)
 		}
 
 		var resp WikiSpaceListResponse
@@ -388,8 +454,11 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 
 		allSpaces = append(allSpaces, resp.Data.Items...)
 
-		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+		if !resp.Data.HasMore {
 			break
+		}
+		if resp.Data.PageToken == "" {
+			return nil, fmt.Errorf("feishu wiki space pagination: has_more=true with a missing page token")
 		}
 		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
 			return nil, fmt.Errorf("feishu wiki space pagination repeated page token %q", resp.Data.PageToken)
@@ -415,7 +484,7 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			path += "&parent_node_token=" + parentNodeToken
 		}
 		if pageToken != "" {
-			path += "&page_token=" + pageToken
+			path += "&page_token=" + url.QueryEscape(pageToken)
 		}
 
 		var resp WikiNodeListResponse
@@ -423,6 +492,12 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			return nil, fmt.Errorf("list wiki nodes: %w", err)
 		}
 		if resp.Code != 0 {
+			if resp.Code == feishuErrCodeWikiNotFound {
+				return nil, fmt.Errorf(
+					"list wiki nodes error: code=%d msg=%s: %w",
+					resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+				)
+			}
 			return nil, fmt.Errorf("list wiki nodes error: code=%d msg=%s", resp.Code, resp.Msg)
 		}
 
@@ -436,8 +511,11 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			allNodes = append(allNodes, node)
 		}
 
-		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+		if !resp.Data.HasMore {
 			break
+		}
+		if resp.Data.PageToken == "" {
+			return nil, fmt.Errorf("feishu wiki node pagination: has_more=true with a missing page token")
 		}
 		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
 			return nil, fmt.Errorf("feishu wiki node pagination repeated page token %q", resp.Data.PageToken)
@@ -458,6 +536,12 @@ func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken stri
 		return WikiNode{}, fmt.Errorf("get wiki node: %w", err)
 	}
 	if resp.Code != 0 {
+		if resp.Code == feishuErrCodeWikiNotFound {
+			return WikiNode{}, fmt.Errorf(
+				"get wiki node error: code=%d msg=%s: %w",
+				resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+			)
+		}
 		return WikiNode{}, fmt.Errorf("get wiki node error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
@@ -468,47 +552,9 @@ func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken stri
 	return node, nil
 }
 
-// listAllWikiNodesRecursive recursively lists all nodes under a wiki space.
-// It walks the tree depth-first to discover all nested documents.
+// listAllWikiNodesRecursive lists a space in provider depth-first order.
 func (c *Client) listAllWikiNodesRecursive(ctx context.Context, spaceID string) ([]WikiNode, error) {
-	// Start with top-level nodes
-	topNodes, err := c.ListWikiNodes(ctx, spaceID, "")
-	if err != nil {
-		return nil, err
-	}
-
-	var allNodes []WikiNode
-	var failures []WikiNodeListFailure
-	var walk func(nodes []WikiNode)
-
-	walk = func(nodes []WikiNode) {
-		for _, node := range nodes {
-			allNodes = append(allNodes, node)
-
-			// Recurse into child nodes if this node has children
-			if node.HasChild {
-				children, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
-				if err != nil {
-					wrappedErr := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
-					failures = append(failures, WikiNodeListFailure{
-						Node: node,
-						Err:  wrappedErr,
-					})
-					logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
-						spaceID, node.NodeToken, err)
-					continue
-				}
-				walk(children)
-			}
-		}
-	}
-
-	walk(topNodes)
-	if len(failures) > 0 {
-		return allNodes, &PartialWikiNodeListError{Failures: failures}
-	}
-
-	return allNodes, nil
+	return c.walkWikiDirectories(ctx, spaceID, nil)
 }
 
 // ListWikiNodesRecursiveFrom returns a wiki node and all descendants below it.
@@ -533,51 +579,7 @@ func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, ro
 	if !root.HasChild {
 		return nil, nil
 	}
-
-	children, err := c.ListWikiNodes(ctx, spaceID, root.NodeToken)
-	if err != nil {
-		wrappedErr := fmt.Errorf("list children of %s: %w", root.NodeToken, err)
-		logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
-			spaceID, root.NodeToken, err)
-		return nil, &PartialWikiNodeListError{
-			Failures: []WikiNodeListFailure{{
-				Node: root,
-				Err:  wrappedErr,
-			}},
-		}
-	}
-
-	var allNodes []WikiNode
-	var failures []WikiNodeListFailure
-	var walk func(nodes []WikiNode)
-
-	walk = func(nodes []WikiNode) {
-		for _, node := range nodes {
-			allNodes = append(allNodes, node)
-			if !node.HasChild {
-				continue
-			}
-
-			grandChildren, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
-			if err != nil {
-				wrappedErr := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
-				failures = append(failures, WikiNodeListFailure{
-					Node: node,
-					Err:  wrappedErr,
-				})
-				logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
-					spaceID, node.NodeToken, err)
-				continue
-			}
-			walk(grandChildren)
-		}
-	}
-
-	walk(children)
-	if len(failures) > 0 {
-		return allNodes, &PartialWikiNodeListError{Failures: failures}
-	}
-	return allNodes, nil
+	return c.walkWikiDirectories(ctx, spaceID, &root)
 }
 
 // getDocumentRawContent retrieves the raw text content of a Feishu docx document.
@@ -763,6 +765,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 	url := c.baseURL + path
 	var lastErr error
 	gate := c.requestGate(http.MethodGet, path)
+	authRetried := false
 
 	for attempt := 0; attempt <= feishuMaxRetries; attempt++ {
 		token, err := c.waitForRequestToken(ctx, gate)
@@ -793,9 +796,19 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 			return nil, lastErr
 		}
 
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusBadRequest {
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusBadRequest ||
+			resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
+			if isFeishuTokenRejected(resp.StatusCode, body) {
+				c.invalidateRejectedToken(token)
+				lastErr = newFeishuAPIError(resp.StatusCode, body)
+				if !authRetried && attempt < feishuMaxRetries {
+					authRetried = true
+					continue
+				}
+				return nil, lastErr
+			}
 			if !isFeishuRateLimited(resp.StatusCode, body) {
 				logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s",
 					path, resp.StatusCode, truncate(string(body), 500))
@@ -900,6 +913,12 @@ func (c *Client) listDriveFiles(
 		return nil, "", false, fmt.Errorf("list drive files: %w", err)
 	}
 	if resp.Code != 0 {
+		if resp.Code == feishuErrCodeDriveNotFound {
+			return nil, "", false, fmt.Errorf(
+				"list drive files error: code=%d msg=%s: %w",
+				resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+			)
+		}
 		return nil, "", false, fmt.Errorf("list drive files error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
@@ -923,6 +942,12 @@ func (c *Client) GetDriveFolderMeta(ctx context.Context, folderToken string) (dr
 		return resp, fmt.Errorf("get drive folder meta: %w", err)
 	}
 	if resp.Code != 0 {
+		if resp.Code == feishuErrCodeDriveNotFound {
+			return resp, fmt.Errorf(
+				"get drive folder meta error: code=%d msg=%s: %w",
+				resp.Code, resp.Msg, datasource.ErrResourceNotFound,
+			)
+		}
 		return resp, fmt.Errorf("get drive folder meta error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	return resp, nil
@@ -939,8 +964,11 @@ func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string)
 			return nil, err
 		}
 		all = append(all, files...)
-		if !hasMore || next == "" {
+		if !hasMore {
 			break
+		}
+		if next == "" {
+			return nil, fmt.Errorf("feishu drive file pagination: has_more=true with a missing page token")
 		}
 		if _, exists := seenPageTokens[next]; exists {
 			return nil, fmt.Errorf("feishu drive file pagination repeated page token %q", next)
@@ -991,6 +1019,9 @@ func WalkDriveTree(
 		}
 
 		for _, f := range entries {
+			if f.ParentToken == "" {
+				f.ParentToken = folderToken
+			}
 			switch f.Type {
 			case "folder":
 				name := SanitizeFileName(f.Name)
@@ -1022,6 +1053,7 @@ func ExpandDriveShortcut(f DriveFile) (DriveFile, bool) {
 	if f.ShortcutInfo == nil || f.ShortcutInfo.TargetToken == "" || f.ShortcutInfo.TargetType == "folder" {
 		return DriveFile{}, false
 	}
+	f.ShortcutToken = f.Token
 	f.Token, f.Type = f.ShortcutInfo.TargetToken, f.ShortcutInfo.TargetType
 	f.ShortcutInfo = nil
 	return f, true

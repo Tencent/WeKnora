@@ -1,17 +1,21 @@
 package compaction
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/Tencent/WeKnora/internal/models/chat"
+)
 
 const fallbackOmission = "[Earlier context omitted to keep the fallback summary within its token budget.]"
 
-// fallbackHistory shares one text budget between the previous summary and the
-// new archive. Repeated failures must not append another full budget each time.
+// fallbackSummary bounds the entire fallback text, including archive labels
+// and any previous history summary. A split-turn prefix has no prior summary
+// and uses its own smaller budget.
 // File tracking has already been extracted by Prepare and is appended separately;
 // removing its old blocks here avoids truncating tags or accumulating stale copies.
-func (c *Compactor) fallbackHistory(p *Preparation) string {
-	budget := c.settings.summaryBudget()
-	previous := withoutFileOps(p.PreviousSummary)
-	archive := rawArchive(p.MessagesToSummarize, budget, c.estimator)
+func (c *Compactor) fallbackSummary(previousSummary string, messages []chat.Message, budget int) string {
+	previous := withoutFileOps(previousSummary)
+	archive := rawArchive(messages, budget, c.estimator)
 	if combined := joinNonEmpty(previous, archive); c.estimator.EstimateString(combined) <= budget {
 		return combined
 	}

@@ -65,7 +65,8 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 			return runSearch(c.Context(), opts, fopts, cli)
 		},
 	}
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 20, "Maximum results to return — server-side limit (1..1000; default 20 mirrors the server default)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 20,
+		"Maximum results to return — server-side limit (1..200; default 20 mirrors the server default)")
 	cmd.Flags().StringVar(&opts.Mode, "mode", "", "Search mode: keyword | vector | hybrid (omit for server default: hybrid)")
 	cmd.Flags().StringArrayVar(&opts.SessionIDs, "session", nil, "Restrict search to these session ids (repeatable)")
 	cmdutil.AddFormatFlag(cmd, messageSearchFields...)
@@ -86,12 +87,11 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 // surfaces as exit 5, not an auth error) and again at the top of runSearch
 // for direct callers; it is idempotent.
 func validateSearchOpts(opts *SearchOptions) error {
-	// 1..1000 mirrors `search chunks` (the sibling search command); the
-	// server itself does not cap limit (handler passes it through).
-	if opts.Limit < 1 || opts.Limit > 1000 {
+	// Both message handlers clamp to 200 items per request.
+	if opts.Limit < 1 || opts.Limit > maxMessagesPerPage {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: fmt.Sprintf("--limit must be in 1..1000, got %d", opts.Limit),
+			Message: fmt.Sprintf("--limit must be in 1..200, got %d", opts.Limit),
 		}
 	}
 	// Validate --mode against the closed server enum and normalize to the

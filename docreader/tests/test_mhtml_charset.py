@@ -46,6 +46,23 @@ class MHTMLCharsetTests(unittest.TestCase):
         document = MHTMLParser().parse(archive_html(html.encode("windows-1252"), "windows-1252"))
         self.assertEqual("Café", document.content)
 
+    def test_unknown_mime_charset_falls_back_to_document_declaration(self):
+        html = (
+            '<html><head><meta charset="windows-1252"></head>'
+            "<body><p>Le café est ouvert.</p></body></html>"
+        )
+        document = MHTMLParser().parse(
+            archive_html(html.encode("windows-1252"), charset="x-unknown")
+        )
+        self.assertIn("Le café est ouvert.", document.content)
+
+    def test_unknown_mime_charset_without_declaration_keeps_text(self):
+        html = "<html><body><p>中文内容</p></body></html>"
+        document = MHTMLParser().parse(
+            archive_html(html.encode("utf-8"), charset="x-unknown")
+        )
+        self.assertIn("中文内容", document.content)
+
     def test_undeclared_utf8_and_ascii(self):
         for text in ("Plain article", "中文内容"):
             with self.subTest(text=text):

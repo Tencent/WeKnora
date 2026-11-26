@@ -38,3 +38,16 @@ export function serializeLocaleValue(value: unknown, indent = 0): string {
 export function writeLocaleModule(file: string, tree: unknown): void {
   writeFileSync(file, `export default ${serializeLocaleValue(tree, 0)}\n`, 'utf8')
 }
+
+export function writeLocaleBarrelModule(
+  file: string,
+  localeName: string,
+  domains: readonly string[],
+): void {
+  const imports = domains.map(
+    (domain) => `import ${domain} from './${localeName}/${domain}.ts'`,
+  )
+  const spreads = domains.map((domain) => `  ...${domain},`)
+  const content = `${imports.join('\n')}\n\nexport default {\n${spreads.join('\n')}\n}\n`
+  writeFileSync(file, content, 'utf8')
+}

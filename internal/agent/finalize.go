@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
@@ -171,22 +172,26 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		})
 		return err
 	}
+	// Validate the visible answer before publishing a successful terminal event.
+	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
+	if strings.TrimSpace(fullAnswer) == "" {
+		return fmt.Errorf("final answer synthesis returned no visible content")
+	}
 	_, tail := splitter.Flush()
+	truncated := isLengthFinishReason(llmResult.FinishReason)
 	_ = e.eventBus.Emit(ctx, event.Event{
 		ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
-		Data: event.AgentFinalAnswerData{Content: terminalContent + tail, Done: true},
+		Data: event.AgentFinalAnswerData{Content: terminalContent + tail, Done: true, Truncated: truncated},
 	})
 
-	// Safety net: strip any residual <think> blocks that may have leaked through
-	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))
 	common.PipelineInfo(ctx, "Agent", "final_answer_done", map[string]interface{}{
 		"session_id": sessionID,
 		"answer_len": len(fullAnswer),
 	})
-	// Delegated callers must distinguish a synthesized partial answer from a
-	// completed deliverable too, including the iteration-budget fallback path.
-	if e.collaboration != nil && e.collaboration.Child != nil && isLengthFinishReason(llmResult.FinishReason) {
+	// History is rebuilt from steps, not live answer events. Record a partial
+	// synthesis for every run so reloads and delegated callers retain the cap.
+	if truncated {
 		state.RoundSteps = append(state.RoundSteps, types.AgentStep{
 			Iteration: state.CurrentRound,
 			Thought:   fullAnswer, Truncated: true, Timestamp: time.Now(),

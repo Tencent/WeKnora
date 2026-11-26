@@ -143,3 +143,16 @@ func TestSearchSessions_PageSizeBound(t *testing.T) {
 		assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code, "page_size=%d", ps)
 	}
 }
+
+func TestSearchRetainsSubsecondSessionOrder(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeSessionsSearchSvc{total: 2, pages: map[int][]sdk.Session{1: {
+		{ID: "newer", Title: "match", UpdatedAt: "2026-05-12T00:00:00.1Z"},
+		{ID: "older", Title: "match", UpdatedAt: "2026-05-12T00:00:00Z"},
+	}}}
+	opts := &SessionsSearchOptions{Query: "match", Limit: 1, PageSize: 2}
+	format := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+	require.NoError(t, runSessionsSearch(context.Background(), opts, format, svc))
+	assert.Contains(t, out.String(), "newer")
+	assert.NotContains(t, out.String(), "older")
+}

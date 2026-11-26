@@ -22,12 +22,14 @@ export interface ScheduleForm {
   day: number
   /** Wall-clock time of a once trigger in the timezone, "YYYY-MM-DD HH:mm". */
   at: string
+  /** Retain seconds and the original occurrence of a repeated local time when editing. */
+  originalOnce?: { at: string; timezone: string } | null
   /** Expression of a custom trigger. */
   expr: string
 }
 
 export function defaultScheduleForm(): ScheduleForm {
-  return { kind: 'daily', minute: 0, hour: 9, days: [1], day: 1, at: '', expr: '' }
+  return { kind: 'daily', minute: 0, hour: 9, days: [1], day: 1, at: '', originalOnce: null, expr: '' }
 }
 
 export function browserTimezone(): string {
@@ -66,6 +68,9 @@ export function scheduleFormFromTrigger(trigger: AutomationTrigger | undefined):
   if (trigger.type === 'once') {
     form.kind = 'once'
     form.at = trigger.at ? zonedWallClock(trigger.at, trigger.timezone) : ''
+    if (trigger.at && form.at) {
+      form.originalOnce = { at: trigger.at, timezone: trigger.timezone || 'UTC' }
+    }
     return form
   }
   const expr = (trigger.expr || '').trim()
@@ -120,6 +125,11 @@ export function triggerFromScheduleForm(form: ScheduleForm, timezone: string): A
       if (!expr) return null
       break
     case 'once': {
+      const original = form.originalOnce
+      if (original && original.timezone === tz && form.at
+        && zonedWallClock(original.at, tz) === form.at) {
+        return { type: 'once', at: original.at, timezone: tz }
+      }
       const at = wallClockToISO(form.at, tz)
       return at ? { type: 'once', at, timezone: tz } : null
     }
@@ -174,7 +184,13 @@ export function wallClockToISO(local: string, timeZone: string): string {
 export function zonedWallClock(iso: string, timeZone?: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return ''
-  const p = zoneParts(date, timeZone || 'UTC')
+  let p: ReturnType<typeof zoneParts>
+  try {
+    p = zoneParts(date, timeZone || 'UTC')
+  } catch (error) {
+    if (error instanceof RangeError) return ''
+    throw error
+  }
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${p.y}-${pad(p.mo)}-${pad(p.d)} ${pad(p.h)}:${pad(p.mi)}`
 }

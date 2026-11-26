@@ -218,11 +218,18 @@ def fill_merged_cells_xlsx(
         if not ws.merged_cells.ranges:
             continue
         for merge_range in list(ws.merged_cells.ranges):
-            master_value = ws.cell(merge_range.min_row, merge_range.min_col).value
+            master = ws.cell(merge_range.min_row, merge_range.min_col)
+            master_value = master.value
+            master_is_text = master.data_type == "s"
             ws.unmerge_cells(str(merge_range))
             for row in range(merge_range.min_row, merge_range.max_row + 1):
                 for col in range(merge_range.min_col, merge_range.max_col + 1):
-                    ws.cell(row, col).value = master_value
+                    cell = ws.cell(row, col)
+                    cell.value = master_value
+                    if master_is_text:
+                        # Assignment infers formulas and errors from text like
+                        # "=1+2" and "#N/A"; keep the original literal type.
+                        cell.data_type = "s"
             changed = True
 
     if not changed:

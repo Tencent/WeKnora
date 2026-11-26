@@ -52,14 +52,11 @@ func listExcelSheetsFromWorkbook(ctx context.Context, filename string) ([]string
 	return names, nil
 }
 
-// filterEmptyExcelSheets checks cell content rather than DuckDB's inferred row
-// count: header-only sheets and uncached formulas must keep their columns.
-func filterEmptyExcelSheets(ctx context.Context, filename string, names []string) ([]string, error) {
-	book, err := zip.OpenReader(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = book.Close() }()
+// resolveExcelWorkbookParts maps each requested sheet name to its internal ZIP
+// entry path and locates the workbook's sharedStrings part when present.
+func resolveExcelWorkbookParts(
+	book *zip.ReadCloser, names []string,
+) (map[string]string, string, error) {
 	var workbook struct {
 		Sheets []struct {
 			Name string `xml:"name,attr"`
@@ -69,6 +66,7 @@ func filterEmptyExcelSheets(ctx context.Context, filename string, names []string
 	var relationships struct {
 		Items []struct {
 			ID     string `xml:"Id,attr"`
+			Type   string `xml:"Type,attr"`
 			Target string `xml:"Target,attr"`
 			Mode   string `xml:"TargetMode,attr"`
 		} `xml:"Relationship"`
@@ -86,10 +84,10 @@ func filterEmptyExcelSheets(ctx context.Context, filename string, names []string
 		return closeErr
 	}
 	if err := readXML("xl/workbook.xml", &workbook); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := readXML("xl/_rels/workbook.xml.rels", &relationships); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	wanted := make(map[string]bool, len(names))
 	for _, name := range names {
@@ -101,27 +99,60 @@ func filterEmptyExcelSheets(ctx context.Context, filename string, names []string
 			wantedIDs[sheet.ID] = true
 		}
 	}
-	targets := make(map[string]string, len(relationships.Items))
-	for _, rel := range relationships.Items {
-		if !wantedIDs[rel.ID] || rel.Mode == "External" || rel.Target == "" {
-			continue
-		}
-		target, err := url.Parse(rel.Target)
+	resolveTarget := func(raw string) (string, bool, error) {
+		target, err := url.Parse(raw)
 		if err != nil {
-			return nil, fmt.Errorf("invalid worksheet relationship: %w", err)
+			return "", false, fmt.Errorf("invalid worksheet relationship: %w", err)
 		}
 		if target.IsAbs() || target.Host != "" {
-			continue
+			return "", false, nil
 		}
 		if strings.HasPrefix(target.Path, "/") {
-			targets[rel.ID] = strings.TrimPrefix(target.Path, "/")
-		} else {
-			targets[rel.ID] = path.Join("xl", target.Path)
+			return strings.TrimPrefix(target.Path, "/"), true, nil
+		}
+		return path.Join("xl", target.Path), true, nil
+	}
+
+	targets := make(map[string]string, len(relationships.Items))
+	sharedStringsPath := ""
+	for _, rel := range relationships.Items {
+		if rel.Mode == "External" || rel.Target == "" {
+			continue
+		}
+		if wantedIDs[rel.ID] {
+			resolved, ok, err := resolveTarget(rel.Target)
+			if err != nil {
+				return nil, "", err
+			}
+			if ok {
+				targets[rel.ID] = resolved
+			}
+			continue
+		}
+		if sharedStringsPath == "" && strings.HasSuffix(rel.Type, "/sharedStrings") {
+			if resolved, ok, err := resolveTarget(rel.Target); err == nil && ok {
+				sharedStringsPath = resolved
+			}
 		}
 	}
 	sheets := make(map[string]string, len(workbook.Sheets))
 	for _, sheet := range workbook.Sheets {
 		sheets[sheet.Name] = targets[sheet.ID]
+	}
+	return sheets, sharedStringsPath, nil
+}
+
+// filterEmptyExcelSheets checks cell content rather than DuckDB's inferred row
+// count: header-only sheets and uncached formulas must keep their columns.
+func filterEmptyExcelSheets(ctx context.Context, filename string, names []string) ([]string, error) {
+	book, err := zip.OpenReader(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = book.Close() }()
+	sheets, _, err := resolveExcelWorkbookParts(book, names)
+	if err != nil {
+		return nil, err
 	}
 	kept := make([]string, 0, len(names))
 	for _, name := range names {
