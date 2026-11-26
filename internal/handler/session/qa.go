@@ -943,8 +943,10 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	}
 
 	// Validate request parameters. A request needs a text query, a query
-	// image, or both: an image alone searches by visual similarity.
-	if request.Query == "" && request.QueryImage == "" {
+	// image, or both: an image alone searches by visual similarity. Whitespace
+	// is not text, and a whitespace-only query with no image used to run a
+	// search for nothing.
+	if strings.TrimSpace(request.Query) == "" && strings.TrimSpace(request.QueryImage) == "" {
 		logger.Error(ctx, "Query content is empty")
 		c.Error(errors.NewBadRequestError("Query content cannot be empty"))
 		return
@@ -1006,6 +1008,14 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	}
 	opts.QueryImage = queryImage
 	opts.QueryImageMediaType = queryImageType
+	// An image query has no keyword form: recall runs in the image vector
+	// space the index stored image chunks in, so with vector match disabled
+	// this request can never return a result.
+	if queryImage != nil && opts.DisableVectorMatch {
+		_ = c.Error(errors.NewBadRequestError(
+			"query_image matches by vector similarity; disable_vector_match leaves it nothing to search"))
+		return
+	}
 
 	logger.Infof(
 		ctx,
