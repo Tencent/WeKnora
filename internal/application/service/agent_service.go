@@ -112,6 +112,7 @@ type agentService struct {
 	webSearchService      interfaces.WebSearchService
 	knowledgeBaseService  interfaces.KnowledgeBaseService
 	knowledgeService      interfaces.KnowledgeService
+	knowledgeImages       *agentKnowledgeImages
 	fileService           interfaces.FileService
 	chunkService          interfaces.ChunkService
 	duckdb                *sql.DB
@@ -169,6 +170,9 @@ func NewAgentService(
 	messageService interfaces.MessageService,
 	memoryService interfaces.MemoryService,
 	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
+	resourceRepo interfaces.ResourceRepository,
+	kbShares interfaces.KBShareService,
 	toolApprovalGate approval.MCPApproval,
 	sandboxMgr sandbox.Manager,
 	sandboxResolver sandbox.TenantSandboxResolver,
@@ -195,6 +199,7 @@ func NewAgentService(
 		knowledgeBaseService: knowledgeBaseService,
 		knowledgeService:     knowledgeService,
 		fileService:          fileService,
+		knowledgeImages:      newAgentKnowledgeImages(resourceCatalog, resourceRepo, kbShares, storageResolver),
 		chunkService:         chunkService,
 		mcpServiceService:    mcpServiceService,
 		mcpManager:           mcpManager,
@@ -276,6 +281,7 @@ func (s *agentService) CreateAgentEngine(
 	s.registerSecureFormTools(ctx, toolRegistry, sessionID, config)
 	s.registerWebPageFiles(ctx, toolRegistry, config, sessionID, assistantMessageID)
 	attachmentReader := s.registerAttachmentReader(ctx, toolRegistry, config, sessionID)
+	s.registerKnowledgeImageReader(toolRegistry, config)
 	// Advertise cached service summaries independently of @mentions. Concrete
 	// tool definitions are published after describe, before the next model request.
 	toolRegistry.PrepareMCPTools(ctx)

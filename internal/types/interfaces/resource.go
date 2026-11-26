@@ -42,6 +42,7 @@ type ResourceRepository interface {
 		tenantID uint64,
 		kbID, resourceID string,
 	) (bool, error)
+	ListKnowledgeImageOwners(ctx context.Context, tenantID uint64, resourceID string) ([]*types.Knowledge, error)
 	GetMessageFileBindings(
 		ctx context.Context,
 		tenantID uint64,
