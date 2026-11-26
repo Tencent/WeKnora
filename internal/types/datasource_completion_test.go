@@ -10,8 +10,10 @@ import (
 func TestPendingLogResultMatchesOnlyCompletedRun(t *testing.T) {
 	started := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	finished := started.Add(time.Second)
-	log := SyncLog{ID: "run", DataSourceID: "source", TenantID: 1, StartedAt: started,
-		FinishedAt: &finished, Status: SyncLogStatusSuccess}
+	log := SyncLog{
+		ID: "run", DataSourceID: "source", TenantID: 1, StartedAt: started,
+		FinishedAt: &finished, Status: SyncLogStatusSuccess,
+	}
 	ds := DataSource{ID: log.DataSourceID, TenantID: log.TenantID, LastSyncAt: &finished}
 	result := &SyncResult{Total: 3, Created: 3}
 	var err error

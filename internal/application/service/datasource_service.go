@@ -879,7 +879,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 	if err := allFetchedItemsFailedError(result, nonBlockingFailures); err != nil {
 		logger.Errorf(ctx, "data source sync failed while processing fetched items: %v", err)
-		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused, "")
+		_ = s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused, "")
 		return err
 	}
 
@@ -1334,7 +1334,9 @@ func resyncConfigDigest(cfg *types.DataSourceConfig) string {
 	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }
 
-func (s *DataSourceService) clearResyncMarkerForConfig(ctx context.Context, ds *types.DataSource, expectedDigest string) {
+func (s *DataSourceService) clearResyncMarkerForConfig(
+	ctx context.Context, ds *types.DataSource, expectedDigest string,
+) {
 	cfg, err := ds.ParseConfig()
 	if err == nil && cfg.Settings[feishuSettingResyncRequired] == nil {
 		return
@@ -1626,7 +1628,9 @@ func (s *DataSourceService) processSyncStreaming(
 			errMsg += fmt.Sprintf("; %d deletion failure(s) will only retry on the next full sync", result.DeletionFailed)
 		}
 	}
-	if err := s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, status, errMsg, wasPaused, resyncDigest); err != nil {
+	if err := s.updateSyncRunResult(
+		ctx, ds, syncLog, result, resultJSON, status, errMsg, wasPaused, resyncDigest,
+	); err != nil {
 		return err
 	}
 	// The upgraded full pass succeeded (success or partial — per-document
@@ -1765,13 +1769,16 @@ func (s *DataSourceService) updateSyncRunResult(
 	return nil
 }
 
-func (s *DataSourceService) recordSyncRunActivity(ctx context.Context, ds *types.DataSource, syncLog *types.SyncLog, result *types.SyncResult) {
+func (s *DataSourceService) recordSyncRunActivity(
+	ctx context.Context, ds *types.DataSource, syncLog *types.SyncLog, result *types.SyncResult,
+) {
 	action := types.AuditActionDataSourceSyncCompleted
 	outcome := types.AuditOutcomeSuccess
-	if syncLog.Status == types.SyncLogStatusFailed {
+	switch syncLog.Status {
+	case types.SyncLogStatusFailed:
 		action = types.AuditActionDataSourceSyncFailed
 		outcome = types.AuditOutcomeFailed
-	} else if syncLog.Status == types.SyncLogStatusPartial {
+	case types.SyncLogStatusPartial:
 		outcome = types.AuditOutcomePartial
 	}
 	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, action,

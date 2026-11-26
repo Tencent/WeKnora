@@ -156,7 +156,9 @@ func TestDataSourceResponse_NoConfig(t *testing.T) {
 }
 
 func TestDataSourceResponseOmitsPendingSyncLog(t *testing.T) {
-	ds := &types.DataSource{LastSyncResult: types.JSON(`{"created":3,"_pending_sync_log":{"id":"private-round","resync_config_digest":"private-digest"}}`)}
+	ds := &types.DataSource{LastSyncResult: types.JSON(
+		`{"created":3,"_pending_sync_log":{"id":"private-round","resync_config_digest":"private-digest"}}`,
+	)}
 	for _, response := range []any{NewDataSourceResponse(ds), NewDataSourceResponses([]*types.DataSource{ds})} {
 		body, err := json.Marshal(response)
 		assert.NoError(t, err)

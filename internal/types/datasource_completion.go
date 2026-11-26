@@ -24,9 +24,14 @@ type syncResultWithPendingLog struct {
 	PendingLog *PendingSyncLog `json:"_pending_sync_log"`
 }
 
+// WithPendingLog encodes the result with recovery metadata for a log write that failed.
 func (r *SyncResult) WithPendingLog(log *SyncLog, resyncDigest string) (JSON, error) {
 	return json.Marshal(syncResultWithPendingLog{SyncResult: *r, PendingLog: &PendingSyncLog{
-		ID: log.ID, Status: log.Status, FinishedAt: *log.FinishedAt, ErrorMessage: log.ErrorMessage, ResyncConfigDigest: resyncDigest,
+		ID:                 log.ID,
+		Status:             log.Status,
+		FinishedAt:         *log.FinishedAt,
+		ErrorMessage:       log.ErrorMessage,
+		ResyncConfigDigest: resyncDigest,
 	}})
 }
 
