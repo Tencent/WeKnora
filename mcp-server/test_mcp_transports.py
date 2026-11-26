@@ -11,6 +11,11 @@ from pathlib import Path
 
 MCP_SERVER_DIR = Path(__file__).resolve().parent
 
+# Where curl discards the response body. `NUL` is Windows's null device;
+# `/dev/null` is not a path curl can open there -- it prints the headers, then
+# exits 23 ("write error"), which the readiness probe below reads as "not up".
+NULL_SINK = "NUL" if os.name == "nt" else "/dev/null"
+
 
 class TransportRegressionTest(unittest.TestCase):
     def test_http_transport_is_stateless(self):
@@ -125,7 +130,7 @@ class HttpStatelessSmokeTest(unittest.TestCase):
                         "-D",
                         "-",
                         "-o",
-                        "/dev/null",
+                        NULL_SINK,
                         "-X",
                         "POST",
                         f"http://127.0.0.1:{port}/mcp",

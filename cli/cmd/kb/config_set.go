@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -139,8 +140,10 @@ func runConfigSet(ctx context.Context, opts *ConfigSetOptions, fopts *cmdutil.Fo
 	// Re-read the server's resulting state (secret-free view) so the envelope
 	// reflects what stuck — the same shape `kb config` returns.
 	result, err := svc.GetInitializationConfig(ctx, kbID)
+	var meta *output.Meta
 	if err != nil || result == nil {
-		// The write succeeded; surface what we applied if the read-back failed.
+		// The write succeeded. Distinguish requested IDs from verified model names.
+		meta = &output.Meta{Hint: "Configuration saved; read-back unavailable. Showing submitted model IDs."}
 		result = &sdk.KBModelConfigView{
 			RetrievalReady: opts.EmbeddingModel != "",
 			Embedding:      sdk.ModelSlotView{Configured: opts.EmbeddingModel != "", ModelName: opts.EmbeddingModel},
@@ -148,7 +151,12 @@ func runConfigSet(ctx context.Context, opts *ConfigSetOptions, fopts *cmdutil.Fo
 		}
 	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, result, nil)
+		return fopts.Emit(iostreams.IO.Out, result, meta)
+	}
+	if meta != nil {
+		if _, err := fmt.Fprintln(iostreams.IO.Err, meta.Hint); err != nil {
+			return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "configuration saved; writing read-back warning failed")
+		}
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Configured knowledge base %s (chat: %s, embedding: %s)\n",
 		kbID, orUnset(result.LLM.ModelName), orUnset(result.Embedding.ModelName))

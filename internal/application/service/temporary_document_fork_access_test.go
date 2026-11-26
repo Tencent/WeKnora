@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"testing"
 	"time"
@@ -167,6 +168,30 @@ func TestResolveForPromptUsesParentAttachmentReferencedByFork(t *testing.T) {
 	require.Len(t, got.Attachments, 1)
 	require.Equal(t, "doc-1", got.Attachments[0].ID)
 	require.Equal(t, "parent brief body", got.Attachments[0].Content)
+}
+
+func TestResolveForPromptDeduplicatesIDsBeforeSharingBudget(t *testing.T) {
+	chunks := make([]types.TemporaryDocumentChunk, 12)
+	for i := range chunks {
+		chunks[i] = types.TemporaryDocumentChunk{Seq: i, Content: "section", TokenCount: 1000}
+	}
+	raw, err := json.Marshal(chunks)
+	require.NoError(t, err)
+	doc := parentOwnedBrief(t)
+	doc.SessionID = "session-1"
+	doc.TokenCount = 13000
+	doc.ChunkCount = len(chunks)
+	doc.Chunks = types.JSON(raw)
+	svc := &temporaryDocumentService{repo: &forkAccessDocRepo{docs: []*types.TemporaryDocument{doc}}}
+
+	got, err := svc.ResolveForPrompt(
+		context.Background(), 7, "session-1", []string{"doc-1", "doc-1"}, "summarize",
+	)
+
+	require.NoError(t, err)
+	require.Len(t, got.Attachments, 1)
+	require.Equal(t, len(chunks), got.Attachments[0].SelectedChunks)
+	require.Equal(t, len(chunks), got.Attachments[0].TotalChunks)
 }
 
 func TestResolveForPromptHidesParentAttachmentNotOnForkedHistory(t *testing.T) {

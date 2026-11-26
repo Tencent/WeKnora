@@ -212,15 +212,6 @@ func TestKnowledgePostProcessGraphEnqueueSelection(t *testing.T) {
 
 	const knowledgeID = "knowledge-graph-ocr"
 	const kbID = "kb-graph"
-	repo := &wikiEnqueueFailureKnowledgeRepo{
-		knowledge: &types.Knowledge{
-			ID:              knowledgeID,
-			TenantID:        7,
-			KnowledgeBaseID: kbID,
-			ParseStatus:     types.ParseStatusProcessing,
-		},
-	}
-	queue := &wikiEnqueueFailureTaskQueue{}
 	bind := func(id, parent, content string, chunkType types.ChunkType) *types.Chunk {
 		return &types.Chunk{
 			ID:              id,
@@ -232,24 +223,12 @@ func TestKnowledgePostProcessGraphEnqueueSelection(t *testing.T) {
 			Content:         content,
 		}
 	}
-	service := &KnowledgePostProcessService{
-		knowledgeRepo: repo,
-		kbService: &wikiEnqueueFailureKBService{kb: &types.KnowledgeBase{
-			ID:       kbID,
-			TenantID: 7,
-			IndexingStrategy: types.IndexingStrategy{
-				GraphEnabled: true,
-			},
-			ExtractConfig: &types.ExtractConfig{Enabled: true},
-		}},
-		chunkRepo: &wikiEnqueueFailureChunkRepo{chunks: []*types.Chunk{
-			bind("text-link", "", "![page_1.jpg](resource://abc)", types.ChunkTypeText),
-			bind("ocr-scanned", "text-link", "第1章 総則", types.ChunkTypeImageOCR),
-			bind("cap-scanned", "text-link", "a scanned page", types.ChunkTypeImageCaption),
-			bind("text-prose", "", "Contract between Alice and Bob.", types.ChunkTypeText),
-			bind("ocr-figure", "text-prose", "ACME logo", types.ChunkTypeImageOCR),
-		}},
-		taskEnqueuer: queue,
+	chunks := []*types.Chunk{
+		bind("text-link", "", "![page_1.jpg](resource://abc)", types.ChunkTypeText),
+		bind("ocr-scanned", "text-link", "第1章 総則", types.ChunkTypeImageOCR),
+		bind("cap-scanned", "text-link", "a scanned page", types.ChunkTypeImageCaption),
+		bind("text-prose", "", "Contract between Alice and Bob.", types.ChunkTypeText),
+		bind("ocr-figure", "text-prose", "ACME logo", types.ChunkTypeImageOCR),
 	}
 
 	payload, err := json.Marshal(types.KnowledgePostProcessPayload{
@@ -259,14 +238,45 @@ func TestKnowledgePostProcessGraphEnqueueSelection(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = service.Handle(context.Background(), asynq.NewTask(types.TypeKnowledgePostProcess, payload))
-	require.NoError(t, err)
-
-	assert.Equal(t, []string{"ocr-scanned", "text-prose"}, queue.extractChunkIDs)
-	assert.Equal(t, []string{
-		types.TypeSummaryGeneration,
-		types.TypeChunkExtract,
-		types.TypeChunkExtract,
-	}, queue.taskTypes)
-	assert.Equal(t, 3, repo.expectedSubtasks, "summary plus two graph extract slots")
+	for _, tc := range []struct {
+		name   string
+		limit  int
+		chunks []string
+	}{
+		{name: "unlimited", chunks: []string{"ocr-scanned", "text-prose"}},
+		{name: "limited", limit: 1, chunks: []string{"ocr-scanned"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &wikiEnqueueFailureKnowledgeRepo{knowledge: &types.Knowledge{
+				ID:              knowledgeID,
+				TenantID:        7,
+				KnowledgeBaseID: kbID,
+				ParseStatus:     types.ParseStatusProcessing,
+			}}
+			queue := &wikiEnqueueFailureTaskQueue{}
+			service := &KnowledgePostProcessService{
+				knowledgeRepo: repo,
+				kbService: &wikiEnqueueFailureKBService{kb: &types.KnowledgeBase{
+					ID:               kbID,
+					TenantID:         7,
+					IndexingStrategy: types.IndexingStrategy{GraphEnabled: true},
+					ExtractConfig: &types.ExtractConfig{
+						Enabled:                   true,
+						MaxGraphChunksPerDocument: &tc.limit,
+					},
+				}},
+				chunkRepo:    &wikiEnqueueFailureChunkRepo{chunks: chunks},
+				taskEnqueuer: queue,
+			}
+			err := service.Handle(context.Background(), asynq.NewTask(types.TypeKnowledgePostProcess, payload))
+			require.NoError(t, err)
+			assert.Equal(t, tc.chunks, queue.extractChunkIDs)
+			wantTasks := []string{types.TypeSummaryGeneration}
+			for range tc.chunks {
+				wantTasks = append(wantTasks, types.TypeChunkExtract)
+			}
+			assert.Equal(t, wantTasks, queue.taskTypes)
+			assert.Equal(t, len(wantTasks), repo.expectedSubtasks, "each enqueued task needs one completion slot")
+		})
+	}
 }

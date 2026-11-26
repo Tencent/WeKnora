@@ -670,3 +670,63 @@ func TestFetchAll_FileNamePolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestFetchIncremental_FailedReplacementRetainsDeletionTracking(t *testing.T) {
+	for _, outcome := range []string{"removed", "recovered", "reverted"} {
+		t.Run(outcome, func(t *testing.T) {
+			f := newFakeIMA(t)
+			original := fakeFile{MediaID: "m-v1", Title: "Runbook", MediaType: mediaTypeMarkdown, Body: "# original"}
+			f.setKB("kb1", []fakeFile{original})
+			cfg := f.config("kb1")
+			c := NewConnector()
+			ctx := context.Background()
+			key := logicalKey("kb1", "", original.Title)
+			items, cursor, err := c.FetchIncremental(ctx, cfg, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mustFindItem(t, items, key)
+
+			replacement := fakeFile{
+				MediaID: "m-v2", Title: original.Title, MediaType: mediaTypeMarkdown,
+				Body: "# updated", DownloadFails: true,
+			}
+			f.setKB("kb1", []fakeFile{replacement})
+			items, cursor, err = c.FetchIncremental(ctx, cfg, cursor)
+			if err != nil || len(items) != 0 {
+				t.Fatalf("failed replacement: items=%s, err=%v", describeItems(items), err)
+			}
+
+			switch outcome {
+			case "removed":
+				f.setKB("kb1", nil)
+			case "recovered":
+				replacement.DownloadFails = false
+				f.setKB("kb1", []fakeFile{replacement})
+			case "reverted":
+				f.setKB("kb1", []fakeFile{original})
+			}
+			items, cursor, err = c.FetchIncremental(ctx, cfg, cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch outcome {
+			case "removed":
+				if len(items) != 1 || !mustFindItem(t, items, key).IsDeleted {
+					t.Fatalf("want a tombstone for the previously imported document, got %s", describeItems(items))
+				}
+				if _, present := decodeCursor(t, cursor).KBLogical["kb1"][key]; present {
+					t.Fatal("deleted document still tracked")
+				}
+			case "recovered":
+				if item := mustFindItem(t, items, key); item.IsDeleted || string(item.Content) != replacement.Body {
+					t.Fatalf("replacement was not retried: %+v", item)
+				}
+			case "reverted":
+				if len(items) != 0 {
+					t.Fatalf("original version was already imported, got %s", describeItems(items))
+				}
+			}
+		})
+	}
+}

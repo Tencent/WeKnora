@@ -1251,3 +1251,103 @@ func TestFetchStreamDefersWhenPartialListingProbeBudgetIsExhausted(t *testing.T)
 		)
 	}
 }
+
+type isolatingConfluenceHandler struct {
+	captureHandler
+	failID string
+}
+
+func (h *isolatingConfluenceHandler) Emit(ctx context.Context, item types.FetchedItem) error {
+	if item.ExternalID == h.failID {
+		return fmt.Errorf("%w: isolated ingest error", datasource.ErrItemIngestFailed)
+	}
+	return h.captureHandler.Emit(ctx, item)
+}
+
+func TestFetchStreamIsolatesSinglePageIngestFailure(t *testing.T) {
+	api := &streamAPI{
+		pages: []streamPage{
+			{id: "p1", title: "Bad Page", version: 2},
+			{id: "p2", title: "Good Page", version: 1},
+		},
+	}
+	prior := streamCursor(map[string]string{"p1": "v:1"})
+	h := &isolatingConfluenceHandler{failID: "p1"}
+	next, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), prior, h)
+	if err != nil {
+		t.Fatalf("FetchStream() unexpected error: %v", err)
+	}
+	if len(h.items) != 1 || h.items[0].ExternalID != "p2" {
+		t.Fatalf("emitted items = %#v; want only p2", h.items)
+	}
+	cur := decodeCursor(next)
+	if got := cur.SpacePages["1"]["p2"]; got != "v:1" {
+		t.Fatalf("p2 cursor = %q; want v:1", got)
+	}
+	if got := cur.SpacePages["1"]["p1"]; got != "v:1" {
+		t.Fatalf("failed p1 cursor = %q; want retained prior v:1", got)
+	}
+
+	// Next round retries only p1 and skips p2.
+	api.bodyCalls = 0
+	retry := &captureHandler{}
+	if _, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), next, retry); err != nil {
+		t.Fatalf("retry FetchStream() error: %v", err)
+	}
+	if len(retry.items) != 1 || retry.items[0].ExternalID != "p1" || api.bodyCalls != 1 {
+		t.Fatalf("retry items=%#v bodyCalls=%d; want only p1", retry.items, api.bodyCalls)
+	}
+}
+
+func TestFetchFullStreamIsolatesSinglePageIngestFailureAndPreservesDeletionBaseline(t *testing.T) {
+	api := &streamAPI{
+		pages: []streamPage{
+			{id: "p1", title: "Bad Page", version: 2},
+			{id: "p2", title: "Good Page", version: 1},
+		},
+	}
+	prior := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"})
+	h := &isolatingConfluenceHandler{failID: "p1"}
+	next, err := newStreamConnector(api).FetchFullStream(context.Background(), streamConfig(), prior, h)
+	if err != nil {
+		t.Fatalf("FetchFullStream() unexpected error: %v", err)
+	}
+	if len(h.items) != 1 || h.items[0].ExternalID != "p2" {
+		t.Fatalf("emitted items = %#v; want only p2", h.items)
+	}
+	cur := decodeCursor(next)
+	if cur.FullSync || cur.FullSyncBaseline != nil {
+		t.Fatalf("completed full sync must clear FullSync state: %#v", cur)
+	}
+	if got := cur.SpacePages["1"]["p2"]; got != "v:1" {
+		t.Fatalf("p2 cursor = %q; want v:1", got)
+	}
+	if val, ok := cur.SpacePages["1"]["p1"]; !ok || val != "" {
+		t.Fatalf("failed p1 cursor = (%q, %v); want (\"\", true) for retry + deletion ownership", val, ok)
+	}
+
+	// Incremental retry re-fetches only p1 and skips unchanged p2.
+	api.bodyCalls = 0
+	retry := &captureHandler{}
+	if _, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), next, retry); err != nil {
+		t.Fatalf("retry FetchStream() error: %v", err)
+	}
+	if len(retry.items) != 1 || retry.items[0].ExternalID != "p1" || api.bodyCalls != 1 {
+		t.Fatalf("retry items=%#v bodyCalls=%d; want only p1", retry.items, api.bodyCalls)
+	}
+
+	// If p1 is instead deleted upstream before recovery, deletion reconciliation still emits a tombstone.
+	deletedAPI := &streamAPI{pages: []streamPage{{id: "p2", title: "Good Page", version: 1}}}
+	delHandler := &captureHandler{}
+	if _, err := newStreamConnector(deletedAPI).FetchStream(
+		context.Background(), streamConfig(), next, delHandler,
+	); err != nil {
+		t.Fatalf("deletion FetchStream() error: %v", err)
+	}
+	if len(delHandler.items) != 1 || delHandler.items[0].ExternalID != "p1" || !delHandler.items[0].IsDeleted {
+		t.Fatalf("deletion items = %#v; want tombstone for p1", delHandler.items)
+	}
+	if deletedAPI.bodyCalls != 0 {
+		t.Fatalf("unchanged p2 should not be re-fetched: bodyCalls=%d", deletedAPI.bodyCalls)
+	}
+}

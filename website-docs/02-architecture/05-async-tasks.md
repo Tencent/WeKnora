@@ -32,6 +32,7 @@ WeKnora 有两种任务执行模式，通过部署形态选择：
 | 任务巡检数据源 | `asynq.Inspector` + 直接的 `LPos`/`ZRank`/`ZRevRank` 分页读取 | `internal/router/task_inspector.go` |
 | Wiki ingest 互斥锁 | `wiki:active:<kbID>`、finalize 锁、slug 锁均为 `SetNX` + TTL | `internal/application/service/wiki_ingest.go`、`wiki_ingest_batch.go` |
 | 多模态子任务计数器 | 图片子任务完成计数（DECR），最后一个 attempt 触发 finalize；Lite 模式改用进程内计数器 | `image_multimodal` 相关服务 |
+| 异步迁移/导入任务进度 | FAQ 导入、知识库复制、跨库文档移动的任务进度缓存（24h TTL）；Lite 模式回退为进程内缓存 | `internal/application/service/knowledge_faq_import.go`、`knowledge_clone_move.go` |
 | 限流 | 滑动窗口限流 ZSET（见可观测性文档） | `internal/ratelimit/limiter.go` |
 
 Redis 连接参数来自环境变量 `REDIS_ADDR` / `REDIS_USERNAME` / `REDIS_PASSWORD` / `REDIS_DB` / TLS 配置。读写超时由 `WEKNORA_REDIS_OP_TIMEOUT_MS` 控制，默认 500ms（写超时为其 2 倍以吸收队头阻塞）：

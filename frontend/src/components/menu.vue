@@ -273,6 +273,7 @@ import {
 } from './sessionSidebarSourceFilter';
 import { logout as logoutApi } from '@/api/auth';
 import { useMenuStore } from '@/stores/menu';
+import { useSettingsStore } from '@/stores/settings';
 import { useSessionActivityStore } from '@/stores/sessionActivity';
 import { useAuthStore } from '@/stores/auth';
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
@@ -1243,6 +1244,8 @@ const gotopage = async (path: string) => {
         return;
     } else {
         if (path === 'creatChat') {
+            // 再次点击当前「新对话」时路由不会变化，仍需清空上一条草稿的引用。
+            if (isInCreatChat.value) useSettingsStore().clearChatReferences()
             // 如果在知识库详情页，跳转到全局对话创建页
             if (isInKnowledgeBase.value) {
                 router.push('/platform/creatChat')

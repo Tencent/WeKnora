@@ -9,6 +9,7 @@ import (
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/filetransport"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -217,11 +218,10 @@ func containsFileType(supported []string, ext string) bool {
 	return false
 }
 
+// isAudioExtension reports whether ext is transcribed by ASR rather than
+// parsed. It delegates to docparser so the upload gate and the parse worker
+// agree on the set: the gate used to accept .aac (and enable ASR for it) while
+// docparser.IsAudioFormat, which the worker checks, did not.
 func isAudioExtension(ext string) bool {
-	switch ext {
-	case "mp3", "wav", "m4a", "flac", "ogg", "aac":
-		return true
-	default:
-		return false
-	}
+	return docparser.IsAudioFormat(ext)
 }

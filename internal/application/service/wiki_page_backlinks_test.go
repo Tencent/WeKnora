@@ -127,7 +127,7 @@ func seedBacklinkPage(t *testing.T, h backlinkHarness, slug, content string, in,
 		SourceRefs: types.StringArray{"keep-source"}, ChunkRefs: types.StringArray{"keep-chunk"},
 		InLinks: types.StringArray(in), OutLinks: types.StringArray(out), CreatedAt: stamp, UpdatedAt: stamp,
 	}
-	require.NoError(t, h.repo.Create(context.Background(), page))
+	require.NoError(t, h.db.Create(page).Error)
 	return page
 }
 
@@ -260,6 +260,7 @@ func TestWikiBacklinksMixedDelta(t *testing.T) {
 func TestWikiBacklinksCreateDeletePreserveOtherSources(t *testing.T) {
 	backlinkBackends(t, func(t *testing.T, h backlinkHarness) {
 		target := seedBacklinkPage(t, h, "entity/target", "目标", []string{"entity/other"}, nil)
+		seedWikiTestKnowledgeBase(t, h.db, backlinkTestKB, backlinkTestTenant)
 		page, err := h.svc.CreatePage(context.Background(), &types.WikiPage{
 			TenantID: backlinkTestTenant, KnowledgeBaseID: backlinkTestKB,
 			Slug: "entity/source", Title: "来源", PageType: types.WikiPageTypeEntity,
@@ -491,7 +492,7 @@ func TestWikiBacklinksUpdatesOnlyTargetKnowledgeBase(t *testing.T) {
 						other.ID = uuid.NewString()
 						other.TenantID = scope.tenant
 						other.KnowledgeBaseID = "kb-backlink-other"
-						require.NoError(t, h.repo.Create(ctx, &other))
+						require.NoError(t, h.db.Create(&other).Error)
 						otherBefore, err := h.repo.GetByID(ctx, other.ID)
 						require.NoError(t, err)
 						source := seedBacklinkPage(t, h, "entity/source", backlinkBody(oldLinks), nil, oldLinks)

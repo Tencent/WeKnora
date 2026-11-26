@@ -444,8 +444,23 @@ type SyncResult struct {
 	// Per-item failure samples (capped), shown in the sync-log UI.
 	Errors []SyncItemError `json:"errors,omitempty"`
 
+	// Per-item source-deletion samples (capped), shown in the sync-log UI.
+	DeletedItems []SyncDeletedItem `json:"deleted_items,omitempty"`
+
 	// Updated cursor for next incremental sync
 	NextCursor *SyncCursor `json:"next_cursor,omitempty"`
+}
+
+// MetaKeySelectedResourceDeleted marks an IsDeleted FetchedItem emitted when a
+// directly selected resource in config.resource_ids has been deleted upstream.
+const MetaKeySelectedResourceDeleted = "selected_resource_deleted"
+
+// SyncDeletedItem records one document or selected resource deleted in the
+// external source system, surfaced in the sync-log drawer and resource picker.
+type SyncDeletedItem struct {
+	ExternalID       string `json:"external_id,omitempty"`
+	SourceResourceID string `json:"source_resource_id,omitempty"`
+	Title            string `json:"title,omitempty"`
 }
 
 // SyncItemError is one user-facing failure sample. It carries a stable i18n

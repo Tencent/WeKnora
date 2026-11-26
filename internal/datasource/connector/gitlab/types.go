@@ -98,11 +98,19 @@ func collapsePaths(paths []string) []string {
 		}
 	}
 	out := make([]string, 0, len(paths))
+	retained := make(map[string]bool, len(paths))
 	for _, p := range paths {
-		if len(out) > 0 && (p == out[len(out)-1] || strings.HasPrefix(p, out[len(out)-1]+"/")) {
+		covered := retained[p]
+		// A sibling such as docs-old can sort between docs and docs/sub.
+		// Check directory ancestors rather than only the preceding selection.
+		for parent := path.Dir(p); !covered && parent != "."; parent = path.Dir(parent) {
+			covered = retained[parent]
+		}
+		if covered {
 			continue
 		}
 		out = append(out, p)
+		retained[p] = true
 	}
 	return out
 }

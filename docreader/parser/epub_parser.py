@@ -8,6 +8,7 @@ import logging
 import os
 import posixpath
 import tempfile
+from xml.etree import ElementTree
 from urllib.parse import unquote, urlsplit
 import uuid
 from typing import Dict
@@ -44,13 +45,11 @@ class EPUBParser(BaseParser):
             try:
                 book = epub.read_epub(epub_path)
                 metadata = self._extract_metadata(book)
-                markdown_content, images = self._extract_content(book)
+                markdown_content, images, chapter_count = self._extract_content(book)
 
                 metadata["source_format"] = "epub"
                 metadata["file_size"] = len(content)
-                metadata["chapter_count"] = len(
-                    [part for part in markdown_content.split("\n## ") if part.strip()]
-                )
+                metadata["chapter_count"] = chapter_count
                 metadata["image_count"] = len(images)
                 return Document(
                     content=markdown_content, images=images, metadata=metadata
@@ -82,14 +81,17 @@ class EPUBParser(BaseParser):
             html_files = [
                 f
                 for f in epub_zip.namelist()
-                if f.endswith((".html", ".xhtml", ".htm"))
+                if f.lower().endswith((".html", ".xhtml", ".htm"))
             ]
 
             def chapter_num(filename: str) -> int:
-                match = re.search(r"chapter(\d+)", filename, re.IGNORECASE)
+                match = re.search(
+                    r"chapter[_-]?(\d+)", posixpath.basename(filename), re.IGNORECASE
+                )
                 return int(match.group(1)) if match else 999999
 
             html_files.sort(key=chapter_num)
+            html_files = self._fallback_reading_order(epub_zip, html_files)
 
             if self.extract_images:
                 img_exts = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg")
@@ -117,7 +119,7 @@ class EPUBParser(BaseParser):
                         base_path=posixpath.dirname(html_file),
                     )
                     base = os.path.basename(html_file)
-                    title = base.replace(".html", "").replace(".xhtml", "")
+                    title = os.path.splitext(base)[0]
                     title = re.sub(
                         r"chapter[_-]?", "Chapter ", title, flags=re.IGNORECASE
                     )
@@ -132,6 +134,46 @@ class EPUBParser(BaseParser):
         return Document(
             content="\n\n".join(markdown_parts), images=images, metadata=metadata
         )
+
+    @staticmethod
+    def _fallback_reading_order(archive, html_files: list[str]) -> list[str]:
+        """Use a recoverable package spine even when navigation is broken."""
+        try:
+            container = ElementTree.fromstring(archive.read("META-INF/container.xml"))
+            rootfile = container.find(".//{*}rootfile")
+            if rootfile is None:
+                return html_files
+            package_path = rootfile.get("full-path", "")
+            package = ElementTree.fromstring(archive.read(package_path))
+            manifest = package.find("{*}manifest")
+            spine = package.find("{*}spine")
+            if manifest is None or spine is None:
+                return html_files
+        except (KeyError, ElementTree.ParseError):
+            return html_files
+
+        available = set(html_files)
+        by_id = {}
+        for item in manifest.findall("{*}item"):
+            try:
+                href = urlsplit(item.get("href", ""))
+            except ValueError:
+                continue
+            if href.scheme or href.netloc:
+                continue
+            path = posixpath.normpath(posixpath.join(
+                posixpath.dirname(package_path), unquote(href.path)
+            ))
+            if path in available:
+                by_id[item.get("id")] = path
+        ordered = []
+        seen = set()
+        for itemref in spine.findall("{*}itemref"):
+            path = by_id.get(itemref.get("idref"))
+            if path is not None and path not in seen:
+                ordered.append(path)
+                seen.add(path)
+        return ordered + [path for path in html_files if path not in seen]
 
     def _extract_metadata(self, book) -> Dict[str, str]:
         metadata: Dict[str, str] = {}
@@ -156,7 +198,7 @@ class EPUBParser(BaseParser):
                     metadata[out_key] = values[0][0]
         return metadata
 
-    def _extract_content(self, book) -> tuple[str, Dict[str, str]]:
+    def _extract_content(self, book) -> tuple[str, Dict[str, str], int]:
         markdown_parts = []
         images: Dict[str, str] = {}
         image_aliases: Dict[str, str] = {}
@@ -170,16 +212,26 @@ class EPUBParser(BaseParser):
                     images[img_path] = base64.b64encode(img_data).decode("utf-8")
                     self._add_image_aliases(image_aliases, item.get_name(), img_path)
 
+        chapter_count = 0
         for item in self._documents_in_reading_order(book):
-            markdown_parts.append(
-                self._process_chapter(
-                    item,
-                    toc_index=len(markdown_parts),
-                    image_aliases=image_aliases,
-                )
+            chapter_md = self._process_chapter(
+                item,
+                toc_index=len(markdown_parts),
+                image_aliases=image_aliases,
             )
+            markdown_parts.append(chapter_md)
+            # Count the documents rendered, not the "## " lines in the joined
+            # markdown: every chapter is emitted under one "## " heading, but so
+            # is every h2 the chapter itself contains, and a navigation page
+            # renders like a chapter without being one.
+            if chapter_md.strip() and not isinstance(item, epub.EpubNav):
+                chapter_count += 1
 
-        return "\n\n".join(part for part in markdown_parts if part.strip()), images
+        return (
+            "\n\n".join(part for part in markdown_parts if part.strip()),
+            images,
+            chapter_count,
+        )
 
     @staticmethod
     def _documents_in_reading_order(book) -> list:
@@ -252,9 +304,22 @@ class EPUBParser(BaseParser):
                 string=lambda text: isinstance(text, Comment)
             ):
                 comment.extract()
+            # markdownify understands HTML img, but drops SVG image elements.
+            # Preserve their resource references through the same archive-local
+            # resolver as ordinary images. SVG2 href takes priority over XLink.
+            for image in soup.select("svg image"):
+                if image.find_parent(["defs", "symbol", "clippath", "mask", "pattern"]):
+                    continue
+                source = image.get("href", image.get("xlink:href", ""))
+                if source.strip():
+                    image.replace_with(
+                        soup.new_tag("img", src=source, alt=image.get("aria-label", ""))
+                    )
             self._strip_internal_links(soup)
             if image_aliases:
                 self._rewrite_image_sources(soup, image_aliases, base_path)
+            # A literal pipe in a cell must not become a GFM column delimiter.
+            MHTMLParser._escape_table_cell_pipes(soup)
             markdown_text = md(str(soup), heading_style="ATX")
             # Keep the blank lines and indentation that delimit Markdown blocks
             # (paragraphs, quotes, lists, tables, fenced code) and only collapse

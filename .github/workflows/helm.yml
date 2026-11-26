@@ -5,10 +5,12 @@ on:
     branches:
       - main
     paths:
+      - "VERSION"
       - "helm/**"
       - ".github/workflows/helm.yml"
   pull_request:
     paths:
+      - "VERSION"
       - "helm/**"
       - ".github/workflows/helm.yml"
 
@@ -62,6 +64,7 @@ jobs:
           docreader_image="$(render_image templates/docreader.yaml)"
           app_tag="${app_image##*:}"
 
+          test "$app_tag" = "v$(cat VERSION)"
           test "${frontend_image##*:}" = "$app_tag"
           test "${docreader_image##*:}" = "$app_tag"
 

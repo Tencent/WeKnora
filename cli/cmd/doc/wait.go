@@ -60,6 +60,12 @@ For fail-fast semantics, use shell composition:
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 
+			if opts.Interval <= 0 {
+				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--interval must be positive")
+			}
+			if opts.Timeout <= 0 {
+				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--timeout must be positive")
+			}
 			opts.IDs = args
 			cli, err := f.Client()
 			if err != nil {

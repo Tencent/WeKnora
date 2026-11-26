@@ -12,11 +12,11 @@ import (
 // Example: for fieldName="answer", expected JSON format: {"answer":"...content..."}
 // The extractor uses a simple state machine to skip the JSON prefix and extract the string value.
 type JSONFieldExtractor struct {
-	fieldName  string // the JSON field name to extract (e.g. "answer", "thought")
-	buffer     string // accumulated full arguments string
-	valueStart int    // byte offset where the field value starts (-1 if not found yet)
-	lastEmit   int    // byte offset of the last emitted position within the value
-	done       bool   // whether we've seen the closing quote
+	fieldName  string          // the JSON field name to extract (e.g. "answer", "thought")
+	buffer     strings.Builder // accumulated arguments without repeated prefix copies
+	valueStart int             // byte offset where the field value starts (-1 if not found yet)
+	lastEmit   int             // byte offset of the last emitted position within the value
+	done       bool            // whether we've seen the closing quote
 }
 
 // NewJSONFieldExtractor creates a new extractor instance for the given field name
@@ -35,11 +35,12 @@ func (e *JSONFieldExtractor) Feed(argsDelta string) string {
 		return ""
 	}
 
-	e.buffer += argsDelta
+	e.buffer.WriteString(argsDelta)
+	buffer := e.buffer.String()
 
 	// If we haven't found the value start yet, try to find it
 	if e.valueStart < 0 {
-		idx := findFieldValueStart(e.buffer, e.fieldName)
+		idx := findFieldValueStart(buffer, e.fieldName)
 		if idx < 0 {
 			return "" // Haven't seen the value start yet
 		}
@@ -48,7 +49,7 @@ func (e *JSONFieldExtractor) Feed(argsDelta string) string {
 	}
 
 	// Extract new content from the value portion
-	valueContent := e.buffer[e.valueStart:]
+	valueContent := buffer[e.valueStart:]
 
 	// Find how far we can safely emit (stop before potential incomplete escape at the end)
 	safeEnd, finished := findSafeEnd(valueContent, e.lastEmit)

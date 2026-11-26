@@ -22,9 +22,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// wikiLinkRegex matches [[wiki-link]] syntax in markdown content
-var wikiLinkRegex = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
-
 // wikiInlineChunkCitationRegex matches internal short handles emitted by the
 // wiki ingest prompt while it classifies supporting chunks. The stable source
 // relationship lives in WikiPage.ChunkRefs, so these handles have no meaning
@@ -80,14 +77,59 @@ func NewWikiPageService(
 
 // CreatePage creates a new wiki page
 func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error) {
+	if err := s.prepareWikiPageForCreate(ctx, page); err != nil {
+		return nil, err
+	}
+
+	if err := s.repo.Create(ctx, page); err != nil {
+		return nil, fmt.Errorf("create wiki page: %w", err)
+	}
+
+	// Update inbound links on target pages
+	s.updateInLinks(ctx, page.TenantID, page.KnowledgeBaseID, page.Slug, page.OutLinks)
+
+	return page, nil
+}
+
+// GetOrCreatePage creates a new wiki page like CreatePage, or returns the
+// live page that already owns the slug when a concurrent writer created
+// it first, with created=false. The losing caller is expected to apply
+// its content through UpdatePage; the existing row is never overwritten
+// here, so a concurrent ingest batch cannot clobber the winner's
+// content or revision history.
+//
+// Only the batch ingest path uses this: interactive create (handler,
+// agent tools) keeps the strict CreatePage, where a duplicate slug is
+// still an error instead of a silent no-op.
+func (s *wikiPageService) GetOrCreatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, bool, error) {
+	if err := s.prepareWikiPageForCreate(ctx, page); err != nil {
+		return nil, false, err
+	}
+
+	createdPage, created, err := s.repo.GetOrCreate(ctx, page)
+	if err != nil {
+		return nil, false, fmt.Errorf("create wiki page: %w", err)
+	}
+	if created {
+		// Update inbound links on target pages
+		s.updateInLinks(ctx, page.TenantID, page.KnowledgeBaseID, page.Slug, page.OutLinks)
+		return createdPage, true, nil
+	}
+	return createdPage, false, nil
+}
+
+// prepareWikiPageForCreate applies the shared pre-insert normalization
+// for both strict and idempotent page creation: defaults, citation
+// stripping, out-link parsing and folder resolution.
+func (s *wikiPageService) prepareWikiPageForCreate(ctx context.Context, page *types.WikiPage) error {
 	if page.ID == "" {
 		page.ID = uuid.New().String()
 	}
 	if page.Slug == "" {
-		return nil, errors.New("wiki page slug is required")
+		return errors.New("wiki page slug is required")
 	}
 	if page.KnowledgeBaseID == "" {
-		return nil, errors.New("knowledge_base_id is required")
+		return errors.New("knowledge_base_id is required")
 	}
 	if page.Status == "" {
 		page.Status = types.WikiPageStatusPublished
@@ -102,22 +144,14 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	// Parse outbound links from content
 	page.OutLinks = s.parseOutLinks(page.Content)
 	if err := s.applyFolderToPage(ctx, page); err != nil {
-		return nil, err
+		return err
 	}
 	normalizeWikiHierarchy(page)
 
 	now := time.Now()
 	page.CreatedAt = now
 	page.UpdatedAt = now
-
-	if err := s.repo.Create(ctx, page); err != nil {
-		return nil, fmt.Errorf("create wiki page: %w", err)
-	}
-
-	// Update inbound links on target pages
-	s.updateInLinks(ctx, page.TenantID, page.KnowledgeBaseID, page.Slug, page.OutLinks)
-
-	return page, nil
+	return nil
 }
 
 // UpdatePage updates an existing wiki page.
@@ -1383,25 +1417,7 @@ func isInvalidWikiSearchQuery(err error) bool {
 
 // parseOutLinks extracts [[wiki-link]] slugs from markdown content
 func (s *wikiPageService) parseOutLinks(content string) types.StringArray {
-	matches := wikiLinkRegex.FindAllStringSubmatch(content, -1)
-	seen := make(map[string]bool)
-	var links types.StringArray
-
-	for _, match := range matches {
-		if len(match) > 1 {
-			slug := strings.TrimSpace(match[1])
-			// Handle [[slug|display name]] format — slug is the first part
-			if parts := strings.SplitN(slug, "|", 2); len(parts) == 2 {
-				slug = strings.TrimSpace(parts[0])
-			}
-			slug = normalizeSlug(slug)
-			if slug != "" && !seen[slug] {
-				seen[slug] = true
-				links = append(links, slug)
-			}
-		}
-	}
-	return links
+	return wikiOutLinks(content)
 }
 
 // normalizeSlug normalizes a wiki link slug
@@ -1427,30 +1443,17 @@ func slugNamespace(slug string) string {
 // untouched. Display text is preserved verbatim. This is a pure helper — the
 // resolution policy lives entirely in the callback.
 func rewriteDeadWikiLinks(content string, resolve func(normSlug, display string) (string, bool)) (string, bool) {
-	changed := false
-	out := wikiLinkRegex.ReplaceAllStringFunc(content, func(match string) string {
-		inner := match[2 : len(match)-2]
-		rawSlug := inner
-		display := ""
-		if parts := strings.SplitN(inner, "|", 2); len(parts) == 2 {
-			rawSlug = parts[0]
-			display = strings.TrimSpace(parts[1])
+	return rewriteMarkdownWikiLinks(content, func(link markdownWikiLink) string {
+		newSlug, ok := resolve(link.slug, link.display)
+		if !ok || newSlug == "" || newSlug == link.slug {
+			return content[link.start:link.end]
 		}
-		norm := normalizeSlug(rawSlug)
-		if norm == "" {
-			return match
+		replacement := "[[" + newSlug
+		if link.display != "" {
+			replacement += link.separator + link.display
 		}
-		newSlug, ok := resolve(norm, display)
-		if !ok || newSlug == "" || newSlug == norm {
-			return match
-		}
-		changed = true
-		if display != "" {
-			return "[[" + newSlug + "|" + display + "]]"
-		}
-		return "[[" + newSlug + "]]"
+		return replacement + "]]"
 	})
-	return out, changed
 }
 
 // RepairContentLinks rewrites [[slug]] / [[slug|display]] references in
