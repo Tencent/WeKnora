@@ -693,10 +693,11 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return s.cancelSyncLog(ctx, syncLog, "data source has been deleted")
 	}
 
+	pendingResult := pendingSyncLogResult(ds, syncLog)
 	// A terminal log without its source completion must fall through so an
 	// asynq retry can finish the writes. failed and running also fall through:
 	// failed resumes from its cursor, and running is the attempt to recover.
-	if terminalResult && syncCompletionPersisted(ds, syncLog) {
+	if terminalResult && pendingResult == nil && syncCompletionPersisted(ds, syncLog) {
 		logger.Infof(ctx, "sync log already finished, skipping replay: ds=%s syncLog=%s status=%s",
 			payload.DataSourceID, payload.SyncLogID, syncLog.Status)
 		return nil
@@ -749,10 +750,20 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
+	sc, streaming := connector.(datasource.StreamingConnector)
+	if pendingResult != nil {
+		if err := s.finishPendingSyncLog(ctx, ds, syncLog, pendingResult); err != nil {
+			return err
+		}
+		if streaming && resyncRequired(config) {
+			s.clearResyncMarker(ctx, ds)
+		}
+		return nil
+	}
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
 	// instead of restarting (Tencent/WeKnora#2136). Others fall back below.
-	if sc, ok := connector.(datasource.StreamingConnector); ok {
+	if streaming {
 		return s.processSyncStreaming(ctx, sc, ds, syncLog, config, payload, wasPaused)
 	}
 
@@ -1640,6 +1651,62 @@ func mergeDeletedItems(cur, prev []types.SyncDeletedItem) []types.SyncDeletedIte
 	return out
 }
 
+// pendingSyncResult attaches the log identity and terminal state to the
+// source's result when its cursor and summary are saved before the log.
+type pendingSyncResult struct {
+	types.SyncResult
+	SyncLogID    string `json:"pending_sync_log_id"`
+	Status       string `json:"pending_sync_log_status"`
+	ErrorMessage string `json:"pending_sync_log_error,omitempty"`
+}
+
+func pendingSyncLogResult(ds *types.DataSource, log *types.SyncLog) *pendingSyncResult {
+	if ds.LastSyncAt == nil || ds.LastSyncAt.Before(log.StartedAt) ||
+		(log.FinishedAt != nil && !log.FinishedAt.Before(*ds.LastSyncAt)) {
+		return nil
+	}
+	var pending pendingSyncResult
+	if json.Unmarshal(ds.LastSyncResult, &pending) != nil || pending.SyncLogID != log.ID {
+		return nil
+	}
+	return &pending
+}
+
+func (s *DataSourceService) finishPendingSyncLog(
+	ctx context.Context, ds *types.DataSource, log *types.SyncLog, pending *pendingSyncResult,
+) error {
+	resultJSON, err := pending.SyncResult.ToJSON()
+	if err != nil {
+		return fmt.Errorf("encode pending sync result: %w", err)
+	}
+	log.FinishedAt = ds.LastSyncAt
+	if err := s.writeSyncLogResult(ctx, log, &pending.SyncResult, resultJSON, pending.Status, pending.ErrorMessage); err != nil {
+		return fmt.Errorf("persist sync result: %w", err)
+	}
+	s.recordSyncRunResult(ctx, ds, log, &pending.SyncResult)
+	return nil
+}
+
+func (s *DataSourceService) writeSyncLogResult(
+	ctx context.Context,
+	syncLog *types.SyncLog,
+	result *types.SyncResult,
+	resultJSON types.JSON,
+	status string,
+	errorMessage string,
+) error {
+	syncLog.ItemsTotal = result.Total
+	syncLog.ItemsCreated = result.Created
+	syncLog.ItemsUpdated = result.Updated
+	syncLog.ItemsDeleted = result.Deleted
+	syncLog.ItemsSkipped = result.Skipped
+	syncLog.ItemsFailed = result.Failed
+	syncLog.Status = status
+	syncLog.ErrorMessage = errorMessage
+	syncLog.Result = resultJSON
+	return s.syncLogRepo.UpdateResult(ctx, syncLog)
+}
+
 func (s *DataSourceService) updateSyncRunResult(
 	ctx context.Context,
 	ds *types.DataSource,
@@ -1650,17 +1717,8 @@ func (s *DataSourceService) updateSyncRunResult(
 	errorMessage string,
 	wasPaused bool,
 ) error {
-	syncLog.ItemsTotal = result.Total
-	syncLog.ItemsCreated = result.Created
-	syncLog.ItemsUpdated = result.Updated
-	syncLog.ItemsDeleted = result.Deleted
-	syncLog.ItemsSkipped = result.Skipped
-	syncLog.ItemsFailed = result.Failed
-	syncLog.Status = status
 	syncLog.FinishedAt = timePtr(time.Now().UTC())
-	syncLog.ErrorMessage = errorMessage
-	syncLog.Result = resultJSON
-	logErr := s.syncLogRepo.UpdateResult(ctx, syncLog)
+	logErr := s.writeSyncLogResult(ctx, syncLog, result, resultJSON, status, errorMessage)
 	if logErr != nil {
 		logger.Errorf(ctx, "failed to update sync log: %v", logErr)
 	}
@@ -1677,6 +1735,17 @@ func (s *DataSourceService) updateSyncRunResult(
 	}
 	ds.ErrorMessage = errorMessage
 	dsResultJSON := resultJSON
+	if logErr != nil && (status == types.SyncLogStatusSuccess || status == types.SyncLogStatusPartial) {
+		// Commit the completion snapshot with the cursor so the retry can
+		// finish this log without fetching from the advanced cursor.
+		pending, err := json.Marshal(pendingSyncResult{
+			SyncResult: *result, SyncLogID: syncLog.ID, Status: status, ErrorMessage: errorMessage,
+		})
+		if err != nil {
+			return fmt.Errorf("persist sync result: %w", errors.Join(logErr, err))
+		}
+		dsResultJSON = types.JSON(pending)
+	}
 	if status == types.SyncLogStatusFailed && result != nil {
 		if prev, err := ds.ParseSyncResult(); err == nil && prev != nil && len(prev.DeletedItems) > 0 {
 			mergedItems := mergeDeletedItems(result.DeletedItems, prev.DeletedItems)
@@ -1705,12 +1774,19 @@ func (s *DataSourceService) updateSyncRunResult(
 	if err := errors.Join(logErr, sourceErr); err != nil {
 		return fmt.Errorf("persist sync result: %w", err)
 	}
+	s.recordSyncRunResult(ctx, ds, syncLog, result)
+	return nil
+}
+
+func (s *DataSourceService) recordSyncRunResult(
+	ctx context.Context, ds *types.DataSource, syncLog *types.SyncLog, result *types.SyncResult,
+) {
 	action := types.AuditActionDataSourceSyncCompleted
 	outcome := types.AuditOutcomeSuccess
-	if status == types.SyncLogStatusFailed {
+	if syncLog.Status == types.SyncLogStatusFailed {
 		action = types.AuditActionDataSourceSyncFailed
 		outcome = types.AuditOutcomeFailed
-	} else if status == types.SyncLogStatusPartial {
+	} else if syncLog.Status == types.SyncLogStatusPartial {
 		outcome = types.AuditOutcomePartial
 	}
 	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, action,
@@ -1720,7 +1796,6 @@ func (s *DataSourceService) updateSyncRunResult(
 			"total": result.Total, "created": result.Created, "updated": result.Updated,
 			"deleted": result.Deleted, "skipped": result.Skipped, "failed": result.Failed,
 		})
-	return nil
 }
 
 func allFetchedItemsFailedError(result *types.SyncResult, nonBlockingFailures int) error {
