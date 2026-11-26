@@ -104,6 +104,7 @@ type KBModelConfigRequest struct {
 		ModelID             *string `json:"model_id"`
 		DescriptionLanguage *string `json:"description_language"`
 		CustomInstructions  *string `json:"custom_instructions"`
+		OCRPrompt           *string `json:"ocr_prompt"`
 		ModelName           *string `json:"model_name"`
 		BaseURL             *string `json:"base_url"`
 		APIKey              *string `json:"api_key"`
@@ -338,6 +339,9 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		}
 		if req.VLMConfig.CustomInstructions != nil {
 			kb.VLMConfig.CustomInstructions = strings.TrimSpace(*req.VLMConfig.CustomInstructions)
+		}
+		if req.VLMConfig.OCRPrompt != nil {
+			kb.VLMConfig.OCRPrompt = strings.TrimSpace(*req.VLMConfig.OCRPrompt)
 		}
 		if req.VLMConfig.ModelName != nil {
 			kb.VLMConfig.ModelName = *req.VLMConfig.ModelName
@@ -1706,7 +1710,7 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	} else {
 		config["multimodal"].(map[string]interface{})["enabled"] = hasMultimodal
 	}
-	if kb.VLMConfig.DescriptionLanguage != "" || kb.VLMConfig.CustomInstructions != "" {
+	if kb.VLMConfig.DescriptionLanguage != "" || kb.VLMConfig.CustomInstructions != "" || kb.VLMConfig.OCRPrompt != "" {
 		if config["multimodal"] == nil {
 			config["multimodal"] = map[string]interface{}{
 				"enabled": hasMultimodal,
@@ -1718,6 +1722,9 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		}
 		if kb.VLMConfig.CustomInstructions != "" {
 			multimodal["customInstructions"] = kb.VLMConfig.CustomInstructions
+		}
+		if kb.VLMConfig.OCRPrompt != "" {
+			multimodal["ocrPrompt"] = kb.VLMConfig.OCRPrompt
 		}
 	}
 

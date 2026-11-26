@@ -65,10 +65,11 @@ func TestUpdateKnowledgeBaseAppliesVLMConfig(t *testing.T) {
 
 	// Providing vlm_config must persist it — this was silently dropped before #1723.
 	kb, err = svc.UpdateKnowledgeBase(ctx, "kb-1", "n", "d", nil,
-		&types.VLMConfig{Enabled: true, ModelID: "vlm-1"})
+		&types.VLMConfig{Enabled: true, ModelID: "vlm-1", OCRPrompt: "Text Recognition:"})
 	require.NoError(t, err)
 	assert.True(t, kb.VLMConfig.Enabled)
 	assert.Equal(t, "vlm-1", kb.VLMConfig.ModelID)
+	assert.Equal(t, "Text Recognition:", kb.VLMConfig.OCRPrompt)
 
 	// Disabling clears the model, like the initialization config endpoint does.
 	kb, err = svc.UpdateKnowledgeBase(ctx, "kb-1", "n", "d", nil,

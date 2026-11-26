@@ -866,10 +866,14 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 
 	// The OCR prompt is system-owned: knowledge base custom instructions must
 	// never reach it, or free-form business rules compete with the "No text
-	// content" contract and poison image_ocr chunks. buildVLMOCRPrompt picks
-	// the scanned-PDF or default prompt and ignores vlmCfg on purpose.
+	// content" contract and poison image_ocr chunks. buildVLMOCRPrompt uses the
+	// tenant's dedicated OCRPrompt when set, otherwise the scanned-PDF or
+	// default prompt.
 	prompt := buildVLMOCRPrompt(r.payload.ImageSourceType, r.vlmCfg)
-	if r.payload.ImageSourceType == "scanned_pdf" {
+	if strings.TrimSpace(r.vlmCfg.OCRPrompt) != "" {
+		logger.Infof(ctx, "[ImageMultimodal] Using custom OCR prompt for: %s", r.payload.ImageURL)
+		r.out[keyOCRPrompt] = "custom"
+	} else if r.payload.ImageSourceType == "scanned_pdf" {
 		logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", r.payload.ImageURL)
 		r.out[keyOCRPrompt] = "scanned_pdf"
 	} else {

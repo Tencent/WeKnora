@@ -61,3 +61,45 @@ func TestVLMOCRPromptExcludesCustomInstructions(t *testing.T) {
 		t.Fatalf("caption prompt should still carry custom instructions: %s", caption)
 	}
 }
+
+// TestVLMOCRPromptOverride covers the dedicated OCR override introduced for
+// models that expect a fixed recognition instruction (MiniCPM-OCR's
+// "Text Recognition:"). It must win over both built-in prompts, keep the
+// system prompt when blank, and still exclude custom instructions.
+func TestVLMOCRPromptOverride(t *testing.T) {
+	const recognition = "Text Recognition:"
+
+	t.Run("override wins for every source", func(t *testing.T) {
+		for _, sourceType := range []string{"", "regular", "scanned_pdf"} {
+			got := buildVLMOCRPrompt(sourceType, types.VLMConfig{OCRPrompt: "  " + recognition + "  "})
+			if got != recognition {
+				t.Fatalf("source %q: got %q, want %q", sourceType, got, recognition)
+			}
+		}
+	})
+
+	t.Run("blank override keeps the system prompt", func(t *testing.T) {
+		for _, cfg := range []types.VLMConfig{{}, {OCRPrompt: "   "}, {OCRPrompt: "\n\t"}} {
+			if got := buildVLMOCRPrompt("scanned_pdf", cfg); got != vlmOCRScannedPDFPrompt {
+				t.Fatalf("scanned_pdf prompt changed: %q", got)
+			}
+			if got := buildVLMOCRPrompt("regular", cfg); got != vlmOCRPrompt {
+				t.Fatalf("default prompt changed: %q", got)
+			}
+		}
+	})
+
+	t.Run("custom instructions still never reach OCR", func(t *testing.T) {
+		const marker = "UNIQUE_BUSINESS_MARKER_override"
+		got := buildVLMOCRPrompt(
+			"scanned_pdf",
+			types.VLMConfig{OCRPrompt: recognition, CustomInstructions: marker},
+		)
+		if got != recognition {
+			t.Fatalf("override should be used verbatim, got %q", got)
+		}
+		if strings.Contains(got, marker) {
+			t.Fatalf("custom instructions leaked into the OCR prompt: %q", got)
+		}
+	})
+}
