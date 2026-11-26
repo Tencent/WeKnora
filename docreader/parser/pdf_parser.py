@@ -208,11 +208,21 @@ def _classify_page(image_area_ratio: float, text_len: int) -> str:
 def _page_image_area_ratio(page, raw) -> float:
     """Return the fraction of the page area covered by image objects.
 
-    Overlapping images can push the ratio above 1.0; callers only compare it
-    against a threshold so that is harmless.
+    Top-level image bounds are clipped to the page box. Bounds are summed,
+    so overlapping, clipped, transparent, or hidden objects may overestimate
+    visible image area. Nested Form image bounds retain the legacy estimate.
     """
-    width, height = page.get_size()
-    page_area = float(width) * float(height)
+    # Bounds are unrotated PDF coordinates; get_bbox() retains the CropBox
+    # origin and intersects it with the MediaBox, unlike rotated get_size().
+    try:
+        page_left, page_bottom, page_right, page_top = page.get_bbox()
+        page_area = float(page_right - page_left) * float(page_top - page_bottom)
+        has_page_box = True
+    except Exception:
+        # Keep the legacy estimate if PDFium cannot supply a page box.
+        width, height = page.get_size()
+        page_area = float(width) * float(height)
+        has_page_box = False
     if page_area <= 0:
         return 0.0
 
@@ -221,10 +231,31 @@ def _page_image_area_ratio(page, raw) -> float:
         try:
             if obj.type == raw.FPDF_PAGEOBJ_IMAGE:
                 left, bottom, right, top = obj.get_bounds()
-                image_area += abs((right - left) * (top - bottom))
+                # Form children use local coordinates, so keep their old
+                # estimate until their parent transforms are handled.
+                if obj.level or not has_page_box:
+                    image_area += abs((right - left) * (top - bottom))
+                else:
+                    visible_width = max(0.0, min(right, page_right) - max(left, page_left))
+                    visible_height = max(0.0, min(top, page_top) - max(bottom, page_bottom))
+                    image_area += visible_width * visible_height
         except Exception:
             continue
     return image_area / page_area
+
+
+def _page_is_text_only(page, raw) -> bool:
+    """Conservatively recognize a page containing only text objects."""
+    seen = False
+    try:
+        for obj in page.get_objects():
+            seen = True
+            if obj.type != raw.FPDF_PAGEOBJ_TEXT:
+                return False
+        return seen
+    except Exception:
+        # Failure to inspect a page isn't evidence that it has no graphics.
+        return False
 
 
 def _extract_page_text(page) -> str:
@@ -335,10 +366,6 @@ def _strip_arxiv_and_page_num_lines(text: str) -> str:
             continue
         if _is_probable_page_num_line(lines, i):
             continue
-        if "arXiv:" in ln:
-            ln = re.sub(r"\s*arXiv:\s*\S+\s*(?:\[[^\]]+\])?\s*[^\n]*", "", ln).strip()
-            if not ln:
-                continue
         kept.append(ln)
     return "\n".join(kept)
 
@@ -425,13 +452,14 @@ def _is_figure_interior_line(text: str) -> bool:
     return False
 
 
-def _postprocess_pdf_text(text: str) -> str:
+def _postprocess_pdf_text(text: str, *, text_only_page: bool = False) -> str:
     if SANITIZE_PDF_TEXT:
         text = _sanitize_pdf_text(text)
     text = _strip_arxiv_and_page_num_lines(text)
-    text = _strip_lines_above_figure_captions(text)
-    if STRIP_CHART_TEXT_DEBRIS:
-        text = _strip_chart_text_debris(text)
+    if not text_only_page:
+        text = _strip_lines_above_figure_captions(text)
+        if STRIP_CHART_TEXT_DEBRIS:
+            text = _strip_chart_text_debris(text)
     return text
 
 
@@ -1920,6 +1948,10 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
         try:
             width, height = page.get_size()
             page_area = float(width) * float(height)
+            try:
+                page_box = page.get_bbox()
+            except Exception:
+                page_box = None
             if page_area <= 0:
                 continue
             for object_index, obj in enumerate(page.get_objects()):
@@ -1929,6 +1961,13 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
                     left, bottom, right, top = obj.get_bounds()
                 except Exception:
                     continue
+                # Form image bounds use local coordinates; only reject a
+                # top-level image that is entirely outside the page box.
+                if page_box is not None and obj.level == 0:
+                    page_left, page_bottom, page_right, page_top = page_box
+                    if (right <= page_left or left >= page_right or
+                        top <= page_bottom or bottom >= page_top):
+                        continue
                 area_ratio = abs((right - left) * (top - bottom)) / page_area
                 if area_ratio < EMBED_MIN_AREA_RATIO:
                     continue  # cheap skip before decoding (logos/decorations)
@@ -2008,9 +2047,10 @@ def _strip_repeating_lines(texts: list, classes: list) -> list:
     """Remove running headers/footers that repeat across most text pages.
 
     Conservative: only the first/last non-empty line of each text page is a
-    candidate, the line must be short, and it must appear on at least 60% of the
-    text pages (and there must be enough pages to judge). Mirrors DeepDoc's
-    cross-page "garbage set" idea without risking removal of real content.
+    candidate, the line must be short, and it must appear in the same edge
+    position on at least 60% of the text pages. Only matching edge occurrences
+    are removed; identical lines in the body remain. The rule is still a
+    heuristic and may remove meaningful text at a page edge.
     """
     from collections import Counter
 
@@ -2021,14 +2061,16 @@ def _strip_repeating_lines(texts: list, classes: list) -> list:
     counter: Counter = Counter()
     for i in text_indices:
         lines = [ln.strip() for ln in texts[i].splitlines() if ln.strip()]
-        if not lines:
+        # A one-line page has no independent body to protect; preserve it.
+        if len(lines) < 2:
             continue
-        for edge in {lines[0], lines[-1]}:
+        for position, edge in (("first", lines[0]), ("last", lines[-1])):
             if len(edge) <= 80:
-                counter[edge] += 1
+                counter[(position, edge)] += 1
 
-    threshold = max(2, int(len(text_indices) * 0.6))
-    repeating = {line for line, count in counter.items() if count >= threshold}
+    # Require at least 60%, rounding up, rather than truncating to fewer pages.
+    threshold = max(2, (3 * len(text_indices) + 4) // 5)
+    repeating = {edge for edge, count in counter.items() if count >= threshold}
     if not repeating:
         return list(texts)
 
@@ -2037,8 +2079,22 @@ def _strip_repeating_lines(texts: list, classes: list) -> list:
         if classes[i] != "text":
             cleaned.append(text)
             continue
-        kept = [ln for ln in text.splitlines() if ln.strip() not in repeating]
-        cleaned.append("\n".join(kept))
+        lines = text.splitlines()
+        nonempty = [index for index, line in enumerate(lines) if line.strip()]
+        if len(nonempty) < 2:
+            cleaned.append(text)
+            continue
+        remove = set()
+        first, last = nonempty[0], nonempty[-1]
+        if ("first", lines[first].strip()) in repeating:
+            remove.add(first)
+        if ("last", lines[last].strip()) in repeating:
+            remove.add(last)
+        # Never erase every non-empty line of a short page.
+        if len(remove) == len(nonempty):
+            cleaned.append(text)
+            continue
+        cleaned.append("\n".join(line for index, line in enumerate(lines) if index not in remove))
     return cleaned
 
 
@@ -2361,6 +2417,18 @@ class PDFParser(BaseParser):
                                 text = plain
                     else:
                         text = plain
+                    # Inspect objects only when a later heuristic could remove
+                    # figure/chart text. Sanitizing first matches the cleanup
+                    # path for text containing PDF placeholder characters.
+                    cleanup_text = _sanitize_pdf_text(text) if SANITIZE_PDF_TEXT else text
+                    has_cleanup_context = (
+                        _FIGURE_CAPTION_SEARCH_RE.search(cleanup_text)
+                        or (STRIP_CHART_TEXT_DEBRIS and _CHART_CONTEXT_RE.search(cleanup_text))
+                    )
+                    text_only_page = bool(
+                        cls == "text" and has_cleanup_context
+                        and _page_is_text_only(page, pdfium_r)
+                    )
                     if cls == "text":
                         clips = _extract_vector_figure_clips(
                             page,
@@ -2376,7 +2444,7 @@ class PDFParser(BaseParser):
                             vector_clips[i] = clips
                             for ref_path, b64, _y, _cap in clips:
                                 images[ref_path] = b64
-                    text = _postprocess_pdf_text(text)
+                    text = _postprocess_pdf_text(text, text_only_page=text_only_page)
                     if cls == "text" and SOURCE_BOXES:
                         line_boxes[i] = _page_line_boxes(page, pdfium_r)
                     if cls == "text" and vector_clips.get(i):

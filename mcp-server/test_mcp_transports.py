@@ -71,8 +71,8 @@ class TransportRegressionTest(unittest.TestCase):
 
 
 class StdioToolsListTest(unittest.TestCase):
-    def test_tools_list_returns_31_tools(self):
-        async def _run() -> int:
+    def test_tools_list_includes_wiki_graph(self):
+        async def _run() -> list[str]:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
 
@@ -88,10 +88,11 @@ class StdioToolsListTest(unittest.TestCase):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     tools = await session.list_tools()
-                    return len(tools.tools)
+                    return [tool.name for tool in tools.tools]
 
-        count = asyncio.run(_run())
-        self.assertEqual(count, 31)
+        names = asyncio.run(_run())
+        self.assertEqual(len(names), 32)
+        self.assertIn("wiki_graph", names)
 
 
 class HttpStatelessSmokeTest(unittest.TestCase):

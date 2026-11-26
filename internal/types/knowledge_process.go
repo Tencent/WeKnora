@@ -4,7 +4,7 @@ package types
 type KnowledgeProcessOverrides struct {
 	// SummaryEnabled defaults to true when omitted for backward compatibility.
 	SummaryEnabled           *bool                     `json:"summary_enabled,omitempty"`
-	ParserEngineRules        []ParserEngineRule        `json:"parser_engine_rules,omitempty"`
+	ParserEngineRules        []ParserEngineRule        `json:"parser_engine_rules,omitzero"`
 	ChunkingConfig           *ChunkingConfig           `json:"chunking_config,omitempty"`
 	EnableMultimodel         *bool                     `json:"enable_multimodel,omitempty"`
 	VLMConfig                *VLMConfig                `json:"vlm_config,omitempty"`

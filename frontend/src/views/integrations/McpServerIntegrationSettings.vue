@@ -259,6 +259,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { copyWithToast } from '@/utils/clipboard'
 import { useApiBaseUrlDisplay } from '@/composables/useApiBaseUrlDisplay'
+import { resolveMcpBaseUrl } from '@/utils/mcpBaseUrl'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import type { CustomAgent } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'
@@ -354,7 +355,7 @@ const connectSnippets = computed(() => {
 })
 
 function endpointUrl(ep: McpEndpoint): string {
-  return buildMcpEndpointUrl(apiBaseUrlDisplay.value, ep.path)
+  return buildMcpEndpointUrl(resolveMcpBaseUrl() || apiBaseUrlDisplay.value, ep.path)
 }
 
 function scopeLabel(ep: McpEndpoint): string {

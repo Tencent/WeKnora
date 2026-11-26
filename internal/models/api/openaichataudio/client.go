@@ -75,7 +75,9 @@ var audioTypes = map[string]string{
 func DataURI(audio []byte, fileName string) (string, error) {
 	mediaType, ok := audioTypes[strings.ToLower(filepath.Ext(fileName))]
 	if !ok {
-		return "", fmt.Errorf("cannot tell the audio format of %q from its extension", fileName)
+		return "", &api.RejectedError{
+			Reason: fmt.Sprintf("cannot tell the audio format of %q from its extension", fileName),
+		}
 	}
 	return "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(audio), nil
 }
@@ -89,9 +91,9 @@ func (c *Client) BuildRequestBody(req api.TranscriptionRequest) (map[string]any,
 	// The ceiling is on the whole string as sent — "encoded string size must
 	// not exceed 10 MB" — so the data: prefix counts too.
 	if limit := c.cfg.Settings.MaxEncodedBytes; limit > 0 && len(uri) > limit {
-		return nil, fmt.Errorf(
+		return nil, &api.RejectedError{Reason: fmt.Sprintf(
 			"the audio is %.1f MB and %.1f MB once base64-encoded; this model accepts at most %.1f MB encoded",
-			float64(len(req.Audio))/(1<<20), float64(len(uri))/(1<<20), float64(limit)/(1<<20))
+			float64(len(req.Audio))/(1<<20), float64(len(uri))/(1<<20), float64(limit)/(1<<20))}
 	}
 	body := map[string]any{
 		"model": c.cfg.Endpoint.Model,
