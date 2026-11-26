@@ -805,3 +805,73 @@ func TestScanRetrieveRows_Error(t *testing.T) {
 
 // silence unused import warning when sql isn't directly used
 var _ = sql.ErrNoRows
+
+// TestDeleteByField_EnumeratesRealTables 覆盖 #4772：删除路径不得依赖配置声明的
+// dimension 去拼接表名。当模型维度缺失/被修改导致 GetDimensions() 返回 0 时，
+// 旧实现会去删 `<base>_0` 之类不存在的表而永久失败；新实现枚举真实存在的
+// `<base>_<dim>` 分表逐表删除。
+func TestDeleteByField_EnumeratesRealTables(t *testing.T) {
+	repo, mock, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	primeCompatMode(repo, dorisCompatModeInnerProductDuplicate, nil)
+
+	// 真实存在两张分表，但传入的 dimension 是 0（配置维度缺失）。
+	mock.ExpectQuery(`SELECT TABLE_NAME FROM information_schema.tables`).
+		WithArgs("weknora", "weknora_embeddings\\_%").
+		WillReturnRows(sqlmock.NewRows([]string{"TABLE_NAME"}).
+			AddRow("weknora_embeddings_768").
+			AddRow("weknora_embeddings_1024"))
+	mock.ExpectExec(`DELETE FROM .*weknora_embeddings_768.* WHERE chunk_id IN \(\?\)`).
+		WithArgs("c1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`DELETE FROM .*weknora_embeddings_1024.* WHERE chunk_id IN \(\?\)`).
+		WithArgs("c1").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	require.NoError(t, repo.DeleteByChunkIDList(context.Background(), []string{"c1"}, 0, "document"))
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestDeleteByField_SingleTableFailureDoesNotAbort 验证单表删除失败不会阻断其余分表，
+// 且不会因此返回错误（部分成功即视为成功，与 KeywordsRetrieve 的容错语义一致）。
+func TestDeleteByField_SingleTableFailureDoesNotAbort(t *testing.T) {
+	repo, mock, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	primeCompatMode(repo, dorisCompatModeInnerProductDuplicate, nil)
+
+	mock.ExpectQuery(`SELECT TABLE_NAME FROM information_schema.tables`).
+		WithArgs("weknora", "weknora_embeddings\\_%").
+		WillReturnRows(sqlmock.NewRows([]string{"TABLE_NAME"}).
+			AddRow("weknora_embeddings_768").
+			AddRow("weknora_embeddings_1024"))
+	// 768 表删除失败，1024 表成功——整体仍应返回 nil。
+	mock.ExpectExec(`DELETE FROM .*weknora_embeddings_768.* WHERE chunk_id IN \(\?\)`).
+		WithArgs("c1").
+		WillReturnError(errors.New("table dropped"))
+	mock.ExpectExec(`DELETE FROM .*weknora_embeddings_1024.* WHERE chunk_id IN \(\?\)`).
+		WithArgs("c1").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	require.NoError(t, repo.DeleteByChunkIDList(context.Background(), []string{"c1"}, 0, "document"))
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestDeleteByField_AllTablesFailReturnsError 验证全部分表删除失败时错误不静默吞掉。
+func TestDeleteByField_AllTablesFailReturnsError(t *testing.T) {
+	repo, mock, _, cleanup := newTestRepo(t)
+	defer cleanup()
+	primeCompatMode(repo, dorisCompatModeInnerProductDuplicate, nil)
+
+	mock.ExpectQuery(`SELECT TABLE_NAME FROM information_schema.tables`).
+		WithArgs("weknora", "weknora_embeddings\\_%").
+		WillReturnRows(sqlmock.NewRows([]string{"TABLE_NAME"}).
+			AddRow("weknora_embeddings_768"))
+	mock.ExpectExec(`DELETE FROM .*weknora_embeddings_768.* WHERE chunk_id IN \(\?\)`).
+		WithArgs("c1").
+		WillReturnError(errors.New("table dropped"))
+
+	require.ErrorContains(t,
+		repo.DeleteByChunkIDList(context.Background(), []string{"c1"}, 0, "document"),
+		"delete by chunk_id")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
