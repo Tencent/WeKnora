@@ -10,6 +10,8 @@ import (
 type UserService interface {
 	// Register creates a new user account
 	Register(ctx context.Context, req *types.RegisterRequest) (*types.User, error)
+	// CreateBootstrapSystemAdmin creates the first administrator at server startup.
+	CreateBootstrapSystemAdmin(ctx context.Context, email, password string) error
 	// Login authenticates a user and returns tokens
 	Login(ctx context.Context, req *types.LoginRequest) (*types.LoginResponse, error)
 	// GetOIDCAuthorizationURL builds the third-party OIDC authorization URL

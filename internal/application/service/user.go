@@ -139,6 +139,26 @@ func (s *userService) complexPasswordEnabled(ctx context.Context) bool {
 
 // Register creates a new user account
 func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) (*types.User, error) {
+	return s.register(ctx, req, false)
+}
+
+// CreateBootstrapSystemAdmin provisions the initial admin using credentials
+// supplied by the deployment operator before the HTTP server starts.
+func (s *userService) CreateBootstrapSystemAdmin(ctx context.Context, email, password string) error {
+	if err := ValidatePasswordPolicy(password, s.complexPasswordEnabled(ctx)); err != nil {
+		return err
+	}
+	// A common username lets the database's unique constraint arbitrate
+	// simultaneous bootstrap attempts, even if replicas specify different emails.
+	_, err := s.register(ctx, &types.RegisterRequest{
+		Username: "system-admin",
+		Email:    email,
+		Password: password,
+	}, true)
+	return err
+}
+
+func (s *userService) register(ctx context.Context, req *types.RegisterRequest, requireBootstrapAdmin bool) (*types.User, error) {
 	logger.Info(ctx, "Start user registration")
 
 	// Validate input
@@ -170,6 +190,10 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 	}
 	if !provisioning.IsValid() {
 		return nil, fmt.Errorf("invalid tenant provisioning mode %q", provisioning)
+	}
+
+	if requireBootstrapAdmin && !shouldPromoteBootstrapSystemAdmin(ctx, s.userRepo, req.Email) {
+		return nil, errors.New("bootstrap requires a matching email and no existing system administrator")
 	}
 
 	var createdTenant *types.Tenant
@@ -204,7 +228,7 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 		user.TenantID = createdTenant.ID
 	}
 
-	if shouldPromoteBootstrapSystemAdmin(ctx, s.userRepo, req.Email) {
+	if requireBootstrapAdmin || shouldPromoteBootstrapSystemAdmin(ctx, s.userRepo, req.Email) {
 		user.IsSystemAdmin = true
 	}
 

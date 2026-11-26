@@ -33,7 +33,7 @@
 ::: tip 空间与平台权限
 空间 Owner 管理所在空间的成员、模型和知识库。全局系统设置、平台任务队列及跨空间审计需要系统管理员身份，两类权限独立授予。
 
-首次设置系统管理员时，给 app 配置 `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL`，由部署负责人在开放注册前完成该邮箱的注册。当前已有系统管理员的部署可以直接升级。[系统管理员指南](../03-features/20-platform-admin.md)
+首次设置系统管理员时，给 app 配置 `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL`。关闭注册的部署可同时配置 `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_PASSWORD`，启动后直接登录。仅配置邮箱时，由部署负责人通过受控入口完成注册。当前已有系统管理员的部署可以直接升级。[系统管理员指南](../03-features/20-platform-admin.md)
 :::
 
 ## 创建知识库并配置模型 {#_3-创建知识库并配置模型}

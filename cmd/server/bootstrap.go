@@ -8,18 +8,22 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 
+	"github.com/gin-gonic/gin/binding"
 	"go.uber.org/dig"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // bootstrapEnvVar is the env var that names the email of the user who
-// may be promoted to system administrator when the deployment has no
+// may become system administrator when the deployment has no
 // existing system administrators.
 //
 // Why an env var (vs a CLI subcommand)?
@@ -32,6 +36,7 @@ import (
 //     var stops granting privileges. That prevents a UI revoke from being
 //     silently undone on the next restart.
 const bootstrapEnvVar = service.BootstrapSystemAdminEmailEnv
+const bootstrapPasswordEnvVar = "WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_PASSWORD"
 
 // runStartupBootstrap consults the env and applies any one-shot
 // bootstrap actions. Currently it only handles system-admin promotion;
@@ -72,15 +77,21 @@ func runStartupBootstrap(c *dig.Container) {
 // The function is idempotent and non-fatal — it warns and returns on
 // every error path.
 //
-// The bootstrap intentionally does NOT create a user when the email is
-// not yet registered: account creation is a workflow with side effects
-// (password hashing, tenant assignment, audit) that we don't want to
-// short-circuit. New sign-ups matching bootstrapEnvVar are promoted
-// immediately inside userService.Register when no system admin exists;
-// this startup hook remains for accounts that registered before the env
-// var was configured.
+// A configured password opts into creating a missing account through the
+// user service. With only an email configured, matching accounts still gain
+// the role when they sign up or are found on startup.
 func bootstrapSystemAdmin(ctx context.Context, userSvc interfaces.UserService, email string) {
 	user, err := userSvc.GetUserByEmail(ctx, email)
+	if password := os.Getenv(bootstrapPasswordEnvVar); password != "" && errors.Is(err, repository.ErrUserNotFound) {
+		if len(email) > 255 || binding.Validator.ValidateStruct(&types.LoginRequest{Email: email, Password: password}) != nil {
+			logger.Warn(ctx, "[bootstrap] invalid initial system admin login credentials")
+			return
+		}
+		if err := userSvc.CreateBootstrapSystemAdmin(ctx, email, password); err != nil {
+			logger.Warnf(ctx, "[bootstrap] could not create initial system admin: %v", err)
+		}
+		return
+	}
 	if err != nil {
 		// "not found" surfaces as an error in this codebase; treat it
 		// gently — operators commonly set the var before the user has
