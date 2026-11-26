@@ -1929,7 +1929,7 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 	var deletedQuestions []string
 	for oldQ := range oldQuestionsSet {
 		if _, exists := newQuestionsSet[oldQ]; !exists {
-			sourceID := fmt.Sprintf("%s-%s", chunk.ID, hashQuestion(oldQ))
+			sourceID := faqSimilarQuestionSourceID(chunk.ID, oldQ)
 			sourceIDsToDelete = append(sourceIDsToDelete, sourceID)
 			deletedQuestions = append(deletedQuestions, oldQ)
 		}
@@ -1943,7 +1943,7 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 		// 1. 新问题（之前不存在）
 		// 2. 答案变化（需要重新embedding）
 		if !existedBefore || answersChanged {
-			sourceID := fmt.Sprintf("%s-%s", chunk.ID, hashQuestion(newQ))
+			sourceID := faqSimilarQuestionSourceID(chunk.ID, newQ)
 			indexInfoToUpdate = append(indexInfoToUpdate, &types.IndexInfo{
 				Content:         buildContent(newQ, normalizedNewMeta.Answers),
 				SourceID:        sourceID,
@@ -1973,6 +1973,17 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 	}
 	if len(updatedQuestions) > 0 {
 		logger.Debugf(ctx, "incrementalIndexFAQEntry: updated similar questions (answers changed): %v", updatedQuestions)
+	}
+
+	// 相似问被删除或答案变化时，旧索引行可能同时混有全量构建的位置源 ID
+	// （<chunk-id>-<序号>）与增量写入的哈希源 ID；位置源 ID 还会随列表删减
+	// 错位，无法仅凭旧列表枚举全部残留行。按 chunk 全量替换：先按 chunk_id
+	// 删掉该条目的全部旧向量（覆盖两种 ID 方案），再按当前元数据重建。
+	// 纯新增 / 仅标准问变化的编辑不受影响，仍走下面的增量路径。
+	if len(deletedQuestions) > 0 || answersChanged {
+		logger.Debugf(ctx, "incrementalIndexFAQEntry: rebuilding chunk %s index (deletedSimilar=%d, answersChanged=%v)",
+			chunk.ID, len(deletedQuestions), answersChanged)
+		return s.indexFAQChunks(ctx, kb, knowledge, []*types.Chunk{chunk}, embeddingModel, false, true)
 	}
 
 	// 3. 删除不再存在的相似问索引，以及即将重建的旧索引。
