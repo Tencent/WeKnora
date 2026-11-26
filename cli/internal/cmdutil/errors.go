@@ -262,9 +262,15 @@ func NewError(code ErrorCode, message string) *Error {
 	return &Error{Code: code, Message: message}
 }
 
-// Wrapf wraps cause with a typed code and Sprintf-style message.
+// Wrapf wraps cause with a typed code and Sprintf-style message. A cause that
+// carries a Retry-After hint (the SDK records it on *sdk.APIError for every
+// non-2xx response) is mirrored onto the typed error here rather than in
+// WrapHTTP / WrapStream, because commands that override the classified code
+// (chat and session ask report session_create_failed) call Wrapf directly and
+// would otherwise still drop the backoff.
 func Wrapf(code ErrorCode, cause error, format string, args ...any) *Error {
-	return &Error{Code: code, Message: fmt.Sprintf(format, args...), Cause: cause}
+	e := &Error{Code: code, Message: fmt.Sprintf(format, args...), Cause: cause}
+	return withRetryAfter(e, cause)
 }
 
 // WrapHTTP wraps a transport / response error with the typed code derived
@@ -277,18 +283,17 @@ func Wrapf(code ErrorCode, cause error, format string, args ...any) *Error {
 // ClassifyHTTPErrorOutputs() in the acceptance/contract test, which
 // enumerates the codes this helper can yield.
 func WrapHTTP(cause error, format string, args ...any) *Error {
-	return withRetryAfter(Wrapf(ClassifyHTTPError(cause), cause, format, args...), cause)
+	return Wrapf(ClassifyHTTPError(cause), cause, format, args...)
 }
 
 // withRetryAfter copies the response's Retry-After hint onto the typed error.
-// The SDK records it on *sdk.APIError for every non-2xx response; without this
-// hop the wire field retry_after_seconds would only ever be populated by the
-// raw `weknora api` passthrough, leaving every typed command's 429 without the
-// backoff the error contract promises.
+// Without this hop the wire field retry_after_seconds would only ever be
+// populated by the raw `weknora api` passthrough, leaving every typed command's
+// 429 without the backoff the error contract promises.
 func withRetryAfter(e *Error, cause error) *Error {
 	var apiErr *sdk.APIError
 	if errors.As(cause, &apiErr) && apiErr.RetryAfterSeconds > 0 {
-		e.WithRetryAfter(apiErr.RetryAfterSeconds)
+		return e.WithRetryAfter(apiErr.RetryAfterSeconds)
 	}
 	return e
 }
@@ -305,7 +310,7 @@ func ClassifySDKError(err error) ErrorCode {
 
 // WrapStream wraps an SDK streaming error with ClassifySDKError.
 func WrapStream(cause error, format string, args ...any) *Error {
-	return withRetryAfter(Wrapf(ClassifySDKError(cause), cause, format, args...), cause)
+	return Wrapf(ClassifySDKError(cause), cause, format, args...)
 }
 
 // FlagError signals user-visible flag/argument problems; the root command
