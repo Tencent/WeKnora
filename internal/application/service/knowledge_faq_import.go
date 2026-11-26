@@ -337,19 +337,13 @@ func (s *knowledgeService) saveFAQImportResultToDatabase(ctx context.Context,
 		return fmt.Errorf("failed to get FAQ knowledge: %w", err)
 	}
 
-	// 计算跳过的条目数（总数 - 完全成功 - 部分失败 - 完全失败）
-	skippedCount := originalTotalEntries - progress.SuccessCount - progress.PartialFailedCount - progress.FailedCount
-	if skippedCount < 0 {
-		skippedCount = 0
-	}
-
 	// 创建导入结果统计
 	importResult := &types.FAQImportResult{
 		TotalEntries:       originalTotalEntries,
 		SuccessCount:       progress.SuccessCount,
 		FailedCount:        progress.FailedCount,
 		PartialFailedCount: progress.PartialFailedCount,
-		SkippedCount:       skippedCount,
+		SkippedCount:       progress.SkippedCount,
 		MergedCount:        progress.MergedCount,
 		AddedCount:         progress.AddedCount,
 		ImportMode:         payload.Mode,
@@ -374,8 +368,10 @@ func (s *knowledgeService) saveFAQImportResultToDatabase(ctx context.Context,
 		return fmt.Errorf("failed to update knowledge with import result: %w", err)
 	}
 
-	logger.Infof(ctx, "Saved FAQ import result to database: knowledge_id=%s, task_id=%s, total=%d, success=%d, added=%d, merged=%d, failed=%d, partial_failed=%d, skipped=%d",
-		payload.KnowledgeID, payload.TaskID, originalTotalEntries, progress.SuccessCount, progress.AddedCount, progress.MergedCount, progress.FailedCount, progress.PartialFailedCount, skippedCount)
+	logger.Infof(ctx, "Saved FAQ import result to database: knowledge_id=%s, task_id=%s, total=%d, "+
+		"success=%d, added=%d, merged=%d, failed=%d, partial_failed=%d, skipped=%d",
+		payload.KnowledgeID, payload.TaskID, originalTotalEntries, progress.SuccessCount, progress.AddedCount,
+		progress.MergedCount, progress.FailedCount, progress.PartialFailedCount, progress.SkippedCount)
 
 	return nil
 }
@@ -1012,22 +1008,22 @@ type faqMergeOperation struct {
 
 // calculateAppendOperations 计算 Append 模式下的操作（支持智能合并）。
 // 如果 entry 的标准问在 KB 中已存在，则视为合并操作（相似问 / 反例并集，
-// 答案 / 策略以新条目为准）；否则视为新建。无变化（hash 一致且操作位
-// 也未变）的合并目标会被 skip 掉，避免无效写库 / 重建索引。
+// 答案 / 策略以新条目为准）；否则视为新建。
+// 内容和运营状态都未改变且已完成索引时跳过，保留原有索引。
 //
 // 内部 master 行为，对应开源版仅 "重复 = 失败" 的简化逻辑。FAQ 导入的
 // 常见使用方式是"导出修改后重新 append"，需要这种合并语义才能正确叠加
 // 新的相似问而不丢历史数据。
 func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 	tenantID uint64, kbID string, entries []types.FAQEntryPayload,
-) (newEntries []types.FAQEntryPayload, mergeOps []faqMergeOperation, skippedCount int, err error) {
+) (newEntries []types.FAQEntryPayload, mergeOps []faqMergeOperation, skippedIndices []int, err error) {
 	if len(entries) == 0 {
-		return nil, nil, 0, nil
+		return nil, nil, nil, nil
 	}
 
 	existingChunks, err := s.chunkRepo.ListAllFAQChunksWithMetadataByKnowledgeBaseID(ctx, tenantID, kbID)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("failed to list existing FAQ chunks: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to list existing FAQ chunks: %w", err)
 	}
 
 	existingStdQToChunk := make(map[string]*types.Chunk)
@@ -1055,7 +1051,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 	for entryIdx, entry := range entries {
 		meta, sErr := sanitizeFAQEntryPayload(&entry)
 		if sErr != nil {
-			skippedCount++
+			skippedIndices = append(skippedIndices, entryIdx)
 			logger.Warnf(ctx, "Skipping invalid FAQ entry: %v", sErr)
 			continue
 		}
@@ -1080,19 +1076,22 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 					Source:            existingMeta.Source,
 				}
 
-				newHash := types.CalculateFAQContentHash(mergedMeta)
 				enabledChanged := entry.IsEnabled != nil && *entry.IsEnabled != existingChunk.IsEnabled
 				recommendedChanged := entry.IsRecommended != nil &&
 					*entry.IsRecommended != existingChunk.Flags.HasFlag(types.ChunkFlagRecommended)
-				answerStrategyChanged := meta.AnswerStrategy != existingMeta.AnswerStrategy
-				if existingChunk.ContentHash == newHash && !enabledChanged && !recommendedChanged && !answerStrategyChanged {
-					skippedCount++
-					logger.Infof(ctx, "Skipping merge for unchanged FAQ entry: %s", meta.StandardQuestion)
-					continue
+				answerChanged := !slices.Equal(mergedMeta.Answers, existingMeta.Answers)
+				unchanged := !enabledChanged && !recommendedChanged && !answerChanged &&
+					mergedMeta.AnswerStrategy == existingMeta.AnswerStrategy &&
+					slices.Equal(mergedSimilar, existingMeta.SimilarQuestions) &&
+					slices.Equal(mergedNegative, existingMeta.NegativeQuestions)
+				if unchanged {
+					if !existingChunk.Flags.HasFlag(types.ChunkFlagFAQAppendIndexPending) {
+						skippedIndices = append(skippedIndices, entryIdx)
+						logger.Infof(ctx, "Skipping merge for unchanged FAQ entry: %s", meta.StandardQuestion)
+						continue
+					}
+					mergedMeta.Version = existingMeta.Version
 				}
-
-				oldAnswerStr := strings.Join(existingMeta.Answers, "##")
-				newAnswerStr := strings.Join(meta.Answers, "##")
 				oldSimilarSet := make(map[string]bool, len(existingMeta.SimilarQuestions))
 				for _, q := range existingMeta.SimilarQuestions {
 					oldSimilarSet[q] = true
@@ -1122,7 +1121,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 					Detail: types.FAQMergeDetail{
 						Index:            entryIdx,
 						StandardQuestion: meta.StandardQuestion,
-						AnswerChanged:    oldAnswerStr != newAnswerStr,
+						AnswerChanged:    answerChanged,
 						NewSimilarCount:  newSimilarCount,
 						NewNegativeCount: newNegativeCount,
 					},
@@ -1135,7 +1134,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 		// 正常情况下这些冲突应在 executeFAQDryRunValidation 阶段就被拦截，这里
 		// 仅作为防御性兜底；用 Warn 级别打点便于排查验证层漏检。
 		if existingQuestions[meta.StandardQuestion] || batchQuestions[meta.StandardQuestion] {
-			skippedCount++
+			skippedIndices = append(skippedIndices, entryIdx)
 			logger.Warnf(ctx,
 				"calculateAppendOperations: dropping FAQ entry with duplicate standard question %q "+
 					"(should have been filtered at validation); entry_idx=%d",
@@ -1150,7 +1149,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 		newEntries = append(newEntries, entry)
 	}
 
-	return newEntries, mergeOps, skippedCount, nil
+	return newEntries, mergeOps, skippedIndices, nil
 }
 
 // calculateReplaceOperations 计算Replace模式下需要删除、创建、更新的条目
@@ -1449,9 +1448,28 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 	} else {
 		// Append 模式（智能合并）：标准问已存在的条目走 merge ops，其余作为新建。
 		var mergeOps []faqMergeOperation
-		entriesToProcess, mergeOps, skippedCount, err = s.calculateAppendOperations(ctx, tenantID, kb.ID, payload.Entries)
+		var skippedIndices []int
+		entriesToProcess, mergeOps, skippedIndices, err = s.calculateAppendOperations(
+			ctx, tenantID, kb.ID, payload.Entries,
+		)
 		if err != nil {
 			return fmt.Errorf("failed to calculate append operations: %w", err)
+		}
+		skippedCount = len(skippedIndices)
+		progress.SkippedCount = skippedCount
+		if progress.PartialFailedCount > 0 && len(progress.ValidEntryIndices) >= len(payload.Entries) {
+			partialFailures := make(map[int]bool, progress.PartialFailedCount)
+			for _, entry := range progress.FailedEntries {
+				if entry.IsPartialFailure {
+					partialFailures[entry.Index] = true
+				}
+			}
+			offset := len(progress.ValidEntryIndices) - len(payload.Entries)
+			for _, idx := range skippedIndices {
+				if partialFailures[progress.ValidEntryIndices[offset+idx]] {
+					progress.SkippedCount--
+				}
+			}
 		}
 
 		if len(mergeOps) > 0 {
@@ -2369,7 +2387,9 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	if existingProgress != nil && len(existingProgress.ValidEntryIndices) > 0 {
 		// 重试时直接使用之前的验证结果
 		validEntryIndices = existingProgress.ValidEntryIndices
+		progress.ValidEntryIndices = validEntryIndices
 		progress.FailedCount = existingProgress.FailedCount
+		progress.PartialFailedCount = existingProgress.PartialFailedCount
 		progress.FailedEntries = existingProgress.FailedEntries
 		logger.Infof(ctx, "Reusing previous validation result: valid=%d, failed=%d",
 			len(validEntryIndices), progress.FailedCount)
@@ -2545,9 +2565,7 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 	} else {
 		progress.SuccessCount = originalTotalEntries - progress.FailedCount - progress.PartialFailedCount
 	}
-	if progress.SuccessCount < 0 {
-		progress.SuccessCount = 0
-	}
+	progress.SuccessCount = max(0, progress.SuccessCount-progress.SkippedCount)
 
 	if progress.AddedCount == 0 && progress.MergedCount > 0 {
 		progress.AddedCount = progress.SuccessCount - progress.MergedCount
@@ -2645,7 +2663,7 @@ func (s *knowledgeService) executeFAQMergeOperations(
 		batch := mergeOps[batchStart:batchEnd]
 
 		// 1. 批量加载完整 chunk（calculateAppendOperations 中只加载了部分字段，
-		//    缺少 status/is_enabled/flags/seq_id 等，直接更新会将这些字段覆盖为零值）
+		//    缺少 status/seq_id 等，直接更新会将这些字段覆盖为零值）
 		chunkIDs := make([]string, len(batch))
 		for i, op := range batch {
 			chunkIDs[i] = op.ExistingChunk.ID
@@ -2690,6 +2708,7 @@ func (s *knowledgeService) executeFAQMergeOperations(
 				}
 			}
 
+			fullChunk.Flags = fullChunk.Flags.SetFlag(types.ChunkFlagFAQAppendIndexPending)
 			mergedChunks = append(mergedChunks, fullChunk)
 		}
 
@@ -2702,6 +2721,13 @@ func (s *knowledgeService) executeFAQMergeOperations(
 		// 4. 重建索引。先删旧索引：ES v8、Qdrant 等引擎不会覆盖相同 SourceID。
 		if err := s.indexFAQChunks(ctx, kb, faqKnowledge, mergedChunks, embeddingModel, false, true); err != nil {
 			return mergedCount, fmt.Errorf("failed to re-index merged chunks: %w", err)
+		}
+		clearFlags := make(map[string]types.ChunkFlags, len(chunkIDs))
+		for _, id := range chunkIDs {
+			clearFlags[id] = types.ChunkFlagFAQAppendIndexPending
+		}
+		if err := s.chunkRepo.UpdateChunkFlagsBatch(ctx, tenantID, kb.ID, nil, clearFlags); err != nil {
+			return mergedCount, fmt.Errorf("failed to record merged FAQ index completion: %w", err)
 		}
 
 		// 5. 收集成功条目信息
@@ -2792,6 +2818,9 @@ func (s *knowledgeService) buildFAQImportResultMessage(prefix string, progress *
 		parts = append(parts, fmt.Sprintf("成功 %d 条", progress.SuccessCount))
 	}
 
+	if progress.SkippedCount > 0 {
+		parts = append(parts, fmt.Sprintf("跳过 %d 条", progress.SkippedCount))
+	}
 	if progress.FailedCount > 0 {
 		parts = append(parts, fmt.Sprintf("失败 %d 条", progress.FailedCount))
 	}
