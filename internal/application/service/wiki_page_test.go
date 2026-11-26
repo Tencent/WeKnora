@@ -106,6 +106,7 @@ func TestUpdateWikiPagePersistsAndClearsAliases(t *testing.T) {
 }
 
 func TestParseOutLinks(t *testing.T) {
+	svc := &wikiPageService{}
 
 	tests := []struct {
 		name    string
@@ -161,7 +162,7 @@ func TestParseOutLinks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := wikiOutLinks(markdownWikiLinks(tt.content), nil)
+			got := svc.parseOutLinks(tt.content)
 			if len(got) != len(tt.want) {
 				t.Errorf("parseOutLinks() = %v (len %d), want %v (len %d)", got, len(got), tt.want, len(tt.want))
 				return
