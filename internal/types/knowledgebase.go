@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"database/sql/driver"
 	"encoding/json"
 	"strings"
@@ -303,6 +304,46 @@ type ChunkingConfig struct {
 	Languages []string `yaml:"languages,omitempty" json:"languages,omitempty" extensions:"x-agent,x-agent-maximum=20"`
 	// TableMetadataInstructions is extra guidance for CSV and Excel summaries. The output format stays fixed.
 	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty" extensions:"x-agent,x-agent-detail,x-agent-max-bytes=4000"`
+	chunkOverlapSet           bool
+	tokenLimitSet             bool
+}
+
+// UnmarshalJSON records whether zero-valued chunk bounds were explicitly
+// present. Sparse overrides keep inheriting the knowledge-base value, while a
+// full upload snapshot can clear an inherited bound with 0.
+func (c *ChunkingConfig) UnmarshalJSON(data []byte) error {
+	type plain ChunkingConfig
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	*c = ChunkingConfig(decoded)
+	c.chunkOverlapSet = explicitJSONField(fields, "chunk_overlap")
+	c.tokenLimitSet = explicitJSONField(fields, "token_limit")
+	return nil
+}
+
+func explicitJSONField(fields map[string]json.RawMessage, name string) bool {
+	raw, ok := fields[name]
+	return ok && !bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
+
+// HasExplicitChunkOverlap reports whether chunk_overlap appeared in the JSON
+// override. A missing field inherits the knowledge-base value.
+func (c ChunkingConfig) HasExplicitChunkOverlap() bool {
+	return c.chunkOverlapSet
+}
+
+// HasExplicitTokenLimit reports whether token_limit appeared in the JSON
+// override. A missing field inherits the knowledge-base value.
+func (c ChunkingConfig) HasExplicitTokenLimit() bool {
+	return c.tokenLimitSet
 }
 
 // defaultParserEngineByType maps file types the builtin/simple engines cannot

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -27,7 +28,7 @@ func TestResolveProcessConfig_OverridesChunkSize(t *testing.T) {
 	t.Parallel()
 
 	kb := &types.KnowledgeBase{
-		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50},
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50, TokenLimit: 256},
 	}
 	overrides := &types.KnowledgeProcessOverrides{
 		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 2048},
@@ -35,6 +36,25 @@ func TestResolveProcessConfig_OverridesChunkSize(t *testing.T) {
 	eff := ResolveProcessConfig(kb, overrides)
 	require.Equal(t, 2048, eff.ChunkingConfig.ChunkSize)
 	require.Equal(t, 50, eff.ChunkingConfig.ChunkOverlap)
+	require.Equal(t, 256, eff.ChunkingConfig.TokenLimit)
+}
+
+func TestResolveProcessConfig_ExplicitZeroClearsChunkingBounds(t *testing.T) {
+	t.Parallel()
+
+	var overrides types.KnowledgeProcessOverrides
+	require.NoError(t, json.Unmarshal(
+		[]byte(`{"chunking_config":{"chunk_overlap":0,"token_limit":0}}`),
+		&overrides,
+	))
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50, TokenLimit: 256},
+	}
+	eff := ResolveProcessConfig(kb, &overrides)
+
+	require.Zero(t, eff.ChunkingConfig.ChunkOverlap)
+	require.Zero(t, eff.ChunkingConfig.TokenLimit)
 }
 
 func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {

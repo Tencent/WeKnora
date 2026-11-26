@@ -323,7 +323,7 @@ func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConf
 	if override.ChunkSize != 0 {
 		result.ChunkSize = override.ChunkSize
 	}
-	if override.ChunkOverlap != 0 {
+	if override.ChunkOverlap != 0 || override.HasExplicitChunkOverlap() {
 		result.ChunkOverlap = override.ChunkOverlap
 	}
 	if len(override.Separators) > 0 {
@@ -344,7 +344,7 @@ func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConf
 	if override.Strategy != "" {
 		result.Strategy = override.Strategy
 	}
-	if override.TokenLimit != 0 {
+	if override.TokenLimit != 0 || override.HasExplicitTokenLimit() {
 		result.TokenLimit = override.TokenLimit
 	}
 	if len(override.Languages) > 0 {

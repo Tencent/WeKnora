@@ -464,3 +464,29 @@ func TestKnowledgeBase_IsImageVectorEnabled(t *testing.T) {
 		t.Errorf("round trip lost the switch: %s", raw)
 	}
 }
+
+func TestChunkingConfigTracksExplicitZeroBounds(t *testing.T) {
+	var sparse ChunkingConfig
+	if err := json.Unmarshal([]byte(`{"chunk_size":512}`), &sparse); err != nil {
+		t.Fatal(err)
+	}
+	if sparse.HasExplicitChunkOverlap() || sparse.HasExplicitTokenLimit() {
+		t.Fatal("omitted chunk bounds must remain inherited")
+	}
+
+	var explicitZero ChunkingConfig
+	if err := json.Unmarshal([]byte(`{"chunk_overlap":0,"token_limit":0}`), &explicitZero); err != nil {
+		t.Fatal(err)
+	}
+	if !explicitZero.HasExplicitChunkOverlap() || !explicitZero.HasExplicitTokenLimit() {
+		t.Fatal("explicit zero chunk bounds must be recorded")
+	}
+
+	var explicitNull ChunkingConfig
+	if err := json.Unmarshal([]byte(`{"chunk_overlap":null,"token_limit":null}`), &explicitNull); err != nil {
+		t.Fatal(err)
+	}
+	if explicitNull.HasExplicitChunkOverlap() || explicitNull.HasExplicitTokenLimit() {
+		t.Fatal("null chunk bounds must remain inherited")
+	}
+}
