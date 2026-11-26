@@ -73,3 +73,26 @@ func TestConvertPageHTMLWithoutTables(t *testing.T) {
 		t.Errorf("unexpected non-table Markdown: %q", got)
 	}
 }
+
+func TestConvertPageHTMLKeepsOnlyUsefulAttachmentMacroContent(t *testing.T) {
+	input := `<p>Before</p><table class="attachments aui"><thead><tr><th>Sort by</th></tr></thead>
+ <tbody><tr class="attachment-row" data-attachment-id="456">
+ <td><a href="https://example.com/download/attachments/123/example.png?api=v2">example.png</a></td>
+ <td>2 minutes ago</td></tr>
+ <tr class="attachment-summary"><td>Edit Labels</td></tr></tbody></table>
+ <table><tr><th>Qty</th><th>Total</th></tr><tr><td>2</td><td>3</td></tr></table><p>After</p>`
+	got, err := convertPageHTML(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Before", "[example.png](https://example.com/download/attachments/123/example.png?api=v2)", "| Qty", "After"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"Sort by", "2 minutes ago", "Edit Labels", "attachment-row"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("unexpected %q in %s", unwanted, got)
+		}
+	}
+}
