@@ -87,7 +87,8 @@ metadata := map[string]string{
     "source": "local",
     "type":   "document",
 }
-knowledge, err := apiClient.CreateKnowledgeFromFile(context.Background(), kb.ID, "path/to/file.pdf", metadata)
+// The last 4 parameters are optional: whether to enable multimodal processing, a custom file name, the ingestion channel (empty defaults to "web"), and parse config overrides; pass nil / "" / nil for the defaults
+knowledge, err := apiClient.CreateKnowledgeFromFile(context.Background(), kb.ID, "path/to/file.pdf", metadata, nil, "", "", nil)
 if err != nil {
     // Handle error
 }
@@ -134,7 +135,7 @@ if err != nil {
 }
 
 // Streaming Q&A
-err = apiClient.KnowledgeQAStream(context.Background(), session.ID, "What is machine learning?", func(response *client.StreamResponse) error {
+err = apiClient.KnowledgeQAStream(context.Background(), session.ID, &client.KnowledgeQARequest{Query: "What is machine learning?"}, func(response *client.StreamResponse) error {
     // Handle each response chunk
     fmt.Print(response.Content)
     return nil

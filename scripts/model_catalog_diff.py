@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CATALOG = ROOT / "internal/models/catalog/data/models.generated.json"
 
 # WeKnora vendor id -> models.dev provider id.
-PROVIDER_MAP = json.loads((ROOT / "scripts/model-catalog/sources.json").read_text())["models_dev"]["provider_map"]
+PROVIDER_MAP = json.loads((ROOT / "scripts/model-catalog/sources.json").read_text(encoding="utf-8"))["models_dev"]["provider_map"]
 
 
 MODELS_DEV_URL = "https://models.dev/api.json"
@@ -45,7 +45,7 @@ def load_api(path):
     """
     path = path or os.environ.get("MODELS_DEV_API")
     if path:
-        return json.loads(Path(path).read_text())
+        return json.loads(Path(path).read_text(encoding="utf-8"))
     request = urllib.request.Request(
         MODELS_DEV_URL,
         headers={"User-Agent": "WeKnora-model-catalog-diff/1.0 (+https://github.com/Tencent/WeKnora)"},
@@ -61,7 +61,7 @@ def load_api(path):
 
 
 def load_catalog(vendor):
-    entries = json.loads(CATALOG.read_text())["providers"].get(vendor, [])
+    entries = json.loads(CATALOG.read_text(encoding="utf-8"))["providers"].get(vendor, [])
     return {m["id"]: m for m in entries if m.get("id")}
 
 

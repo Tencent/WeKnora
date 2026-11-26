@@ -50,6 +50,20 @@ class NativePDFSourceTest(unittest.TestCase):
         self.assertIn("1.5 mm", doc.content[source[0]["start"]:source[0]["end"]])
         self.assertIn(loc, [json.loads(b.locator_json) for b in source_blocks_to_proto(doc)])
 
+    def test_numeric_lines_keep_distinct_regions(self):
+        first = "A shipment weighs 20"
+        second = "30 units are in the next package"
+        doc = self.parse([{"lines": [(first, 60, 700), (second, 60, 400)]}])
+        boxed = [block for block in doc.source_blocks if block["locator"].get("bbox")]
+
+        self.assertEqual(len(boxed), 2)
+        self.assertEqual(
+            [doc.content[block["start"] : block["end"]].strip() for block in boxed],
+            [first, second],
+        )
+        self.assertLess(boxed[0]["locator"]["bbox"][1], 0.2)
+        self.assertGreater(boxed[1]["locator"]["bbox"][1], 0.45)
+
     def test_cropbox_and_rotation_use_displayed_page_coordinates(self):
         for rotation in (0, 90, 180, 270):
             with self.subTest(rotation=rotation):
@@ -72,6 +86,23 @@ class NativePDFSourceTest(unittest.TestCase):
         self.assertLess(boxed[0]["locator"]["bbox"][1], .2)
         self.assertGreater(boxed[1]["locator"]["bbox"][1], .45)
         self.assertIn(text.rstrip('.'), doc.content[boxed[1]["start"]:boxed[1]["end"]])
+
+    def test_reversed_cropbox_preserves_visible_text_and_clips_outside_text(self):
+        visible = "Visible text inside the crop boundary."
+        outside = "Outside note"
+        for crop in ("[100 700 500 100]", "[500 100 100 700]", "[500 700 100 100]"):
+            with self.subTest(crop=crop):
+                doc = self.parse([{
+                    "crop": f"/CropBox {crop}",
+                    "rotation": 90,
+                    "lines": [(visible, 150, 600), (outside, 10, 300)],
+                }])
+                self.assertIn(visible, doc.content)
+                self.assertNotIn(outside, doc.content)
+                locator = next(b["locator"] for b in doc.source_blocks if b["locator"].get("bbox"))
+                x0, y0, x1, y1 = locator["bbox"]
+                self.assertEqual(locator["page"], 1)
+                self.assertTrue(0.8 < x0 < x1 <= 1 and 0 <= y0 < y1 <= 1)
 
 
 if __name__ == "__main__":

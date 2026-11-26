@@ -1,6 +1,6 @@
 <template>
   <t-dialog v-model:visible="dialogVisible" :footer="false" :header="false" :close-btn="false" width="640px" top="10vh"
-    :close-on-esc="!settingsVisible" destroy-on-close class="cmdk-dialog" @close="handleClose" @opened="onDialogOpened">
+    attach="body" :close-on-esc="!settingsVisible" destroy-on-close class="cmdk-dialog" @close="handleClose" @opened="onDialogOpened">
     <div class="cmdk" @keydown="onKeyDown">
       <!-- Input row -->
       <div class="cmdk__input-row">
@@ -135,8 +135,16 @@
               @hover="selectItemAt($event)" />
           </ResultGroup>
 
+          <div v-if="!loading && searchFailures.length" class="cmdk__search-error" role="alert">
+            <p v-if="searchFailures.includes('knowledge')">{{ t('commandPalette.errors.knowledge') }}</p>
+            <p v-if="searchFailures.includes('messages')">{{ t('commandPalette.errors.messages') }}</p>
+            <t-button variant="outline" size="small" @keydown.enter.exact.stop @click="retrySearch">
+              {{ t('common.retry') }}
+            </t-button>
+          </div>
+
           <!-- No results -->
-          <div v-if="!loading && !hasAnyResults && hasSearched" class="cmdk__empty">
+          <div v-if="!loading && !searchFailures.length && !hasAnyResults && hasSearched" class="cmdk__empty">
             <p>{{ t('commandPalette.empty.noResults') }}</p>
             <div class="cmdk__empty-actions">
               <t-button theme="primary" variant="outline" size="small" @click="askAi">
@@ -164,10 +172,14 @@
     </div>
 
   </t-dialog>
+  <t-drawer v-if="sourceTarget" :visible="true" :header="t('chat.referenceSourceView')" :footer="false"
+    size="min(960px, 100vw)" @close="sourceTarget = null">
+    <ChatReferenceSourceView :target="sourceTarget" :active="true" @unavailable="openSourceDocument" />
+  </t-drawer>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
@@ -183,6 +195,10 @@ import ResultItem from './GlobalCommandPalette/ResultItem.vue'
 import RetrievalSettings from '@/views/settings/RetrievalSettings.vue'
 import type { MessageSearchGroupItem } from '@/api/chat-history'
 
+import type { ReferenceSourceTarget } from '@/utils/referenceSources'
+
+const ChatReferenceSourceView = defineAsyncComponent(() => import('./ChatReferenceSourceView.vue'))
+const sourceTarget = ref<ReferenceSourceTarget | null>(null)
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
@@ -202,7 +218,7 @@ const activeKbScope = ref<{ id: string; name: string } | null>(null)
 const scopeDismissed = ref(false) // user clicked ✕, remember for this session
 
 const {
-  query, loading, hasSearched,
+  query, loading, hasSearched, searchFailures, retrySearch,
   fileGroups, messageGroups, kbMatches,
   knowledgeBases,
   agentMatches, sessionMatches,
@@ -408,22 +424,35 @@ const openChunk = (item: FlatChunkItem) => {
   commandPaletteStore.pushRecent(query.value)
   commandPaletteStore.closePalette()
   if (!item.file.kbId) return
+  sourceTarget.value = {
+    chunkId: item.chunk.id,
+    knowledgeId: item.file.knowledgeId,
+    knowledgeBaseId: item.file.kbId,
+    title: item.file.title,
+    content: item.chunk.content,
+  }
+}
+
+const openSourceDocument = () => {
+  const target = sourceTarget.value
+  sourceTarget.value = null
+  if (!target?.knowledgeBaseId) return
   const currentKbId = typeof route.params.kbId === 'string' ? route.params.kbId : ''
   // If the user is already on this KB page, router.push to the same path+query
   // is a no-op (vue-router dedupes identical navigations), so the document
   // auto-open logic never fires. Dispatch a global event that KnowledgeBase.vue
   // listens for instead; this also avoids reloading the KB list on every click.
-  if (currentKbId === item.file.kbId) {
+  if (currentKbId === target.knowledgeBaseId) {
     window.dispatchEvent(
       new CustomEvent('weknora:open-knowledge', {
-        detail: { kbId: item.file.kbId, knowledgeId: item.file.knowledgeId },
+        detail: { kbId: target.knowledgeBaseId, knowledgeId: target.knowledgeId },
       }),
     )
     return
   }
   router.push({
-    path: `/platform/knowledge-bases/${item.file.kbId}`,
-    query: { knowledge_id: item.file.knowledgeId },
+    path: `/platform/knowledge-bases/${target.knowledgeBaseId}`,
+    query: { knowledge_id: target.knowledgeId },
   })
 }
 
@@ -507,6 +536,7 @@ const shortcutFor = (flatIndex: number): number | undefined => {
 }
 
 const onKeyDown = (e: KeyboardEvent) => {
+  if (e.isComposing || e.keyCode === 229) return
   if (settingsVisible.value && e.key === 'Escape') {
     e.preventDefault()
     settingsVisible.value = false
@@ -532,6 +562,8 @@ const onKeyDown = (e: KeyboardEvent) => {
       item.run({ cmd: false })
     }
   } else if (e.key === 'Enter') {
+    // Let native buttons handle ordinary Enter; modified Enter remains a palette shortcut.
+    if (!e.metaKey && !e.ctrlKey && (e.target as Element | null)?.closest('button')) return
     e.preventDefault()
     primaryActionForSelected({ cmd: e.metaKey || e.ctrlKey })
   } else if (e.key === 'Escape') {
@@ -591,8 +623,11 @@ const onGlobalKey = (e: KeyboardEvent) => {
 // `onDialogOpened` once the dialog's enter animation has finished — doing it
 // here in a plain `nextTick` is too early for t-dialog (the input may not be
 // attached to the document yet, so `.focus()` silently no-ops).
+watch(() => route.fullPath, () => { sourceTarget.value = null })
+
 watch(open, (val) => {
   if (val) {
+    sourceTarget.value = null
     query.value = initialQuery.value || ''
     selectedKey.value = null
     // Infer KB scope from current route. Reset scopeDismissed on each open so
@@ -783,6 +818,12 @@ onUnmounted(() => {
   min-height: 0;
   overflow-y: auto;
   padding: 6px 4px;
+}
+
+.cmdk__search-error {
+  padding: 12px;
+  color: var(--td-text-color-secondary);
+  p { margin: 0 0 8px; }
 }
 
 .cmdk__empty {

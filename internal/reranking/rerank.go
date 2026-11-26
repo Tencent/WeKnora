@@ -125,10 +125,9 @@ func Rerank(
 	var scoredAsImage map[int]bool
 	defer func() { recordSelection(ctx, results, res, opts, scoredAsImage) }()
 
-	keep := topByScore(results, opts.MaxCandidates)
 	candidateIdx := make([]int, 0, len(results))
 	for i, r := range results {
-		if r == nil || (keep != nil && !keep[i]) {
+		if r == nil {
 			continue
 		}
 		passage := ModelPassage(ctx, r)
@@ -138,6 +137,22 @@ func Rerank(
 		candidateIdx = append(candidateIdx, i)
 		res.Candidates = append(res.Candidates, r)
 		res.Passages = append(res.Passages, passage)
+	}
+	// Empty passages cannot be scored and must not consume the model budget.
+	if keep := topByScore(res.Candidates, opts.MaxCandidates); keep != nil {
+		n := 0
+		for i, candidate := range res.Candidates {
+			if !keep[i] {
+				continue
+			}
+			res.Candidates[n] = candidate
+			res.Passages[n] = res.Passages[i]
+			candidateIdx[n] = candidateIdx[i]
+			n++
+		}
+		res.Candidates = res.Candidates[:n]
+		res.Passages = res.Passages[:n]
+		candidateIdx = candidateIdx[:n]
 	}
 	res.Diagnostics.CandidateCount = len(res.Candidates)
 	if len(res.Candidates) == 0 {
@@ -273,9 +288,25 @@ func fitPassages(ctx context.Context, passages []string, limit int) {
 	}
 	trimmed := 0
 	for i, p := range passages {
-		if utf8.RuneCountInString(p) > limit {
-			passages[i] = string([]rune(p)[:limit])
+		if len(p) <= limit {
+			continue
+		}
+		remaining := limit
+		for offset := range p {
+			if remaining > 0 {
+				remaining--
+				continue
+			}
+			prefix := p[:offset]
+			if utf8.ValidString(prefix) {
+				// Own the prefix so a short passage does not retain a large OCR buffer.
+				passages[i] = strings.Clone(prefix)
+			} else {
+				// Keep the existing per-byte replacement of invalid UTF-8.
+				passages[i] = string([]rune(prefix))
+			}
 			trimmed++
+			break
 		}
 	}
 	if trimmed > 0 {

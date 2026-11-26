@@ -191,17 +191,8 @@ func (x *ShellJobIndex) Claim(ctx context.Context, now time.Time, replica string
 // Release drops the session sweep lock when this replica still holds it.
 func (x *ShellJobIndex) Release(ctx context.Context, s interfaces.SessionRef, replica string) error {
 	key := fmt.Sprintf(shellJobSweepKeyFmt, x.hashTag(s))
-	current, err := x.client.Get(ctx, key).Result()
-	if err == redis.Nil {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if current != replica {
-		return nil
-	}
-	return x.client.Del(ctx, key).Err()
+	_, err := redislock.Release(ctx, x.client, key, replica)
+	return err
 }
 
 // ClaimWork removes one job from the schedule so another replica will not sweep it.

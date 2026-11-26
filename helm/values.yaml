@@ -8,6 +8,11 @@
 # - https://github.com/argoproj/argo-helm/blob/main/charts/argo-cd/values.yaml
 # - https://github.com/cert-manager/cert-manager/blob/master/deploy/charts/cert-manager/values.yaml
 
+# -- Override the chart name used in resource names (empty keeps Chart.Name, "weknora")
+nameOverride: ""
+# -- Override the fully qualified app name (empty derives it from the release name)
+fullnameOverride: ""
+
 # -- Global configuration shared across all components
 # @default -- See values.yaml
 global:
@@ -172,6 +177,12 @@ app:
   #   mountPath: /etc/my-config
   #   readOnly: true
 
+  # -- Extra annotations for the app Pod template metadata (not the Deployment
+  # metadata). Rendered verbatim into spec.template.metadata.annotations. Use
+  # for platform-level sidecar injection or metrics auto-discovery.
+  podAnnotations: {}
+  #   example.com/sidecar-inject: 'true'
+
 # -----------------------------------------------------------------------------
 # Frontend (Web UI)
 # -----------------------------------------------------------------------------
@@ -211,6 +222,11 @@ frontend:
     name: ""
     type: ClusterIP
     port: 80
+
+  # -- Backend host the UI proxies to (empty keeps the App Service name)
+  appHost: ""
+  # -- Backend port the UI proxies to (empty keeps the App Service port, 8080)
+  appPort: ""
 
   # -- Node selector
   nodeSelector: {}
@@ -474,7 +490,8 @@ minio:
   enabled: false
   image:
     repository: pgsty/minio
-    tag: latest
+    # -- Image tag (matches docker-compose.yml)
+    tag: "RELEASE.2026-08-04T00-00-00Z"
   # -- Root user
   rootUser: minioadmin
   # -- Root password (REQUIRED if enabled)
@@ -543,7 +560,8 @@ qdrant:
   enabled: false
   image:
     repository: qdrant/qdrant
-    tag: latest
+    # -- Image tag (matches docker-compose.yml)
+    tag: "v1.16.2"
   persistence:
     enabled: true
     size: 10Gi

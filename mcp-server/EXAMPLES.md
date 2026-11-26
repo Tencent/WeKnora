@@ -201,15 +201,14 @@ echo "WEKNORA_API_KEY=your_api_key_here" >> .env
 ### 会话管理
 
 #### 创建聊天会话
+
+创建会话时无需选择知识库。如需检索，在发送消息时传入 `knowledge_base_ids`。
+
 ```json
 {
   "tool": "create_session",
   "arguments": {
-    "kb_id": "kb_123456",
-    "max_rounds": 10,
-    "enable_rewrite": true,
-    "fallback_response": "抱歉，我无法回答这个问题。",
-    "summary_model_id": "gpt-3.5-turbo"
+    "title": "产品咨询"
   }
 }
 ```
@@ -243,7 +242,8 @@ echo "WEKNORA_API_KEY=your_api_key_here" >> .env
   "tool": "chat",
   "arguments": {
     "session_id": "sess_345678",
-    "query": "请介绍一下产品的主要功能"
+    "query": "请介绍一下产品的主要功能",
+    "knowledge_base_ids": ["kb_123456"]
   }
 }
 ```
@@ -324,9 +324,7 @@ python main.py --verbose
 {
   "tool": "create_session",
   "arguments": {
-    "kb_id": "知识库ID",
-    "max_rounds": 5,
-    "enable_rewrite": true
+    "title": "API 使用咨询"
   }
 }
 ```
@@ -337,7 +335,8 @@ python main.py --verbose
   "tool": "chat",
   "arguments": {
     "session_id": "会话ID",
-    "query": "如何使用用户认证API？"
+    "query": "如何使用用户认证API？",
+    "knowledge_base_ids": ["知识库ID"]
   }
 }
 ```
@@ -386,7 +385,10 @@ python main.py --verbose
 }
 ```
 
-### 自定义会话策略
+### 自定义会话策略（旧版服务端）
+
+如果使用支持会话级检索策略的旧版服务端，仍可显式传入 `kb_id` 和策略参数。
+
 ```json
 {
   "tool": "create_session",

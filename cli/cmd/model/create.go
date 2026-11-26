@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -240,7 +241,14 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 		parameters["base_url"] = opts.BaseURL
 	}
 	if opts.Dimension > 0 {
-		parameters["embedding_parameters"] = map[string]any{"dimension": opts.Dimension}
+		embedding, ok := parameters["embedding_parameters"].(map[string]any)
+		if !ok {
+			embedding = map[string]any{}
+		} else {
+			embedding = maps.Clone(embedding)
+		}
+		embedding["dimension"] = opts.Dimension
+		parameters["embedding_parameters"] = embedding
 	}
 	if opts.APIKeyStdin {
 		key, err := readStdinTrimmed(opts.StdinReader)

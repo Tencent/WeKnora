@@ -23,7 +23,7 @@ def load(path):
                 raise ValueError(f"{path}: duplicate JSON key {key}")
             obj[key] = value
         return obj
-    return json.loads(path.read_text(), object_pairs_hook=unique)
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique)
 
 
 def identity(entry):
@@ -86,10 +86,10 @@ def main():
     rendered = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
     target = DATA / "models.generated.json"
     if args.check:
-        if not target.exists() or target.read_text() != rendered:
+        if not target.exists() or target.read_text(encoding="utf-8") != rendered:
             parser.exit(1, "model catalog is stale; run scripts/model-catalog/generate.py\n")
     else:
-        target.write_text(rendered)
+        target.write_bytes(rendered.encode("utf-8"))
     print(f"Verified {len(result['providers'])} providers and "
           f"{sum(map(len, result['providers'].values()))} catalog rules")
 

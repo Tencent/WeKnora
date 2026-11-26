@@ -82,7 +82,7 @@ services:
       - full
 
   minio:
-    image: pgsty/minio:latest
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: WeKnora-minio-dev
     ports:
       - "${MINIO_PORT:-9000}:9000"
@@ -204,7 +204,7 @@ services:
       - full
 
   neo4j:
-    image: neo4j:latest
+    image: neo4j:2025.10.1
     container_name: WeKnora-neo4j-dev
     volumes:
       - neo4j-data-dev:/data

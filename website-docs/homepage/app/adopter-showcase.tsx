@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { homeAssets } from "../../shared/header";
 import { adopters, adopterIssue } from "./adopters";
+import { ChapterHeading } from "./chapter-heading";
 import { Icon } from "./ui";
 import s from "./home.module.css";
 import a from "./adopters.module.css";
@@ -38,11 +39,11 @@ export function AdopterShowcase() {
     onKeyDown={event => { if (event.key === "Escape") setActive(null); }}>
     <div ref={inner} className={`${s.shell} ${a.inner}`}>
       <div className={a.heading} onPointerEnter={event => { if (event.pointerType === "mouse") setActive(null); }}>
-        <h2 id="adopters-title">谁在使用 WeKnora</h2>
+        <ChapterHeading id="adopters-title" label="WHO USES WEKNORA">谁在使用 WeKnora</ChapterHeading>
         <a className={a.join} href={adopterIssue} target="_blank" rel="noreferrer">分享你的实践 <Icon name="arrow" /></a>
       </div>
       <div id="adopter-logos" className={a.viewport}>
-        <div className={a.track}>
+        <div className={a.track} style={{ animationDuration: `${adopters.length * 7.5}s` }}>
           {/* Equal-width copies make the linear animation loop without a jump. */}
           {[0, 1].map(copy => <ul className={a.group} key={copy} aria-hidden={copy === 1 ? true : undefined} aria-label={copy === 0 ? "使用 WeKnora 的团队与产品" : undefined}>
             {adopters.map((adopter, index) => <li key={adopter.name}>
@@ -51,7 +52,7 @@ export function AdopterShowcase() {
                 onPointerEnter={event => { if (event.pointerType === "mouse") showDetails(index, event.currentTarget); }}
                 onFocus={event => { if (event.currentTarget.matches(":focus-visible")) { setManual(true); showDetails(index, event.currentTarget, true); } }}
                 onClick={event => { if (active?.index === index) setActive(null); else showDetails(index, event.currentTarget); }}>
-                <span className={a.logoMark}>
+                <span className={a.logoMark} style={{ aspectRatio: `${adopter.logoSize.width} / ${adopter.logoSize.height}` }}>
                   <Image src={`${homeAssets}/adopters/${adopter.logo}`} alt="" width={adopter.logoSize.width} height={adopter.logoSize.height} style={adopter.logoScale ? { transform: `scale(${adopter.logoScale})` } : undefined} />
                 </span>
                 {adopter.variant === "B" && <span className={a.logoName}>{adopter.name}</span>}
@@ -62,7 +63,12 @@ export function AdopterShowcase() {
       </div>
       {/* Outside the clipped marquee so details can float over the next section. */}
       {adopters.map((adopter, index) => <div key={adopter.name} id={`adopter-details-${index}`} className={a.details} hidden={active?.index !== index} style={{ left: active?.left ?? 0 }} role="region" aria-labelledby={`adopter-name-${index}`}>
-        <h3 id={`adopter-name-${index}`}>{adopter.name}</h3>
+        <h3 id={`adopter-name-${index}`}>
+          {adopter.name}
+          {adopter.link && <a className={a.detailLink} href={adopter.link.href} target="_blank" rel="noopener noreferrer" aria-label={`${adopter.name}：${adopter.link.label}（在新标签页打开）`} title={adopter.link.label}>
+            <Icon name="external" />
+          </a>}
+        </h3>
         <ul className={a.tags} aria-label="行业与应用场景">
           <li className={a.industry}>{adopter.industry}</li>
           {adopter.useCases.map(useCase => <li key={useCase}>{useCase}</li>)}
