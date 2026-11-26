@@ -53,6 +53,8 @@ type StorageCheckRequest struct {
 	COS      json.RawMessage `json:"cos,omitempty"`
 	TOS      json.RawMessage `json:"tos,omitempty"`
 	S3       json.RawMessage `json:"s3,omitempty"`
+	OSS      json.RawMessage `json:"oss,omitempty"`
+	KS3      json.RawMessage `json:"ks3,omitempty"`
 	OBS      json.RawMessage `json:"obs,omitempty"`
 }
 
