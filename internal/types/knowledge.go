@@ -205,7 +205,8 @@ type Knowledge struct {
 	// ID of the embedding model
 	EmbeddingModelID string `json:"embedding_model_id"`
 	// File name of the knowledge
-	FileName string `json:"file_name" extensions:"x-agent"`
+	FileName          string `json:"file_name" extensions:"x-agent"`
+	FileNameSpecified bool   `json:"-" gorm:"-"`
 	// FolderPath is the canonical relative directory this entry belongs to
 	// inside the knowledge base, e.g. "docs/spec" for a folder upload of
 	// "docs/spec/design.md". Empty means the knowledge base root. It is a

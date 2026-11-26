@@ -13728,6 +13728,9 @@ definitions:
         description: New summary; omit to keep it, empty clears it.
         type: string
         x-agent: true
+      file_name:
+        description: New filename for an uploaded document, including its existing extension.
+        type: string
       title:
         description: New title; omit to keep it.
         type: string
@@ -21381,7 +21384,7 @@ paths:
     put:
       consumes:
       - application/json
-      description: 部分更新知识条目（标题/描述/自定义元数据）；未传字段保持不变，显式传空 description 可清空摘要
+      description: 部分更新知识条目（标题/文件名/描述/自定义元数据）；未传字段保持不变，显式传空 description 可清空摘要
       parameters:
       - description: 知识ID
         in: path

@@ -20,6 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'download'): void;
+  (e: 'rename'): void;
   (e: 'edit'): void;
   (e: 'view-trace'): void;
   (e: 'reparse'): void;
@@ -49,6 +50,12 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
   >
     <t-icon class="icon" name="download" />
     <span>{{ $t('common.download') }}</span>
+  </div>
+
+  <div v-if="item.type === 'file' && !isParseInFlight && item.parse_status !== 'deleting'"
+    class="doc-action-menu-item" @click.stop="emit('rename')">
+    <t-icon class="icon" name="edit" />
+    <span>{{ $t('knowledgeBase.folderTree.rename') }}</span>
   </div>
 
   <!-- 编辑文档 -->

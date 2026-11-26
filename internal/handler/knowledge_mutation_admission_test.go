@@ -22,6 +22,7 @@ type mutationAdmissionKnowledge struct {
 	err        error
 	tagsCalled bool
 	writeGrant bool
+	update     *types.Knowledge
 }
 
 func (s *mutationAdmissionKnowledge) GetKnowledgeByIDOnly(context.Context, string) (*types.Knowledge, error) {
@@ -48,7 +49,8 @@ func (s *mutationAdmissionKnowledge) ListKnowledgeByKnowledgeBaseID(
 	return s.rows, nil
 }
 
-func (s *mutationAdmissionKnowledge) UpdateKnowledge(context.Context, *types.Knowledge) error {
+func (s *mutationAdmissionKnowledge) UpdateKnowledge(_ context.Context, update *types.Knowledge) error {
+	s.update = update
 	return s.err
 }
 
@@ -187,6 +189,28 @@ func (s *mutationChunkService) UpdateDocumentChunk(
 
 func (s *mutationChunkService) RevertDocumentChunk(context.Context, string, int, *int) (*types.Chunk, error) {
 	return nil, s.err
+}
+
+func TestUpdateKnowledgeBindsOptionalFileName(t *testing.T) {
+	kg := &mutationAdmissionKnowledge{rows: []*types.Knowledge{admissionKnowledge(false)}}
+	h := &KnowledgeHandler{kgService: kg}
+	r := documentHandlerRouter()
+	r.PUT("/:id", h.UpdateKnowledge)
+
+	for _, tc := range []struct {
+		body      string
+		name      string
+		specified bool
+	}{
+		{body: `{"title":"new"}`},
+		{body: `{"file_name":""}`, specified: true},
+		{body: `{"file_name":"renamed.pdf"}`, name: "renamed.pdf", specified: true},
+	} {
+		w := mutationRequest(r, http.MethodPut, "/doc", tc.body)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, tc.specified, kg.update.FileNameSpecified)
+		require.Equal(t, tc.name, kg.update.FileName)
+	}
 }
 
 func TestMutationHandlersPreserveApplicationStatus(t *testing.T) {

@@ -703,6 +703,10 @@ export function revertDocumentChunk(knowledgeId: string, chunkId: string, revisi
   });
 }
 
+export function renameKnowledgeFile(knowledgeId: string, fileName: string) {
+  return put(`/api/v1/knowledge/${knowledgeId}`, { file_name: fileName });
+}
+
 export function updateKnowledgeMetadata(knowledgeId: string, customMetadata: Record<string, unknown>) {
   return put(`/api/v1/knowledge/${knowledgeId}`, { custom_metadata: customMetadata });
 }

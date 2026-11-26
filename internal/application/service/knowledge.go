@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"reflect"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -856,7 +859,14 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 		logger.Errorf(ctx, "Failed to get knowledge record: %v", err)
 		return err
 	}
-	// if need other fields update, please add here
+	var newFileName string
+	if knowledge.FileNameSpecified {
+		name, err := validateKnowledgeRename(record, knowledge.FileName)
+		if err != nil {
+			return err
+		}
+		newFileName = name
+	}
 	if knowledge.Title != "" {
 		record.Title = knowledge.Title
 	}
@@ -897,8 +907,33 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 		record.CustomMetadata = knowledge.CustomMetadata
 	}
 
-	// Update knowledge record in the repository
-	if err := s.repo.UpdateKnowledge(ctx, record); err != nil {
+	// Keep concurrent processing and storage fields out of rename updates.
+	if knowledge.FileNameSpecified {
+		values := map[string]interface{}{"file_name": newFileName}
+		if knowledge.Title != "" {
+			values["title"] = record.Title
+		}
+		if knowledge.DescriptionSpecified || knowledge.Description != "" {
+			values["description"] = record.Description
+		}
+		if knowledge.DescriptionSpecified {
+			values["summary_status"] = record.SummaryStatus
+		}
+		if knowledge.CustomMetadata != nil {
+			values["custom_metadata"] = record.CustomMetadata
+		}
+		if newFileName == record.FileName && len(values) == 1 {
+			return nil
+		}
+		var updated bool
+		updated, err = s.repo.UpdateKnowledgeRenameColumns(ctx, record, values)
+		if err == nil && !updated {
+			return werrors.NewConflictError("The document changed before it could be renamed")
+		}
+	} else {
+		err = s.repo.UpdateKnowledge(ctx, record)
+	}
+	if err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge: %v", err)
 		return err
 	}
@@ -911,6 +946,27 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 	}
 	logger.Infof(ctx, "Knowledge updated successfully, ID: %s", knowledge.ID)
 	return nil
+}
+
+func validateKnowledgeRename(record *types.Knowledge, rawName string) (string, error) {
+	if record.Type != "file" || record.FileName == "" {
+		return "", werrors.NewBadRequestError("Only uploaded files can be renamed")
+	}
+	switch record.ParseStatus {
+	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing, types.ParseStatusDeleting:
+		return "", werrors.NewBadRequestError("Wait for document processing to finish before renaming")
+	}
+	name, valid := secutils.ValidateInput(rawName)
+	ext := path.Ext(name)
+	if !valid || name == "" || name == "." || name == ".." || name == ext ||
+		strings.ContainsAny(name, `/\`) || strings.ContainsFunc(rawName, unicode.IsControl) ||
+		utf8.RuneCountInString(name) > 255 {
+		return "", werrors.NewBadRequestError("Invalid file name")
+	}
+	if ext != path.Ext(record.FileName) {
+		return "", werrors.NewBadRequestError("The file extension must stay the same")
+	}
+	return name, nil
 }
 
 // GetKnowledgeBatch retrieves multiple knowledge entries by their IDs

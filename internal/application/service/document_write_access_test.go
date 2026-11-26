@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
@@ -153,7 +155,13 @@ func (r *documentTenantSpy) AdjustStorageUsed(_ context.Context, _ uint64, delta
 type documentFileSpy struct {
 	interfaces.FileService
 	deleted      []string
+	readPaths    []string
 	beforeDelete func()
+}
+
+func (r *documentFileSpy) GetFile(_ context.Context, path string) (io.ReadCloser, error) {
+	r.readPaths = append(r.readPaths, path)
+	return io.NopCloser(strings.NewReader("original file bytes")), nil
 }
 
 func (r *documentFileSpy) DeleteFile(_ context.Context, path string) error {
@@ -657,4 +665,63 @@ func TestDocumentWritesRejectMoveInProgress(t *testing.T) {
 		require.Equal(t, 409, appErr.HTTPCode)
 	}
 	f.requireNoWrites(t)
+}
+
+func TestDocumentRenamePreservesStoredFileAndChunks(t *testing.T) {
+	f := newDocumentWriteFixture(t)
+	const originalPath = "original/object.pdf"
+	require.NoError(t, f.repo.UpdateKnowledgeColumns(f.ctx, "doc", map[string]interface{}{
+		"type": "file", "file_name": "original.pdf", "file_type": "pdf",
+		"file_path": originalPath, "parse_status": types.ParseStatusCompleted,
+	}))
+	for _, name := range []string{"", "../other.pdf", "nested\\other.pdf", "line\nbreak.pdf", "other.docx"} {
+		err := f.svc.UpdateKnowledge(f.ctx, &types.Knowledge{
+			ID: "doc", FileName: name, FileNameSpecified: true,
+		})
+		var appErr *apperrors.AppError
+		require.ErrorAs(t, err, &appErr)
+		require.Equal(t, 400, appErr.HTTPCode)
+	}
+	require.NoError(t, f.repo.UpdateKnowledgeColumn(f.ctx, "doc", "parse_status", types.ParseStatusProcessing))
+	err := f.svc.UpdateKnowledge(f.ctx, &types.Knowledge{
+		ID: "doc", FileName: "processing.pdf", FileNameSpecified: true,
+	})
+	var appErr *apperrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, 400, appErr.HTTPCode)
+	require.NoError(t, f.repo.UpdateKnowledgeColumn(f.ctx, "doc", "parse_status", types.ParseStatusCompleted))
+	before, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+	require.NoError(t, err)
+	require.Equal(t, "original.pdf", before.FileName)
+	require.NoError(t, f.svc.UpdateKnowledge(f.ctx, &types.Knowledge{
+		ID: "doc", FileName: "报销指南.pdf", FileNameSpecified: true,
+	}))
+	after, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+	require.NoError(t, err)
+	require.Equal(t, "报销指南.pdf", after.FileName)
+	require.Equal(t, originalPath, after.FilePath)
+	require.Equal(t, "pdf", after.FileType)
+	require.Equal(t, before.Title, after.Title)
+	require.Equal(t, before.ParseStatus, after.ParseStatus)
+	chunk, err := f.chunkRepo.GetChunkByID(f.ctx, 7, "chunk")
+	require.NoError(t, err)
+	require.Equal(t, "original", chunk.Content)
+	require.Equal(t, "ready", chunk.IndexStatus)
+	file, name, err := f.svc.GetKnowledgeFile(f.ctx, "doc")
+	require.NoError(t, err)
+	defer file.Close()
+	content, err := io.ReadAll(file)
+	require.NoError(t, err)
+	require.Equal(t, "报销指南.pdf", name)
+	require.Equal(t, "original file bytes", string(content))
+	require.Equal(t, []string{originalPath}, f.files.readPaths)
+	f.requireNoWrites(t)
+
+	// A worker holding the old filename can still save processing metadata.
+	before.ParseStatus = types.ParseStatusPending
+	require.NoError(t, f.repo.UpdateKnowledge(f.ctx, before))
+	reparsed, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+	require.NoError(t, err)
+	require.Equal(t, types.ParseStatusPending, reparsed.ParseStatus)
+	require.Equal(t, "报销指南.pdf", reparsed.FileName)
 }
