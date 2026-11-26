@@ -82,15 +82,18 @@ func (s *knowledgeBaseService) GetQueryImageEmbedding(
 	imageModel, ok := embedding.AsImageEmbedder(embeddingModel)
 	if !ok {
 		// A KB indexed without images has no image_vector rows to match; a
-		// text query is the only recall it supports.
-		return nil, fmt.Errorf(
+		// text query is the only recall it supports. Request-level: the
+		// caller picked a KB that cannot serve this query, so the typed 400
+		// survives the pipeline's error wrapping to the API client.
+		return nil, apperrors.NewBadRequestError(fmt.Sprintf(
 			"embedding model %s cannot embed images; enable image vectors for this knowledge base or search with text",
 			embeddingModel.GetModelName(),
-		)
+		))
 	}
 	prepared, err := imageprep.Prepare(img, imageModel.ImageLimits())
 	if err != nil {
-		return nil, fmt.Errorf("query image not embeddable: %w", err)
+		// The caller's bytes, not the service: 400 with the reason.
+		return nil, apperrors.NewBadRequestError(fmt.Sprintf("query image not embeddable: %v", err))
 	}
 	vectors, err := imageModel.BatchEmbedImages(types.WithEmbedQuery(ctx), []embedding.Image{prepared})
 	if err != nil {
@@ -196,14 +199,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	recordImageRecallDecision(ctx, "fusion.candidate_selection", "",
 		summarizeImageCandidateCut(chunks, params.MatchCount))
 
-	// Truncate to the primary-match cap. MatchCount is guaranteed positive by
-	// the normalization at the top of this function; the slice bound below
-	// depends on that.
-	if len(chunks) > params.MatchCount {
-		chunks = chunks[:params.MatchCount]
-	}
-
-	return s.processSearchResults(ctx, chunks, params.SkipContextEnrichment)
+	return s.processSearchResults(ctx, chunks, params.MatchCount, params.SkipContextEnrichment)
 }
 
 // hybridSearchCandidates runs retrieval, fusion and FAQ post-processing for

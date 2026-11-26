@@ -1,4 +1,5 @@
 import { createI18n } from 'vue-i18n'
+import { seedEmbedLocaleMessages, syncEmbedSharedLocale } from './index.ts'
 
 const messages = {
   "zh-CN": {
@@ -2790,6 +2791,8 @@ const i18n = createI18n({
   messages: EMBED_MESSAGES,
 })
 
+seedEmbedLocaleMessages(EMBED_MESSAGES, locale)
+
 type LocaleRef = { value: string }
 
 /** Apply locale for the embed surface (isolated storage + optional active vue-i18n ref). */
@@ -2805,6 +2808,7 @@ export function applyEmbedLocale(raw: string, localeRef?: LocaleRef) {
   } else {
     i18n.global.locale.value = next
   }
+  syncEmbedSharedLocale(next)
 }
 
 /** Honor `?locale=` on the embed URL for the currently mounted vue-i18n instance. */

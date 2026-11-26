@@ -62,6 +62,14 @@ type MessageService interface {
 	// GetChatHistoryKBStats returns statistics about the chat history knowledge base (indexed message count, etc.)
 	GetChatHistoryKBStats(ctx context.Context) (*types.ChatHistoryKBStats, error)
 
+	// UpdateChatHistoryConfig serializes configuration changes with indexing and cleanup.
+	// KnowledgeBaseID is managed internally; a model change requires an empty index.
+	UpdateChatHistoryConfig(ctx context.Context, config *types.ChatHistoryConfig) (*types.ChatHistoryConfig, error)
+
+	// ClearChatHistoryIndex pauses indexing and removes only the current workspace's
+	// chat-history knowledge, chunks and retrieval indexes, preserving conversations.
+	ClearChatHistoryIndex(ctx context.Context) (*types.ChatHistoryKBStats, error)
+
 	// GetSessionArtifacts returns every skill-produced MessageArtifact
 	// recorded against any assistant message of the session. Used to power
 	// the frontend "download files generated in this session" drawer and
@@ -113,6 +121,12 @@ type MessageRepository interface {
 	// messages sorting strictly before (before, beforeID), newest first. A zero
 	// cursor starts from the newest message.
 	ListMessagesBySessionBeforeCursor(
+		ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
+	) ([]*types.Message, error)
+	// ListMessagesBySessionBeforeCursorForLLM has the same paging contract but
+	// omits Message.Artifacts. LLM history replay does not consume artifact
+	// metadata, so this avoids a side query for every page.
+	ListMessagesBySessionBeforeCursorForLLM(
 		ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
 	) ([]*types.Message, error)
 	// ListMessagesBySessionUpTo returns every message sorting strictly before

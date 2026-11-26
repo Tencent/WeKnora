@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/reranking"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -61,6 +62,18 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		diag.Outcome = types.RerankOutcomeNoCandidates
 		pipelineInfo(ctx, "Rerank", "skip", map[string]interface{}{
 			"reason": "empty_search_result",
+		})
+		return next()
+	}
+	// A pure-image query carries no text to rerank with. Calling the model
+	// with an empty query only earns a vendor rejection — recorded as
+	// model_error with the vendor's complaint in the diagnostics — before the
+	// retrieval order is returned anyway. The candidates and their image
+	// content stand on their own.
+	if strings.TrimSpace(chatManage.RewriteQuery) == "" {
+		diag.Outcome = types.RerankOutcomeNoQuery
+		pipelineWarn(ctx, "Rerank", "skip", map[string]interface{}{
+			"reason": "empty_query",
 		})
 		return next()
 	}

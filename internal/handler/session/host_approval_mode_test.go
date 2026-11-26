@@ -7,6 +7,7 @@ import (
 	stderrors "errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -137,4 +138,18 @@ func TestHostApprovalModeIsLiteOnly(t *testing.T) {
 	h := &Handler{sessionService: modeSessionService{owned: map[string]bool{"s1": true}}}
 	_, c := modeRequest(t, h, http.MethodGet, "s1", "")
 	require.Equal(t, http.StatusNotFound, lastAppError(t, c).HTTPCode)
+}
+
+func TestHostApprovalModeRejectsAnOversizedBody(t *testing.T) {
+	modes := &fakeHostModes{modes: map[string]string{}}
+	h := &Handler{sessionService: modeSessionService{owned: map[string]bool{"s1": true}}, hostModes: modes}
+
+	oversized := `{"mode":"auto","padding":"` + strings.Repeat("x", 8<<10) + `"}`
+	_, c := modeRequest(t, h, http.MethodPut, "s1", oversized)
+
+	appErr := lastAppError(t, c)
+	require.Equal(t, http.StatusBadRequest, appErr.HTTPCode)
+	require.Contains(t, appErr.Error(), "too large")
+	// The oversized body must not reach the mode store.
+	require.Empty(t, modes.modes)
 }

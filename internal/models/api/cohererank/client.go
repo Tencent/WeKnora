@@ -71,7 +71,9 @@ type response struct {
 }
 
 type result struct {
-	Index          int      `json:"index"`
+	// Index is a pointer so a response that omits it is rejected instead of
+	// silently ranking the document at position 0.
+	Index          *int     `json:"index"`
 	RelevanceScore *float64 `json:"relevance_score"`
 	Score          *float64 `json:"score"`
 	Document       document `json:"document"`
@@ -201,12 +203,24 @@ func (c *Client) post(ctx context.Context, body map[string]any, count int) ([]ap
 		return nil, err
 	}
 	out := make([]api.RerankResult, 0, len(results))
+	seen := make([]bool, count)
 	for _, item := range results {
-		if item.Index < 0 || item.Index >= count {
-			return nil, fmt.Errorf("rerank index %d out of range for %d documents", item.Index, count)
+		if item.Index == nil {
+			return nil, fmt.Errorf("rerank result is missing index")
+		}
+		index := *item.Index
+		if index < 0 || index >= count {
+			return nil, fmt.Errorf("rerank index %d out of range for %d documents", index, count)
+		}
+		if seen[index] {
+			return nil, fmt.Errorf("rerank returned duplicate index %d", index)
+		}
+		seen[index] = true
+		if item.RelevanceScore == nil && item.Score == nil {
+			return nil, fmt.Errorf("rerank result is missing relevance_score or score")
 		}
 		out = append(out, api.RerankResult{
-			Index: item.Index,
+			Index: index,
 			Score: firstNonNil(item.RelevanceScore, item.Score),
 			Text:  item.Document.Text,
 		})
@@ -228,6 +242,11 @@ func decodeResults(raw []byte) ([]result, error) {
 	var decoded response
 	if err := json.Unmarshal(trimmed, &decoded); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	// Missing or null results can be an error document returned with a 2xx
+	// status. Only an explicit array is a ranking, including an empty one.
+	if decoded.Results == nil {
+		return nil, fmt.Errorf("decode response: expected a results array")
 	}
 	return decoded.Results, nil
 }

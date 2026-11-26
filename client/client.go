@@ -328,14 +328,24 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // would defeat it for ordinary responses.
 func decodeResponseBody(r io.Reader, target interface{}) error {
 	limited := &countingReader{r: io.LimitReader(r, maxResponseBodyBytes+1)}
-	if err := json.NewDecoder(limited).Decode(target); err != nil {
+	decoder := json.NewDecoder(limited)
+	if err := decoder.Decode(target); err != nil {
 		if limited.n > maxResponseBodyBytes {
 			return errResponseBodyTooLarge
 		}
 		return err
 	}
+	// Verify the rest of the body contains only whitespace. Token avoids
+	// materializing a second JSON value when a proxy sends a malformed reply.
+	_, err := decoder.Token()
 	if limited.n > maxResponseBodyBytes {
 		return errResponseBodyTooLarge
+	}
+	if err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("unexpected data after JSON response")
+		}
+		return err
 	}
 	return nil
 }

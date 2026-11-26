@@ -34,7 +34,7 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 }
 
 // emptyContentSearchHint returns an actionable note when a KB-scoped content
-// search (chunks / docs) yields zero results, so an agent can distinguish
+// search (chunks) yields zero results, so an agent can distinguish
 // "no match" from "the KB has no indexed content". Empty when n > 0 so it
 // never adds noise to real results.
 func emptyContentSearchHint(n int) string {
@@ -42,6 +42,7 @@ func emptyContentSearchHint(n int) string {
 		return ""
 	}
 	return "0 results: this may be no match, OR the KB has no indexed chunks. " +
-		"Check `weknora kb status <kb>` (chunk_count) and `weknora doc list --kb <kb>` (parse_status); " +
+		"Check `weknora doc list --kb <kb>` (parse_status) and " +
+		"`weknora chunk list --doc <doc-id>` for indexed chunks; " +
 		"documents in parse_status=draft are not indexed — run `weknora doc reparse <doc-id>`."
 }

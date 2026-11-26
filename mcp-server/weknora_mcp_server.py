@@ -15,7 +15,8 @@ import re
 import secrets
 import sys
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, Iterator
+from urllib.parse import quote
 
 import urllib3
 import requests
@@ -36,6 +37,15 @@ try:
 except ValueError:
     logger.warning("WEKNORA_CHAT_TIMEOUT is not a valid integer; falling back to 300s.")
     WEKNORA_CHAT_TIMEOUT = 300
+
+# Timeout in seconds for the non-chat API requests (CRUD, search, uploads).
+# Without it requests waits forever, so a hung backend blocks the calling
+# tool indefinitely. Default 300s, matching the chat read timeout.
+try:
+    WEKNORA_API_TIMEOUT = int(os.getenv("WEKNORA_API_TIMEOUT", "300"))
+except ValueError:
+    logger.warning("WEKNORA_API_TIMEOUT is not a valid integer; falling back to 300s.")
+    WEKNORA_API_TIMEOUT = 300
 
 # Bound the data accumulated while waiting for an SSE event's blank line.
 MAX_SSE_EVENT_BYTES = 8 * 1024 * 1024
@@ -126,12 +136,35 @@ def _normalize_kb_entries(resp: object) -> list[Dict]:
     return out
 
 
+def _iter_sse_lines(response: requests.Response) -> Iterator[bytes]:
+    """Split SSE lines without treating a CRLF split across chunks as two breaks."""
+    pending = bytearray()
+    skip_lf = False
+    for chunk in response.iter_content(chunk_size=512):
+        if not chunk:
+            continue
+        if skip_lf and chunk.startswith(b"\n"):
+            chunk = chunk[1:]
+        # Emit bare CR immediately. If the next chunk starts with LF, it
+        # belongs to this same line ending.
+        skip_lf = chunk.endswith(b"\r")
+        for part in chunk.splitlines(keepends=True):
+            if part.endswith((b"\r", b"\n")):
+                pending.extend(part.rstrip(b"\r\n"))
+                yield bytes(pending)
+                pending.clear()
+            else:
+                pending.extend(part)
+    if pending:
+        yield bytes(pending)
+
+
 class WeKnoraClient:
     """Client for interacting with WeKnora API"""
 
     def __init__(self, base_url: str, api_key: str):
         """Initialize the WeKnora API client with base URL and authentication"""
-        self.base_url = base_url
+        self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         # SSL verification: enabled by default. Set WEKNORA_VERIFY_SSL=false to disable
         # (e.g. for self-signed certs in dev environments — NOT recommended for production).
@@ -175,6 +208,9 @@ class WeKnoraClient:
             JSON response as dictionary
         """
         url = f"{self.base_url}{endpoint}"
+        # Bound the wait like the chat SSE path does; an explicit timeout
+        # passed by the caller still wins.
+        kwargs.setdefault("timeout", WEKNORA_API_TIMEOUT)
         try:
             # Execute HTTP request with the specified method
             response = self.session.request(method, url, **kwargs)
@@ -247,9 +283,8 @@ class WeKnoraClient:
         """Resolve an agent ID or name to its canonical ID.
 
         If *agent_id_or_name* is already a UUID it is returned unchanged.
-        Otherwise all agents are listed and the first one whose ``id``
-        matches exactly or whose ``name`` matches case-insensitively is
-        returned.
+        Otherwise an exact ``id`` match takes precedence over the first
+        case-insensitive ``name`` match.
         Raises ValueError when no match is found.
         """
         if self._UUID_RE.match(agent_id_or_name):
@@ -259,13 +294,16 @@ class WeKnoraClient:
         if isinstance(agents, dict):
             agents = agents.get("list", agents.get("items", []))
         needle = agent_id_or_name.lower()
+        name_match = None
         for agent in (agents or []):
             if not isinstance(agent, dict):
                 continue
             if agent.get("id") == agent_id_or_name:
                 return agent["id"]
-            if agent.get("name", "").lower() == needle:
-                return agent["id"]
+            if name_match is None and agent.get("name", "").lower() == needle:
+                name_match = agent["id"]
+        if name_match is not None:
+            return name_match
         raise ValueError(
             f"Agent {agent_id_or_name!r} not found. "
             "Use list_agents to see available agent IDs and names."
@@ -332,6 +370,7 @@ class WeKnoraClient:
                 files=files,
                 data=data,
                 verify=self.verify_ssl,
+                timeout=WEKNORA_API_TIMEOUT,
             )
             response.raise_for_status()
             return response.json()
@@ -404,14 +443,13 @@ class WeKnoraClient:
         """List knowledge in a knowledge base.
 
         ``folder_path`` filters to one folder (empty string = root).
-        ``folder_scope`` is passed through when the backend supports
-        scoped folder listing.
+        Use ``folder_scope="subtree"`` (or "all") to include descendants.
         """
         params = {"page": page, "page_size": page_size}
         if folder_path is not None:
             params["folder_path"] = folder_path
-        if folder_scope:
-            params["folder_scope"] = folder_scope
+        if folder_path is not None and folder_scope in ("all", "subtree"):
+            params["folder_recursive"] = "true"
         return self._request(
             "GET", f"/knowledge-bases/{kb_id}/knowledge", params=params
         )
@@ -456,7 +494,7 @@ class WeKnoraClient:
     # Session Management - Methods for managing chat sessions
     def create_session(
         self,
-        kb_id: str,
+        kb_id: str | None = None,
         max_rounds: int = 5,
         enable_rewrite: bool = True,
         fallback_response: str = "Sorry, I cannot answer this question.",
@@ -464,21 +502,20 @@ class WeKnoraClient:
         title: str = "",
         description: str = "",
     ) -> Dict:
-        """Create a new chat session with strategy configuration"""
-        strategy = {
-            "max_rounds": max_rounds,
-            "enable_rewrite": enable_rewrite,
-            "fallback_strategy": "FIXED_RESPONSE",
-            "fallback_response": fallback_response,
-            "embedding_top_k": 10,
-            "keyword_threshold": 0.5,
-            "vector_threshold": 0.7,
-            "summary_model_id": summary_model_id,
-        }
-        data = {
-            "knowledge_base_id": kb_id,
-            "session_strategy": strategy,
-        }
+        """Create a session, retaining the legacy payload when a KB is supplied."""
+        data: Dict[str, Any] = {}
+        if kb_id is not None:
+            data["knowledge_base_id"] = kb_id
+            data["session_strategy"] = {
+                "max_rounds": max_rounds,
+                "enable_rewrite": enable_rewrite,
+                "fallback_strategy": "FIXED_RESPONSE",
+                "fallback_response": fallback_response,
+                "embedding_top_k": 10,
+                "keyword_threshold": 0.5,
+                "vector_threshold": 0.7,
+                "summary_model_id": summary_model_id,
+            }
         if title:
             data["title"] = title
         if description:
@@ -509,6 +546,7 @@ class WeKnoraClient:
           data: {"response_type": "answer", "content": "..."}
           data: {"response_type": "references", "knowledge_references": [...]}
           data: {"response_type": "complete"}
+          data: {"response_type": "stop", "done": true}
         
         A blank line ends each event; multiple data lines are joined with newlines.
         We accumulate answer chunks and extract references, returning them as a dict.
@@ -532,9 +570,8 @@ class WeKnoraClient:
             with response:
                 response.raise_for_status()
                 first_line = True
-                for raw_line in response.iter_lines():
-                    if isinstance(raw_line, bytes):
-                        raw_line = raw_line.decode("utf-8")
+                for line in _iter_sse_lines(response):
+                    raw_line = line.decode("utf-8")
                     if first_line:
                         # SSE ignores exactly one BOM at the start of the stream.
                         raw_line = raw_line.removeprefix("\ufeff")
@@ -578,16 +615,25 @@ class WeKnoraClient:
                         raise RequestException(
                             f"Server error: {event_data.get('content', 'unknown error')}"
                         )
-                    elif response_type == "complete":
-                        break
-                else:
-                    raise RequestException("SSE stream ended before complete event")
+                    elif response_type in ("complete", "stop"):
+                        metadata = event_data.get("data")
+                        final = metadata.get("final_content") if isinstance(metadata, dict) else None
+                        result = {
+                            "answer": final if response_type == "complete" and isinstance(final, str) and final else "".join(answer_chunks),
+                            "references": references,
+                            "_debug_events": debug_events,
+                        }
+                        if response_type == "stop":
+                            result["stopped"] = True
+                        else:
+                            # A complete event can end only the current stream
+                            # while the run is still waiting on a human prompt.
+                            data = event_data.get("data")
+                            if isinstance(data, dict) and data.get("suspended"):
+                                result["suspended"] = data["suspended"]
+                        return result
 
-            return {
-                "answer": "".join(answer_chunks),
-                "references": references,
-                "_debug_events": debug_events,
-            }
+            raise RequestException("SSE stream ended before complete event")
         except RequestException as e:
             logger.error(f"SSE stream request failed ({url}): {e}")
             raise
@@ -671,14 +717,22 @@ class WeKnoraClient:
 
     def wiki_read_page(self, kb_id: str, slug: str) -> Dict:
         """Read a wiki page by slug, returns full markdown + metadata + links"""
-        return self._request("GET", f"/knowledgebase/{kb_id}/wiki/pages/{slug}")
+        encoded_slug = quote(slug, safe="/")
+        return self._request("GET", f"/knowledgebase/{kb_id}/wiki/pages/{encoded_slug}")
 
-    def wiki_index_view(self, kb_id: str, limit: int = 50) -> Dict:
-        """Get structured wiki index with per-type directory groups"""
+    def wiki_index_view(
+        self, kb_id: str, limit: int = 50, page_type: str = "", cursor: str = ""
+    ) -> Dict:
+        """Get a window of wiki directory entries."""
+        params = {"limit": limit}
+        if page_type:
+            params["types"] = page_type
+        if cursor:
+            params["cursor"] = cursor
         return self._request(
             "GET",
             f"/knowledgebase/{kb_id}/wiki/index",
-            params={"limit": limit},
+            params=params,
         )
 
 
@@ -737,8 +791,9 @@ def create_knowledge_base(
         "chunking_config": {
             "chunk_size": 1000,
             "chunk_overlap": 200,
-            "separators": ["."],
-            "enable_multimodal": True,
+            # Same separators and strategy as a KB created in the web UI.
+            "separators": ["\n\n", "\n", "。", "！", "？", ";", "；"],
+            "strategy": "auto",
         },
         "embedding_model_id": embedding_model_id,
         "summary_model_id": summary_model_id,
@@ -872,7 +927,7 @@ def list_knowledge(
     """List knowledge entries in a knowledge base.
 
     ``folder_path`` optionally filters to one folder (``""`` = root).
-    ``folder_scope`` is forwarded when the backend supports scoped listing.
+    Use ``folder_scope="subtree"`` (or "all") to include descendants.
     """
     return client.list_knowledge(
         kb_id, page, page_size, folder_path=folder_path, folder_scope=folder_scope
@@ -920,7 +975,7 @@ def get_model(model_id: str) -> dict:
 
 @mcp.tool()
 def create_session(
-    kb_id: str,
+    kb_id: str | None = None,
     max_rounds: int = 5,
     enable_rewrite: bool = True,
     fallback_response: str = "Sorry, I cannot answer this question.",
@@ -928,12 +983,13 @@ def create_session(
     title: str = "",
     description: str = "",
 ) -> dict:
-    """Create a new chat session bound to a knowledge base with a retrieval strategy.
+    """Create a chat session. No knowledge base is required.
 
-    kb_id may be a UUID or a knowledge-base name (resolved automatically).
+    To retrieve from a knowledge base, pass knowledge_base_ids to chat or agent_chat.
+    Older servers can still receive kb_id (UUID or name) and the session strategy.
     """
     return client.create_session(
-        kb_id=client.resolve_kb_id(kb_id),
+        kb_id=client.resolve_kb_id(kb_id) if kb_id is not None else None,
         max_rounds=max_rounds,
         enable_rewrite=enable_rewrite,
         fallback_response=fallback_response,
@@ -1002,11 +1058,8 @@ async def agent_chat(
     """Agentic pipeline chat: the agent autonomously calls tools (knowledge_search, web_search, SQL, etc.).
 
     REQUIRED: agent_id (name or UUID) — use list_agents to discover agents.
-    IMPORTANT: many agents have KBSelectionMode=none and NO built-in knowledge bases.
-    In that case you MUST pass knowledge_base_ids, otherwise the agent will fail
-    with 'no search targets available'. Use get_agent to inspect an agent's
-    kb_selection_mode and knowledge_bases before calling. If kb_selection_mode is
-    'none' or 'selected' with an empty list, always provide knowledge_base_ids.
+    Optional knowledge_base_ids (names or UUIDs) override or supplement the
+    agent's default knowledge bases. Omit them to use the agent's configured scope.
     """
     resolved_agent_id = await asyncio.to_thread(client.resolve_agent_id, agent_id)
     kb_ids = (
@@ -1014,45 +1067,6 @@ async def agent_chat(
         if knowledge_base_ids
         else None
     )
-    # Pre-check: if no KB IDs provided, inspect agent config to detect
-    # kb_selection_mode=none/selected-empty so we fail fast with a clear message
-    # instead of the cryptic backend error "no search targets available".
-    if not kb_ids:
-        try:
-            agent_info = await asyncio.to_thread(client.get_agent, resolved_agent_id)
-            cfg = (agent_info.get("data") or agent_info).get("config") or {}
-            mode = cfg.get("kb_selection_mode", "selected")
-            built_in_kbs = cfg.get("knowledge_bases") or []
-            needs_kbs = (mode == "none") or (
-                mode in ("selected", "") and not built_in_kbs
-            )
-            if needs_kbs:
-                all_kbs = _normalize_kb_entries(
-                    await asyncio.to_thread(client.list_knowledge_bases)
-                ) + _normalize_kb_entries(
-                    await asyncio.to_thread(client.list_shared_knowledge_bases)
-                )
-                seen_ids: set[str] = set()
-                unique_kbs: list[Dict] = []
-                for kb in all_kbs:
-                    kb_id = kb.get("id")
-                    if kb_id and kb_id not in seen_ids:
-                        seen_ids.add(kb_id)
-                        unique_kbs.append(kb)
-                kb_summary = ", ".join(
-                    f"{kb.get('name')} ({kb.get('id')})" for kb in unique_kbs[:10]
-                )
-                raise ValueError(
-                    f"Agent '{agent_id}' has kb_selection_mode='{mode}' with no built-in "
-                    f"knowledge bases. You must provide knowledge_base_ids. "
-                    f"Available knowledge bases: [{kb_summary}]"
-                )
-        except ValueError:
-            raise
-        except Exception as preflight_err:
-            logger.warning(
-                "agent_chat preflight KB check failed (non-fatal): %s", preflight_err
-            )
     fn = functools.partial(
         client.agent_chat,
         session_id,
@@ -1118,13 +1132,15 @@ def wiki_read_page(kb_id: str, slug: str) -> dict:
 
 
 @mcp.tool()
-def wiki_index_view(kb_id: str, limit: int = 50) -> dict:
+def wiki_index_view(
+    kb_id: str, limit: int = 50, page_type: str = "", cursor: str = ""
+) -> dict:
     """Get a structured wiki index with per-type directory groups.
 
-    Returns an overview of all wiki pages organized by type (entity, concept,
-    summary, etc.).
+    Pass a group's type as page_type and its next_cursor as cursor to read
+    the next window of that group.
     """
-    return client.wiki_index_view(kb_id, limit)
+    return client.wiki_index_view(kb_id, limit, page_type, cursor)
 
 
 # ---------------------------------------------------------------------------
@@ -1213,7 +1229,7 @@ def main():
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.getenv("MCP_PORT", "8000")),
+        default=os.getenv("MCP_PORT", "8000"),
         help="Bind port for network transports (default: 8000)",
     )
     args = parser.parse_args()

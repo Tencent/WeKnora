@@ -117,6 +117,7 @@ class _ScrapeResult:
     visible_text: str
     page_title: str
     error: str = ""
+    http_status: int | None = None
 
 
 def extract_markdown_from_html(html: str) -> Optional[str]:
@@ -237,7 +238,11 @@ class StdWebParser(BaseParser):
             logger.error("URL blocked by SSRF guard before navigation: %s", reason)
             return _ScrapeResult(
                 html="", visible_text="", page_title="",
-                error=f"URL blocked by SSRF guard: {reason}",
+                error=(
+                    f"URL blocked by SSRF guard: {reason}. "
+                    "DocReader uses its own SSRF_WHITELIST and SSRF_WHITELIST_EXTRA "
+                    "environment variables. The app's ssrf.whitelist setting applies only to the app."
+                ),
             )
         try:
             async with SSRFProxy(self.proxy) as proxy, async_playwright() as p:
@@ -249,11 +254,22 @@ class StdWebParser(BaseParser):
 
                 logger.info(f"Navigating to URL: {url}")
                 try:
-                    await page.goto(
+                    response = await page.goto(
                         url,
                         timeout=_GOTO_TIMEOUT_MS,
                         wait_until="domcontentloaded",
                     )
+                    # Playwright does not raise for HTTP error responses.  Do
+                    # not turn the server's error page into indexable knowledge.
+                    # goto returns the final response after HTTP redirects.
+                    if response is not None and response.status >= 400:
+                        status = response.status
+                        logger.warning("URL navigation returned HTTP %d", status)
+                        await browser.close()
+                        return _ScrapeResult(
+                            html="", visible_text="", page_title="",
+                            http_status=status,
+                        )
                     logger.info("Initial page load complete")
                 except Exception as e:
                     logger.error(f"Error navigating to URL: {str(e)}")
@@ -310,6 +326,9 @@ class StdWebParser(BaseParser):
 
         logger.info(f"Scraping web page: {url}")
         scrape_result = asyncio.run(self.scrape(url))
+        if scrape_result.http_status is not None:
+            # Only disclose the status, never the response body or URL.
+            raise WebParseError(f"Web page returned HTTP {scrape_result.http_status}")
         if scrape_result.error or (
             not scrape_result.html and not scrape_result.visible_text
         ):

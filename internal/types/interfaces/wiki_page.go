@@ -14,6 +14,15 @@ type WikiPageService interface {
 	// bidirectional link references, and syncs to chunks for retrieval.
 	CreatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error)
 
+	// GetOrCreatePage creates a new wiki page like CreatePage, or returns
+	// the live page that already owns the slug when a concurrent writer
+	// created it first, with created=false. Only the batch ingest path
+	// uses this: the get-or-create race between the exists snapshot and
+	// the insert would otherwise fail the batch on the unique-key
+	// conflict. Callers must apply their content to the returned page
+	// through UpdatePage; the existing row is never overwritten here.
+	GetOrCreatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, bool, error)
+
 	// UpdatePage updates an existing wiki page, re-parses links, and updates
 	// bidirectional references. The `version` field is incremented only when
 	// a user-visible content field (title, content, summary, page_type,
@@ -218,6 +227,9 @@ type WikiPageService interface {
 	// SearchPages performs full-text search over wiki pages.
 	SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
+	// SearchPagesLiteral searches for query text without regular-expression interpretation.
+	SearchPagesLiteral(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
 	// SearchPagesAcross searches wiki pages across multiple knowledge bases
 	// with the same ranking as SearchPages, then returns a global top-N.
 	SearchPagesAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error)
@@ -251,6 +263,13 @@ type WikiPageService interface {
 type WikiPageRepository interface {
 	// Create inserts a new wiki page record.
 	Create(ctx context.Context, page *types.WikiPage) error
+
+	// GetOrCreate inserts a new wiki page record, or returns the live
+	// page that already owns (knowledge_base_id, slug) when a concurrent
+	// writer created it first. The second return reports whether the row
+	// was inserted. The existing row is returned untouched: callers that
+	// need to apply new content must go through UpdatePage.
+	GetOrCreate(ctx context.Context, page *types.WikiPage) (*types.WikiPage, bool, error)
 
 	// Update rewrites a wiki page record with optimistic locking and
 	// unconditionally increments `version`. Callers are responsible for
@@ -403,6 +422,9 @@ type WikiPageRepository interface {
 
 	// Search performs full-text search on wiki pages within a knowledge base.
 	Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
+	// SearchLiteral matches the query as text on every supported database.
+	SearchLiteral(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
 	// SearchAcross performs the same full-text search across multiple
 	// knowledge bases, then returns a global top-N by match_rank.

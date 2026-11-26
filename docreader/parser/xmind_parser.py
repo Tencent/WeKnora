@@ -139,20 +139,19 @@ def _parse_xml_sheets(payload: bytes) -> list[_Sheet]:
     return sheets
 
 
-def _read_content_entry(content: bytes) -> tuple[str, bytes]:
+def _read_content_entry(
+    content: bytes, formats: tuple[str, ...] = ("json", "xml")
+) -> tuple[str, bytes] | None:
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            try:
-                info = archive.getinfo("content.json")
-                content_format = "json"
-            except KeyError:
+            for content_format in formats:
                 try:
-                    info = archive.getinfo("content.xml")
-                except KeyError as exc:
-                    raise ValueError(
-                        "XMind archive is missing content.json or content.xml"
-                    ) from exc
-                content_format = "xml"
+                    info = archive.getinfo(f"content.{content_format}")
+                except KeyError:
+                    continue
+                break
+            else:
+                return None
 
             if info.flag_bits & 0x1:
                 raise ValueError("encrypted XMind content is not supported")
@@ -168,6 +167,11 @@ def _read_content_entry(content: bytes) -> tuple[str, bytes]:
         raise ValueError("invalid XMind archive") from exc
 
 
+def _single_line_title(value: str) -> str:
+    """Keep title line breaks from becoming Markdown headings or list items."""
+    return " ".join(line.strip() for line in value.splitlines() if line.strip())
+
+
 def _render_topic(topic: _Topic, depth: int) -> tuple[list[str], int, int]:
     lines: list[str] = []
     topic_count = 0
@@ -175,7 +179,7 @@ def _render_topic(topic: _Topic, depth: int) -> tuple[list[str], int, int]:
     child_depth = depth
 
     if topic.title:
-        lines.append(f"{'  ' * depth}- {topic.title}")
+        lines.append(f"{'  ' * depth}- {_single_line_title(topic.title)}")
         topic_count = 1
         child_depth += 1
         if topic.note:
@@ -205,7 +209,7 @@ def _render_sheets(sheets: list[_Sheet]) -> tuple[str, int, int, int]:
         lines, sheet_topics, sheet_notes = _render_topic(sheet.root_topic, 0)
         if not lines:
             continue
-        title = sheet.title or f"Sheet {index}"
+        title = _single_line_title(sheet.title) or f"Sheet {index}"
         rendered_sheets.append(f"# {title}\n\n" + "\n".join(lines))
         topic_count += sheet_topics
         note_count += sheet_notes
@@ -222,13 +226,20 @@ class XMindParser(BaseParser):
     """Extract topic hierarchy and plain-text notes from XMind files."""
 
     def parse_into_text(self, content: bytes) -> Document:
-        content_format, payload = _read_content_entry(content)
+        entry = _read_content_entry(content)
+        if entry is None:
+            raise ValueError("XMind archive is missing content.json or content.xml")
+        content_format, payload = entry
 
         if content_format == "json":
             try:
                 sheets = _parse_json_sheets(payload)
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                raise ValueError("invalid XMind content.json") from exc
+                fallback = _read_content_entry(content, ("xml",))
+                if fallback is None:
+                    raise ValueError("invalid XMind content.json") from exc
+                content_format, payload = fallback
+                sheets = _parse_xml_sheets(payload)
         else:
             sheets = _parse_xml_sheets(payload)
 
