@@ -52,6 +52,8 @@
                 <div class="ai-markdown-template markdown-content" v-stable-html="renderedHTML">
                 </div>
             </div>
+            <AnswerReferencedDocuments v-if="!embeddedMode && answerFullyRendered && hasActualContent"
+                :references="session.knowledge_references" :message-id="session.id" />
             <!-- 复制和添加到知识库按钮 - 非 Agent 模式下显示 -->
             <div v-if="answerFullyRendered && (content || session.content)" class="answer-toolbar"
                 :class="{ 'answer-toolbar--persistent': hasArtifacts || artifactsCollecting }">
@@ -153,6 +155,7 @@ import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
 import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
+import AnswerReferencedDocuments from './AnswerReferencedDocuments.vue';
 import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
