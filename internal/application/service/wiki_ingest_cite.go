@@ -28,6 +28,13 @@ const (
 	// maxCitationBatchConcurrency limits parallelism across chunk-citation
 	// batches so a single long document can't saturate the synthesis model.
 	maxCitationBatchConcurrency = 4
+
+	// maxRunesPerExtractionBatch bounds one Pass-0 candidate-extraction call.
+	// It is larger than the citation budget because the output is a
+	// lightweight skeleton, not per-chunk facts. A document longer than this
+	// is split into several calls instead of being truncated, so entities and
+	// concepts in the tail still get their own wiki pages.
+	maxRunesPerExtractionBatch = 48000
 )
 
 // citationBatchResult is the JSON shape we expect back from one invocation of
@@ -94,44 +101,127 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	granularity := batchCtx.ExtractionGranularity.Normalize()
-	raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
-		"Content":             content,
-		"Language":            lang,
-		"PreviousSlugs":       prevSlugsText,
-		"Granularity":         string(granularity),
-		"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
-		"CustomInstructions":  batchCtx.ExtractionInstructions,
-		"InstructionScope":    "wiki_extraction",
-	})
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("candidate slug extraction failed: %w", err)
+
+	// Pass 0 used to send the whole document in one call, which forced the
+	// caller to truncate long documents at maxContentForWiki and silently
+	// drop every entity and concept past that point. Batch instead so the
+	// tail of a long document still gets its own wiki pages.
+	batches := splitContentIntoExtractionBatches(content, maxRunesPerExtractionBatch)
+	entityBatches := make([][]extractedItem, 0, len(batches))
+	conceptBatches := make([][]extractedItem, 0, len(batches))
+	for i, batch := range batches {
+		raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
+			"Content":             batch,
+			"Language":            lang,
+			"PreviousSlugs":       prevSlugsText,
+			"Granularity":         string(granularity),
+			"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
+			"CustomInstructions":  batchCtx.ExtractionInstructions,
+			"InstructionScope":    "wiki_extraction",
+		})
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf(
+				"candidate slug extraction failed (batch %d/%d): %w", i+1, len(batches), err)
+		}
+
+		raw = cleanLLMJSON(raw)
+
+		var result combinedExtraction
+		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+			logger.Warnf(ctx, "wiki ingest: failed to parse candidate slug JSON (batch %d/%d): %v\nRaw: %s",
+				i+1, len(batches), err, raw)
+			return nil, nil, nil, fmt.Errorf("parse candidate slug JSON (batch %d/%d): %w", i+1, len(batches), err)
+		}
+		entityBatches = append(entityBatches, result.Entities)
+		conceptBatches = append(conceptBatches, result.Concepts)
 	}
 
-	raw = cleanLLMJSON(raw)
-
-	var result combinedExtraction
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to parse candidate slug JSON: %v\nRaw: %s", err, raw)
-		return nil, nil, nil, fmt.Errorf("parse candidate slug JSON: %w", err)
-	}
-
-	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts, batchCtx,
+	entities := mergeExtractedBySlug(entityBatches)
+	concepts := mergeExtractedBySlug(conceptBatches)
+	entities, concepts = s.deduplicateExtractedBatch(
+		ctx, chatModel, kbID, entities, concepts, batchCtx,
 	)
 
-	slugItems := make(map[string]extractedItem, len(result.Entities)+len(result.Concepts))
-	for _, item := range result.Entities {
+	slugItems := make(map[string]extractedItem, len(entities)+len(concepts))
+	for _, item := range entities {
 		if item.Slug != "" && item.Name != "" {
 			slugItems[item.Slug] = item
 		}
 	}
-	for _, item := range result.Concepts {
+	for _, item := range concepts {
 		if item.Slug != "" && item.Name != "" {
 			slugItems[item.Slug] = item
 		}
 	}
 
-	return result.Entities, result.Concepts, slugItems, nil
+	return entities, concepts, slugItems, nil
+}
+
+// splitContentIntoExtractionBatches partitions a document's text into batches
+// whose rune count stays under budget, preferring paragraph boundaries so a
+// batch never cuts a sentence in half. A single paragraph longer than the
+// budget occupies its own batch, so no content is ever dropped: the caller
+// sees the whole document instead of only its head.
+func splitContentIntoExtractionBatches(content string, budget int) []string {
+	if budget <= 0 {
+		return []string{content}
+	}
+	runes := []rune(content)
+	if len(runes) <= budget {
+		return []string{content}
+	}
+	batches := make([]string, 0, len(runes)/budget+1)
+	start := 0
+	for start < len(runes) {
+		end := start + budget
+		if end >= len(runes) {
+			batches = append(batches, string(runes[start:]))
+			break
+		}
+		// Prefer the last paragraph break inside the window so a batch ends on
+		// a boundary the model can read as a complete thought. Fall back to the
+		// hard cut when the window holds no blank line.
+		cut := end
+		for i := end; i > start+budget/2; i-- {
+			if runes[i-1] == '\n' && runes[i] == '\n' {
+				cut = i
+				break
+			}
+		}
+		batches = append(batches, string(runes[start:cut]))
+		start = cut
+	}
+	return batches
+}
+
+// mergeExtractedBySlug folds per-batch extraction results into one list,
+// keeping the first occurrence of each slug and unioning aliases so an entity
+// mentioned in several batches is extracted once.
+func mergeExtractedBySlug(batches [][]extractedItem) []extractedItem {
+	order := make([]string, 0)
+	bySlug := make(map[string]*extractedItem)
+	for _, batch := range batches {
+		for _, item := range batch {
+			if item.Slug == "" {
+				continue
+			}
+			if existing, ok := bySlug[item.Slug]; ok {
+				existing.Aliases = unionStrings(existing.Aliases, item.Aliases)
+				if existing.Description == "" {
+					existing.Description = item.Description
+				}
+				continue
+			}
+			copied := item
+			bySlug[item.Slug] = &copied
+			order = append(order, item.Slug)
+		}
+	}
+	out := make([]extractedItem, 0, len(order))
+	for _, slug := range order {
+		out = append(out, *bySlug[slug])
+	}
+	return out
 }
 
 // chunkBatch groups chunks that will be sent in a single WikiChunkCitationPrompt call.
