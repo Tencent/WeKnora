@@ -279,14 +279,7 @@ func (m *MCPManager) connectClient(
 func (m *MCPManager) initializeClient(
 	ctx context.Context, service *types.MCPService, client MCPClient, errPrefix string,
 ) error {
-	initTimeout := 30 * time.Second
-	if service.AdvancedConfig != nil && service.AdvancedConfig.Timeout > 0 {
-		initTimeout = time.Duration(service.AdvancedConfig.Timeout) * time.Second
-		if initTimeout > 60*time.Second {
-			initTimeout = 60 * time.Second
-		}
-	}
-
+	initTimeout := min(service.ConnectionTimeout(), 60*time.Second)
 	initCtx, initCancel := context.WithTimeout(ctx, initTimeout)
 	defer initCancel()
 
