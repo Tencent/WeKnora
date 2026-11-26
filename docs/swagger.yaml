@@ -12004,6 +12004,9 @@ definitions:
           for document knowledge bases
         x-agent: true
         x-agent-detail: true
+      reader_download_enabled:
+        description: ReaderDownloadEnabled applies to this caller and this KB only.
+        type: boolean
       share_count:
         description: ShareCount indicates the number of organizations this knowledge
           base is shared with (not stored in database)
@@ -20282,6 +20285,42 @@ paths:
         risk: read
       x-agent-hint: Use parse_status=failed to find documents that failed to parse;
         meta.total counts every match.
+  /knowledge-bases/{id}/knowledge/{knowledge_id}/reader-download:
+    get:
+      description: Requires a web session and direct read access to a knowledge base
+        enabled by the operator.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Knowledge ID
+        in: path
+        name: knowledge_id
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Original file
+          schema:
+            type: file
+        "403":
+          description: Reader download unavailable
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Document not found in this knowledge base
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Download an individual original file from a reader-enabled knowledge
+        base
+      tags:
+      - 知识管理
   /knowledge-bases/{id}/knowledge/batch-download:
     post:
       consumes:

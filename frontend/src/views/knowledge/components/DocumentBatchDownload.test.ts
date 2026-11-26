@@ -33,3 +33,15 @@ test('Blob 格式的 JSON 错误会还原为可读消息', () => {
   assert.match(request, /JSON\.parse\(text\)/)
   assert.match(request, /text\.startsWith\('\{'\)/)
 })
+
+test('reader access adds a single-file action without exposing batch export', () => {
+  const menu = readFileSync(new URL('./DocumentActionMenu.vue', import.meta.url), 'utf8')
+  const drawer = readFileSync(new URL('../../../components/doc-content.vue', import.meta.url), 'utf8')
+  assert.match(knowledgeBase, /kbInfo\.value\?\.id === kbId\.value && kbInfo\.value\?\.reader_download_enabled/)
+  assert.match(knowledgeBase, /:canDownloadKB="canDownloadSingle"/)
+  assert.match(knowledgeBase, /<DocumentBatchBar[^>]*:can-download="canDownloadKnowledge"/)
+  assert.match(menu, /canDownloadSingle && item\.parse_status !== 'draft'/)
+  assert.match(menu, /v-if="canMutateKnowledge \|\| canDownload"/)
+  assert.match(drawer, /downKnowledgeDetails\(props\.details\.id, props\.readerDownloadKbId\)/)
+  assert.match(knowledgeApi, /encodeURIComponent\(readerKBId\).*encodeURIComponent\(id\).*reader-download/)
+})

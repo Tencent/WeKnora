@@ -8987,6 +8987,59 @@
                 "x-agent-hint": "Imports a user-provided public web page or file URL as a source document; ingests asynchronously. Check knowledge.get_parse_progress."
             }
         },
+        "/knowledge-bases/{id}/knowledge/{knowledge_id}/reader-download": {
+            "get": {
+                "description": "Requires a web session and direct read access to a knowledge base enabled by the operator.",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "Download an individual original file from a reader-enabled knowledge base",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Knowledge ID",
+                        "name": "knowledge_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Original file",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "403": {
+                        "description": "Reader download unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found in this knowledge base",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ]
+            }
+        },
         "/knowledge-bases/{id}/move-targets": {
             "get": {
                 "description": "返回与源知识库 Type 一致、EmbeddingModelID 一致、非临时且不是自身的目标知识库列表",
@@ -40838,6 +40891,10 @@
                     ],
                     "x-agent": true,
                     "x-agent-detail": true
+                },
+                "reader_download_enabled": {
+                    "description": "ReaderDownloadEnabled applies to this caller and this KB only.",
+                    "type": "boolean"
                 },
                 "share_count": {
                     "description": "ShareCount indicates the number of organizations this knowledge base is shared with (not stored in database)",

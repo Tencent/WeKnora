@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -815,11 +816,28 @@ func normalizeTargetFolderPath(ctx context.Context, folderPath string) (string, 
 
 // GetKnowledgeFile retrieves the physical file associated with a knowledge entry
 func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error) {
-	// Get knowledge record
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	return s.getKnowledgeFile(ctx, id, "")
+}
+
+func (s *knowledgeService) GetReaderDownloadFile(ctx context.Context, kbID, id string) (io.ReadCloser, string, error) {
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || kbID == "" || !access.HasKBGrant(ctx, kbID, tenantID, types.OrgRoleViewer) {
+		return nil, "", access.ErrForbidden
+	}
+	return s.getKnowledgeFile(ctx, id, kbID)
+}
+
+func (s *knowledgeService) getKnowledgeFile(ctx context.Context, id, readerKBID string) (io.ReadCloser, string, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, id)
 	if err != nil {
 		return nil, "", err
+	}
+	// Check and serve the same row so a concurrent move cannot substitute a document from another KB.
+	if readerKBID != "" && (knowledge == nil || knowledge.ID != id || knowledge.KnowledgeBaseID != readerKBID ||
+		knowledge.TenantID != tenantID || (knowledge.Type != "file" && !knowledge.IsManual()) ||
+		knowledge.ParseStatus == "draft") {
+		return nil, "", repository.ErrKnowledgeNotFound
 	}
 
 	// Manual knowledge stores content in Metadata — stream it directly as a .md file.

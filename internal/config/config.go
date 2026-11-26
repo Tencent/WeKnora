@@ -237,6 +237,8 @@ type ServerConfig struct {
 
 // KnowledgeBaseConfig 知识库配置
 type KnowledgeBaseConfig struct {
+	// Deployment opt-in for individual original files. IDs are never sent to clients as a list.
+	ReaderDownloadKBIDs    []string               `yaml:"reader_download_kb_ids" json:"-"`
 	ChunkSize              int                    `yaml:"chunk_size"       json:"chunk_size"`
 	ChunkOverlap           int                    `yaml:"chunk_overlap"    json:"chunk_overlap"`
 	SplitMarkers           []string               `yaml:"split_markers"    json:"split_markers"`

@@ -2079,8 +2079,12 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 		return
 	}
 	logger.Infof(ctx, "Retrieving knowledge file, ID: %s", secutils.SanitizeForLog(id))
-
 	file, filename, err := h.kgService.GetKnowledgeFile(effCtx, id)
+	writeKnowledgeFile(c, file, filename, err)
+}
+
+func writeKnowledgeFile(c *gin.Context, file io.ReadCloser, filename string, err error) {
+	ctx := c.Request.Context()
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError("Failed to retrieve file").WithDetails(err.Error()))

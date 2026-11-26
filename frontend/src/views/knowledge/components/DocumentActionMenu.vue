@@ -12,6 +12,7 @@ interface KnowledgeItem {
 const props = defineProps<{
   item: KnowledgeItem;
   canDownload: boolean;
+  canDownloadSingle?: boolean;
   canMutateKnowledge: boolean;
   traceVisible: boolean;
   /** Whether the knowledge base has a folder structure to file documents into. */
@@ -43,7 +44,7 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
 <template>
   <!-- 下载原始文档 -->
   <div
-    v-if="canDownload && (item.type === 'file' || item.type === 'manual')"
+    v-if="(canDownload || (canDownloadSingle && item.parse_status !== 'draft')) && (item.type === 'file' || item.type === 'manual')"
     class="doc-action-menu-item"
     @click.stop="emit('download')"
   >

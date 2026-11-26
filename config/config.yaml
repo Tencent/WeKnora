@@ -42,6 +42,10 @@ conversation:
 
 # Knowledge base configuration
 knowledge_base:
+  # Allow signed-in members with direct read access to download individual source files
+  # only from these KB IDs, e.g. ["your-training-kb-id"]. Restart the API after editing.
+  # An empty list keeps original downloads restricted to editors. Batch ZIPs stay restricted.
+  reader_download_kb_ids: []
   chunk_size: 512
   chunk_overlap: 50
   split_markers: ["\n\n", "\n", "。"]

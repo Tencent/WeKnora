@@ -44,6 +44,7 @@ const props = defineProps<{
   batchMode: boolean;
   canEdit: boolean;
   canDownload: boolean;
+  canDownloadSingle?: boolean;
   canMutateKnowledge: boolean;
   traceAvailableById: Record<string, boolean>;
   /** Every folder of the knowledge base, for the "move to folder" picker. */
@@ -431,7 +432,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
                 </button>
                 <DocumentActionMenu
                   :item="item"
-                  :can-download="canDownload"
+                  :can-download="canDownload" :can-download-single="canDownloadSingle"
                   :can-mutate-knowledge="canMutateKnowledge"
                   :trace-visible="isTraceMenuVisible(item)"
                   :folders-available="Boolean(folderOptions?.length)"

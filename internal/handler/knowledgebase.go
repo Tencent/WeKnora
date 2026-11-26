@@ -323,6 +323,8 @@ type KnowledgeBaseView struct {
 	VectorStoreSource     string `json:"vector_store_source,omitempty"`
 	VectorStoreEngineType string `json:"vector_store_engine_type,omitempty"`
 	VectorStoreStatus     string `json:"vector_store_status,omitempty"`
+	// ReaderDownloadEnabled applies to this caller and this KB only.
+	ReaderDownloadEnabled bool `json:"reader_download_enabled,omitempty"`
 	// MyPermission is the caller's role on a knowledge base shared from
 	// another workspace; GET /knowledge-bases/{id} sets it.
 	MyPermission string `json:"my_permission,omitempty" enums:"admin,editor,viewer" extensions:"x-agent"`
@@ -593,10 +595,13 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	}
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	storeView := h.resolveKBStoreView(c.Request.Context(), kb, tenantID)
-	var extras map[string]interface{}
+	extras := map[string]interface{}{}
+	if _, ok := readerDownloadGrant(c, h.cfg, kb, h.kbShareService); ok {
+		extras["reader_download_enabled"] = true
+	}
 	if kb.TenantID != tenantID && permission != "" {
 		// Include my_permission in data so frontend can show role (e.g. "只读") instead of "--" for agent-visible KBs
-		extras = map[string]interface{}{"my_permission": permission}
+		extras["my_permission"] = permission
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": buildKBResponse(kb, storeView, extras)})
 }

@@ -340,6 +340,11 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 			}
 		})
 	}
+
+	readerPath := "/api/v1/knowledge-bases/:id/knowledge/:knowledge_id/reader-download"
+	if _, ok := g.apiKeyAuthorizer.Lookup(http.MethodGet, readerPath); ok {
+		t.Fatal("the reader opt-in must not grant an API key access to source downloads")
+	}
 }
 
 func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
