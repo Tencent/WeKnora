@@ -18,6 +18,7 @@ var nestedTableRow = regexp.MustCompile(`(?i)<tr\b`)
 // their rows and cells. The shared normalizer renders simple tables as GFM and
 // keeps complex tables as row-separated HTML.
 func convertPageHTML(content string) (string, error) {
+	content = stripBrowserOnlyMarkup(content)
 	if !strings.Contains(strings.ToLower(content), "<table") {
 		return htmltomd.ConvertString(content)
 	}
