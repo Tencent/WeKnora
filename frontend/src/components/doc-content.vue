@@ -12,7 +12,7 @@ import {
   downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile,
   updateDocumentChunk, listChunkRevisions, revertDocumentChunk, updateKnowledgeMetadata,
   updateKnowledgeSummary, regenerateKnowledgeSummary, upsertGeneratedQuestion, regenerateGeneratedQuestions, getKnowledgeDetails,
-  KNOWLEDGE_CHUNK_PAGE_SIZE,
+  getKnowledgeDetailsCon, KNOWLEDGE_CHUNK_PAGE_SIZE,
 } from "@/api/knowledge-base/index";
 import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
@@ -555,6 +555,54 @@ let url = ref('')
 // 视图模式：chunks / merged / preview
 // file 类型默认「预览」，URL / 手动创建 默认「全文」
 const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
+
+type ChunkViewType = 'text' | 'image_ocr' | 'image_caption';
+const chunkViewType = ref<ChunkViewType>('text');
+const imageChunkPage = ref(1);
+const imageChunks = ref<{ id: string; content: string }[]>([]);
+const imageChunkTotal = ref(0);
+const imageChunksLoading = ref(false);
+const imageChunksError = ref(false);
+const imageChunkRetry = ref(0);
+const chunkTypeLabels = {
+  text: 'knowledgeBase.viewMerged',
+  image_ocr: 'knowledgeEditor.wikiBrowser.gallery.ocr',
+  image_caption: 'knowledgeEditor.wikiBrowser.gallery.caption',
+} as const;
+const chunkTypeOptions = computed(() =>
+  Object.entries(chunkTypeLabels).map(([value, key]) => ({ value, label: t(key) })),
+);
+
+function selectChunkViewType(type: ChunkViewType) {
+  chunkViewType.value = type;
+  imageChunkPage.value = 1;
+  imageChunkTotal.value = 0;
+}
+
+watch([() => props.details?.id, () => props.visible], () => selectChunkViewType('text'), { flush: 'sync' });
+watch(
+  [() => props.details?.id, () => props.visible, viewMode, chunkViewType, imageChunkPage, imageChunkRetry],
+  async ([id, visible, mode, type, page], _, onCleanup) => {
+    if (!id || !visible || mode !== 'chunks' || type === 'text') return;
+    let current = true;
+    onCleanup(() => { current = false; });
+    imageChunks.value = [];
+    imageChunksLoading.value = true;
+    imageChunksError.value = false;
+    try {
+      const result = await getKnowledgeDetailsCon(id, page, type);
+      if (!result.success || !Array.isArray(result.data)) throw new Error('Failed to load image chunks');
+      if (!current) return;
+      imageChunks.value = result.data;
+      imageChunkTotal.value = result.total;
+    } catch {
+      if (current) imageChunksError.value = true;
+    } finally {
+      if (current) imageChunksLoading.value = false;
+    }
+  },
+);
+
 
 // 合并后的文档内容（在下方通过 computed 定义）
 
@@ -1833,7 +1881,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
           <div class="doc-content-section-head">
             <div class="doc-content-section-head-left">
               <h4 class="setting-drawer__section-title">{{ getContentLabel() }}</h4>
-              <span v-if="details.total > 0" class="chunk-count">
+              <span v-if="details.total > 0 && (viewMode !== 'chunks' || chunkViewType === 'text')" class="chunk-count">
                 {{ $t('knowledgeBase.chunkCount', { count: details.total }) }}
               </span>
             </div>
@@ -1880,6 +1928,35 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
           </div>
 
           <!-- 分块视图 -->
+          <template v-if="viewMode === 'chunks'">
+            <t-select class="chunk-type-select" size="small" :value="chunkViewType"
+              :aria-label="$t('knowledgeBase.viewChunks')" :options="chunkTypeOptions"
+              @change="selectChunkViewType" />
+          </template>
+          <div v-if="viewMode === 'chunks' && chunkViewType !== 'text'">
+            <div v-if="imageChunksLoading" class="chunk-page-loading">
+              <t-loading size="small" />
+              <span>{{ $t('common.loading') }}</span>
+            </div>
+            <div v-else-if="imageChunksError" class="chunk-page-loading">
+              <span>{{ $t('knowledgeBase.chunkLoadFailed') }}</span>
+              <t-button size="small" variant="outline" @click="imageChunkRetry++">{{ $t('common.retry') }}</t-button>
+            </div>
+            <div v-else-if="!imageChunks.length" class="no_content">{{ $t('common.noData') }}</div>
+            <div v-else class="chunk-list">
+              <div v-for="(chunk, index) in imageChunks" :key="chunk.id" class="chunk-item">
+                <div class="chunk-header">
+                  <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ (imageChunkPage - 1) * CHUNK_PAGE_SIZE + index + 1 }}</span>
+                  <span class="chunk-meta">{{ $t(chunkTypeLabels[chunkViewType]) }}</span>
+                </div>
+                <div class="image-chunk-text">{{ chunk.content }}</div>
+              </div>
+            </div>
+            <div v-if="imageChunkTotal > CHUNK_PAGE_SIZE" class="chunk-pagination">
+              <t-pagination v-model="imageChunkPage" :total="imageChunkTotal" :page-size="CHUNK_PAGE_SIZE"
+                size="small" :show-page-size="false" :disabled="imageChunksLoading" />
+            </div>
+          </div>
           <div v-else-if="viewMode === 'chunks'">
             <div v-if="isChunkPageTransition" class="chunk-page-loading">
               <t-loading size="small" />
@@ -2144,7 +2221,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
           </div>
 
           <!-- 文档预览视图 -->
-          <div v-if="(viewMode === 'merged' || viewMode === 'chunks') && details.total > CHUNK_PAGE_SIZE"
+          <div v-if="(viewMode === 'merged' || (viewMode === 'chunks' && chunkViewType === 'text')) && details.total > CHUNK_PAGE_SIZE"
             class="chunk-pagination">
             <t-pagination v-model="chunkPage" :total="details.total" :page-size="CHUNK_PAGE_SIZE" size="small"
               show-jumper show-page-number :show-page-size="false" :disabled="details.chunkLoading"
@@ -2176,6 +2253,17 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
 .metadata-empty { color: var(--td-text-color-placeholder); }
 .metadata-actions, .chunk-editor-actions { margin-top: 8px; justify-content: flex-end; }
 .chunk-disabled { opacity: .5; }
+
+.chunk-type-select {
+  width: 200px;
+  max-width: 100%;
+  margin-bottom: 12px;
+}
+
+.image-chunk-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 .chunk-pagination {
   display: flex;
