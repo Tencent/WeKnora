@@ -3,6 +3,7 @@ package searchutil
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // ExtractSnippet matches Agent wiki_search: ~60 runes of context around the
@@ -21,30 +22,41 @@ func ExtractSnippet(content string, query string) string {
 		return ""
 	}
 
-	matchStr := content[loc[0]:loc[1]]
-	before := content[:loc[0]]
-	after := content[loc[1]:]
+	// Walk only the visible windows, even when the match sits in a large page.
+	start := loc[0]
+	for range 60 {
+		if start == 0 {
+			break
+		}
+		_, size := utf8.DecodeLastRuneInString(content[:start])
+		start -= size
+	}
+	end := runePrefixEnd(content[loc[1]:], 60) + loc[1]
 
-	beforeRunes := []rune(before)
-	if len(beforeRunes) > 60 {
-		beforeRunes = beforeRunes[len(beforeRunes)-60:]
+	match := content[loc[0]:loc[1]]
+	snippet := content[start:end]
+	if matchEnd := runePrefixEnd(match, 100); matchEnd < len(match) {
+		snippet = content[start:loc[0]+matchEnd] + "..." + content[loc[1]:end]
+	}
+	// Preserve the previous rune conversion for malformed UTF-8 in the window.
+	if !utf8.ValidString(snippet) {
+		snippet = string([]rune(snippet))
 	}
 
-	afterRunes := []rune(after)
-	if len(afterRunes) > 60 {
-		afterRunes = afterRunes[:60]
-	}
-
-	matchRunes := []rune(matchStr)
-	if len(matchRunes) > 100 {
-		matchRunes = append(matchRunes[:100], []rune("...")...)
-	}
-
-	snippet := string(beforeRunes) + string(matchRunes) + string(afterRunes)
 	snippet = strings.ReplaceAll(snippet, "\n", " ")
 	for strings.Contains(snippet, "  ") {
 		snippet = strings.ReplaceAll(snippet, "  ", " ")
 	}
 
 	return "... " + strings.TrimSpace(snippet) + " ..."
+}
+
+func runePrefixEnd(text string, limit int) int {
+	for offset := range text {
+		if limit == 0 {
+			return offset
+		}
+		limit--
+	}
+	return len(text)
 }

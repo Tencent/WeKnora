@@ -61,22 +61,39 @@ func preparePendingOp(op *types.TaskPendingOp) error {
 // row first determines the order, and the deletion path's subsequent scope
 // scrub removes any insert that committed before it.
 func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
-	ctx context.Context,
-	op *types.TaskPendingOp,
+	ctx context.Context, op *types.TaskPendingOp,
 ) (bool, error) {
-	if err := preparePendingOp(op); err != nil {
-		return false, err
+	return r.EnqueueBatchIfKnowledgeBaseActive(ctx, []*types.TaskPendingOp{op})
+}
+
+// EnqueueBatchIfKnowledgeBaseActive keeps the liveness check and all inserts
+// in one transaction. Bounded statements avoid SQLite/Postgres parameter
+// limits without leaving a partially persisted convergence batch on failure.
+func (r *taskPendingOpsRepository) EnqueueBatchIfKnowledgeBaseActive(
+	ctx context.Context, ops []*types.TaskPendingOp,
+) (bool, error) {
+	if len(ops) == 0 {
+		return false, nil
 	}
-	if op.Scope != types.TaskScopeKnowledgeBase {
-		return false, errors.New("task pending ops: guarded enqueue requires knowledge_base scope")
+	for _, op := range ops {
+		if err := preparePendingOp(op); err != nil {
+			return false, err
+		}
+		if op.EnqueuedAt.IsZero() {
+			op.EnqueuedAt = time.Now()
+		}
+		if op.Scope != types.TaskScopeKnowledgeBase {
+			return false, errors.New("task pending ops: guarded enqueue requires knowledge_base scope")
+		}
+		if op.TenantID != ops[0].TenantID || op.ScopeID != ops[0].ScopeID || op.TaskType != ops[0].TaskType {
+			return false, errors.New("task pending ops: batch must belong to one tenant and queue lane")
+		}
 	}
 	accepted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Model(&types.KnowledgeBase{}).
-			Select("id").
-			Where("id = ? AND tenant_id = ?", op.ScopeID, op.TenantID)
-		dialector := tx.Dialector
-		if dialector.Name() == "postgres" {
+		query := tx.Model(&types.KnowledgeBase{}).Select("id").
+			Where("id = ? AND tenant_id = ?", ops[0].ScopeID, ops[0].TenantID)
+		if tx.Name() == "postgres" {
 			query = query.Clauses(clause.Locking{Strength: "SHARE"})
 		}
 		var kb types.KnowledgeBase
@@ -86,17 +103,17 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 			}
 			return err
 		}
-		active, err := tenantActiveWithinTx(tx, op.TenantID)
+		active, err := tenantActiveWithinTx(tx, ops[0].TenantID)
 		if err != nil || !active {
 			return err
 		}
-		if err := tx.Create(op).Error; err != nil {
+		if err := tx.CreateInBatches(ops, 100).Error; err != nil {
 			return err
 		}
 		accepted = true
 		return nil
 	})
-	return accepted, err
+	return accepted && err == nil, err
 }
 
 // tenantActiveWithinTx reports whether the tenant row exists and is not

@@ -12,6 +12,7 @@ import textract
 from docreader.config import CONFIG
 from docreader.models.document import Document
 from docreader.parser.docx2_parser import Docx2Parser
+from docreader.parser.docx_merge import fill_vertical_merged_cells_docx
 from docreader.utils.tempfile import TempDirContext, TempFileContext
 
 logger = logging.getLogger(__name__)
@@ -208,6 +209,9 @@ class DocParser(Docx2Parser):
         if not docx_content:
             raise RuntimeError("Failed to convert DOC to DOCX")
 
+        # The child parsers retain the DOC type, so their DOCX-only merge
+        # preprocessing does not run for these converted bytes.
+        docx_content = fill_vertical_merged_cells_docx(docx_content)
         logger.info("Successfully converted DOC to DOCX, using DocxParser")
         # Use existing DocxParser to parse the converted docx
         document = super(Docx2Parser, self).parse_into_text(docx_content)

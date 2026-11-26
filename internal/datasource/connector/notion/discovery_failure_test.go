@@ -48,6 +48,29 @@ func TestFetchIncrementalSearchFailure(t *testing.T) {
 	}
 }
 
+func TestFetchIncrementalSearchMissingCursor(t *testing.T) {
+	allowNotionTestServer(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/search" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"results":[],"has_more":true,"next_cursor":null}`))
+	}))
+	defer server.Close()
+	config := makeNotionConfig(&Config{APIKey: "test-token"}, server.URL, []string{"page-1"})
+	cursor := buildCursor(map[string]time.Time{"page-1": time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)})
+
+	items, next, err := NewConnector().FetchIncremental(context.Background(), config, cursor)
+	if err == nil {
+		t.Errorf("expected an error for incomplete search pagination")
+	}
+	if len(items) != 0 || next != nil {
+		t.Errorf("incomplete discovery must return no items or cursor, got items=%+v cursor=%+v", items, next)
+	}
+}
+
 func TestFetchIncrementalSuccessfulEmptySearch(t *testing.T) {
 	allowNotionTestServer(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

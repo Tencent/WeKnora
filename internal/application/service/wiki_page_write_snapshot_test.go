@@ -23,6 +23,7 @@ func newWikiSnapshotService(t *testing.T) (*wikiPageService, *types.WikiPage, *g
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
 	svc := NewWikiPageService(apprepo.NewWikiPageRepository(db), nil, nil, nil, nil, nil).(*wikiPageService)
+	seedWikiTestKnowledgeBase(t, db, "kb-snapshot", 7)
 	page, err := svc.CreatePage(context.Background(), &types.WikiPage{
 		TenantID: 7, KnowledgeBaseID: "kb-snapshot", Slug: "entity/example", Title: "Example",
 		PageType: types.WikiPageTypeEntity, Content: "Original body",

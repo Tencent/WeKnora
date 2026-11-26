@@ -50,6 +50,20 @@ class NativePDFSourceTest(unittest.TestCase):
         self.assertIn("1.5 mm", doc.content[source[0]["start"]:source[0]["end"]])
         self.assertIn(loc, [json.loads(b.locator_json) for b in source_blocks_to_proto(doc)])
 
+    def test_numeric_lines_keep_distinct_regions(self):
+        first = "A shipment weighs 20"
+        second = "30 units are in the next package"
+        doc = self.parse([{"lines": [(first, 60, 700), (second, 60, 400)]}])
+        boxed = [block for block in doc.source_blocks if block["locator"].get("bbox")]
+
+        self.assertEqual(len(boxed), 2)
+        self.assertEqual(
+            [doc.content[block["start"] : block["end"]].strip() for block in boxed],
+            [first, second],
+        )
+        self.assertLess(boxed[0]["locator"]["bbox"][1], 0.2)
+        self.assertGreater(boxed[1]["locator"]["bbox"][1], 0.45)
+
     def test_cropbox_and_rotation_use_displayed_page_coordinates(self):
         for rotation in (0, 90, 180, 270):
             with self.subTest(rotation=rotation):

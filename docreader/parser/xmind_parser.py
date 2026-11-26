@@ -139,20 +139,19 @@ def _parse_xml_sheets(payload: bytes) -> list[_Sheet]:
     return sheets
 
 
-def _read_content_entry(content: bytes) -> tuple[str, bytes]:
+def _read_content_entry(
+    content: bytes, formats: tuple[str, ...] = ("json", "xml")
+) -> tuple[str, bytes] | None:
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            try:
-                info = archive.getinfo("content.json")
-                content_format = "json"
-            except KeyError:
+            for content_format in formats:
                 try:
-                    info = archive.getinfo("content.xml")
-                except KeyError as exc:
-                    raise ValueError(
-                        "XMind archive is missing content.json or content.xml"
-                    ) from exc
-                content_format = "xml"
+                    info = archive.getinfo(f"content.{content_format}")
+                except KeyError:
+                    continue
+                break
+            else:
+                return None
 
             if info.flag_bits & 0x1:
                 raise ValueError("encrypted XMind content is not supported")
@@ -183,12 +182,15 @@ def _render_topic(topic: _Topic, depth: int) -> tuple[list[str], int, int]:
         lines.append(f"{'  ' * depth}- {_single_line_title(topic.title)}")
         topic_count = 1
         child_depth += 1
-        if topic.note:
-            for note_line in topic.note.splitlines():
-                normalized = note_line.strip()
-                quote = f"> {normalized}" if normalized else ">"
-                lines.append(f"{'  ' * child_depth}{quote}")
-            note_count = 1
+
+    # A blank title does not make a topic's note empty. Keep the same
+    # promoted depth used for its children, without inventing a topic title.
+    if topic.note:
+        for note_line in topic.note.splitlines():
+            normalized = note_line.strip()
+            quote = f"> {normalized}" if normalized else ">"
+            lines.append(f"{'  ' * child_depth}{quote}")
+        note_count = 1
 
     for child in topic.children:
         child_lines, child_topics, child_notes = _render_topic(child, child_depth)
@@ -227,13 +229,20 @@ class XMindParser(BaseParser):
     """Extract topic hierarchy and plain-text notes from XMind files."""
 
     def parse_into_text(self, content: bytes) -> Document:
-        content_format, payload = _read_content_entry(content)
+        entry = _read_content_entry(content)
+        if entry is None:
+            raise ValueError("XMind archive is missing content.json or content.xml")
+        content_format, payload = entry
 
         if content_format == "json":
             try:
                 sheets = _parse_json_sheets(payload)
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                raise ValueError("invalid XMind content.json") from exc
+                fallback = _read_content_entry(content, ("xml",))
+                if fallback is None:
+                    raise ValueError("invalid XMind content.json") from exc
+                content_format, payload = fallback
+                sheets = _parse_xml_sheets(payload)
         else:
             sheets = _parse_xml_sheets(payload)
 

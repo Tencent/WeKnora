@@ -94,6 +94,7 @@ func TestModelList_SourceFilter(t *testing.T) {
 	svc := &fakeListSvc{models: []sdk.Model{
 		{ID: "m1", Type: sdk.ModelTypeEmbedding, Source: sdk.ModelSourceLocal},
 		{ID: "m2", Type: sdk.ModelTypeKnowledgeQA, Source: sdk.ModelSourceOpenAI},
+		{ID: "m3", Source: sdk.ModelSourceRemote, Parameters: sdk.ModelParameters{"provider": "openai"}},
 	}}
 	if err := runList(context.Background(), &ListOptions{Source: "OpenAI", Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc); err != nil {
 		t.Fatalf("runList: %v", err)
@@ -104,15 +105,18 @@ func TestModelList_SourceFilter(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
 		t.Fatalf("parse: %v\n%s", err, out.String())
 	}
-	if len(env.Data) != 1 || env.Data[0].ID != "m2" {
-		t.Errorf("expected only m2 (openai), got %+v", env.Data)
+	if len(env.Data) != 2 {
+		t.Errorf("expected both OpenAI registrations, got %+v", env.Data)
 	}
 }
 
 // TestModelList_InvalidEnum: a typo'd --type / --source is rejected up front
 // (input.invalid_argument) instead of silently returning an empty set.
 func TestModelList_InvalidEnum(t *testing.T) {
-	for _, tc := range []struct{ name string; opts ListOptions }{
+	for _, tc := range []struct {
+		name string
+		opts ListOptions
+	}{
 		{"type", ListOptions{Type: "bogus", Limit: 30}},
 		{"source", ListOptions{Source: "bogus", Limit: 30}},
 	} {

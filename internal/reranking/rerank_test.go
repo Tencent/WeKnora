@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 
@@ -276,6 +277,27 @@ func TestRerank_fitsPassagesToModelLimit(t *testing.T) {
 	}
 	if len(res.Results) != 2 {
 		t.Fatalf("results = %d", len(res.Results))
+	}
+}
+
+func TestFitPassagesPreservesRuneAndInvalidUTF8Semantics(t *testing.T) {
+	t.Parallel()
+	passages := []string{"中🙂文", "前🙂", "\xff\xfe尾", "\xff", ""}
+	want := []string{"中🙂", "前🙂", "��", "\xff", ""}
+	fitPassages(context.Background(), passages, 2)
+	if !slices.Equal(passages, want) {
+		t.Fatalf("passages = %q, want %q", passages, want)
+	}
+}
+
+func BenchmarkFitPassagesLargeOCR(b *testing.B) {
+	ctx := context.Background()
+	content := "Document title\n" + strings.Repeat("扫描页面中的文本", 16384)
+	var passages [1]string
+	b.ReportAllocs()
+	for b.Loop() {
+		passages[0] = content
+		fitPassages(ctx, passages[:], 2048)
 	}
 }
 

@@ -95,37 +95,38 @@ export function resolveCitationChunkId(
 
   const doc = (attrs.doc || '').trim()
   const kbId = (attrs.kbId || '').trim()
-
-  if (doc) {
-    const byDoc = list.find(
-      (r) =>
-        docTitlesMatch(doc, r.knowledge_title || '') ||
-        docTitlesMatch(doc, r.knowledge_filename || ''),
-    )
-    if (byDoc?.id) return byDoc.id
-  }
+  const titleMatches = doc ? list.filter((r) =>
+    docTitlesMatch(doc, r.knowledge_title || '') ||
+    docTitlesMatch(doc, r.knowledge_filename || ''),
+  ) : []
+  const matchesDocumentHint = (ref: CitationKnowledgeRef) =>
+    !titleMatches.length || titleMatches.includes(ref)
 
   const faqMatch = raw.match(/^FAQ-(\d+)$/i)
   if (faqMatch) {
     const faqRefs = list.filter((r) => r.chunk_type === 'faq')
     const hit = faqRefs[parseInt(faqMatch[1], 10) - 1]
-    if (hit?.id) return hit.id
+    if (hit?.id && matchesDocumentHint(hit)) return hit.id
   }
 
   const docMatch = raw.match(/^DOC-(\d+)$/i)
   if (docMatch) {
     const docRefs = list.filter((r) => r.chunk_type !== 'faq')
     const hit = docRefs[parseInt(docMatch[1], 10) - 1]
-    if (hit?.id) return hit.id
+    if (hit?.id && matchesDocumentHint(hit)) return hit.id
   }
 
   const num = parseInt(raw, 10)
   if (!Number.isNaN(num) && String(num) === raw) {
     const byPos = list[num - 1]
-    if (byPos?.id) return byPos.id
+    if (byPos?.id && matchesDocumentHint(byPos)) return byPos.id
     const byChunkIndex = list.find((r) => r.chunk_index === num || r.chunk_index === num - 1)
-    if (byChunkIndex?.id) return byChunkIndex.id
+    if (byChunkIndex?.id && matchesDocumentHint(byChunkIndex)) return byChunkIndex.id
   }
+
+  // Multiple passages can share a document title. Prefer an explicit index
+  // within that document, but retain title recovery for inconsistent hints.
+  if (titleMatches[0]?.id) return titleMatches[0].id
 
   if (kbId) {
     const scoped = list.filter((r) => r.knowledge_base_id === kbId)
@@ -228,8 +229,27 @@ export function restoreCitationHtmlPlaceholders(html: string, htmlSnippets: stri
 /** Opening/closing fence for GFM fenced code blocks (up to 3 spaces indent). */
 const FENCED_CODE_DELIMITER_RE = /^ {0,3}(`{3,}|~{3,})(\s*\S.*)?\s*$/
 
+/** A line that is only a `$ … $` display-math delimiter (optionally with the body on the same line). */
+const DISPLAY_MATH_DELIMITER_RE = /^\s*\$\$.*\$\$\s*$|^\s*\$\$\s*$/
+
 function isFencedCodeDelimiterLine(line: string): boolean {
   return FENCED_CODE_DELIMITER_RE.test(line)
+}
+
+/**
+ * Display-math blocks must also keep the blank line before a citation tag.
+ *
+ * marked-katex-extension matches a block as `$\n…\n$` followed by a newline
+ * or end-of-input. Appending `<kb/>` to the closing `$` line breaks that
+ * condition, and the block degrades to raw LaTeX with throwOnError disabled.
+ */
+function isDisplayMathDelimiterLine(line: string): boolean {
+  return DISPLAY_MATH_DELIMITER_RE.test(line)
+}
+
+/** Lines whose trailing newline carries meaning and must not absorb a citation tag. */
+function isBlockDelimiterLine(line: string): boolean {
+  return isFencedCodeDelimiterLine(line) || isDisplayMathDelimiterLine(line)
 }
 
 /** Collapse newlines around <kb/> / <web/> so marked keeps citations inline. */
@@ -253,7 +273,7 @@ export function joinCitationTagsToPreviousLine(content: string): string {
   result = result.replace(/\n[ \t]*\n+([ \t]*<(?:kb|web)\b)/gi, (match, kbStart, offset, full) => {
     const before = full.slice(0, offset)
     const lastLine = before.split('\n').filter((line: string) => line.trim()).pop() || ''
-    if (isFencedCodeDelimiterLine(lastLine)) {
+    if (isBlockDelimiterLine(lastLine)) {
       return `\n\n${kbStart}`
     }
     return ` ${kbStart.trimStart()}`
@@ -267,7 +287,7 @@ export function joinCitationTagsToPreviousLine(content: string): string {
       // partial line (e.g. ``` captured as ``), which would skip the fence check.
       const lineStart = full.lastIndexOf('\n', offset - 1) + 1
       const fullPrevLine = full.slice(lineStart, offset + beforePart.length)
-      if (isFencedCodeDelimiterLine(fullPrevLine)) {
+      if (isBlockDelimiterLine(fullPrevLine)) {
         return match
       }
       return `${beforePart} ${kbStart.trimStart()}`

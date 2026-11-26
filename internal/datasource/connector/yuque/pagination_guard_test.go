@@ -106,6 +106,19 @@ func TestListBookDocs_StopsAtMetaTotal(t *testing.T) {
 		"the walk must stop on the page that reaches meta.total")
 }
 
+func TestListBookDocs_RejectsRepeatedPageAtMetaTotal(t *testing.T) {
+	resp := v2DocListResponse{Data: fullDocPage(1, defaultPageSize)}
+	resp.Meta.Total = 2 * defaultPageSize
+	server, requests := alwaysFullPageServer(t, resp)
+
+	c := newClient(&Config{APIToken: "tok", BaseURL: server.URL})
+	docs, err := c.ListBookDocs(context.Background(), 4242)
+
+	require.ErrorContains(t, err, "repeated page")
+	require.Empty(t, docs, "a stalled walk must not hand back a partial listing")
+	require.EqualValues(t, 2, requests.Load())
+}
+
 // A full page whose first id repeats the previous page means the offset walk is
 // not making progress. Each endpoint must report that instead of appending the
 // same page forever.

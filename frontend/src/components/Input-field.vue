@@ -26,6 +26,7 @@ import HostApprovalModeSelect from './HostApprovalModeSelect.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
 import { type ModelConfig } from '@/api/model';
+import { selectInitialModelId } from '@/utils/modelDefaults';
 import {
   formatContextWindow,
   isDefaultContextWindow,
@@ -693,6 +694,18 @@ const hostApprovalModeVisible = computed(() =>
   !props.embeddedMode && !!props.sessionId && deploymentCapabilities.isSupported('settings.sandbox.host'),
 );
 
+// A transcript belongs to the composer context in which it was recorded, not
+// whichever session/agent happens to be selected when ASR finishes.
+watch(() => [
+  props.sessionId, selectedAgentId.value, settingsStore.selectedAgentSourceTenantId,
+  mentionAuth.user?.id, mentionAuth.selectedTenantId, mentionAuth.tenant?.id,
+  showVoiceButton.value,
+], () => {
+  voiceInput.cancel();
+  voiceHold.release();
+  voiceInsertRange = null;
+}, { flush: 'sync' });
+
 const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
@@ -864,7 +877,6 @@ const selectedModelId = computed({
   get: () => settingsStore.conversationModels.selectedChatModelId || '',
   set: (val: string) => settingsStore.updateConversationModels({ selectedChatModelId: val })
 });
-const modelsLoading = ref(false);
 const showModelSelector = ref(false);
 const modelButtonRef = ref<HTMLElement>();
 const modelDropdownStyle = ref<Record<string, string>>({});
@@ -1147,39 +1159,39 @@ const initChatModelSelection = () => {
     selectedChatModelId: initialSelection,
     rerankModelId: '',
   });
-  if (!selectedModelId.value) {
-    selectedModelId.value = initialSelection;
-  }
   ensureModelSelection();
 };
 
 const loadChatModels = async (force = false) => {
-  if (modelsLoading.value) return;
-  modelsLoading.value = true;
   try {
     await chatResources.ensureChatModels(force);
-    if (!props.embeddedMode) ensureModelSelection();
+    ensureModelSelection();
   } catch (error) {
     console.error('Failed to load chat models:', error);
     chatResources.invalidate('models');
-  } finally {
-    modelsLoading.value = false;
   }
 };
 
 const ensureModelSelection = () => {
-  if (selectedModelId.value) {
-    return;
-  }
+  // An empty list is authoritative only after a successful load. Shared agents
+  // may name a model that is intentionally absent from the local catalog.
+  if (props.embeddedMode || !chatResources.isLoaded('models')) return;
+  const shared = !!settingsStore.selectedAgentSourceTenantId;
+  if (shared && !selectedSharedAgent.value) return;
+  const isAvailable = (id: string | null | undefined) =>
+    !!id && ((shared && id === agentModelId.value) || availableModels.value.some(model => model.id === id));
   const lastPick = readLastChatModelID();
-  if (lastPick) {
-    selectedModelId.value = lastPick;
-    return;
-  }
-  if (availableModels.value.length > 0) {
-    selectedModelId.value = availableModels.value[0].id || '';
+  if (lastPick && !isAvailable(lastPick)) writeLastChatModelID('');
+  if (isAvailable(selectedModelId.value)) return;
+  const replacement = [lastPick, agentModelId.value].find(isAvailable)
+    || selectInitialModelId(availableModels.value, 'KnowledgeQA') || '';
+  if (replacement !== selectedModelId.value) {
+    settingsStore.updateConversationModels({ selectedChatModelId: replacement, summaryModelId: replacement });
   }
 };
+
+// Settings can replace the catalog while this composer is already mounted.
+watch(availableModels, ensureModelSelection);
 
 // 智能体身份或其数据到位时，把对话模型同步到智能体配置的 model_id。
 // 修复场景：导航离开再返回时，initChatModelSelection 会用 localStorage 的 lastPick
@@ -1189,7 +1201,11 @@ const ensureModelSelection = () => {
 watch(
   [selectedAgentId, () => settingsStore.selectedAgentSourceTenantId, agentModelId],
   ([, sourceTenantId, newModelId]) => {
-    if (props.embeddedMode || !newModelId || newModelId.trim() === '') return;
+    if (props.embeddedMode) return;
+    if (!newModelId) {
+      ensureModelSelection();
+      return;
+    }
 
     const lastPick = readLastChatModelID();
     const isSharedAgent = !!sourceTenantId;
@@ -1199,6 +1215,7 @@ watch(
       lastPick &&
       selectedModelId.value === lastPick &&
       lastPick !== newModelId &&
+      (!chatResources.isLoaded('models') || availableModels.value.some(model => model.id === lastPick)) &&
       (!isSharedAgent || agentModelInList)
     ) {
       return;
@@ -1207,6 +1224,7 @@ watch(
     if (newModelId !== selectedModelId.value) {
       selectedModelId.value = newModelId;
     }
+    ensureModelSelection();
   },
   { immediate: true }
 );
@@ -1231,7 +1249,6 @@ const handleModelChange = (value: string | number | Array<string | number> | und
     return;
   }
   if (val === '__add_model__') {
-    if (!props.embeddedMode) selectedModelId.value = readLastChatModelID();
     handleGoToConversationModels();
     return;
   }
@@ -2171,14 +2188,13 @@ onMounted(() => {
     settingsStore.addKnowledgeBase(kbId);
   }
 
-  const prefill = menuStore.consumePrefillQuery();
-  if (prefill) {
-    query.value = prefill;
-    nextTick(() => {
-      const textarea = getTextareaEl();
-      if (textarea) textarea.focus();
-    });
-  }
+  // Searches can target this already-mounted composer.
+  watch(() => menuStore.prefillQuery, (prefill) => {
+    if (!prefill || route.path !== '/platform/creatChat') return;
+    query.value = menuStore.consumePrefillQuery();
+    // Let the closing search panel finish its autofocus before taking focus.
+    requestAnimationFrame(() => { void focusInput(); });
+  }, { immediate: true });
 
   // 监听点击外部关闭下拉菜单
   document.addEventListener('click', closeAgentModeSelector);
@@ -2400,6 +2416,7 @@ const createSession = async (
   const imageFiles = uploadedImages.value.map(img => img.file);
   const attachmentFiles = uploadedAttachments.value;
 
+  ensureModelSelection();
   emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles, options);
 
   // Clean up image previews
@@ -2600,6 +2617,7 @@ const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) =>
       selectedModelId.value = lastPick;
     }
   }
+  ensureModelSelection();
 
   showAgentModeSelector.value = false;
 

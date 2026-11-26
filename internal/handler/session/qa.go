@@ -773,6 +773,11 @@ type sseStreamContext struct {
 	// mode releases on completion (the pipeline returns before the stream
 	// finishes); agent mode releases when AgentQA returns.
 	releaseTurn func()
+	// turnUsage holds the provider's token usage carried on the stream's
+	// final answer event, so completeQuickAnswerTurn can report it on the
+	// complete event and persist it with the message (issue #3865). Nil for
+	// turns that never received usage (stop, failure, usage-less providers).
+	turnUsage *types.TokenUsage
 }
 
 // setupSSEStream sets up the SSE streaming context
@@ -938,8 +943,10 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	}
 
 	// Validate request parameters. A request needs a text query, a query
-	// image, or both: an image alone searches by visual similarity.
-	if request.Query == "" && request.QueryImage == "" {
+	// image, or both: an image alone searches by visual similarity. Whitespace
+	// is not text, and a whitespace-only query with no image used to run a
+	// search for nothing.
+	if strings.TrimSpace(request.Query) == "" && strings.TrimSpace(request.QueryImage) == "" {
 		logger.Error(ctx, "Query content is empty")
 		c.Error(errors.NewBadRequestError("Query content cannot be empty"))
 		return
@@ -1001,6 +1008,14 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	}
 	opts.QueryImage = queryImage
 	opts.QueryImageMediaType = queryImageType
+	// An image query has no keyword form: recall runs in the image vector
+	// space the index stored image chunks in, so with vector match disabled
+	// this request can never return a result.
+	if queryImage != nil && opts.DisableVectorMatch {
+		_ = c.Error(errors.NewBadRequestError(
+			"query_image matches by vector similarity; disable_vector_match leaves it nothing to search"))
+		return
+	}
 
 	logger.Infof(
 		ctx,
@@ -1055,7 +1070,7 @@ func decodeQueryImage(raw string) ([]byte, string, error) {
 	if raw == "" {
 		return nil, "", nil
 	}
-	mediaType := ""
+	declared := ""
 	if strings.HasPrefix(raw, "data:") {
 		header, payload, ok := strings.Cut(raw, ",")
 		if !ok {
@@ -1064,7 +1079,7 @@ func decodeQueryImage(raw string) ([]byte, string, error) {
 		if !strings.HasSuffix(header, ";base64") {
 			return nil, "", fmt.Errorf("query_image data URI must be base64 encoded")
 		}
-		mediaType = strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64")
+		declared = strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64")
 		raw = payload
 	}
 	decoded, err := base64.StdEncoding.DecodeString(raw)
@@ -1077,13 +1092,28 @@ func decodeQueryImage(raw string) ([]byte, string, error) {
 	if len(decoded) > maxQueryImageBytes {
 		return nil, "", fmt.Errorf("query_image exceeds %d bytes", maxQueryImageBytes)
 	}
-	if mediaType == "" {
-		mediaType = http.DetectContentType(decoded)
+	// The bytes decide, not the declaration: whatever the label says, the
+	// embedder receives these bytes as this type, and a text payload labelled
+	// image/png used to pass this gate only to fail downstream as a 500. A
+	// declaration that disagrees with the content is a client bug worth
+	// naming here, not a label to quietly adopt.
+	mediaType := http.DetectContentType(decoded)
+	if declared != "" && normalizeImageMediaType(declared) != mediaType {
+		return nil, "", fmt.Errorf("query_image is declared as %q but its content is %s", declared, mediaType)
 	}
 	if _, ok := queryImageMediaTypes[mediaType]; !ok {
 		return nil, "", fmt.Errorf("query_image must be one of png, jpeg, webp or gif, got %q", mediaType)
 	}
 	return decoded, mediaType, nil
+}
+
+// normalizeImageMediaType folds the common "image/jpg" spelling into the
+// registered name so a harmless alias does not read as a mismatch.
+func normalizeImageMediaType(mediaType string) string {
+	if mediaType == "image/jpg" {
+		return "image/jpeg"
+	}
+	return mediaType
 }
 
 // knowledgeSearchOptions validates the retrieval overrides of a
@@ -1484,8 +1514,6 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	// Normal mode: register completion handler on EventAgentFinalAnswer
 	// (Agent mode handles completion in the defer block instead)
 	if mode == qaModeNormal {
-		var completionHandled bool
-
 		// Persist the pipeline's retrieval/attachment stages so a reloaded
 		// conversation redraws the timeline it showed while streaming, including
 		// turns that searched and cited nothing.
@@ -1504,36 +1532,15 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			return nil
 		})
 
-		streamCtx.eventBus.On(event.EventAgentFinalAnswer, func(ctx context.Context, evt event.Event) error {
-			data, ok := evt.Data.(event.AgentFinalAnswerData)
-			if !ok {
-				return nil
-			}
-			streamCtx.assistantMessage.Content += data.Content
-			if data.IsFallback {
-				streamCtx.assistantMessage.IsFallback = true
-			}
-			if data.Truncated {
-				markQuickAnswerTruncated(streamCtx.assistantMessage)
-			}
-			if data.Done {
-				if completionHandled {
-					return nil
-				}
-				completionHandled = true
-
-				logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
-				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
-				h.completeQuickAnswerTurn(updateCtx, streamCtx, reqCtx.query, reqCtx.userMessageID)
-			}
-			return nil
-		})
+		completionHandled := h.registerQuickAnswerCompletionHandler(
+			streamCtx, sessionID, reqCtx.query, reqCtx.userMessageID, reqCtx.session.TenantID,
+		)
 
 		// A failed pipeline never streams EventAgentFinalAnswer with Done=true,
 		// so the turn would otherwise end with an empty, incomplete assistant
 		// row: the live UI shows the error event, but a refresh renders a blank
 		// bubble and the SSE stream never closes (issue #4145).
-		h.registerQuickAnswerFailureHandler(streamCtx, &completionHandled, reqCtx.session.TenantID)
+		h.registerQuickAnswerFailureHandler(streamCtx, completionHandled, reqCtx.session.TenantID)
 	}
 
 	// Execute QA asynchronously
@@ -2130,13 +2137,21 @@ func (h *Handler) completeQuickAnswerTurn(
 	if streamCtx.eventBus != nil {
 		// MessageID is what handleComplete keys on. Leave FinalAnswer empty:
 		// KnowledgeQA already accumulated the answer on the message, and
-		// handleComplete would append FinalAnswer a second time.
+		// handleComplete would append FinalAnswer a second time. Usage rides
+		// along when the stream's final answer event carried it: handleComplete
+		// both persists it on the message and reports it in the complete event.
+		// Only set it when present — a typed-nil pointer would travel as a
+		// non-nil interface and read as "usage reported" downstream.
+		completeData := event.AgentCompleteData{
+			MessageID: streamCtx.assistantMessage.ID,
+		}
+		if streamCtx.turnUsage != nil {
+			completeData.Usage = streamCtx.turnUsage
+		}
 		_ = streamCtx.eventBus.Emit(ctx, event.Event{
 			Type:      event.EventAgentComplete,
 			SessionID: streamCtx.assistantMessage.SessionID,
-			Data: event.AgentCompleteData{
-				MessageID: streamCtx.assistantMessage.ID,
-			},
+			Data:      completeData,
 		})
 	}
 	h.completeStreamAssistantMessage(ctx, streamCtx, query, userMessageID)
@@ -2148,6 +2163,46 @@ func (h *Handler) completeQuickAnswerTurn(
 // quickAnswerFailureContent is persisted when a pipeline error carries no
 // message, so the failed turn does not save an empty answer.
 const quickAnswerFailureContent = "Failed to generate the answer"
+
+// registerQuickAnswerCompletionHandler completes the KnowledgeQA turn when the
+// stream's final answer event arrives, accumulating answer text, fallback and
+// truncation flags onto the assistant message and forwarding the provider's
+// token usage (issue #3865) to completeQuickAnswerTurn. Returns the shared
+// completion flag the failure handler must honor so a turn cannot complete
+// twice.
+func (h *Handler) registerQuickAnswerCompletionHandler(
+	streamCtx *sseStreamContext, sessionID, query, userMessageID string, sessionTenantID uint64,
+) *bool {
+	completionHandled := new(bool)
+	streamCtx.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.AgentFinalAnswerData)
+		if !ok {
+			return nil
+		}
+		streamCtx.assistantMessage.Content += data.Content
+		if data.IsFallback {
+			streamCtx.assistantMessage.IsFallback = true
+		}
+		if data.Truncated {
+			markQuickAnswerTruncated(streamCtx.assistantMessage)
+		}
+		if usage, ok := data.Usage.(*types.TokenUsage); ok && usage != nil {
+			streamCtx.turnUsage = usage
+		}
+		if data.Done {
+			if *completionHandled {
+				return nil
+			}
+			*completionHandled = true
+
+			logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
+			updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, sessionTenantID)
+			h.completeQuickAnswerTurn(updateCtx, streamCtx, query, userMessageID)
+		}
+		return nil
+	})
+	return completionHandled
+}
 
 // registerQuickAnswerFailureHandler completes and persists the assistant
 // message when the quick-answer pipeline reports EventError. The empty query
