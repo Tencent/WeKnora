@@ -25,6 +25,12 @@ func (s wikiReparsePages) ListSlugsBySourceRef(context.Context, string, string) 
 	return s.slugs, nil
 }
 
+func (wikiReparsePages) ListSummariesByKnowledgeIDs(
+	context.Context, string, []string,
+) (map[string]string, error) {
+	return map[string]string{"kn-1": "Prior certification requirements."}, nil
+}
+
 func (wikiReparseChunks) ListChunksByKnowledgeIDAndTypes(
 	context.Context, uint64, string, []types.ChunkType,
 ) ([]*types.Chunk, error) {
@@ -35,19 +41,24 @@ func (wikiReparseChunks) ListChunksByKnowledgeIDAndTypes(
 // Route by prompt purpose because summary and citation calls run concurrently.
 type wikiReparseModel struct {
 	templateCaptureChatModel
+	candidates   string
+	summaryLinks string
 }
 
-func (*wikiReparseModel) Chat(
+func (m *wikiReparseModel) Chat(
 	ctx context.Context, _ []chat.Message, _ *chat.ChatOptions,
 ) (*types.ChatResponse, error) {
 	purpose, _ := types.LLMCallMetadataFromContext(ctx)
 	var content string
 	switch purpose {
 	case "wiki_candidate_slug":
-		content = `{"entities": [], "concepts": []}`
+		content = m.candidates
+		if content == "" {
+			content = `{"entities": [], "concepts": []}`
+		}
 	case "wiki_summary":
 		content = "SUMMARY: Updated certification requirements\n# Certification\n\n" +
-			"PMP requires experience and an examination."
+			"PMP requires experience and an examination." + m.summaryLinks
 	case "wiki_chunk_citation":
 		content = `{"citations": {}, "new_slugs": []}`
 	default:
@@ -160,6 +171,79 @@ func TestWikiSourceDeletionStillReconcilesPages(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				require.Equal(t, types.StringArray{"kn-2"}, after.SourceRefs)
+			}
+		})
+	}
+}
+
+func TestWikiIngestPageLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		limit   int
+		pages   []string
+		retract bool
+	}{
+		{name: "unlimited", pages: []string{"summary/kn-1", "entity/pmp", "entity/zeta-controls"}, retract: true},
+		{name: "summary only", limit: 1, pages: []string{"summary/kn-1"}},
+		{name: "one entity", limit: 2, pages: []string{"summary/kn-1", "entity/pmp"}, retract: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			pageSvc, page := newWikiWriteGuardStore(t, "# PMP\n\nPrior certification requirements.")
+			svc := &wikiIngestService{
+				wikiService: wikiReparsePages{WikiPageService: pageSvc, slugs: []string{page.Slug}},
+				chunkRepo:   &wikiReparseChunks{},
+				knowledgeSvc: &wikiKnowledgeLookupStub{lookup: func(context.Context, string) (*types.Knowledge, error) {
+					return &types.Knowledge{ID: "kn-1", Title: "Certification"}, nil
+				}},
+			}
+			batchCtx := svc.newWikiBatchContext(page.KnowledgeBaseID, &types.WikiConfig{
+				MaxPagesPerIngest: tc.limit,
+			})
+
+			result, updates, err := svc.mapOneDocument(ctx,
+				&wikiReparseModel{
+					candidates: `{
+						"entities": [
+							{"slug": "entity/zeta-controls", "name": "Zeta Controls"},
+							{"slug": "entity/pmp", "name": "PMP"}
+						],
+						"concepts": []
+					}`,
+					summaryLinks: " [[entity/pmp|PMP]] and [[entity/zeta-controls|Zeta Controls]].",
+				},
+				WikiIngestPayload{TenantID: 1, KnowledgeBaseID: page.KnowledgeBaseID},
+				WikiPendingOp{KnowledgeID: "kn-1", Op: WikiOpIngest}, batchCtx)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			var reported, additions, retractions []string
+			var summary string
+			for _, ref := range result.Pages {
+				reported = append(reported, ref.Slug)
+			}
+			for _, update := range updates {
+				if update.Type == "retract" {
+					retractions = append(retractions, update.Slug)
+					require.Equal(t, "Prior certification requirements.", update.RetractDocContent)
+					continue
+				}
+				additions = append(additions, update.Slug)
+				if update.Type == types.WikiPageTypeSummary {
+					summary = update.SummaryBody
+				}
+			}
+			require.ElementsMatch(t, tc.pages, additions)
+			require.ElementsMatch(t, tc.pages, reported)
+			if tc.retract {
+				require.Equal(t, []string{page.Slug}, retractions)
+			} else {
+				require.Empty(t, retractions)
+			}
+			require.Contains(t, summary, "[[entity/pmp|PMP]]", "preserve links to existing pages")
+			if tc.limit > 0 {
+				require.Contains(t, summary, "Zeta Controls")
+				require.NotContains(t, summary, "[[entity/zeta-controls")
 			}
 		})
 	}
