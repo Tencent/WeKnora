@@ -145,7 +145,7 @@ func (s *wikiPageService) prepareWikiPageForCreate(ctx context.Context, page *ty
 	// Parse outbound links from content
 	outLinks, err := s.parsePageOutLinks(ctx, page)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	page.OutLinks = outLinks
 	if err := s.applyFolderToPage(ctx, page); err != nil {
