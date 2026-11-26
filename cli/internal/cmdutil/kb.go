@@ -63,8 +63,9 @@ func ResolveKBNameToID(ctx context.Context, lister KBLister, name string) (strin
 	case 0:
 		return "", NewError(CodeKBNotFound, fmt.Sprintf("knowledge base not found: %s", name))
 	default:
-		return "", NewError(CodeInputInvalidArgument,
-			fmt.Sprintf("knowledge base name %q matches %d knowledge bases — pass the kb id instead", name, len(matches))).
+		msg := fmt.Sprintf("knowledge base name %q matches %d knowledge bases — pass the kb id instead",
+			name, len(matches))
+		return "", NewError(CodeInputInvalidArgument, msg).
 			WithHint("`weknora kb list` shows the ids")
 	}
 }
