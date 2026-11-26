@@ -360,7 +360,14 @@ func projectSkillFileContent(rel string, body []byte) *SkillFileContent {
 		}
 	}
 	if len(body) > skillFileTextLimit {
-		out.Content = string(body[:skillFileTextLimit])
+		// Cut in the original byte slice: converting the whole file to a string
+		// first copies it, so a 32 MiB text file would allocate 32 MiB for a
+		// 1 MiB preview.
+		end := skillFileTextLimit
+		for end > 0 && !utf8.RuneStart(body[end]) {
+			end--
+		}
+		out.Content = string(body[:end])
 		out.Truncated = true
 		return out
 	}

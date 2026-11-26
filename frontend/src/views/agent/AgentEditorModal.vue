@@ -3858,10 +3858,9 @@ const initMcpSelectionMode = () => {
     // 有指定 MCP 服务
     mcpSelectionMode.value = 'selected';
   } else {
-    // Legacy configs with no mode run with every enabled MCP service for the
-    // owner (registerMCPTools treats "" as "all"). Show that actual runtime
-    // behaviour so the editor matches what the agent can call.
-    mcpSelectionMode.value = 'all';
+    // Empty modes disable MCP at runtime. Reflect that state instead of showing
+    // services the agent cannot call until the config is explicitly saved.
+    mcpSelectionMode.value = 'none';
   }
 };
 

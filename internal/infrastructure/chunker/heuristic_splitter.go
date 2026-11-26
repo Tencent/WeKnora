@@ -160,9 +160,13 @@ func findHeuristicBoundaries(text string, langs []string) []boundary {
 
 	// Excessive blank blocks (\n{3,}). Match at the *start* of the run so we
 	// drop into the next paragraph cleanly.
+	// Matches are ordered and non-overlapping. Count only the bytes since
+	// the previous match, rather than rescanning the full prefix per paragraph.
+	bytePos, runePos := 0, 0
 	for _, idx := range ExcessiveBlanksPattern.FindAllStringIndex(text, -1) {
-		runeStart := utf8.RuneCountInString(text[:idx[1]])
-		bounds = append(bounds, boundary{runeStart: runeStart, priority: PrioBlankBlock})
+		runePos += utf8.RuneCountInString(text[bytePos:idx[1]])
+		bytePos = idx[1]
+		bounds = append(bounds, boundary{runeStart: runePos, priority: PrioBlankBlock})
 	}
 
 	if len(bounds) == 0 {
@@ -292,14 +296,11 @@ func applyOverlapAligned(runes []rune, curEnd, overlap int, bounds []boundary) i
 	}
 
 	// Prefer a semantic boundary strictly inside the window.
-	bestBound := -1
-	for _, b := range bounds {
-		if b.runeStart >= windowStart && b.runeStart < curEnd && b.runeStart > bestBound {
-			bestBound = b.runeStart
-		}
-	}
-	if bestBound >= 0 {
-		return bestBound
+	// Boundaries are sorted. The last one before curEnd is the nearest
+	// candidate; if it is outside the window, every earlier one is too.
+	idx := sort.Search(len(bounds), func(i int) bool { return bounds[i].runeStart >= curEnd }) - 1
+	if idx >= 0 && bounds[idx].runeStart >= windowStart {
+		return bounds[idx].runeStart
 	}
 
 	// Fallback: scan backwards from `target` to the previous newline, but

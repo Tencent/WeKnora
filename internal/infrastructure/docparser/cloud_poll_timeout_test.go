@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 func TestPaddleOCRVLCloudTimeoutConfig(t *testing.T) {
@@ -159,4 +162,69 @@ func TestWeKnoraCloudPollStopsAtConfiguredTimeout(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The submit POST carries the whole file in one multipart body, so the
+// configured budget must bound it too; the old fixed 60s client ceiling failed
+// every scan larger than ~100MB (#5589).
+func TestPaddleOCRVLCloudSubmitStopsAtConfiguredTimeout(t *testing.T) {
+	allowLoopbackSSRF(t)
+	t.Setenv("WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT", "200ms")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(2 * time.Second) // slower than the configured budget
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"code":0,"data":{"jobId":"job-1"}}`)
+	}))
+	defer server.Close()
+
+	reader := NewPaddleOCRVLCloudReader(nil)
+	reader.baseURL = server.URL
+
+	// Watchdog: with the old hardcoded 60s client the goroutine would still be
+	// waiting when this fires.
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		_, submitErr := reader.submitJob(context.Background(), &types.ReadRequest{
+			FileName: "big.pdf",
+			FileType: ".pdf",
+		}, []byte("%PDF-1.7 big scan"))
+		done <- submitErr
+	}()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		// The transport's deadline wording varies by platform and code path
+		// ("context deadline exceeded", "net/http: request canceled
+		// (Client.Timeout exceeded ...)", or a mix), so assert the wrap
+		// prefix plus that the error is a net timeout, not exact text.
+		assert.Contains(t, err.Error(), "HTTP request")
+		var netErr net.Error
+		require.ErrorAs(t, err, &netErr)
+		assert.True(t, netErr.Timeout())
+		assert.Less(t, time.Since(start), 5*time.Second)
+	case <-time.After(5 * time.Second):
+		t.Fatalf("submit ignored WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT")
+	}
+}
+
+func TestPaddleOCRVLCloudSubmitSucceedsWithinConfiguredTimeout(t *testing.T) {
+	allowLoopbackSSRF(t)
+	t.Setenv("WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT", "10s")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"code":0,"data":{"jobId":"job-42"}}`)
+	}))
+	defer server.Close()
+
+	reader := NewPaddleOCRVLCloudReader(nil)
+	reader.baseURL = server.URL
+
+	jobID, err := reader.submitJob(context.Background(), &types.ReadRequest{
+		FileName: "small.pdf",
+		FileType: ".pdf",
+	}, []byte("%PDF-1.7"))
+	require.NoError(t, err)
+	assert.Equal(t, "job-42", jobID)
 }

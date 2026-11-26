@@ -166,20 +166,29 @@ func (s *mcpServiceService) commitMCPMetadata(
 
 // PersistMCPMetadata writes a complete directory already listed on an authorized
 // connection. It is how a chatting OAuth user stores their own snapshot without
-// an admin settings refresh.
+// an admin settings refresh. The server identity is stored as well, so a later
+// connection to a different server build can be recognized. listedAt is when
+// the listing started, as a settings refresh records it, so the two never
+// replace a directory that was listed later; zero means now.
 func (s *mcpServiceService) PersistMCPMetadata(
 	ctx context.Context,
 	tenant uint64,
 	id string,
 	listed []*types.MCPTool,
 	instructions string,
+	server types.MCPServerInfo,
+	listedAt time.Time,
 ) error {
 	service, principal, _, err := s.loadServiceForMetadata(ctx, tenant, id)
 	if err != nil {
 		return err
 	}
+	if listedAt.IsZero() {
+		listedAt = time.Now()
+	}
 	_, err = s.commitMCPMetadata(
-		ctx, tenant, service, principal, listed, instructions, "", "", "", time.Now().UTC(),
+		ctx, tenant, service, principal, listed, instructions,
+		server.Name, server.Version, server.Description, listedAt.UTC(),
 	)
 	return err
 }

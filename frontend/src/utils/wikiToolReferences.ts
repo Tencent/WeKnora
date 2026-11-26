@@ -16,7 +16,7 @@ function extractTag(value: string, tag: string): string {
 }
 
 function parseWikiLink(value: string): { slug: string; title: string } {
-  const match = String(value || '').match(/\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/)
+  const match = String(value || '').trim().match(/^\[\[([^|\]]+)(?:\|(.+))?\]\]$/s)
   const slug = match?.[1]?.trim() || ''
   return {
     slug,

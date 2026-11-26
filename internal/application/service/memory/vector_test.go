@@ -2,6 +2,7 @@ package memory
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -234,6 +235,35 @@ func TestEmbeddingRoundTripsAndScoresItself(t *testing.T) {
 	decoded := types.DecodeEmbedding(types.EncodeEmbedding(vector))
 	require.Equal(t, vector, decoded)
 	require.InDelta(t, 1.0, types.CosineSimilarity(vector, decoded), 1e-6)
+}
+
+func TestInvalidEmbeddingsAreNotPersisted(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		vector []float32
+	}{
+		{name: "nan", vector: []float32{1, float32(math.NaN()), 0}},
+		{name: "positive infinity", vector: []float32{1, float32(math.Inf(1)), 0}},
+		{name: "negative infinity", vector: []float32{1, float32(math.Inf(-1)), 0}},
+		{name: "zero norm", vector: []float32{0, 0, 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, tenantRepo, models := newVectorHarness(t)
+			ctx := enabledCtx(t, tenantRepo, 1, "alice")
+			scope := scopeFor(t, ctx)
+			models.embedder.vectors["invalid-vector"] = tc.vector
+
+			item, err := svc.Remember(ctx, types.MemoryItem{
+				Kind: types.MemoryKindFact, Topic: "向量", Content: "invalid-vector",
+			})
+			require.NoError(t, err)
+
+			vectors, err := svc.repo.ItemEmbeddings(ctx, scope, []string{item.ID}, "embed-1")
+			require.NoError(t, err)
+			require.Empty(t, vectors,
+				"a vector that cosine distance cannot compare must not enter persistent recall state")
+		})
+	}
 }
 
 // Vectors from different models are not comparable. Scoring them anyway would

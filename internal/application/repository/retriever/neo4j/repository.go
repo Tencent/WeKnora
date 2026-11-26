@@ -3,6 +3,7 @@ package neo4j
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -75,12 +76,16 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		// Node import query
 		node_import_query := `
 			UNWIND $data AS row
+			WITH row ORDER BY row.name ASC, row.knowledge_id ASC
 			CALL apoc.merge.node(row.labels, {name: row.name, kg: row.knowledge_id}, row.props, {}) YIELD node
 			SET node.chunks = apoc.coll.union(node.chunks, row.chunks)
 			RETURN distinct 'done' AS result
 		`
 		nodeData := []map[string]interface{}{}
 		for _, node := range graph.Node {
+			if node == nil {
+				continue
+			}
 			nodeData = append(nodeData, map[string]interface{}{
 				"name":         node.Name,
 				"knowledge_id": namespace.Knowledge,
@@ -89,6 +94,14 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 				"labels":       n.Labels(namespace),
 			})
 		}
+		// Neo4j serializes merges that touch the same entities. Concurrent
+		// chunks receive model output in different orders, so A-then-B and
+		// B-then-A transactions can deadlock. Sort by merge identity to use
+		// one lock order across all workers.
+		sort.Slice(nodeData, func(i, j int) bool {
+			return nodeData[i]["name"].(string) < nodeData[j]["name"].(string)
+		})
+
 		// Keep driver errors recognizable by ExecuteWrite's bounded retry.
 		// Consume also catches failures reported while pulling the result.
 		result, err := tx.Run(ctx, node_import_query, map[string]interface{}{"data": nodeData})
@@ -102,13 +115,29 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		// Relationship import query
 		rel_import_query := `
 			UNWIND $data AS row
-			CALL apoc.merge.node(row.source_labels, {name: row.source, kg: row.knowledge_id}, {}, {}) YIELD node as source
-			CALL apoc.merge.node(row.target_labels, {name: row.target, kg: row.knowledge_id}, {}, {}) YIELD node as target
+			WITH row,
+			     CASE WHEN row.source <= row.target THEN row.source ELSE row.target END AS first_name,
+			     CASE WHEN row.source <= row.target THEN row.source_labels ELSE row.target_labels END AS first_labels,
+			     CASE WHEN row.source <= row.target THEN row.target ELSE row.source END AS second_name,
+			     CASE WHEN row.source <= row.target THEN row.target_labels ELSE row.source_labels END AS second_labels
+			ORDER BY first_name ASC, second_name ASC, row.type ASC
+			CALL apoc.merge.node(
+				first_labels, {name: first_name, kg: row.knowledge_id}, {}, {}
+			) YIELD node AS first_node
+			CALL apoc.merge.node(
+				second_labels, {name: second_name, kg: row.knowledge_id}, {}, {}
+			) YIELD node AS second_node
+			WITH row, first_name, first_node, second_node,
+			     CASE WHEN row.source = first_name THEN first_node ELSE second_node END AS source,
+			     CASE WHEN row.target = first_name THEN first_node ELSE second_node END AS target
 			CALL apoc.merge.relationship(source, row.type, {}, row.attributes, target) YIELD rel
 			RETURN distinct 'done'
 		`
 		relData := []map[string]interface{}{}
 		for _, rel := range graph.Relation {
+			if rel == nil {
+				continue
+			}
 			relData = append(relData, map[string]interface{}{
 				"source":        rel.Node1,
 				"target":        rel.Node2,
@@ -118,6 +147,11 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 				"target_labels": n.Labels(namespace),
 			})
 		}
+		// The relationship statement locks source then target before merging
+		// the edge. Sort the full identity tuple so every worker sees the same
+		// endpoint and edge lock order regardless of model output order.
+		sortRelationRowsForLockOrder(relData)
+
 		result, err = tx.Run(ctx, rel_import_query, map[string]interface{}{"data": relData})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create relationships: %w", err)
@@ -132,6 +166,44 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		return err
 	}
 	return nil
+}
+
+// sortRelationRowsForLockOrder orders rows by the endpoint pair the Cypher
+// statement actually locks. The Go sort keeps the payload deterministic for
+// tests and drivers; ORDER BY in the statement is what guarantees execution
+// order after UNWIND.
+func sortRelationRowsForLockOrder(rows []map[string]interface{}) {
+	sort.Slice(rows, func(i, j int) bool {
+		leftFirst, leftSecond := canonicalRelationEndpoints(rows[i])
+		rightFirst, rightSecond := canonicalRelationEndpoints(rows[j])
+		if leftFirst != rightFirst {
+			return leftFirst < rightFirst
+		}
+		if leftSecond != rightSecond {
+			return leftSecond < rightSecond
+		}
+		leftType, rightType := rows[i]["type"].(string), rows[j]["type"].(string)
+		if leftType != rightType {
+			return leftType < rightType
+		}
+		if rows[i]["source"].(string) != rows[j]["source"].(string) {
+			return rows[i]["source"].(string) < rows[j]["source"].(string)
+		}
+		return rows[i]["target"].(string) < rows[j]["target"].(string)
+	})
+}
+
+// canonicalRelationEndpoints returns the order in which the relationship
+// statement merges the endpoints: lexicographically smaller name first. The
+// second endpoint can be larger than the next row's first endpoint, so the
+// statement itself must order rows by this canonical pair rather than by the
+// model's original source field.
+func canonicalRelationEndpoints(row map[string]interface{}) (string, string) {
+	source, target := row["source"].(string), row["target"].(string)
+	if source <= target {
+		return source, target
+	}
+	return target, source
 }
 
 // DelGraph deletes a graph from the Neo4j repository

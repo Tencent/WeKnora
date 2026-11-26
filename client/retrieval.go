@@ -35,7 +35,11 @@ type RerankDiagnostics struct {
 	TopScore           float64 `json:"top_score"`
 	CandidateCount     int     `json:"candidate_count"`
 	ResultCount        int     `json:"result_count"`
-	Error              string  `json:"error,omitempty"`
+	// ImagesScored counts image hits scored by a multimodal reranker.
+	ImagesScored int `json:"images_scored,omitempty"`
+	// ImagesKept counts image hits retained on vector evidence after text rerank rejection.
+	ImagesKept int    `json:"images_kept,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // RetrievalMeta carries the diagnostics returned beside retrieval results.

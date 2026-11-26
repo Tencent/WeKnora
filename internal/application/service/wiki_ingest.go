@@ -794,88 +794,76 @@ func (s *wikiIngestService) releaseIngestForUnavailableWiki(ctx context.Context,
 	return nil
 }
 
-func (s *wikiIngestService) enqueueFinalizeRow(ctx context.Context, op *types.TaskPendingOp) bool {
-	accepted, err := enqueueWikiPendingOp(ctx, s.pendingRepo, op)
-	if err != nil {
-		logger.Warnf(ctx, "wiki finalize: enqueue %s row failed: %v", op.Op, err)
-		return false
-	}
-	return accepted
-}
-
-// enqueueFinalize persists this batch's KB-global convergence work into the
-// finalize lane of task_pending_ops and schedules a debounced trigger. One
-// "slug" row per affected page (carrying its fresh title when this batch wrote
-// it, for cross-linking) plus one "change" row per doc added/removed (for the
-// index-intro change description).
+// enqueueFinalize persists convergence work before the ingest batch settles
+// its source rows. Persistence has its own bounded budget, independent of any
+// earlier cleanup work or the cancelled task context. The returned count is
+// the number of rows not persisted when an error occurs.
 func (s *wikiIngestService) enqueueFinalize(
-	ctx context.Context,
-	payload WikiIngestPayload,
-	affectedSlugs []string,
-	freshTitleBySlug map[string]string,
-	changes []wikiFinalizeChange,
-	folderIDs []string,
-) {
+	ctx context.Context, payload WikiIngestPayload,
+	affectedSlugs []string, freshTitleBySlug map[string]string,
+	changes []wikiFinalizeChange, folderIDs []string,
+) (int, error) {
 	if s.pendingRepo == nil {
-		return
+		return 0, nil
 	}
-	acceptedAny := false
-	for _, slug := range affectedSlugs {
-		row := wikiFinalizeRow{Slug: slug, Title: freshTitleBySlug[slug]}
+	rows := make([]*types.TaskPendingOp, 0, len(affectedSlugs)+len(changes)+1)
+	appendRow := func(op, key string, row wikiFinalizeRow) error {
 		b, err := json.Marshal(row)
 		if err != nil {
-			continue
+			return err
 		}
-		if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
-			TenantID: payload.TenantID,
-			TaskType: wikiFinalizeTaskType,
-			Scope:    wikiTaskScope,
-			ScopeID:  payload.KnowledgeBaseID,
-			Op:       wikiFinalizeOpSlug,
-			DedupKey: slug,
-			Payload:  b,
-		}) {
-			acceptedAny = true
+		rows = append(rows, &types.TaskPendingOp{
+			TenantID: payload.TenantID, TaskType: wikiFinalizeTaskType,
+			Scope: wikiTaskScope, ScopeID: payload.KnowledgeBaseID, Op: op, DedupKey: key, Payload: b,
+		})
+		return nil
+	}
+	for _, slug := range affectedSlugs {
+		row := wikiFinalizeRow{Slug: slug, Title: freshTitleBySlug[slug]}
+		if err := appendRow(wikiFinalizeOpSlug, slug, row); err != nil {
+			return len(affectedSlugs) + len(changes), err
 		}
 	}
 	for i := range changes {
-		row := wikiFinalizeRow{Change: &changes[i]}
-		b, err := json.Marshal(row)
-		if err != nil {
-			continue
-		}
-		if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
-			TenantID: payload.TenantID,
-			TaskType: wikiFinalizeTaskType,
-			Scope:    wikiTaskScope,
-			ScopeID:  payload.KnowledgeBaseID,
-			Op:       wikiFinalizeOpChange,
-			DedupKey: "",
-			Payload:  b,
-		}) {
-			acceptedAny = true
+		if err := appendRow(wikiFinalizeOpChange, "", wikiFinalizeRow{Change: &changes[i]}); err != nil {
+			return len(affectedSlugs) + len(changes), err
 		}
 	}
 	if len(folderIDs) > 0 {
 		row := wikiFinalizeRow{FolderIDs: uniqueWikiFolderIDs(folderIDs)}
-		if b, err := json.Marshal(row); err == nil {
-			if s.enqueueFinalizeRow(ctx, &types.TaskPendingOp{
-				TenantID: payload.TenantID,
-				TaskType: wikiFinalizeTaskType,
-				Scope:    wikiTaskScope,
-				ScopeID:  payload.KnowledgeBaseID,
-				Op:       wikiFinalizeOpFolderPrune,
-				DedupKey: "",
-				Payload:  b,
-			}) {
-				acceptedAny = true
-			}
+		if err := appendRow(wikiFinalizeOpFolderPrune, "", row); err != nil {
+			return len(rows) + 1, err
 		}
 	}
-	if !acceptedAny {
-		return
+	if len(rows) == 0 {
+		return 0, nil
 	}
-	s.scheduleFinalize(ctx, payload)
+	// Allow larger batches more time, but never detach unbounded work.
+	budget := max(30*time.Second, min(5*time.Minute, time.Duration((len(rows)-1)/100+1)*5*time.Second))
+	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+	defer cancel()
+	accepted := false
+	if batch, ok := s.pendingRepo.(interfaces.TaskPendingOpsKnowledgeBaseBatchGuard); ok {
+		var err error
+		accepted, err = batch.EnqueueBatchIfKnowledgeBaseActive(enqueueCtx, rows)
+		if err != nil {
+			return len(rows), fmt.Errorf("wiki finalize: persist %d rows: %w", len(rows), err)
+		}
+	} else {
+		// Alternate repositories retain their existing guarded single-row path;
+		// errors still stop the ingest batch from trimming its source operations.
+		for i, row := range rows {
+			ok, err := enqueueWikiPendingOp(enqueueCtx, s.pendingRepo, row)
+			if err != nil {
+				return len(rows) - i, fmt.Errorf("wiki finalize: persist row %d/%d: %w", i+1, len(rows), err)
+			}
+			accepted = accepted || ok
+		}
+	}
+	if accepted {
+		s.scheduleFinalize(enqueueCtx, payload)
+	}
+	return 0, nil
 }
 
 func uniqueWikiFolderIDs(values []string) []string {
@@ -1775,6 +1763,10 @@ func (s *wikiIngestService) resolveLiveSlugs(
 //     plain text (display text when present; otherwise a humanized
 //     last-segment of the slug). This is the original behaviour.
 //
+// References inside fenced code, indented code and inline code are literal
+// examples rather than links, and are left untouched — the same rule
+// derivation and repair use.
+//
 // The resolver is optional: when liveSlugs / titleToSlug are nil or
 // empty, every dead slug falls through to the strip path. This keeps
 // backward compatibility for tests / call sites that don't yet wire
@@ -1788,46 +1780,59 @@ func stripDeadWikiLinks(
 	if len(deadSlugs) == 0 || content == "" {
 		return content, false
 	}
+	code := markdownCodeSpans(content)
+	var out strings.Builder
+	last := 0
 	changed := false
-	out := wikiLinkRE.ReplaceAllStringFunc(content, func(match string) string {
-		sub := wikiLinkRE.FindStringSubmatch(match)
-		if len(sub) < 2 {
-			return match
+	for _, match := range wikiLinkRE.FindAllStringSubmatchIndex(content, -1) {
+		start, end := match[0], match[1]
+		if spanContains(code, start, end) {
+			continue
 		}
-		slug := sub[1]
+		slug := content[match[2]:match[3]]
 		if _, dead := deadSlugs[slug]; !dead {
-			return match
+			continue
 		}
 		display := ""
-		if len(sub) >= 3 {
-			display = strings.TrimSpace(sub[2])
+		if match[4] >= 0 {
+			display = strings.TrimSpace(content[match[4]:match[5]])
 		}
 
+		replacement := ""
 		// (1) Try fuzzy resolve before falling back to strip. The
 		// resolver consults display-text reverse lookup, hyphen-
 		// normalized equality, and bigram similarity in that order;
 		// returns "" only when no candidate is safe.
 		if resolved, ok := resolveDeadSlug(slug, display, liveSlugs, titleToSlug); ok && resolved != slug {
-			changed = true
 			if display != "" {
-				return "[[" + resolved + "|" + display + "]]"
+				replacement = "[[" + resolved + "|" + display + "]]"
+			} else {
+				replacement = "[[" + resolved + "]]"
 			}
-			return "[[" + resolved + "]]"
+		} else if display != "" {
+			// (2) Strip — best-effort plain text, preferring the
+			// LLM-supplied display text.
+			replacement = display
+		} else {
+			// Otherwise humanize the slug's last path segment so the
+			// prose stays readable.
+			parts := strings.Split(slug, "/")
+			label := parts[len(parts)-1]
+			replacement = strings.ReplaceAll(label, "-", " ")
 		}
-
-		// (2) Strip — best-effort plain text. Prefer the LLM-supplied
-		// display text; otherwise humanize the slug's last path segment
-		// so the prose stays readable.
+		if replacement == content[start:end] {
+			continue
+		}
 		changed = true
-		if display != "" {
-			return display
-		}
-		parts := strings.Split(slug, "/")
-		label := parts[len(parts)-1]
-		label = strings.ReplaceAll(label, "-", " ")
-		return label
-	})
-	return out, changed
+		out.WriteString(content[last:start])
+		out.WriteString(replacement)
+		last = end
+	}
+	if !changed {
+		return content, false
+	}
+	out.WriteString(content[last:])
+	return out.String(), true
 }
 
 // cleanDeadLinks rewrites `[[slug]]` references in the batch's affected
@@ -3045,6 +3050,7 @@ func isTransientLLMError(ctx context.Context, err error) bool {
 		"no such host", // DNS hiccup
 		"i/o timeout",
 		"unexpected eof",
+		"decode response: unexpected end of json input", // incomplete HTTP response envelope
 		"tls handshake",
 		"context deadline exceeded", // nested per-call deadline
 	} {

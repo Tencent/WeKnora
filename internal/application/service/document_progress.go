@@ -119,48 +119,78 @@ func documentFailureSQL() string {
 
 func (s *DocumentProgressService) currentWikiFailureSQL() string {
 	attempt := s.jsonText("d.payload", "attempt")
-	return documentFailureSQL() + ` AND d.task_type='wiki:ingest' AND
-  COALESCE(CAST(` + attempt + ` AS TEXT),'0') IN ('0',CAST(` + documentAttemptSQL + ` AS TEXT))`
+	return documentFailureSQL() + ` AND d.task_type='wiki:ingest' AND (
+		COALESCE(CAST(` + attempt + ` AS TEXT),'0')=CAST(` + documentAttemptSQL + ` AS TEXT)
+		OR (COALESCE(CAST(` + attempt + ` AS TEXT),'0')='0' AND (
+			` + documentAttemptSQL + `=0
+			OR NOT EXISTS(SELECT 1 FROM knowledge_processing_spans sa
+				WHERE sa.knowledge_id=k.id AND sa.attempt=` + documentAttemptSQL + `
+				AND sa.started_at IS NOT NULL AND sa.started_at>d.failed_at)
+		))
+	)`
 }
 
-func (s *DocumentProgressService) wikiEnabledSQL() string {
-	return "COALESCE(CAST(" + s.jsonText("kb.indexing_strategy", "wiki_enabled") +
+func (s *DocumentProgressService) wikiAutoGenerateSQL() string {
+	enabled := "COALESCE(CAST(" + s.jsonText("kb.indexing_strategy", "wiki_enabled") +
 		" AS TEXT), 'false') IN ('true','1')"
+	var autoGen string
+	if s.db.Name() == "sqlite" {
+		autoGen = "CASE WHEN kb.wiki_config IS NULL OR TRIM(kb.wiki_config)='' THEN 'true' " +
+			"ELSE COALESCE(CAST(json_extract(kb.wiki_config,'$.auto_generate') AS TEXT), 'true') " +
+			"END NOT IN ('false','0')"
+	} else {
+		autoGen = "COALESCE(CAST(" + s.jsonText("kb.wiki_config", "auto_generate") +
+			" AS TEXT), 'true') NOT IN ('false','0')"
+	}
+	return "(" + enabled + " AND " + autoGen + ")"
+}
+
+func escapeLikePattern(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
 }
 
 func (s *DocumentProgressService) query(ctx context.Context, f DocumentProgressFilter) *gorm.DB {
-	wikiEnabled := s.wikiEnabledSQL()
+	wikiEnabled := s.wikiAutoGenerateSQL()
 	pending := "EXISTS(SELECT 1 FROM task_pending_ops p WHERE " + s.pendingSQL() + ")"
 	wikiSpan := `s.knowledge_id=k.id AND s.attempt=` + documentAttemptSQL + ` AND s.name='postprocess.wiki'
 		AND s.id=(SELECT MAX(w.id) FROM knowledge_processing_spans w
 		WHERE w.knowledge_id=k.id AND w.attempt=s.attempt AND w.name='postprocess.wiki')`
 	done := `EXISTS(SELECT 1 FROM knowledge_processing_spans s WHERE ` + wikiSpan + ` AND s.status IN ('done','skipped')
 		AND NOT EXISTS(SELECT 1 FROM task_dead_letters d WHERE ` + s.currentWikiFailureSQL() + `
-		AND d.failed_at>s.finished_at))`
+		AND d.failed_at>COALESCE(s.finished_at,s.updated_at)))`
 	failed := `EXISTS(SELECT 1 FROM knowledge_processing_spans s WHERE ` + wikiSpan + ` AND s.status='failed') OR
 		EXISTS(SELECT 1 FROM task_dead_letters d WHERE ` + s.currentWikiFailureSQL() + `)`
 	q := s.db.WithContext(ctx).Table("knowledges k").
 		Joins("JOIN knowledge_bases kb ON kb.id=k.knowledge_base_id AND kb.tenant_id=k.tenant_id").
 		Joins("JOIN tenants t ON t.id=k.tenant_id").
 		Where("k.deleted_at IS NULL AND kb.deleted_at IS NULL AND t.deleted_at IS NULL").
-		Where("k.type IN ?", []string{"file", "url", "manual"})
+		Where("k.type IN ?", []string{"file", "url", "file_url", "manual", "passage"})
 	if f.KnowledgeBaseID != "" {
 		q = q.Where("kb.id=?", f.KnowledgeBaseID)
 	}
 	if search := strings.ToLower(strings.TrimSpace(f.Search)); search != "" {
-		q = q.Where("LOWER(k.title) LIKE ? OR LOWER(k.file_name) LIKE ? OR LOWER(kb.name) LIKE ?",
-			"%"+search+"%", "%"+search+"%", "%"+search+"%")
+		pattern := "%" + escapeLikePattern(search) + "%"
+		q = q.Where(
+			`LOWER(k.title) LIKE ? ESCAPE '\' OR LOWER(k.file_name) LIKE ? ESCAPE '\' `+
+				`OR LOWER(kb.name) LIKE ? ESCAPE '\'`,
+			pattern, pattern, pattern)
 	}
 	switch f.Status {
 	case "unfinished":
-		q = q.Where("k.parse_status IN ? OR ("+wikiEnabled+" AND ("+pending+" OR NOT "+done+"))",
+		q = q.Where(
+			"k.parse_status IN ? OR (k.parse_status IN ? AND "+wikiEnabled+" AND ("+pending+" OR NOT "+done+"))",
 			[]string{
 				types.ParseStatusPending, types.ParseStatusProcessing,
 				types.ParseStatusFinalizing, types.ParseStatusFailed,
-			})
+			},
+			[]string{types.ParseStatusCompleted, types.ParseStatusFinalizing})
 	case "failed":
-		q = q.Where("k.parse_status=? OR ("+wikiEnabled+" AND NOT "+pending+" AND NOT "+done+" AND ("+failed+"))",
-			types.ParseStatusFailed)
+		q = q.Where(
+			"k.parse_status=? OR (k.parse_status IN ? AND "+wikiEnabled+
+				" AND NOT "+pending+" AND NOT "+done+" AND ("+failed+"))",
+			types.ParseStatusFailed,
+			[]string{types.ParseStatusCompleted, types.ParseStatusFinalizing})
 	case "completed":
 		q = q.Where("k.parse_status=? AND (NOT "+wikiEnabled+" OR (NOT "+pending+" AND "+done+"))",
 			types.ParseStatusCompleted)
@@ -209,10 +239,16 @@ func (s *DocumentProgressService) list(
 		return result, nil
 	}
 	ids := make([]string, 0, len(result.Documents))
+	kbIDSet := make(map[string]struct{}, len(result.Documents))
+	kbIDs := make([]string, 0, len(result.Documents))
 	byID := make(map[string]*DocumentProgress, len(result.Documents))
 	for i := range result.Documents {
 		d := &result.Documents[i]
 		ids = append(ids, d.ID)
+		if _, seen := kbIDSet[d.KnowledgeBaseID]; !seen {
+			kbIDSet[d.KnowledgeBaseID] = struct{}{}
+			kbIDs = append(kbIDs, d.KnowledgeBaseID)
+		}
 		byID[d.ID] = d
 		d.Stages = []DocumentStageProgress{}
 		d.IngestionStatus = d.ParseStatus
@@ -222,13 +258,13 @@ func (s *DocumentProgressService) list(
 		d.WikiStatus = "not_started"
 	}
 	var kbs []types.KnowledgeBase
-	if err := s.db.WithContext(ctx).Select("id,indexing_strategy").Where("id IN (?)",
-		s.db.Table("knowledges").Select("knowledge_base_id").Where("id IN ?", ids)).Find(&kbs).Error; err != nil {
+	if err := s.db.WithContext(ctx).Select("id,indexing_strategy,wiki_config").
+		Where("id IN ?", kbIDs).Find(&kbs).Error; err != nil {
 		return nil, err
 	}
 	enabled := map[string]bool{}
 	for _, kb := range kbs {
-		enabled[kb.ID] = kb.IsWikiEnabled()
+		enabled[kb.ID] = kb.IsWikiAutoGenerateEnabled()
 	}
 	for _, d := range byID {
 		d.wikiEnabled = enabled[d.KnowledgeBaseID]
@@ -273,7 +309,8 @@ func (s *DocumentProgressService) list(
 		Where("k.id IN ? AND ("+s.currentWikiFailureSQL()+")", ids).
 		Where(`NOT EXISTS(SELECT 1 FROM knowledge_processing_spans s WHERE s.knowledge_id=k.id
    AND s.attempt=` + documentAttemptSQL + ` AND s.name='postprocess.wiki'
-   AND s.status IN ('done','skipped') AND s.finished_at>=d.failed_at)`).Group("k.id").Scan(&failed).Error; err != nil {
+   AND s.status IN ('done','skipped') AND COALESCE(s.finished_at,s.updated_at)>=d.failed_at)`).
+		Group("k.id").Scan(&failed).Error; err != nil {
 		return nil, err
 	}
 	for _, row := range failed {

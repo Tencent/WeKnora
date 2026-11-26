@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -41,6 +42,7 @@ type StreamAssembler struct {
 	ctx              context.Context
 	model            string
 	toolCallMap      map[int]*types.LLMToolCall
+	toolArguments    map[int]*strings.Builder
 	lastFunctionName map[int]string
 	nameNotified     map[int]bool
 	fieldExtractors  map[int]*JSONFieldExtractor
@@ -353,7 +355,19 @@ func (a *StreamAssembler) processToolCalls(ch chan<- types.StreamResponse, delta
 
 		argsUpdated := false
 		if tc.Arguments != "" {
-			entry.Function.Arguments += tc.Arguments
+			if a.toolArguments == nil {
+				a.toolArguments = make(map[int]*strings.Builder)
+			}
+			args := a.toolArguments[index]
+			if args == nil {
+				args = &strings.Builder{}
+				args.WriteString(entry.Function.Arguments)
+				a.toolArguments[index] = args
+			}
+			args.WriteString(tc.Arguments)
+			// String exposes an immutable snapshot without copying the whole
+			// accumulated argument on every small provider delta.
+			entry.Function.Arguments = args.String()
 			argsUpdated = true
 		}
 
@@ -430,6 +444,7 @@ func TruncateForDebug(s string, maxRunes int) string {
 // ReplaceToolCalls swaps the assembled tool calls for a protocol's own final
 // view (for example, one that drops calls the stream never closed).
 func (a *StreamAssembler) ReplaceToolCalls(calls []types.LLMToolCall) {
+	a.toolArguments = nil
 	a.toolCallMap = make(map[int]*types.LLMToolCall, len(calls))
 	for i := range calls {
 		call := calls[i]

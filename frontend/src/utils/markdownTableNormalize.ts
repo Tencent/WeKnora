@@ -69,7 +69,18 @@ export function normalizeSpuriousTablePrefixes(content: string): string {
   const lines = content.split('\n');
   const out: string[] = [];
   let i = 0;
+  let fence = '';
   while (i < lines.length) {
+    const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(lines[i]);
+    if (fence || delimiter) {
+      if (delimiter) {
+        const [, marker, rest] = delimiter;
+        if (!fence && !(marker[0] === '`' && rest.includes('`'))) fence = marker;
+        else if (fence && marker.startsWith(fence) && !rest.trim()) fence = '';
+      }
+      out.push(lines[i++]);
+      continue;
+    }
     if (!isTableRow(lines[i])) {
       out.push(lines[i]);
       i += 1;

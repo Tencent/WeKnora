@@ -79,3 +79,29 @@ func TestWikiIngestRejectsInvalidSelectedIdentityBeforeAccessingServices(t *test
 		require.Error(t, svc.ProcessWikiIngest(context.Background(), asynq.NewTask(types.TypeWikiIngest, raw)))
 	}
 }
+
+func TestWikiIngestSelectedDocumentClearsKnowledgeIDOnCappedRetryAndStaleRecheck(t *testing.T) {
+	server := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, rdb.Close()) })
+
+	svc, db := newWikiLookupRecoveryService(t, "kb", rdb)
+	seedWikiLookupTask(t, svc, db, "kb", "selected")
+
+	// Occupy all default in-flight slots so ProcessWikiIngest hits the capped-retry branch.
+	for i := 0; i < wikiInflightDefault; i++ {
+		release, ok := svc.reserveInflightSlot(context.Background(), "kb", wikiInflightDefault)
+		require.True(t, ok)
+		defer release()
+	}
+
+	raw, err := json.Marshal(WikiIngestPayload{TenantID: 7, KnowledgeBaseID: "kb", KnowledgeID: "selected"})
+	require.NoError(t, err)
+	require.NoError(t, svc.ProcessWikiIngest(context.Background(), asynq.NewTask(types.TypeWikiIngest, raw)))
+
+	tasks := svc.task.(*wikiGuardTaskQueue).tasks
+	require.NotEmpty(t, tasks)
+	var retryPayload WikiIngestPayload
+	require.NoError(t, json.Unmarshal(tasks[len(tasks)-1].Payload(), &retryPayload))
+	require.Empty(t, retryPayload.KnowledgeID, "capped retry must stay KB-scoped, not pinned to one selected document")
+}
