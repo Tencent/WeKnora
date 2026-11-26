@@ -3808,6 +3808,11 @@ definitions:
       added_count:
         description: 新增的条目数
         type: integer
+      completed_entry_indices:
+        description: 已完成条目索引（重试恢复用）
+        items:
+          type: integer
+        type: array
       created_at:
         description: Task creation timestamp
         type: integer

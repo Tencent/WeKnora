@@ -57,6 +57,7 @@ async function fixture() {
     '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true }) },
     '@/utils/clipboard': { copyWithToast: assert.fail },
     '@/composables/useApiBaseUrlDisplay': { useApiBaseUrlDisplay: () => ({ apiBaseUrlDisplay: vue.ref('https://example.com') }) },
+    '@/utils/mcpBaseUrl': { resolveMcpBaseUrl: () => 'https://example.com' },
     '@/components/settings/SettingDrawer.vue': { default: {} },
     '@/stores/chatResources': { useChatResourcesStore: () => resources },
     '@/stores/organization': { useOrganizationStore: () => organization },

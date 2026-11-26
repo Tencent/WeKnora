@@ -1020,14 +1020,17 @@ type faqMergeOperation struct {
 // 新的相似问而不丢历史数据。
 func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 	tenantID uint64, kbID string, entries []types.FAQEntryPayload,
-) (newEntries []types.FAQEntryPayload, mergeOps []faqMergeOperation, skippedCount int, err error) {
+) (
+	newEntries []types.FAQEntryPayload, newEntryPositions []int,
+	mergeOps []faqMergeOperation, skippedCount int, err error,
+) {
 	if len(entries) == 0 {
-		return nil, nil, 0, nil
+		return nil, nil, nil, 0, nil
 	}
 
 	existingChunks, err := s.chunkRepo.ListAllFAQChunksWithMetadataByKnowledgeBaseID(ctx, tenantID, kbID)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("failed to list existing FAQ chunks: %w", err)
+		return nil, nil, nil, 0, fmt.Errorf("failed to list existing FAQ chunks: %w", err)
 	}
 
 	existingStdQToChunk := make(map[string]*types.Chunk)
@@ -1050,6 +1053,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 
 	batchQuestions := make(map[string]bool)
 	newEntries = make([]types.FAQEntryPayload, 0, len(entries))
+	newEntryPositions = make([]int, 0, len(entries))
 	mergeOps = make([]faqMergeOperation, 0)
 
 	for entryIdx, entry := range entries {
@@ -1148,23 +1152,24 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 			batchQuestions[q] = true
 		}
 		newEntries = append(newEntries, entry)
+		newEntryPositions = append(newEntryPositions, entryIdx)
 	}
 
-	return newEntries, mergeOps, skippedCount, nil
+	return newEntries, newEntryPositions, mergeOps, skippedCount, nil
 }
 
 // calculateReplaceOperations 计算Replace模式下需要删除、创建、更新的条目
 // 同时过滤掉同批次内标准问或相似问重复的条目
 func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 	tenantID uint64, knowledgeID string, newEntries []types.FAQEntryPayload,
-) ([]types.FAQEntryPayload, []*types.Chunk, int, error) {
+) ([]types.FAQEntryPayload, []int, []*types.Chunk, int, error) {
 	// 获取 kbID 用于解析 tag
 	var kbID string
 	if len(newEntries) > 0 {
 		// 从 knowledgeID 获取 kbID
 		knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 		if err != nil {
-			return nil, nil, 0, fmt.Errorf("failed to get knowledge: %w", err)
+			return nil, nil, nil, 0, fmt.Errorf("failed to get knowledge: %w", err)
 		}
 		if knowledge != nil {
 			kbID = knowledge.KnowledgeBaseID
@@ -1176,6 +1181,7 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 		entry types.FAQEntryPayload
 		hash  string
 		meta  *types.FAQChunkMetadata
+		pos   int // 条目在 newEntries 中的下标，供调用方按原始行身份记录检查点
 	}
 	entriesWithHash := make([]entryWithHash, 0, len(newEntries))
 	newHashSet := make(map[string]bool)
@@ -1183,7 +1189,7 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 	batchQuestions := make(map[string]bool)
 	batchSkippedCount := 0
 
-	for _, entry := range newEntries {
+	for pos, entry := range newEntries {
 		meta, err := sanitizeFAQEntryPayload(&entry)
 		if err != nil {
 			batchSkippedCount++
@@ -1220,7 +1226,7 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 
 		hash := types.CalculateFAQContentHash(meta)
 		if hash != "" {
-			entriesWithHash = append(entriesWithHash, entryWithHash{entry: entry, hash: hash, meta: meta})
+			entriesWithHash = append(entriesWithHash, entryWithHash{entry: entry, hash: hash, meta: meta, pos: pos})
 			newHashSet[hash] = true
 		}
 	}
@@ -1228,7 +1234,7 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 	// 查询所有已存在的chunks
 	allExistingChunks, err := s.chunkRepo.ListAllFAQChunksByKnowledgeID(ctx, tenantID, knowledgeID)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("failed to list existing chunks: %w", err)
+		return nil, nil, nil, 0, fmt.Errorf("failed to list existing chunks: %w", err)
 	}
 
 	// 在内存中过滤出匹配新条目hash的chunks，并构建map
@@ -1317,6 +1323,7 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 
 	// 计算需要创建的条目（利用已经计算好的hash，避免重复计算）
 	entriesToProcess := make([]types.FAQEntryPayload, 0, len(entriesWithHash))
+	entryPositions := make([]int, 0, len(entriesWithHash))
 	skippedCount := batchSkippedCount
 
 	for idx, ewh := range entriesWithHash {
@@ -1332,6 +1339,7 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 			if err != nil {
 				logger.Warnf(ctx, "Failed to resolve tag for entry, treating as new: %v", err)
 				entriesToProcess = append(entriesToProcess, ewh.entry)
+				entryPositions = append(entryPositions, ewh.pos)
 				continue
 			}
 
@@ -1355,6 +1363,7 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 				}
 				chunksToDelete = append(chunksToDelete, existingChunk)
 				entriesToProcess = append(entriesToProcess, ewh.entry)
+				entryPositions = append(entryPositions, ewh.pos)
 			} else {
 				// hash、tag、运营状态都相同，跳过
 				skippedCount++
@@ -1364,15 +1373,19 @@ func (s *knowledgeService) calculateReplaceOperations(ctx context.Context,
 
 		// hash 不匹配或不存在，需要创建
 		entriesToProcess = append(entriesToProcess, ewh.entry)
+		entryPositions = append(entryPositions, ewh.pos)
 	}
 
-	return entriesToProcess, chunksToDelete, skippedCount, nil
+	return entriesToProcess, entryPositions, chunksToDelete, skippedCount, nil
 }
 
-// executeFAQImport 执行实际的FAQ导入逻辑
+// executeFAQImport 执行实际的FAQ导入逻辑。
+// processedCount 是已完成行数（含验证失败数），只用于进度展示；entryIndices
+// 与 payload.Entries 平行，记录每条输入的原始下标，用于按行身份记录完成
+// 检查点（nil 表示输入即原始顺序，直接调用时使用）。
 func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, kbID string,
 	payload *types.FAQBatchUpsertPayload, tenantID uint64, processedCount int,
-	progress *types.FAQImportProgress,
+	progress *types.FAQImportProgress, entryIndices []int,
 ) (err error) {
 	// 保存知识库和embedding模型信息，用于清理索引
 	var kb *types.KnowledgeBase
@@ -1416,12 +1429,14 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 
 	// 增量更新逻辑：计算需要处理的条目
 	var entriesToProcess []types.FAQEntryPayload
+	var createPositions []int // entriesToProcess 中每条在 payload.Entries 中的下标
 	var chunksToDelete []*types.Chunk
 	var skippedCount int
+	var mergedCount int // 本轮合并的行数（不含重试前已合并的，见 progress.MergedCount）
 
 	if payload.Mode == types.FAQBatchModeReplace {
 		// Replace模式：计算需要删除、创建、更新的条目
-		entriesToProcess, chunksToDelete, skippedCount, err = s.calculateReplaceOperations(
+		entriesToProcess, createPositions, chunksToDelete, skippedCount, err = s.calculateReplaceOperations(
 			ctx,
 			tenantID,
 			faqKnowledge.ID,
@@ -1449,9 +1464,16 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 	} else {
 		// Append 模式（智能合并）：标准问已存在的条目走 merge ops，其余作为新建。
 		var mergeOps []faqMergeOperation
-		entriesToProcess, mergeOps, skippedCount, err = s.calculateAppendOperations(ctx, tenantID, kb.ID, payload.Entries)
+		entriesToProcess, createPositions, mergeOps, skippedCount, err = s.calculateAppendOperations(
+			ctx, tenantID, kb.ID, payload.Entries)
 		if err != nil {
 			return fmt.Errorf("failed to calculate append operations: %w", err)
+		}
+
+		// 把 merge 目标换算成原始行下标：Detail.Index 后续既用于
+		// SuccessEntries/MergeDetails 展示，也用于按行身份记录检查点。
+		for i := range mergeOps {
+			mergeOps[i].Detail.Index = faqRawEntryIndex(entryIndices, mergeOps[i].Detail.Index)
 		}
 
 		if len(mergeOps) > 0 {
@@ -1460,9 +1482,19 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 				return fmt.Errorf("failed to execute merge operations: %w", mergeErr)
 			}
 			logger.Infof(ctx, "FAQ import task %s: merged %d entries", taskID, mergedCount)
-			progress.MergedCount = mergedCount
+			// 累加而非覆盖：重试时 progress 里已带有上一轮合并的行数。
+			progress.MergedCount += mergedCount
 			for _, op := range mergeOps {
 				progress.MergeDetails = append(progress.MergeDetails, op.Detail)
+			}
+			// 合并已落库且重建索引完成，按行身份记入恢复检查点。
+			mergedRaw := make([]int, 0, len(mergeOps))
+			for _, op := range mergeOps {
+				mergedRaw = append(mergedRaw, op.Detail.Index)
+			}
+			progress.CompletedEntryIndices = unionFAQEntryIndices(progress.CompletedEntryIndices, mergedRaw)
+			if err := s.saveFAQImportCompletedCheckpoint(ctx, progress); err != nil {
+				logger.Warnf(ctx, "Failed to save FAQ import resume checkpoint after merge: %v", err)
 			}
 		}
 	}
@@ -1485,7 +1517,9 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 	// 分批处理需要创建的条目
 	remainingEntries := len(entriesToProcess)
 	totalStartTime := time.Now()
-	actualProcessed := skippedCount + processedCount + progress.MergedCount
+	// 注意：processedCount 已包含之前轮次完成的行（含 merge），这里只加本轮
+	// 新合并的行，避免重复计数导致进度超过 100%。
+	actualProcessed := skippedCount + processedCount + mergedCount
 
 	logger.Infof(
 		ctx,
@@ -1607,7 +1641,9 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 		// 收集成功条目信息（tag 信息按批一次查出，避免每条一次查询）
 		tagsByID := s.loadFAQTagsForChunks(ctx, tenantID, chunks)
 		for idx, chunk := range chunks {
-			entryIdx := i + idx + processedCount // 原始条目索引
+			// 原始行下标：新建条目在输入中的位置，不是其在新建批次中的位置
+			//（merge 行被排除在新建批次之外，批次下标会错位）。
+			entryIdx := faqRawEntryIndex(entryIndices, createPositions[i+idx])
 			meta, _ := chunk.FAQMetadata()
 			standardQ := ""
 			if meta != nil {
@@ -1621,6 +1657,17 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 				TagName:          tagName,
 				StandardQuestion: standardQ,
 			})
+		}
+
+		// 本批已创建、索引并标记 Indexed，按行身份记入恢复检查点，
+		// 失败重试时不再重做这一批。
+		batchRaw := make([]int, 0, len(batch))
+		for k := range batch {
+			batchRaw = append(batchRaw, faqRawEntryIndex(entryIndices, createPositions[i+k]))
+		}
+		progress.CompletedEntryIndices = unionFAQEntryIndices(progress.CompletedEntryIndices, batchRaw)
+		if err := s.saveFAQImportCompletedCheckpoint(ctx, progress); err != nil {
+			logger.Warnf(ctx, "Failed to save FAQ import resume checkpoint after batch %d-%d: %v", i+1, end, err)
 		}
 
 		actualProcessed += len(batch)
@@ -2237,6 +2284,131 @@ func (s *knowledgeService) recordFAQImportKBActivity(
 		"faq_entry", payload.KnowledgeID, outcome, faqImportActivityDetails(payload, progress, totalEntries))
 }
 
+// faqCompletedEntrySet builds the set of completed input rows, identified by
+// their index into FAQImportPayload.Entries (the same domain as
+// FAQImportProgress.ValidEntryIndices).
+func faqCompletedEntrySet(completed []int) map[int]bool {
+	set := make(map[int]bool, len(completed))
+	for _, idx := range completed {
+		set[idx] = true
+	}
+	return set
+}
+
+// remainingFAQEntryIndices returns the valid entry indices that are not yet
+// completed, preserving input order. A retry is driven by this set, never by
+// the processed counter: merges run before creates, so the counter can
+// include work completed out of input order and must not be used as an
+// offset into the input (see #5957).
+func remainingFAQEntryIndices(validIndices, completed []int) []int {
+	done := faqCompletedEntrySet(completed)
+	remaining := make([]int, 0, len(validIndices))
+	for _, idx := range validIndices {
+		if !done[idx] {
+			remaining = append(remaining, idx)
+		}
+	}
+	return remaining
+}
+
+// intersectFAQEntryIndices keeps the completed rows that are still part of
+// the validated input, in input order. Stale rows from an older payload are
+// dropped so a retry never skips an unrelated entry.
+func intersectFAQEntryIndices(validIndices, completed []int) []int {
+	done := faqCompletedEntrySet(completed)
+	kept := make([]int, 0, len(completed))
+	for _, idx := range validIndices {
+		if done[idx] {
+			kept = append(kept, idx)
+		}
+	}
+	return kept
+}
+
+// unionFAQEntryIndices merges two completed-row sets, preserving order and
+// dropping duplicates.
+func unionFAQEntryIndices(a, b []int) []int {
+	seen := faqCompletedEntrySet(a)
+	out := append([]int(nil), a...)
+	for _, idx := range b {
+		if !seen[idx] {
+			seen[idx] = true
+			out = append(out, idx)
+		}
+	}
+	return out
+}
+
+// legacyResumeCompletedIndices reconstructs completed input rows for a
+// checkpoint written before CompletedEntryIndices existed, when only the
+// processed counter survives. Merges always run before the first create
+// batch, so a counter above zero implies every merge candidate recorded at
+// validation time already completed; the rest of the count is completed
+// creates, taken in input order from the non-merge valid entries. This is
+// only an approximation: the counter also includes entries skipped by the
+// operation planner, which in append mode are duplicates the planner would
+// drop again, so over-counting them cannot lose a real entry. A zero
+// counter resumes from scratch.
+func legacyResumeCompletedIndices(validIndices, mergeIndices []int, processed, failedCount int) []int {
+	n := processed - failedCount
+	if n <= 0 {
+		return nil
+	}
+	valid := faqCompletedEntrySet(validIndices)
+	mergeSet := make(map[int]bool, len(mergeIndices))
+	merges := make([]int, 0, len(mergeIndices))
+	for _, idx := range mergeIndices {
+		if !valid[idx] || mergeSet[idx] {
+			continue
+		}
+		mergeSet[idx] = true
+		merges = append(merges, idx)
+	}
+	completed := make([]int, 0, n)
+	remaining := n - len(merges)
+	for _, idx := range validIndices {
+		if mergeSet[idx] {
+			completed = append(completed, idx)
+		} else if remaining > 0 {
+			completed = append(completed, idx)
+			remaining--
+		}
+	}
+	return completed
+}
+
+// faqRawEntryIndex maps a position inside the entries handed to
+// executeFAQImport back to the raw payload index. A nil entryIndices means
+// the entries were passed in payload order (direct executeFAQImport calls).
+func faqRawEntryIndex(entryIndices []int, pos int) int {
+	if pos >= 0 && pos < len(entryIndices) {
+		return entryIndices[pos]
+	}
+	return pos
+}
+
+// saveFAQImportCompletedCheckpoint persists the identity-based resume
+// checkpoint (completed input rows + merge stats) into the stored progress
+// without touching the count-based fields owned by
+// updateFAQImportProgressStatus. It merges into the stored copy instead of
+// writing the in-memory progress, whose Processed/Progress fields are stale
+// between batch updates. A checkpoint is only recorded after the work it
+// describes is durable (chunk created, indexed, and marked indexed; merge
+// saved and re-indexed), so a stored chunk left over from a failed batch is
+// never mistaken for completed work.
+func (s *knowledgeService) saveFAQImportCompletedCheckpoint(
+	ctx context.Context, progress *types.FAQImportProgress,
+) error {
+	stored, err := s.GetFAQImportProgress(ctx, progress.TaskID)
+	if err != nil {
+		return err
+	}
+	stored.CompletedEntryIndices = unionFAQEntryIndices(stored.CompletedEntryIndices, progress.CompletedEntryIndices)
+	stored.MergedCount = progress.MergedCount
+	stored.MergeDetails = progress.MergeDetails
+	return s.saveFAQImportProgress(ctx, stored)
+}
+
 // ProcessFAQImport handles Asynq FAQ import tasks (including dry run mode)
 func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) error {
 	var payload types.FAQImportPayload
@@ -2357,6 +2529,25 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	// 注意：必须在保存新 progress 之前查询，否则会被覆盖
 	existingProgress, _ := s.GetFAQImportProgress(ctx, payload.TaskID)
 
+	// 恢复检查点：已完成的工作按输入行身份记录，绝不用 Processed 计数
+	// 当输入偏移量用（见 #5957：后行先 merge 会让计数虚高，漏掉前面的新条目）。
+	// 必须在下面保存新 progress 之前算好并带上，否则旧检查点会被覆盖。
+	var resumeCompleted []int
+	var resumeMergedCount int
+	var resumeMergeDetails []types.FAQMergeDetail
+	if existingProgress != nil && len(existingProgress.ValidEntryIndices) > 0 {
+		resumeCompleted = existingProgress.CompletedEntryIndices
+		if len(resumeCompleted) == 0 {
+			// 修复前写下的旧检查点只有计数，用计数重建行身份。
+			resumeCompleted = legacyResumeCompletedIndices(
+				existingProgress.ValidEntryIndices, existingProgress.MergeEntryIndices,
+				existingProgress.Processed, existingProgress.FailedCount)
+		}
+		resumeCompleted = intersectFAQEntryIndices(existingProgress.ValidEntryIndices, resumeCompleted)
+		resumeMergedCount = existingProgress.MergedCount
+		resumeMergeDetails = existingProgress.MergeDetails
+	}
+
 	progress := &types.FAQImportProgress{
 		TaskID:         payload.TaskID,
 		KBID:           payload.KBID,
@@ -2369,10 +2560,14 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		FailedCount:    0,
 		FailedEntries:  make([]types.FAQFailedEntry, 0),
 		SuccessEntries: make([]types.FAQSuccessEntry, 0),
-		Message:        "正在验证条目...",
-		CreatedAt:      time.Now().Unix(),
-		UpdatedAt:      time.Now().Unix(),
-		DryRun:         payload.DryRun,
+		// 带上恢复检查点：重试只补真正未完成的输入行。
+		CompletedEntryIndices: resumeCompleted,
+		MergedCount:           resumeMergedCount,
+		MergeDetails:          resumeMergeDetails,
+		Message:               "正在验证条目...",
+		CreatedAt:             time.Now().Unix(),
+		UpdatedAt:             time.Now().Unix(),
+		DryRun:                payload.DryRun,
 	}
 	if err := s.saveFAQImportProgress(ctx, progress); err != nil {
 		logger.Warnf(ctx, "Failed to save initial FAQ import progress: %v", err)
@@ -2382,6 +2577,9 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	if existingProgress != nil && len(existingProgress.ValidEntryIndices) > 0 {
 		// 重试时直接使用之前的验证结果
 		validEntryIndices = existingProgress.ValidEntryIndices
+		// 同步写回 fresh progress：finalize 时 SuccessCount 按 ValidEntryIndices
+		// 计算，重试不写回会把总数算成仅本轮成功的条目。
+		progress.ValidEntryIndices = validEntryIndices
 		progress.FailedCount = existingProgress.FailedCount
 		progress.FailedEntries = existingProgress.FailedEntries
 		logger.Infof(ctx, "Reusing previous validation result: valid=%d, failed=%d",
@@ -2423,6 +2621,8 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	}
 
 	// 检查任务状态 - 幂等性处理（复用之前获取的 existingProgress）
+	// 已完成量只按行身份集合的大小算，Processed 计数仅作展示，绝不用作
+	// 输入偏移量（#5957：乱序完成的 merge 会让计数虚高）。
 	var processedCount int
 	if existingProgress != nil {
 		if existingProgress.Status == types.FAQImportStatusCompleted {
@@ -2432,15 +2632,16 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 			}
 			return nil // 幂等：已完成的任务直接返回
 		}
-		// 获取已处理的数量（注意：这是相对于 validEntries 的索引）
-		processedCount = existingProgress.Processed - progress.FailedCount // 已处理数 - 验证失败数 = 已导入的有效条目数
-		if processedCount < 0 {
-			processedCount = 0
+		processedCount = len(resumeCompleted)
+		if processedCount > 0 {
+			logger.Infof(ctx, "Resuming FAQ import from completed entries: %d/%d", processedCount, len(validEntries))
 		}
-		logger.Infof(ctx, "Resuming FAQ import from progress: %d/%d (valid entries)", processedCount, len(validEntries))
 	}
 
-	// 幂等性处理：清理可能已部分处理的chunks和索引数据
+	// 幂等性处理：清理可能已部分处理的chunks和索引数据。
+	// 这里删的只能是未完成索引的 chunk：已完成的行在检查点里有记录，
+	// 其 chunk 早已是 Indexed 状态；未记入检查点的行才可能留下 Stored
+	// 状态的 chunk，删掉后由下面的重试按行身份重新创建，不会丢数据。
 	chunksDeleted, err := s.chunkRepo.DeleteUnindexedChunks(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to delete unindexed chunks: %v", err)
@@ -2476,20 +2677,31 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		}
 	}
 
-	// 如果已经处理了一部分有效条目，从该位置继续
+	// 只补真正未完成的输入行：按行身份集合过滤，保留输入顺序。
+	// 绝不能用 validEntries[processedCount:] 切片——后行先 merge 会让
+	// processedCount 大于已完成的新建行数，从而漏掉前面的行（#5957）。
 	entriesToImport := validEntries
+	remainingIndices := validEntryIndices
 	importMode := payload.Mode
-	if processedCount > 0 && processedCount < len(validEntries) {
-		entriesToImport = validEntries[processedCount:]
-		// 重试场景下，如果之前已经处理了一部分数据，需要切换到 Append 模式
-		// 因为 Replace 模式的删除操作在第一次运行时已经执行过了
-		// 如果继续使用 Replace 模式，calculateReplaceOperations 会将之前成功导入的数据标记为删除
-		// 导致数据丢失
-		if payload.Mode == types.FAQBatchModeReplace {
-			importMode = types.FAQBatchModeAppend
-			logger.Infof(ctx, "Switching to Append mode for retry, original mode was Replace")
+	if len(resumeCompleted) > 0 {
+		remaining := remainingFAQEntryIndices(validEntryIndices, resumeCompleted)
+		if len(remaining) < len(validEntryIndices) {
+			entriesToImport = make([]types.FAQEntryPayload, 0, len(remaining))
+			for _, idx := range remaining {
+				entriesToImport = append(entriesToImport, payload.Entries[idx])
+			}
+			remainingIndices = remaining
+			// 重试场景下，如果之前已经处理了一部分数据，需要切换到 Append 模式
+			// 因为 Replace 模式的删除操作在第一次运行时已经执行过了
+			// 如果继续使用 Replace 模式，calculateReplaceOperations 会将之前成功导入的数据标记为删除
+			// 导致数据丢失
+			if payload.Mode == types.FAQBatchModeReplace {
+				importMode = types.FAQBatchModeAppend
+				logger.Infof(ctx, "Switching to Append mode for retry, original mode was Replace")
+			}
+			logger.Infof(ctx, "Continuing FAQ import with %d remaining entries (completed %d)",
+				len(entriesToImport), len(resumeCompleted))
 		}
-		logger.Infof(ctx, "Continuing FAQ import from entry %d, remaining: %d entries", processedCount, len(entriesToImport))
 	}
 
 	// 构建FAQBatchUpsertPayload（使用验证通过的有效条目）
@@ -2498,18 +2710,28 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		Mode:    importMode,
 	}
 
-	// 执行FAQ导入（传入已处理的偏移量，用于进度计算）
-	if err := s.executeFAQImport(ctx, payload.TaskID, payload.KBID, faqPayload, payload.TenantID, progress.FailedCount+processedCount, progress); err != nil {
-		logger.Errorf(ctx, "FAQ import task failed: %s, error: %v", payload.TaskID, err)
-		// 如果是最后一次重试，更新状态为失败
-		if isLastRetry {
-			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusFailed, 0, originalTotalEntries, len(validEntries), "导入失败", err.Error()); updateErr != nil {
-				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
+	// 执行FAQ导入（传入已完成行数用于进度计算，传入剩余行的原始下标用于
+	// 按行身份记录检查点）。全部行已完成时直接走 finalize，不再调用导入，
+	// 避免 Replace 模式对空输入误删已有数据。
+	if len(entriesToImport) > 0 {
+		if err := s.executeFAQImport(ctx, payload.TaskID, payload.KBID, faqPayload,
+			payload.TenantID, progress.FailedCount+processedCount, progress, remainingIndices); err != nil {
+			logger.Errorf(ctx, "FAQ import task failed: %s, error: %v", payload.TaskID, err)
+			// 如果是最后一次重试，更新状态为失败
+			if isLastRetry {
+				if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID,
+					payload.EnqueuedAt, types.FAQImportStatusFailed, 0, originalTotalEntries,
+					len(validEntries), "导入失败", err.Error()); updateErr != nil {
+					logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
+				}
+				s.recordFAQImportKBActivity(ctx, &payload, progress, originalTotalEntries,
+					types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
 			}
-			s.recordFAQImportKBActivity(ctx, &payload, progress, originalTotalEntries, types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
+			s.cleanupFAQEntriesFileOnFinalFailure(ctx, payload.EntriesURL, retryCount, maxRetry)
+			return fmt.Errorf("FAQ import failed: %w", err)
 		}
-		s.cleanupFAQEntriesFileOnFinalFailure(ctx, payload.EntriesURL, retryCount, maxRetry)
-		return fmt.Errorf("FAQ import failed: %w", err)
+	} else {
+		logger.Infof(ctx, "FAQ import task %s: all entries already completed, skipping execution", payload.TaskID)
 	}
 
 	// 任务成功完成
