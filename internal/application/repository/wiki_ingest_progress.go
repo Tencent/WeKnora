@@ -331,6 +331,9 @@ func (r *taskPendingOpsRepository) enqueueWikiProgressHandoffBatch(
 				return types.ErrWikiProgressPlanMissing
 			}
 		}
+		if len(ops) == 1 {
+			return tx.Create(ops[0]).Error
+		}
 		return tx.CreateInBatches(ops, 100).Error
 	})
 	return err == nil, err

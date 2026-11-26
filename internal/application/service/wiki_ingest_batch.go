@@ -1085,7 +1085,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				for _, r := range docResults {
 					if r != nil && r.WikiSpan != nil &&
 						!progress.settlement.isSettled(progress.canonical[r.KnowledgeID].dbID) {
-						s.tracker().FailSpan(failCtx, r.WikiSpan, "FINALIZE_ENQUEUE_FAILED", finalizeErr.Error(), finalizeErr)
+						s.tracker().FailSpan(
+							failCtx, r.WikiSpan, "FINALIZE_ENQUEUE_FAILED", finalizeErr.Error(), finalizeErr,
+						)
 					}
 				}
 				failCancel()
@@ -1100,7 +1102,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				failCtx, failCancel := wikiIngestCleanupContext(ctx)
 				for _, r := range docResults {
 					if r != nil && r.WikiSpan != nil {
-						s.tracker().FailSpan(failCtx, r.WikiSpan, "FINALIZE_ENQUEUE_FAILED", enqueueErr.Error(), enqueueErr)
+						s.tracker().FailSpan(
+							failCtx, r.WikiSpan, "FINALIZE_ENQUEUE_FAILED", enqueueErr.Error(), enqueueErr,
+						)
 					}
 				}
 				failCancel()
