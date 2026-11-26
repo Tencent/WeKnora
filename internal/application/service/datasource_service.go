@@ -879,7 +879,8 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 	if err := allFetchedItemsFailedError(result, nonBlockingFailures); err != nil {
 		logger.Errorf(ctx, "data source sync failed while processing fetched items: %v", err)
-		_ = s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused, "")
+		_ = s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON,
+			types.SyncLogStatusFailed, err.Error(), wasPaused, "")
 		return err
 	}
 
