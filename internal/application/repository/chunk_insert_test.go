@@ -23,6 +23,7 @@ func TestCreateChunks_PostgresPreservesEnabledStateAndReturnsSeqIDs(t *testing.T
 		makeChunk("kb", "faq", types.ChunkTypeFAQ),
 		makeChunk("kb", "faq", types.ChunkTypeFAQ),
 	}
+	chunks[0].Flags = types.ChunkFlagRecommended
 	chunks[1].IsEnabled = false
 	chunks[1].Flags = 0
 	// Check the bound values for both rows, not only the caller's structs.
