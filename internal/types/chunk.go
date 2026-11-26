@@ -3,6 +3,7 @@
 package types
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -71,10 +72,16 @@ const (
 	// 未来可扩展更多标志位：
 	// ChunkFlagPinned ChunkFlags = 1 << 1  // 置顶
 	// ChunkFlagHot    ChunkFlags = 1 << 2  // 热门
-
-	// ChunkFlagFAQAppendIndexPending keeps a saved FAQ merge eligible for reindexing after a failure.
-	ChunkFlagFAQAppendIndexPending ChunkFlags = 1 << 3
 )
+
+// The retry bit is persisted until reindexing succeeds. Keep it untyped
+// so Swagger excludes it from the public ChunkFlags enum.
+const ChunkFlagFAQAppendIndexPending = 1 << 3
+
+// MarshalJSON keeps the persisted FAQ retry bit out of public chunk responses.
+func (f ChunkFlags) MarshalJSON() ([]byte, error) {
+	return json.Marshal(int(f.ClearFlag(ChunkFlagFAQAppendIndexPending)))
+}
 
 // HasFlag 检查是否设置了指定标志
 func (f ChunkFlags) HasFlag(flag ChunkFlags) bool {

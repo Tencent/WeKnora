@@ -21,6 +21,22 @@ func TestChunkContextHeaderHiddenInJSON(t *testing.T) {
 	}
 }
 
+func TestChunkJSONOmitsFAQAppendIndexPending(t *testing.T) {
+	chunk := Chunk{Flags: ChunkFlagRecommended | ChunkFlagFAQAppendIndexPending}
+	data, err := json.Marshal(chunk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response Chunk
+	if err := json.Unmarshal(data, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Flags != ChunkFlagRecommended || !chunk.Flags.HasFlag(ChunkFlagFAQAppendIndexPending) {
+		t.Fatalf("expected public flags %d and an intact retry bit, got %d and %d",
+			ChunkFlagRecommended, response.Flags, chunk.Flags)
+	}
+}
+
 func TestParsedChunkEmbeddingContent(t *testing.T) {
 	pc := ParsedChunk{Content: "body", ContextHeader: "# H"}
 	got := pc.EmbeddingContent()

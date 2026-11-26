@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -36,7 +37,7 @@ func (e *faqAppendIndex) BatchIndex(
 
 func TestFAQAppendSkipsUnchangedEntries(t *testing.T) {
 	for _, scenario := range []string{
-		"identical", "identical-after-validation-removal",
+		"identical", "identical-after-validation-removal", "mixed",
 		"changed-answer-order", "changed-enabled", "changed-recommendation",
 	} {
 		t.Run(scenario, func(t *testing.T) {
@@ -69,13 +70,22 @@ func TestFAQAppendSkipsUnchangedEntries(t *testing.T) {
 					TaskID: taskID, KBID: f.kb.ID, KnowledgeID: "faq",
 					Total: 1, ValidEntryIndices: []int{0},
 				}
+				entries := []types.FAQEntryPayload{entry}
+				if scenario == "mixed" && taskID == "same" {
+					entries = append(entries, types.FAQEntryPayload{
+						StandardQuestion: "Where is the support page?",
+						Answers:          []string{"On the help site."},
+					})
+					progress.Total = len(entries)
+					progress.ValidEntryIndices = []int{0, 1}
+				}
 				if scenario == "identical-after-validation-removal" && taskID == "same" {
 					progress.PartialFailedCount = 1
 					progress.FailedEntries = []types.FAQFailedEntry{{Index: 0, IsPartialFailure: true}}
 				}
 				err := f.svc.executeFAQImport(f.ctx, taskID, f.kb.ID,
 					&types.FAQBatchUpsertPayload{
-						Mode: types.FAQBatchModeAppend, Entries: []types.FAQEntryPayload{entry},
+						Mode: types.FAQBatchModeAppend, Entries: entries,
 					},
 					f.kb.TenantID, 0, progress)
 				return progress, err
@@ -85,27 +95,47 @@ func TestFAQAppendSkipsUnchangedEntries(t *testing.T) {
 			require.Len(t, engine.indexed, 1)
 			chunkID := engine.indexed[0].ChunkID
 
-			engine.unavailable = true
+			engine.unavailable = scenario != "mixed"
 			switch scenario {
-			case "identical", "identical-after-validation-removal":
+			case "identical", "identical-after-validation-removal", "mixed":
 				progress, err := appendEntry("same")
 				require.NoError(t, err)
 				require.Zero(t, engine.deletions)
-				require.Len(t, engine.indexed, 1)
 				require.Zero(t, progress.MergedCount)
-				require.NoError(t, f.svc.finalizeFAQValidation(f.ctx, &types.FAQImportPayload{
+				audit := &captureKBActivityAudit{}
+				f.svc.audit = audit
+				ctx := withKBActivityTask(f.ctx, progress.TaskID, "user")
+				require.NoError(t, f.svc.finalizeFAQValidation(ctx, &types.FAQImportPayload{
 					TaskID: progress.TaskID, KBID: f.kb.ID, KnowledgeID: "faq", TenantID: f.kb.TenantID,
 					Mode: types.FAQBatchModeAppend,
-				}, progress, 1))
-				wantSkipped := 1
+				}, progress, progress.Total))
+				wantSkipped, wantAdded := 1, 0
+				wantOutcome, wantStatus := types.AuditOutcomeSuccess, "completed"
 				if scenario == "identical-after-validation-removal" {
 					wantSkipped = 0
+					wantOutcome, wantStatus = types.AuditOutcomePartial, "partial"
 					require.Equal(t, 1, progress.PartialFailedCount)
 				} else {
 					require.Contains(t, progress.Message, "跳过 1 条")
 				}
+				if scenario == "mixed" {
+					wantAdded = 1
+				} else {
+					require.Len(t, engine.indexed, 1)
+				}
+				require.NotNil(t, audit.entry)
+				require.Equal(t, wantOutcome, audit.entry.Outcome)
+				var details map[string]any
+				require.NoError(t, json.Unmarshal(audit.entry.Details, &details))
+				require.Equal(t, wantStatus, details["processing_status"])
+				if wantSkipped > 0 {
+					require.Equal(t, float64(wantSkipped), details["skipped"])
+				} else {
+					require.NotContains(t, details, "skipped")
+				}
+				require.Equal(t, float64(wantAdded), details["count"])
 				require.Equal(t, wantSkipped, progress.SkippedCount)
-				require.Zero(t, progress.AddedCount)
+				require.Equal(t, wantAdded, progress.AddedCount)
 				kb, err := f.svc.repo.GetKnowledgeByID(f.ctx, f.kb.TenantID, "faq")
 				require.NoError(t, err)
 				result, err := kb.GetLastFAQImportResult()

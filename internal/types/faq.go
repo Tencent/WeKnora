@@ -431,6 +431,8 @@ const (
 // FAQImportProgress represents the progress of an FAQ import task stored in Redis
 // When Status is "completed", the result fields (SkippedCount, ImportMode, ImportedAt, DisplayStatus, ProcessingTime) are populated.
 type FAQImportProgress struct {
+	UnchangedSkippedCount int `json:"-"` // 本次执行中正常跳过的未变化条目数
+
 	TaskID             string              `json:"task_id"`                        // UUID for the import task
 	KBID               string              `json:"kb_id"`                          // Knowledge Base ID
 	KnowledgeID        string              `json:"knowledge_id"`                   // FAQ Knowledge ID

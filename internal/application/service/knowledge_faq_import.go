@@ -1006,6 +1006,11 @@ type faqMergeOperation struct {
 	Detail        types.FAQMergeDetail
 }
 
+type faqAppendSkip struct {
+	index     int
+	unchanged bool
+}
+
 // calculateAppendOperations 计算 Append 模式下的操作（支持智能合并）。
 // 如果 entry 的标准问在 KB 中已存在，则视为合并操作（相似问 / 反例并集，
 // 答案 / 策略以新条目为准）；否则视为新建。
@@ -1016,7 +1021,7 @@ type faqMergeOperation struct {
 // 新的相似问而不丢历史数据。
 func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 	tenantID uint64, kbID string, entries []types.FAQEntryPayload,
-) (newEntries []types.FAQEntryPayload, mergeOps []faqMergeOperation, skippedIndices []int, err error) {
+) (newEntries []types.FAQEntryPayload, mergeOps []faqMergeOperation, skips []faqAppendSkip, err error) {
 	if len(entries) == 0 {
 		return nil, nil, nil, nil
 	}
@@ -1051,7 +1056,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 	for entryIdx, entry := range entries {
 		meta, sErr := sanitizeFAQEntryPayload(&entry)
 		if sErr != nil {
-			skippedIndices = append(skippedIndices, entryIdx)
+			skips = append(skips, faqAppendSkip{index: entryIdx})
 			logger.Warnf(ctx, "Skipping invalid FAQ entry: %v", sErr)
 			continue
 		}
@@ -1086,7 +1091,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 					slices.Equal(mergedNegative, existingMeta.NegativeQuestions)
 				if unchanged {
 					if !existingChunk.Flags.HasFlag(types.ChunkFlagFAQAppendIndexPending) {
-						skippedIndices = append(skippedIndices, entryIdx)
+						skips = append(skips, faqAppendSkip{index: entryIdx, unchanged: true})
 						logger.Infof(ctx, "Skipping merge for unchanged FAQ entry: %s", meta.StandardQuestion)
 						continue
 					}
@@ -1134,7 +1139,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 		// 正常情况下这些冲突应在 executeFAQDryRunValidation 阶段就被拦截，这里
 		// 仅作为防御性兜底；用 Warn 级别打点便于排查验证层漏检。
 		if existingQuestions[meta.StandardQuestion] || batchQuestions[meta.StandardQuestion] {
-			skippedIndices = append(skippedIndices, entryIdx)
+			skips = append(skips, faqAppendSkip{index: entryIdx})
 			logger.Warnf(ctx,
 				"calculateAppendOperations: dropping FAQ entry with duplicate standard question %q "+
 					"(should have been filtered at validation); entry_idx=%d",
@@ -1149,7 +1154,7 @@ func (s *knowledgeService) calculateAppendOperations(ctx context.Context,
 		newEntries = append(newEntries, entry)
 	}
 
-	return newEntries, mergeOps, skippedIndices, nil
+	return newEntries, mergeOps, skips, nil
 }
 
 // calculateReplaceOperations 计算Replace模式下需要删除、创建、更新的条目
@@ -1448,27 +1453,33 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 	} else {
 		// Append 模式（智能合并）：标准问已存在的条目走 merge ops，其余作为新建。
 		var mergeOps []faqMergeOperation
-		var skippedIndices []int
-		entriesToProcess, mergeOps, skippedIndices, err = s.calculateAppendOperations(
+		var skips []faqAppendSkip
+		entriesToProcess, mergeOps, skips, err = s.calculateAppendOperations(
 			ctx, tenantID, kb.ID, payload.Entries,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to calculate append operations: %w", err)
 		}
-		skippedCount = len(skippedIndices)
-		progress.SkippedCount = skippedCount
-		if progress.PartialFailedCount > 0 && len(progress.ValidEntryIndices) >= len(payload.Entries) {
-			partialFailures := make(map[int]bool, progress.PartialFailedCount)
+		skippedCount = len(skips)
+		progress.SkippedCount = 0
+		progress.UnchangedSkippedCount = 0
+		var partialFailures map[int]bool
+		offset := len(progress.ValidEntryIndices) - len(payload.Entries)
+		if progress.PartialFailedCount > 0 && offset >= 0 {
+			partialFailures = make(map[int]bool, progress.PartialFailedCount)
 			for _, entry := range progress.FailedEntries {
 				if entry.IsPartialFailure {
 					partialFailures[entry.Index] = true
 				}
 			}
-			offset := len(progress.ValidEntryIndices) - len(payload.Entries)
-			for _, idx := range skippedIndices {
-				if partialFailures[progress.ValidEntryIndices[offset+idx]] {
-					progress.SkippedCount--
-				}
+		}
+		for _, skip := range skips {
+			if partialFailures != nil && partialFailures[progress.ValidEntryIndices[offset+skip.index]] {
+				continue
+			}
+			progress.SkippedCount++
+			if skip.unchanged {
+				progress.UnchangedSkippedCount++
 			}
 		}
 
@@ -2229,7 +2240,7 @@ func faqImportActivityDetails(payload *types.FAQImportPayload, progress *types.F
 	}
 	skipped := progress.SkippedCount
 	if skipped <= 0 && total > 0 {
-		skipped = total - progress.SuccessCount - progress.FailedCount
+		skipped = total - progress.SuccessCount - progress.FailedCount - progress.PartialFailedCount
 		if skipped < 0 {
 			skipped = 0
 		}
@@ -2622,7 +2633,14 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 		payload.TaskID, payload.DryRun, progress.SuccessCount, progress.AddedCount, progress.MergedCount, progress.FailedCount, progress.PartialFailedCount)
 
 	if !payload.DryRun {
-		outcome := faqImportCompletedOutcome(progress.SuccessCount, progress.FailedCount, progress.SkippedCount)
+		outcome := faqImportCompletedOutcome(
+			progress.SuccessCount+progress.UnchangedSkippedCount,
+			progress.FailedCount,
+			progress.SkippedCount-progress.UnchangedSkippedCount,
+		)
+		if payload.Mode == types.FAQBatchModeAppend && progress.PartialFailedCount > 0 {
+			outcome = types.AuditOutcomePartial
+		}
 		s.recordFAQImportKBActivity(ctx, payload, progress, originalTotalEntries,
 			types.AuditActionFAQImportCompleted, outcome)
 	}
