@@ -73,3 +73,25 @@ func TestConvertPageHTMLWithoutTables(t *testing.T) {
 		t.Errorf("unexpected non-table Markdown: %q", got)
 	}
 }
+
+func TestConvertPageHTMLKeepsStrikethrough(t *testing.T) {
+	// Data Center body.view renders the editor's strikethrough as <s>.
+	page := `<p>套餐价格：<s>旧价格 4410 元已作废</s>，现行价格为 3990 元。</p>`
+	cell := `<table><tr><th>项目</th></tr><tr><td>A</td></tr></table>`
+	for name, input := range map[string]string{"page": page, "page with table": page + cell} {
+		got, err := convertPageHTML(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, "套餐价格：~~旧价格 4410 元已作废~~，现行价格为 3990 元。") {
+			t.Errorf("%s: strikethrough was lost:\n%s", name, got)
+		}
+	}
+	got, err := convertPageHTML(`<p><del>删除</del> 与 <strike>作废</strike></p>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "~~删除~~ 与 ~~作废~~" {
+		t.Errorf("unexpected Markdown for del/strike: %q", got)
+	}
+}
