@@ -33,6 +33,55 @@ test('copying a session rejects a full page that cannot advance the history curs
   await assert.rejects(collectAllSessionMessages(async () => page, 1), /cursor/)
 })
 
+function mockSessionHistory(size: number) {
+  const messages = Array.from({ length: size }, (_, index) => ({
+    id: String(index),
+    role: 'user',
+    created_at: new Date(Date.UTC(2026, 0, 1) + index * 1000).toISOString(),
+  }))
+  const limits: number[] = []
+  let end = messages.length
+  return {
+    messages,
+    limits,
+    fetchPage: async (beforeTime: string, limit: number) => {
+      assert.equal(beforeTime, messages[end]?.created_at ?? '')
+      limits.push(limit)
+      const start = Math.max(0, end - limit)
+      const page = messages.slice(start, end)
+      end = start
+      return page
+    },
+  }
+}
+
+test('exactly 50,000 messages are complete after one empty probe', async () => {
+  const { messages, limits, fetchPage } = mockSessionHistory(50_000)
+  assert.deepEqual(await collectAllSessionMessages(fetchPage), messages)
+  assert.deepEqual(limits, [...Array(500).fill(100), 1])
+})
+
+test('50,001 messages reject export after one non-empty probe', async () => {
+  const { limits, fetchPage } = mockSessionHistory(50_001)
+  await assert.rejects(collectAllSessionMessages(fetchPage), { name: 'SessionHistoryExportLimitError' })
+  assert.deepEqual(limits, [...Array(500).fill(100), 1])
+})
+
+test('a short final page needs no probe even at the page cap', async () => {
+  const { messages, limits, fetchPage } = mockSessionHistory(3)
+  assert.deepEqual(await collectAllSessionMessages(fetchPage, 2, 2), messages)
+  assert.deepEqual(limits, [2, 2])
+})
+
+test('a failed probe does not return an unverified export', async () => {
+  const { fetchPage } = mockSessionHistory(2)
+  const failure = new Error('message request failed')
+  await assert.rejects(collectAllSessionMessages(async (beforeTime, limit) => {
+    if (limit === 1) throw failure
+    return fetchPage(beforeTime, limit)
+  }, 2, 1), failure)
+})
+
 test('buildSessionMarkdown exports visible conversation content without internal citation tags', () => {
   const markdown = buildSessionMarkdown({
     sessionId: 'session-1',
