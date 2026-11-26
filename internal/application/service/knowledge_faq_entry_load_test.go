@@ -135,7 +135,9 @@ func testFAQImportEntryLoadFailure(t *testing.T, stage string, maxRetry int, rep
 	select {
 	case processErr := <-result:
 		require.Error(t, processErr)
-		if cancelled {
+		if replaced {
+			require.ErrorIs(t, processErr, asynq.SkipRetry)
+		} else if cancelled {
 			require.ErrorIs(t, processErr, context.Canceled)
 		} else if stage != "decode" {
 			require.ErrorIs(t, processErr, loadErr)
