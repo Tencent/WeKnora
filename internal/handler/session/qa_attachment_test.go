@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -59,4 +60,31 @@ func TestDecodeAndValidateAttachmentUploadsReturnsDecodedBytes(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, decoded, 1)
 	assert.Equal(t, []byte("hello"), decoded[0])
+}
+
+func TestInlineAttachmentUploadCountSetting(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		limit int
+	}{
+		{"", 5},
+		{"invalid", 5},
+		{"0", 5},
+		{"-2", 5},
+		{"2", 2},
+		{"8", 8},
+	} {
+		t.Run("value="+tc.value, func(t *testing.T) {
+			t.Setenv("MAX_ATTACHMENT_UPLOADS_PER_REQUEST", tc.value)
+			uploads := make([]AttachmentUpload, tc.limit+1)
+			for i := range uploads {
+				uploads[i] = encodedAttachment("x", 1)
+			}
+
+			_, err := decodeAndValidateAttachmentUploads(uploads[:tc.limit], maxAttachmentUploadsPerRequest(), 10, 100)
+			require.NoError(t, err)
+			_, err = decodeAndValidateAttachmentUploads(uploads, maxAttachmentUploadsPerRequest(), 10, 100)
+			require.EqualError(t, err, fmt.Sprintf("at most %d attachments are allowed per request", tc.limit))
+		})
+	}
 }
