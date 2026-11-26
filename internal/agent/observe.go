@@ -299,9 +299,9 @@ func compactToolMessage(msg chat.Message, maxTokens int, estimator *agenttoken.E
 	if msg.Name == agenttools.ToolDiscoverMCPTools {
 		// Catalog cursors and parameter schemas are structured protocol data.
 		// A head/tail preview can silently remove required fields or constraints.
-		base.Content = "[MCP directory result omitted to fit the context budget. Use smaller list pages. If " +
-			"a single describe result cannot fit, report that limitation; do not invoke a tool " +
-			"using a partial schema.]"
+		base.Content = "[MCP directory result omitted to fit the context budget. Use smaller list pages " +
+			"or fewer tool_names in describe_many. If a single describe result cannot fit, report that " +
+			"limitation; do not invoke a tool using a partial schema.]"
 		return base
 	}
 	if len(runes) == 0 || estimator.EstimateMessage(&base) >= maxTokens {
@@ -841,7 +841,8 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 				lines,
 				fmt.Sprintf(
 					"Use discover_mcp_tools(mode=\"list_tools\", server_id=%q) for the selected MCP "+
-						"service @%s. Describe the required tools, then use the offered functions or "+
+						"service @%s. Describe the required tool, or use describe_many for several exact "+
+						"tools from this service, then use the offered functions or "+
 						"call_mcp_tool as available before answering; report connection or "+
 						"authentication failures if the service is unavailable.",
 					sanitizeMustUseField(svc.ID),

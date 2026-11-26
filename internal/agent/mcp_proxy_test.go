@@ -147,31 +147,43 @@ func TestAgentMCPStringArgumentsKeepValidationAndAudit(t *testing.T) {
 		starts = append(starts, evt.Data.(event.AgentToolCallData))
 		return nil
 	})
-	describe := func(name string) string {
-		raw, _ := json.Marshal(map[string]any{"mode": "describe", "server_id": "currency", "tool_name": name})
-		result, err := registry.ExecuteTool(ctx, agenttools.ToolDiscoverMCPTools, raw)
-		require.NoError(t, err)
-		require.True(t, result.Success, result.Error)
-		modelResult := engine.modelContext.ModelToolResultForTool(agenttools.ToolDiscoverMCPTools, result)
-		var definition struct {
+	engine.buildToolsForLLM() // Register the model-facing server handle.
+	discovery := []types.LLMToolCall{{ID: "describe-both", Function: types.FunctionCall{
+		Name:      agenttools.ToolDiscoverMCPTools,
+		Arguments: `{"mode":"describe_many","server_id":"ms1","tool_names":["币种列表","convert"]}`,
+	}}}
+	engine.modelContext.DecodeToolCalls(discovery)
+	discovered := engine.runToolCall(ctx, discovery[0], 0, 1, 1, "session", "message")
+	require.True(t, discovered.Result.Success, discovered.Result.Error)
+	require.Zero(t, executions.Load(), "batch discovery does not call the upstream tools")
+	modelResult := engine.modelContext.ModelToolResultForTool(agenttools.ToolDiscoverMCPTools, discovered.Result)
+	var batch struct {
+		ServerID string `json:"server_id"`
+		Tools    []struct {
+			Name    string `json:"name"`
 			ToolRef string `json:"tool_ref"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(modelResult), &definition))
-		return definition.ToolRef
+		} `json:"tools"`
 	}
-	emptyRef := describe("币种列表")
-	requiredRef := describe("convert")
+	require.NoError(t, json.Unmarshal([]byte(modelResult), &batch))
+	require.Equal(t, "ms1", batch.ServerID)
+	require.Len(t, batch.Tools, 2)
+	require.Equal(t, "币种列表", batch.Tools[0].Name)
+	require.Equal(t, "convert", batch.Tools[1].Name)
+	emptyRef, requiredRef := batch.Tools[0].ToolRef, batch.Tools[1].ToolRef
+	require.Regexp(t, `^mt[0-9]+$`, emptyRef)
+	require.Regexp(t, `^mt[0-9]+$`, requiredRef)
 	for _, tc := range []struct {
 		ref       string
 		arguments any
-		success   bool
+		want      map[string]any
 	}{
-		{emptyRef, "{}", true},
-		{requiredRef, "{}", false},
-		{emptyRef, "null", false},
-		{emptyRef, "[]", false},
-		{emptyRef, `{"currency":`, false},
-		{"mt99", "{}", false},
+		{emptyRef, "{}", map[string]any{}},
+		{requiredRef, `{"currency":"USD"}`, map[string]any{"currency": "USD"}},
+		{requiredRef, "{}", nil},
+		{emptyRef, "null", nil},
+		{emptyRef, "[]", nil},
+		{emptyRef, `{"currency":`, nil},
+		{"mt99", "{}", nil},
 	} {
 		raw, err := json.Marshal(map[string]any{"tool_ref": tc.ref, "arguments": tc.arguments})
 		require.NoError(t, err)
@@ -180,12 +192,16 @@ func TestAgentMCPStringArgumentsKeepValidationAndAudit(t *testing.T) {
 		}}}
 		engine.modelContext.DecodeToolCalls(calls)
 		result := engine.runToolCall(ctx, calls[0], 0, 1, 1, "session", "message")
-		require.Equal(t, tc.success, result.Result.Success, result.Result.Error)
-		if tc.success {
-			require.Equal(t, map[string]any{}, result.Args["arguments"])
-			require.Empty(t, starts[len(starts)-1].Arguments, "UI sees actual empty arguments, not a JSON string")
+		require.Equal(t, tc.want != nil, result.Result.Success, result.Result.Error)
+		if tc.want != nil {
+			require.Equal(t, tc.want, result.Args["arguments"])
+			if len(tc.want) == 0 {
+				require.Empty(t, starts[len(starts)-1].Arguments, "UI sees empty arguments, not a JSON string")
+			} else {
+				require.Equal(t, tc.want, starts[len(starts)-1].Arguments)
+			}
 			audit := buildToolSpanInput(calls[0], result.Args, false)
-			require.Equal(t, "{}", audit["model_arguments"].(map[string]any)["arguments"])
+			require.Equal(t, tc.arguments, audit["model_arguments"].(map[string]any)["arguments"])
 			require.Equal(t, "resolved", audit["argument_resolution"])
 			require.Equal(t, result.Args, audit["resolved_arguments"])
 		} else if tc.ref == requiredRef {
@@ -193,5 +209,5 @@ func TestAgentMCPStringArgumentsKeepValidationAndAudit(t *testing.T) {
 				"target schema must still reject a missing required field")
 		}
 	}
-	require.EqualValues(t, 1, executions.Load(), "only the valid parameterless call may reach the MCP server")
+	require.EqualValues(t, 2, executions.Load(), "both valid calls may reach the MCP server")
 }

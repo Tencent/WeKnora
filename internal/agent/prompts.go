@@ -470,9 +470,9 @@ func formatToolGuidanceWithDesktop(
 	}
 	if has("discover_mcp_tools") {
 		b.WriteString("For MCP tools, use already offered functions directly. Otherwise inspect the " +
-			"relevant listed server, describe the exact tool, and wait for its definition before making " +
-			"a dependent call. Use the returned tool_ref with call_mcp_tool only when that function is " +
-			"offered; never guess tool names, server IDs, arguments, or references.\n")
+			"relevant listed server, use describe for one exact tool or describe_many for several from that server, " +
+			"and wait for the definitions before making a dependent call. Use returned tool_ref values with " +
+			"call_mcp_tool only when offered; never guess tool names, server IDs, arguments, or references.\n")
 	}
 	if has("local_browser") {
 		b.WriteString("Use local_browser directly for the connected browser; it requires no shell " +

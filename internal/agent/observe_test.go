@@ -627,6 +627,7 @@ func TestExecuteToolCalls_CompleteArgs_StillExecute(t *testing.T) {
 func TestBuildMustUseBlockMCPDirectory(t *testing.T) {
 	block := buildMustUseBlock([]*PinnedMCPServiceInfo{{ID: "orders", Name: "Orders", Discoverable: true}}, nil)
 	assert.Contains(t, block, `discover_mcp_tools(mode="list_tools", server_id="orders")`)
+	assert.Contains(t, block, "describe_many")
 	assert.Contains(t, block, "call_mcp_tool")
 	assert.NotContains(t, block, "names start with")
 }
@@ -672,6 +673,7 @@ func TestMCPDiscoveryCompactionNeverReturnsPartialSchema(t *testing.T) {
 	require.Equal(t, msg.ToolCallID, compacted.ToolCallID)
 	require.NotContains(t, compacted.Content, "input_schema")
 	require.NotContains(t, compacted.Content, "required")
+	require.Contains(t, compacted.Content, "fewer tool_names in describe_many")
 	require.Contains(t, compacted.Content, "partial schema")
 }
 

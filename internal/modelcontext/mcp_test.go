@@ -66,6 +66,32 @@ func TestMCPRoutingHandlesRoundTripWithoutTouchingExternalPayloads(t *testing.T)
 	require.Equal(t, output, r.ModelToolResultForTool("mcp_external_tool", result))
 }
 
+func TestMCPBatchDirectoryEncodesNestedRoutingFieldsWithoutTouchingSchema(t *testing.T) {
+	r := NewRegistry(false)
+	r.EncodeTools(mcpTestDefinitions())
+	externalSchema := `{"type":"object","properties":{"server_id":{"const":"` + mcpTestServer +
+		`"},"tool_ref":{"const":"` + mcpTestRef + `"}}}`
+	output := `{"server_id":"` + mcpTestServer + `","server_name":"amap-maps","tools":[` +
+		`{"server_id":"` + mcpTestServer + `","tool_ref":"` + mcpTestRef + `","input_schema":` + externalSchema + `}]}`
+	durable := &types.ToolResult{Success: true, Output: output}
+	result := r.ModelToolResultForTool("discover_mcp_tools", durable)
+	var modelOutput struct {
+		ServerID string `json:"server_id"`
+		Tools    []struct {
+			ServerID    string          `json:"server_id"`
+			ToolRef     string          `json:"tool_ref"`
+			InputSchema json.RawMessage `json:"input_schema"`
+		} `json:"tools"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(result), &modelOutput))
+	require.Equal(t, "ms1", modelOutput.ServerID)
+	require.Len(t, modelOutput.Tools, 1)
+	require.Equal(t, "ms1", modelOutput.Tools[0].ServerID)
+	require.Equal(t, "mt1", modelOutput.Tools[0].ToolRef)
+	require.JSONEq(t, externalSchema, string(modelOutput.Tools[0].InputSchema))
+	require.Equal(t, output, durable.Output, "model-side handle encoding must not mutate durable output")
+}
+
 func TestMCPRoutingReplayAndStreamUseTheSameRegistry(t *testing.T) {
 	r := NewRegistry(false)
 	r.EncodeTools(mcpTestDefinitions())

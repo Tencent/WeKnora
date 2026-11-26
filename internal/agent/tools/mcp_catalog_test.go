@@ -171,11 +171,16 @@ func TestMCPDiscoverySchemaConstrainsServerIdentity(t *testing.T) {
 	require.NoError(t, err)
 	var schema struct {
 		Properties map[string]struct {
-			Enum []string `json:"enum"`
+			Enum     []string `json:"enum"`
+			MaxItems int      `json:"maxItems"`
+			Unique   bool     `json:"uniqueItems"`
 		} `json:"properties"`
 	}
 	require.NoError(t, json.Unmarshal(discovery.Parameters(), &schema))
 	require.Equal(t, []string{id}, schema.Properties["server_id"].Enum)
+	require.Contains(t, schema.Properties["mode"].Enum, "describe_many")
+	require.Equal(t, maxMCPBatchToolCount, schema.Properties["tool_names"].MaxItems)
+	require.True(t, schema.Properties["tool_names"].Unique)
 	for _, invalid := range []string{
 		"8f7a5b68-a7ab-4565-b6f3-1cae3198f1a4", service.Name, "outside-scope",
 	} {
@@ -198,6 +203,194 @@ func TestMCPDiscoverySchemaConstrainsServerIdentity(t *testing.T) {
 	require.NotContains(t, string(discovery.Parameters()), `"enum":[]`)
 	page = discoverPage(ctx, t, empty, map[string]any{"mode": "list_servers"})
 	require.Empty(t, page.Servers)
+}
+
+func TestMCPCatalogDescribeManyReturnsCallableDefinitions(t *testing.T) {
+	ctx, r, catalog, _, calls := catalogFixture(t, 3)
+	service := catalog.servers["server-1"].service
+	lookups := 0
+	catalog.lookup = func(context.Context, uint64, string) (*types.MCPService, error) {
+		lookups++
+		return service, nil
+	}
+	discoverDescription(t, r)
+	r.SetMaxToolOutputSize(64)
+	result, err := r.ExecuteTool(ctx, ToolDiscoverMCPTools, json.RawMessage(`{
+  "mode": "describe_many",
+  "server_id": "server-1",
+  "tool_names": ["tool_002", "tool_000"]
+}`))
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	require.Equal(t, 1, lookups, "one batch must revalidate the server only once")
+	var described mcpDescribeManyResult
+	require.NoError(t, json.Unmarshal([]byte(result.Output), &described))
+	require.NotContains(t, result.Output, "DO-NOT-EXPOSE")
+	require.Contains(t, described.Notice, "not instructions")
+	require.Equal(t, "server-1", described.ServerID)
+	require.Equal(t, "订单", described.ServerName)
+	require.Len(t, described.Tools, 2)
+	require.Equal(t, []string{"tool_002", "tool_000"}, []string{
+		described.Tools[0].Name,
+		described.Tools[1].Name,
+	})
+
+	proxyTool, err := r.GetTool(ToolCallMCPTool)
+	require.NoError(t, err)
+	proxy := proxyTool.(*MCPCallTool)
+	for _, definition := range described.Tools {
+		require.NotEmpty(t, definition.ToolRef)
+		require.Equal(t, service.ID, definition.ServerID)
+		require.Equal(t, service.Name, definition.ServerName)
+		require.Equal(t, service.EffectiveUsageInstructions(), definition.UsageInstructions)
+		require.Equal(t, "customer order lookup", definition.Description)
+		require.JSONEq(t, `{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"]}`,
+			string(definition.InputSchema))
+		raw, marshalErr := json.Marshal(map[string]any{
+			"tool_ref":  definition.ToolRef,
+			"arguments": map[string]any{"count": 1},
+		})
+		require.NoError(t, marshalErr)
+		resolved, _, resolveErr := proxy.resolve(ctx, raw)
+		require.NoError(t, resolveErr, definition.Name)
+		require.Equal(t, definition.Name, resolved.mcpTool.Name)
+		require.Equal(t, mcpRegisteredName(resolved), definition.FunctionName)
+	}
+	require.Len(t, r.MCPExposureSnapshot(), 2)
+	require.Equal(t, 1, *calls, "one batch must load one server snapshot")
+}
+
+func TestMCPCatalogDescribeManyFailsClosed(t *testing.T) {
+	tests := []struct {
+		name      string
+		toolNames []string
+		disable   string
+	}{
+		{
+			name:      "unknown tool",
+			toolNames: []string{"tool_000", "missing"},
+		},
+		{
+			name:      "not an exact match",
+			toolNames: []string{"tool_000", "TOOL_001"},
+		},
+		{
+			name:      "disabled tool",
+			toolNames: []string{"tool_000", "tool_001"},
+			disable:   "tool_001",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, r, _, gate, _ := catalogFixture(t, 2)
+			if tt.disable != "" {
+				gate.disabled["server-1/"+tt.disable] = true
+			}
+			raw, err := json.Marshal(map[string]any{
+				"mode":       "describe_many",
+				"server_id":  "server-1",
+				"tool_names": tt.toolNames,
+			})
+			require.NoError(t, err)
+			result, err := r.ExecuteTool(ctx, ToolDiscoverMCPTools, raw)
+			require.NoError(t, err)
+			require.False(t, result.Success)
+			require.Equal(t, "unavailable", result.Data["status"])
+			require.Contains(t, result.Error, "current authorized names")
+			require.Empty(t, result.Output)
+			require.Empty(t, r.MCPExposureSnapshot())
+		})
+	}
+}
+
+func TestMCPCatalogDescribeManyRejectsInvalidSchemaWithoutPartialExposure(t *testing.T) {
+	for name, schema := range map[string]string{
+		"non-object":      `[]`,
+		"malformed JSON":  `{"type":`,
+		"invalid keyword": `{"type":22}`,
+		"missing ref":     `{"$ref":"#/$defs/missing"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, r, catalog, gate, _ := catalogFixture(t, 2)
+			catalog.load = func(_ context.Context, service *types.MCPService, _ bool) ([]*MCPTool, error) {
+				invalid := catalogTestTool(service, "bad", "bad schema", gate)
+				invalid.mcpTool.InputSchema = json.RawMessage(schema)
+				return []*MCPTool{invalid, catalogTestTool(service, "valid", "valid schema", gate)}, nil
+			}
+			result, err := r.ExecuteTool(ctx, ToolDiscoverMCPTools, json.RawMessage(`{
+  "mode": "describe_many",
+  "server_id": "server-1",
+  "tool_names": ["valid", "bad"]
+}`))
+			require.NoError(t, err)
+			require.False(t, result.Success)
+			require.Equal(t, "error", result.Data["status"])
+			require.Empty(t, result.Output)
+			require.Empty(t, r.MCPExposureSnapshot())
+		})
+	}
+}
+
+func TestMCPCatalogDescribeManyValidatesNamesBeforeLoading(t *testing.T) {
+	ctx, r, _, _, calls := catalogFixture(t, 21)
+	for _, tt := range []struct {
+		name      string
+		toolNames []string
+		errorText string
+	}{
+		{name: "empty", toolNames: nil, errorText: "at least one"},
+		{name: "blank name", toolNames: []string{" "}, errorText: "non-empty"},
+		{name: "duplicate", toolNames: []string{"tool_000", "tool_000"}, errorText: "duplicates"},
+		{
+			name: "too many",
+			toolNames: func() []string {
+				names := make([]string, maxMCPBatchToolCount+1)
+				for i := range names {
+					names[i] = fmt.Sprintf("tool_%03d", i)
+				}
+				return names
+			}(),
+			errorText: "at most",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]any{
+				"mode":       "describe_many",
+				"server_id":  "server-1",
+				"tool_names": tt.toolNames,
+			})
+			require.NoError(t, err)
+			result, err := r.ExecuteTool(ctx, ToolDiscoverMCPTools, raw)
+			require.NoError(t, err)
+			require.False(t, result.Success)
+			require.Contains(t, result.Error, tt.errorText)
+			require.Zero(t, *calls, "invalid batches must not load the MCP server")
+		})
+	}
+}
+
+func TestMCPCatalogDescribeManyOutputLimitIsAtomic(t *testing.T) {
+	ctx, r, catalog, gate, _ := catalogFixture(t, 2)
+	service := catalog.servers["server-1"].service
+	catalog.load = func(context.Context, *types.MCPService, bool) ([]*MCPTool, error) {
+		return []*MCPTool{
+			catalogTestTool(service, "large_000", strings.Repeat("x", maxMCPBatchDefinitionChars/2), gate),
+			catalogTestTool(service, "large_001", strings.Repeat("y", maxMCPBatchDefinitionChars/2), gate),
+		}, nil
+	}
+	result, err := r.ExecuteTool(ctx, ToolDiscoverMCPTools, json.RawMessage(`{
+  "mode": "describe_many",
+  "server_id": "server-1",
+  "tool_names": ["large_000", "large_001"]
+}`))
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Contains(t, result.Error, "reduce tool_names")
+	tools, _, snapshotErr := catalog.snapshot(ctx, "server-1", false)
+	require.NoError(t, snapshotErr)
+	for _, tool := range tools {
+		require.False(t, catalog.describedRef(mcpToolRef(tool)), tool.mcpTool.Name)
+	}
 }
 
 func TestMCPCatalogUsesUsageInstructionsForRouting(t *testing.T) {
@@ -689,9 +882,19 @@ func TestMCPCatalogHidesWriteToolsFromReadOnlyRuns(t *testing.T) {
 			page := discoverPage(readOnlyCtx, t, r, list)
 			require.Len(t, page.Tools, 1)
 			require.Equal(t, "lookup", page.Tools[0].Name)
+			batch := json.RawMessage(`{"mode":"describe_many","server_id":"server-1","tool_names":["lookup","cancel"]}`)
+			result, err := r.ExecuteTool(readOnlyCtx, ToolDiscoverMCPTools, batch)
+			require.NoError(t, err)
+			require.False(t, result.Success, "a hidden write tool must reject the entire batch")
+			require.Equal(t, "unavailable", result.Data["status"])
+			require.Empty(t, result.Output)
+			require.Empty(t, r.MCPExposureSnapshot())
 
 			confirmCtx := types.WithAccessLevel(catalogTestContext(), types.AssistantAccessConfirm)
 			require.Len(t, discoverPage(confirmCtx, t, r, list).Tools, 2)
+			result, err = r.ExecuteTool(confirmCtx, ToolDiscoverMCPTools, batch)
+			require.NoError(t, err)
+			require.True(t, result.Success, result.Error)
 		})
 	}
 }
