@@ -29,17 +29,20 @@ func TestWikiPageModifyRemovalNoticeOnlyForPureRetraction(t *testing.T) {
 		name        string
 		additions   string
 		retractions string
+		remaining   string
 		wantNotice  bool
 	}{
-		{name: "new contribution", additions: "1"},
-		{name: "reparse swap", additions: "1", retractions: "1"},
+		{name: "new contribution", additions: "1", remaining: "1"},
+		{name: "reparse swap", additions: "1", retractions: "1", remaining: "1"},
 		{name: "deleted source", retractions: "1", wantNotice: true},
-		{name: "no source changes"},
+		{name: "deleted source with other sources left", retractions: "1", remaining: "1"},
+		{name: "no source changes", remaining: "1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var b strings.Builder
 			if err := tmpl.Execute(&b, map[string]string{
 				"HasAdditions": tc.additions, "HasRetractions": tc.retractions,
+				"HasRemainingSources": tc.remaining,
 			}); err != nil {
 				t.Fatal(err)
 			}
