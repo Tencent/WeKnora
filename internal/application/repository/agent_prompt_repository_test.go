@@ -35,7 +35,8 @@ func TestAgentPromptRepositoryStoresLongPrincipalIdentities(t *testing.T) {
 	for _, name := range []string{"UserID", "ResolvedBy"} {
 		field := stmt.Schema.LookUpField(name)
 		require.NotNil(t, field)
-		require.EqualValues(t, 512, field.Size)
+		dataType := repo.db.Migrator().FullDataTypeOf(field)
+		require.Contains(t, strings.ToLower(dataType.SQL), "varchar(512)")
 	}
 
 	require.NoError(t, repo.Create(ctx, &types.AgentPrompt{
