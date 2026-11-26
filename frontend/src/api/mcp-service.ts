@@ -103,6 +103,18 @@ export interface MCPAgentScope {
   sourceTenantId?: string | number
 }
 
+// Query string naming the shared agent an OAuth step is for. The token of a
+// shared agent's service lives in the agent owner's workspace, so the backend
+// needs the agent to find it; own-agent requests send nothing.
+function agentScopeQuery(agent?: MCPAgentScope): string {
+  if (!agent?.agentId || !agent?.sourceTenantId) return ''
+  const params = new URLSearchParams({
+    agent_id: agent.agentId,
+    agent_source_tenant_id: String(agent.sourceTenantId),
+  })
+  return `?${params}`
+}
+
 // Lists MCP services.
 //
 // With a shared agent, the result is the services THAT agent can be @mentioned
@@ -249,9 +261,13 @@ export interface MCPOAuthStatus {
 // this popup, so an older stored token cannot be mistaken for fresh consent.
 export async function getMCPOAuthAuthorizeURL(
   serviceId: string,
-  body: { redirect_uri: string; frontend_redirect?: string }
+  body: { redirect_uri: string; frontend_redirect?: string },
+  agent?: MCPAgentScope,
 ): Promise<MCPOAuthAuthorization> {
-  const response: any = await post(`/api/v1/mcp-services/${serviceId}/oauth/authorize-url`, body)
+  const response: any = await post(
+    `/api/v1/mcp-services/${serviceId}/oauth/authorize-url${agentScopeQuery(agent)}`,
+    body,
+  )
   const data = response.data ?? response
   return {
     authorizationUrl: data?.authorization_url ?? '',
@@ -263,10 +279,11 @@ export async function getMCPOAuthAuthorizeURL(
 export async function getMCPOAuthStatus(
   serviceId: string,
   authorizationAttempt?: string,
+  agent?: MCPAgentScope,
 ): Promise<boolean> {
-  const query = authorizationAttempt
-    ? `?authorization_attempt=${encodeURIComponent(authorizationAttempt)}`
-    : ''
+  const params = new URLSearchParams(agentScopeQuery(agent).slice(1))
+  if (authorizationAttempt) params.set('authorization_attempt', authorizationAttempt)
+  const query = params.toString() ? `?${params}` : ''
   const response: any = await get(`/api/v1/mcp-services/${serviceId}/oauth/status${query}`)
   return Boolean((response.data ?? response)?.authorized)
 }
@@ -344,9 +361,13 @@ export async function resolveAgentPrompt(
 // the token exists before unblocking the paused tool call.
 export async function resolveMCPOAuth(
   pendingId: string,
-  body: { service_id: string; decision?: 'authorize' | 'cancel' }
+  body: { service_id: string; decision?: 'authorize' | 'cancel' },
+  agent?: MCPAgentScope,
 ): Promise<void> {
-  await post(`/api/v1/agent/mcp-oauth-resolutions/${encodeURIComponent(pendingId)}`, body)
+  await post(
+    `/api/v1/agent/mcp-oauth-resolutions/${encodeURIComponent(pendingId)}${agentScopeQuery(agent)}`,
+    body,
+  )
 }
 
 export async function cancelMCPOAuth(pendingId: string): Promise<void> {

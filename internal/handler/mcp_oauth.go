@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -34,6 +35,8 @@ type MCPOAuthHandler struct {
 	gate       *approval.Gate
 	// cfg supplies the SPA origin for subpath-aware redirect defaults.
 	cfg *config.Config
+	// agents resolves the shared agent a borrower is authorizing for.
+	agents access.SharedAgentLookup
 }
 
 // NewMCPOAuthHandler constructs the handler.
@@ -43,8 +46,9 @@ func NewMCPOAuthHandler(
 	svc interfaces.MCPServiceService,
 	gate *approval.Gate,
 	cfg *config.Config,
+	agents access.SharedAgentLookup,
 ) *MCPOAuthHandler {
-	return &MCPOAuthHandler{oauth: oauth, mcpManager: mcpManager, svc: svc, gate: gate, cfg: cfg}
+	return &MCPOAuthHandler{oauth: oauth, mcpManager: mcpManager, svc: svc, gate: gate, cfg: cfg, agents: agents}
 }
 
 // mcpFrontendRedirectDefault derives the default post-authorization popup
@@ -67,6 +71,33 @@ func mcpFrontendRedirectDefault(cfg *config.Config) string {
 		return strings.TrimRight(base, "/") + "/"
 	}
 	return "/"
+}
+
+// scopeTenant returns the workspace that owns the MCP service and the user's
+// token for it. That is the caller's own workspace, except when the request
+// names a shared agent (agent_id + agent_source_tenant_id): the agent runs
+// against its owner's workspace, so the token it reads is stored there, keyed
+// by the borrower. Access requires the share and the service being part of the
+// agent's explicit MCP preset, so this opens no other service of the owner.
+func (h *MCPOAuthHandler) scopeTenant(c *gin.Context, callerTenant uint64, serviceID string) (uint64, error) {
+	agentID := strings.TrimSpace(c.Query("agent_id"))
+	source, err := types.ParseAgentSourceTenantID(c.Query(types.AgentSourceTenantIDParam))
+	if err != nil {
+		return 0, errors.NewBadRequestError(err.Error())
+	}
+	if agentID == "" || source == 0 || source == callerTenant {
+		return callerTenant, nil
+	}
+	agent, err := resolveSharedAgentForRequest(c, agentID, h.agents)
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range sharedAgentMCPScope(agent) {
+		if id == serviceID {
+			return agent.TenantID, nil
+		}
+	}
+	return 0, errors.NewForbiddenError("MCP service is not available through this shared agent")
 }
 
 func mcpOAuthPrincipalsFromContext(ctx *gin.Context) (tokenPrincipal types.Principal, gateUserID string) {
@@ -110,6 +141,11 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 	principal, _ := mcpOAuthPrincipalsFromContext(c)
 	if tenantID == 0 || !principal.Valid() {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
+		return
+	}
+	tenantID, err := h.scopeTenant(c, tenantID, serviceID)
+	if err != nil {
+		c.Error(err)
 		return
 	}
 
@@ -331,6 +367,11 @@ func (h *MCPOAuthHandler) Status(c *gin.Context) {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
 	}
+	tenantID, err := h.scopeTenant(c, tenantID, serviceID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
 
 	attemptID := strings.TrimSpace(c.Query("authorization_attempt"))
 	if attemptID != "" {
@@ -378,6 +419,11 @@ func (h *MCPOAuthHandler) Revoke(c *gin.Context) {
 	principal, _ := mcpOAuthPrincipalsFromContext(c)
 	if tenantID == 0 || !principal.Valid() {
 		c.Error(errors.NewUnauthorizedError("authentication required"))
+		return
+	}
+	tenantID, err := h.scopeTenant(c, tenantID, serviceID)
+	if err != nil {
+		c.Error(err)
 		return
 	}
 
@@ -484,7 +530,12 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 
 	// Only resume once the user genuinely holds a token; otherwise the retry
 	// would just fail again with another authorization-required error.
-	authorized, err := h.oauth.IsAuthorized(ctx, tenantID, principal, serviceID)
+	tokenTenant, err := h.scopeTenant(c, tenantID, serviceID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	authorized, err := h.oauth.IsAuthorized(ctx, tokenTenant, principal, serviceID)
 	if err != nil {
 		c.Error(errors.NewInternalServerError("failed to verify authorization: " + err.Error()))
 		return

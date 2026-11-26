@@ -776,7 +776,16 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Start only after the delegation close hook is installed.
 	must(container.Invoke(startAgentPromptReaper))
 	must(container.Provide(handler.NewMCPCredentialsHandler))
-	must(container.Provide(handler.NewMCPOAuthHandler))
+	must(container.Provide(func(
+		oauth *mcp.OAuthManager,
+		mcpManager *mcp.MCPManager,
+		svc interfaces.MCPServiceService,
+		gate *approval.Gate,
+		cfg *config.Config,
+		agents interfaces.AgentShareService,
+	) *handler.MCPOAuthHandler {
+		return handler.NewMCPOAuthHandler(oauth, mcpManager, svc, gate, cfg, agents)
+	}))
 	must(container.Provide(handler.NewModelCredentialsHandler))
 	must(container.Provide(handler.NewWebSearchProviderCredentialsHandler))
 	must(container.Provide(handler.NewDataSourceCredentialsHandler))
