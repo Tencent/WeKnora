@@ -695,3 +695,38 @@ func TestMCPCatalogHidesWriteToolsFromReadOnlyRuns(t *testing.T) {
 		})
 	}
 }
+
+func TestMCPCatalogReloadRetiresToolsAfterConnectionChange(t *testing.T) {
+	ctx := catalogTestContext()
+	service := &types.MCPService{ID: "svc", Name: "Orders", Enabled: true}
+	original := &types.MCPMetadata{
+		ConfigFingerprint: types.MCPConfigFingerprint(service),
+		Tools:             []*types.MCPTool{{Name: "lookup"}},
+	}
+	for name, next := range map[string]*types.MCPMetadata{
+		"saved directory is stale": {Stale: true, ConfigFingerprint: original.ConfigFingerprint},
+		"new connection already refreshed": {
+			ConfigFingerprint: types.MCPConfigFingerprint(&types.MCPService{
+				Headers: types.MCPHeaders{"X-Client": "new"},
+			}),
+			Tools: []*types.MCPTool{{Name: "new_lookup"}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := &memoryDirectoryStore{snapshot: original}
+			catalog, _ := revalidatingCatalog(t, service, store, 0)
+			loaded, _, err := catalog.snapshot(ctx, service.ID, false)
+			require.NoError(t, err)
+			require.Len(t, loaded, 1)
+			ref := mcpToolRef(loaded[0])
+
+			// The saved directory can change after the catalog reads the service row.
+			catalog.markForReload(service.ID)
+			store.save(next)
+			loaded, _, err = catalog.snapshot(ctx, service.ID, false)
+			require.Error(t, err)
+			require.Empty(t, loaded)
+			require.Nil(t, catalog.cachedTool(ref))
+		})
+	}
+}

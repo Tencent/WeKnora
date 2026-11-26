@@ -11,7 +11,8 @@ import (
 type MCPMetadataRepository interface {
 	GetMetadata(context.Context, uint64, string, string) (*types.MCPMetadata, error)
 	ListMetadataSummaries(context.Context, uint64, []string) ([]*types.MCPMetadataSummary, error)
-	SaveMetadata(context.Context, *types.MCPMetadata) error
+	// SaveMetadata verifies the source connection and atomically returns the winning snapshot.
+	SaveMetadata(ctx context.Context, snapshot *types.MCPMetadata, sourceEnabled bool) (*types.MCPMetadata, error)
 }
 
 // MCPMetadataService reads and explicitly refreshes directory snapshots.
@@ -21,10 +22,10 @@ type MCPMetadataService interface {
 	// ListMCPMetadataSummaries returns persisted directory counts for the list UI.
 	ListMCPMetadataSummaries(context.Context, uint64, []*types.MCPService) (map[string]*types.MCPMetadataSummary, error)
 	// PersistMCPMetadata stores a complete directory already listed on an authorized
-	// connection, with the server identity that connection reported and the time
+	// connection, using the service configuration that opened it and the time
 	// the listing started.
 	PersistMCPMetadata(
-		context.Context, uint64, string, []*types.MCPTool, string, types.MCPServerInfo, time.Time,
+		context.Context, uint64, *types.MCPService, []*types.MCPTool, string, types.MCPServerInfo, time.Time,
 	) error
 	// RefreshMCPMetadata explicitly connects and atomically replaces a complete snapshot.
 	RefreshMCPMetadata(context.Context, uint64, string) (*types.MCPMetadata, error)

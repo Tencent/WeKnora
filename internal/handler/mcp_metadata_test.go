@@ -58,34 +58,25 @@ func TestMCPMetadataAppErrorDoesNotLeakUpstreamDetails(t *testing.T) {
 	unauthorized := mcpMetadataAppError(types.ErrMCPOAuthPrincipalRequired, true)
 	require.Equal(t, http.StatusUnauthorized, unauthorized.HTTPCode)
 
+	forbidden := mcpMetadataAppError(types.ErrMCPSharedRefreshForbidden, true)
+	require.Equal(t, http.StatusForbidden, forbidden.HTTPCode)
+
 	conflict := mcpMetadataAppError(types.ErrMCPMetadataConnectionChanged, true)
 	require.Equal(t, http.StatusConflict, conflict.HTTPCode)
 
 	unavailable := mcpMetadataAppError(types.ErrMCPMetadataStorage, false)
 	require.Equal(t, http.StatusServiceUnavailable, unavailable.HTTPCode)
 
+	for _, refresh := range []bool{false, true} {
+		err := errors.Join(types.ErrMCPMetadataConnectionUnverified, errors.New("private database diagnostic"))
+		unverified := mcpMetadataAppError(err, refresh)
+		require.Equal(t, http.StatusServiceUnavailable, unverified.HTTPCode)
+		require.NotContains(t, unverified.Error(), "private database diagnostic")
+	}
+
 	refresh := mcpMetadataAppError(errors.New("dial tcp 10.1.2.3:443 https://secret.internal/mcp"), true)
 	require.Equal(t, http.StatusBadRequest, refresh.HTTPCode)
 	require.Equal(t, "Failed to refresh MCP tools. Check the connection and try again.", refresh.Message)
 	require.NotContains(t, refresh.Error(), "secret.internal")
 	require.NotContains(t, refresh.Error(), "10.1.2.3")
-}
-
-func TestMayWriteSharedMCPMetadata(t *testing.T) {
-	require.False(t, mayWriteSharedMCPMetadata(context.Background()))
-	require.False(t, mayWriteSharedMCPMetadata(types.WithCaller(
-		context.Background(),
-		types.Caller{Role: types.TenantRoleViewer},
-	)))
-	require.True(t, mayWriteSharedMCPMetadata(types.WithCaller(
-		context.Background(),
-		types.Caller{Role: types.TenantRoleAdmin},
-	)))
-	require.True(t, mayWriteSharedMCPMetadata(types.WithTenantAPIKeyScope(
-		context.Background(),
-		types.TenantAPIKeyScope{KeyID: 1, FullAccess: true},
-	)))
-	require.True(t, mayWriteSharedMCPMetadata(
-		context.WithValue(context.Background(), types.SystemAdminContextKey, true),
-	))
 }

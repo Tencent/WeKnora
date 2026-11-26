@@ -38,7 +38,7 @@ func (s *mcpServiceService) loadServiceForMetadata(
 ) (*types.MCPService, string, interfaces.MCPMetadataRepository, error) {
 	service, err := s.mcpServiceRepo.GetByID(ctx, tenant, id)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", nil, fmt.Errorf("%w: %w", types.ErrMCPMetadataConnectionUnverified, err)
 	}
 	if service == nil || tenant == 0 {
 		return nil, "", nil, types.ErrMCPServiceNotFound
@@ -118,20 +118,6 @@ func (s *mcpServiceService) commitMCPMetadata(
 	instructions, serverName, serverVersion, serverDescription string,
 	started time.Time,
 ) (*types.MCPMetadata, error) {
-	repo, err := s.metadataRepo()
-	if err != nil {
-		return nil, err
-	}
-	seen := make(map[string]bool)
-	for _, tool := range listed {
-		if tool == nil || tool.Name == "" || seen[tool.Name] {
-			return nil, types.ErrMCPMetadataInvalidTools
-		}
-		seen[tool.Name] = true
-	}
-	if listed == nil {
-		listed = []*types.MCPTool{}
-	}
 	snapshot := &types.MCPMetadata{
 		TenantID:          tenant,
 		ServiceID:         service.ID,
@@ -144,6 +130,16 @@ func (s *mcpServiceService) commitMCPMetadata(
 		ServerDescription: serverDescription,
 		SyncedAt:          started,
 	}
+	seen := make(map[string]bool)
+	for _, tool := range snapshot.Tools {
+		if tool == nil || tool.Name == "" || seen[tool.Name] {
+			return nil, types.ErrMCPMetadataInvalidTools
+		}
+		seen[tool.Name] = true
+	}
+	if snapshot.Tools == nil {
+		snapshot.Tools = []*types.MCPTool{}
+	}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
 		return nil, err
@@ -151,21 +147,18 @@ func (s *mcpServiceService) commitMCPMetadata(
 	if len(raw) > 8*1024*1024 {
 		return nil, types.ErrMCPMetadataTooLarge
 	}
-	current, err := s.mcpServiceRepo.GetByID(ctx, tenant, service.ID)
+	repo, err := s.metadataRepo()
 	if err != nil {
-		return nil, err
+		// Without the repository's atomic connection check, a live listing
+		// cannot be safely used as a storage-only fallback in chat.
+		return nil, types.ErrMCPMetadataConnectionUnverified
 	}
-	if current == nil || types.MCPConfigFingerprint(current) != snapshot.ConfigFingerprint {
-		return nil, types.ErrMCPMetadataConnectionChanged
-	}
-	if err := repo.SaveMetadata(ctx, snapshot); err != nil {
-		return nil, err
-	}
-	return s.GetMCPMetadata(ctx, tenant, service.ID)
+	return repo.SaveMetadata(ctx, snapshot, service.Enabled)
 }
 
 // PersistMCPMetadata writes a complete directory already listed on an authorized
-// connection. It is how a chatting OAuth user stores their own snapshot without
+// connection. service is the configuration used to list the directory.
+// It is how a chatting OAuth user stores their own snapshot without
 // an admin settings refresh. The server identity is stored as well, so a later
 // connection to a different server build can be recognized. listedAt is when
 // the listing started, as a settings refresh records it, so the two never
@@ -173,13 +166,16 @@ func (s *mcpServiceService) commitMCPMetadata(
 func (s *mcpServiceService) PersistMCPMetadata(
 	ctx context.Context,
 	tenant uint64,
-	id string,
+	service *types.MCPService,
 	listed []*types.MCPTool,
 	instructions string,
 	server types.MCPServerInfo,
 	listedAt time.Time,
 ) error {
-	service, principal, _, err := s.loadServiceForMetadata(ctx, tenant, id)
+	if tenant == 0 || service == nil {
+		return types.ErrMCPServiceNotFound
+	}
+	principal, err := metadataPrincipal(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -193,6 +189,19 @@ func (s *mcpServiceService) PersistMCPMetadata(
 	return err
 }
 
+// mayWriteSharedMCPMetadata is the extra gate for static-auth catalogs. The
+// route stays Viewer+ so OAuth users can persist their own snapshot after
+// authorizing in chat. API keys already passed manage-MCP; JWT callers need Admin.
+func mayWriteSharedMCPMetadata(ctx context.Context) bool {
+	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		return true
+	}
+	if types.IsSystemAdminFromContext(ctx) {
+		return true
+	}
+	return types.CallerFromContext(ctx).Role.HasPermission(types.TenantRoleAdmin)
+}
+
 // Refresh performs no user operations and never publishes a partial tools/list.
 // A failed refresh preserves the last stored snapshot for inspection. Config
 // fingerprints keep snapshots for old connections out of the execution path.
@@ -204,6 +213,10 @@ func (s *mcpServiceService) RefreshMCPMetadata(
 	service, principal, _, err := s.loadServiceForMetadata(ctx, tenant, id)
 	if err != nil {
 		return nil, err
+	}
+	// Authorize the same service configuration that opens this connection.
+	if !service.AuthConfig.IsOAuth() && !mayWriteSharedMCPMetadata(ctx) {
+		return nil, types.ErrMCPSharedRefreshForbidden
 	}
 	started := time.Now().UTC()
 	config := &mcp.ClientConfig{Service: service}

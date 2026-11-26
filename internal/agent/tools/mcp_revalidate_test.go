@@ -134,7 +134,7 @@ func (m *memoryDirectoryStore) io(revalidator *MCPDirectoryRevalidator) *MCPMeta
 			return &copied, nil
 		},
 		Put: func(
-			_ context.Context, _ uint64, _ string,
+			_ context.Context, _ uint64, _ *types.MCPService,
 			listed []*types.MCPTool, instructions string, server types.MCPServerInfo, listedAt time.Time,
 		) error {
 			m.mu.Lock()

@@ -29,7 +29,9 @@ func TestLoadMCPDirectoryUsesFreshSnapshotWithoutConnecting(t *testing.T) {
 			require.Equal(t, "svc", id)
 			return &types.MCPMetadata{Tools: want, Instructions: "from-db"}, nil
 		},
-		Put: func(context.Context, uint64, string, []*types.MCPTool, string, types.MCPServerInfo, time.Time) error {
+		Put: func(
+			context.Context, uint64, *types.MCPService, []*types.MCPTool, string, types.MCPServerInfo, time.Time,
+		) error {
 			t.Fatal("fresh snapshot must not be rewritten")
 			return nil
 		},
@@ -51,7 +53,9 @@ func TestLoadMCPDirectoryDoesNotLiveFillStaleSnapshot(t *testing.T) {
 				Tools: []*types.MCPTool{{Name: "old"}},
 			}, nil
 		},
-		Put: func(context.Context, uint64, string, []*types.MCPTool, string, types.MCPServerInfo, time.Time) error {
+		Put: func(
+			context.Context, uint64, *types.MCPService, []*types.MCPTool, string, types.MCPServerInfo, time.Time,
+		) error {
 			t.Fatal("stale snapshot must not live-fill")
 			return nil
 		},
@@ -90,14 +94,14 @@ func TestLoadMCPDirectoryLiveFillsMissingNonOAuthDirectory(t *testing.T) {
 	directory, err := loadMCPDirectory(ctx, service, manager, nil, nil, &MCPMetadataIO{
 		Get: func(context.Context, uint64, string) (*types.MCPMetadata, error) { return nil, nil },
 		Put: func(
-			_ context.Context, tenant uint64, id string,
+			_ context.Context, tenant uint64, source *types.MCPService,
 			listed []*types.MCPTool, text string, server types.MCPServerInfo, listedAt time.Time,
 		) error {
 			put.Add(1)
 			require.Equal(t, types.MCPServerInfo{Name: "Orders", Version: "1"}, server)
 			require.False(t, listedAt.IsZero(), "a live listing is dated by when it started")
 			require.Equal(t, uint64(7), tenant)
-			require.Equal(t, "svc", id)
+			require.Equal(t, service, source)
 			require.Equal(t, "live", text)
 			require.Len(t, listed, 1)
 			require.Equal(t, "get_order", listed[0].Name)
@@ -120,7 +124,9 @@ func TestLoadMCPDirectoryOAuthMissingRequiresToolExecContext(t *testing.T) {
 	}
 	io := &MCPMetadataIO{
 		Get: func(context.Context, uint64, string) (*types.MCPMetadata, error) { return nil, nil },
-		Put: func(context.Context, uint64, string, []*types.MCPTool, string, types.MCPServerInfo, time.Time) error {
+		Put: func(
+			context.Context, uint64, *types.MCPService, []*types.MCPTool, string, types.MCPServerInfo, time.Time,
+		) error {
 			t.Fatal("OAuth preload must not persist a directory")
 			return nil
 		},
@@ -174,8 +180,8 @@ func TestLoadMCPDirectoryExplicitRefreshRelistsExistingAndStaleSnapshots(t *test
 			return nil, nil
 		},
 		Put: func(
-			_ context.Context, _ uint64, _ string, listed []*types.MCPTool, text string, _ types.MCPServerInfo,
-			_ time.Time,
+			_ context.Context, _ uint64, _ *types.MCPService, listed []*types.MCPTool,
+			text string, _ types.MCPServerInfo, _ time.Time,
 		) error {
 			put.Add(1)
 			require.Equal(t, "live", text)
@@ -190,4 +196,36 @@ func TestLoadMCPDirectoryExplicitRefreshRelistsExistingAndStaleSnapshots(t *test
 	require.Equal(t, int32(1), put.Load())
 	require.Equal(t, "get_order", directory.tools[0].Name)
 	require.Equal(t, "live", directory.instructions)
+}
+
+func TestMCPDirectoryLookupAndSnapshotUseSameConfig(t *testing.T) {
+	ctx := catalogTestContext()
+	english := &types.MCPService{
+		ID: "dictionary", Enabled: true, Headers: types.MCPHeaders{"Accept-Language": "en"},
+	}
+	french := *english
+	french.Headers = types.MCPHeaders{"Accept-Language": "fr"}
+	current := english
+	lookup := func(context.Context, uint64, string) (*types.MCPService, error) { return current, nil }
+	io := &MCPMetadataIO{Get: func(context.Context, uint64, string) (*types.MCPMetadata, error) {
+		// A settings edit and refresh finished after the catalog selected its service.
+		current = &french
+		return &types.MCPMetadata{
+			ConfigFingerprint: types.MCPConfigFingerprint(current),
+			Tools:             []*types.MCPTool{{Name: "traduire"}},
+		}, nil
+	}}
+	registry := NewToolRegistry()
+	_, err := RegisterMCPTools(ctx, registry, []*types.MCPService{english}, nil, nil, 0, lookup, io)
+	require.NoError(t, err)
+	catalog := registry.mcpCatalog()
+	listed, _, err := catalog.snapshot(ctx, english.ID, false)
+	require.Error(t, err, "an English service must not offer the French directory")
+	require.Empty(t, listed)
+
+	listed, _, err = catalog.snapshot(ctx, english.ID, false)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, "traduire", listed[0].mcpTool.Name)
+	require.Equal(t, "fr", listed[0].service.Headers["Accept-Language"])
 }
