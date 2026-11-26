@@ -236,6 +236,7 @@ export default {
     zhTW: '繁體中文',
     enUS: 'English',
     ruRU: 'Русский',
+    viVN: 'Tiếng Việt',
     koKR: '한국어',
     jaJP: '日本語',
     selectLanguage: '选择语言',

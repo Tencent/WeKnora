@@ -107,6 +107,7 @@ test('normalizeMainLocale resolves BCP-47 tags and Traditional Chinese variants'
   assert.equal(normalizeMainLocale('ja'), 'ja-JP')
   assert.equal(normalizeMainLocale('ko'), 'ko-KR')
   assert.equal(normalizeMainLocale('ru'), 'ru-RU')
+  assert.equal(normalizeMainLocale('vi'), 'vi-VN')
   assert.equal(normalizeMainLocale('unknown-tag'), 'zh-CN')
   assert.equal(normalizeMainLocale(''), 'zh-CN')
 })

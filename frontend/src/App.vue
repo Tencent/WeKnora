@@ -35,6 +35,8 @@ const tdLocaleMap: Record<string, object> = {
   'ko-KR': koKRConfig,
   'ja-JP': jaJPConfig,
   'ru-RU': ruRUConfig,
+  // tdesign ships no Vietnamese pack; component strings use English.
+  'vi-VN': enUSConfig,
 }
 
 const tdGlobalConfig = computed(() => tdLocaleMap[locale.value] || enUSConfig)

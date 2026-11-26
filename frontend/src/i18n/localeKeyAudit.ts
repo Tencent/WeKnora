@@ -21,6 +21,7 @@ import enUS from './locales/en-US.ts'
 import jaJP from './locales/ja-JP.ts'
 import koKR from './locales/ko-KR.ts'
 import ruRU from './locales/ru-RU.ts'
+import viVN from './locales/vi-VN.ts'
 import zhCN from './locales/zh-CN.ts'
 import zhTW from './locales/zh-TW.ts'
 
@@ -31,6 +32,7 @@ export const LOCALE_BUNDLES = {
   'ko-KR': koKR,
   'ja-JP': jaJP,
   'ru-RU': ruRU,
+  'vi-VN': viVN,
 } as const
 
 export type LocaleName = keyof typeof LOCALE_BUNDLES
@@ -537,7 +539,7 @@ export function findAllLocaleMessageCompileErrors(
 
 type LocaleTree = Record<string, unknown>
 
-const LOCALE_ORDER: LocaleName[] = ['en-US', 'zh-CN', 'zh-TW', 'ko-KR', 'ru-RU', 'ja-JP']
+const LOCALE_ORDER: LocaleName[] = ['en-US', 'zh-CN', 'zh-TW', 'ko-KR', 'ru-RU', 'ja-JP', 'vi-VN']
 const LOCALES_DIR = join(dirname(fileURLToPath(import.meta.url)), 'locales')
 
 function getLocaleValueAtPathParts(current: unknown, parts: string[]): unknown {

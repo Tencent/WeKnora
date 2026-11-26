@@ -26,8 +26,8 @@ const EXPECTED_REFERENCES_DRAWER_KEYS = [
   'referencesDrawerEmpty',
 ] as const
 
-test('supported embed locales include zh-CN, zh-TW, en-US, ko-KR, ja-JP, ru-RU', () => {
-  assert.deepEqual([...SUPPORTED_LOCALES].sort(), ['en-US', 'ja-JP', 'ko-KR', 'ru-RU', 'zh-CN', 'zh-TW'].sort())
+test('supported embed locales include zh-CN, zh-TW, en-US, ko-KR, ja-JP, ru-RU, vi-VN', () => {
+  assert.deepEqual([...SUPPORTED_LOCALES].sort(), ['en-US', 'ja-JP', 'ko-KR', 'ru-RU', 'zh-CN', 'zh-TW', 'vi-VN'].sort())
 })
 
 test('every supported locale defines conversationTime and referencesDrawer in chat', () => {

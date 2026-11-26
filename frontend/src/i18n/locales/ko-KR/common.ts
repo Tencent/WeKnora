@@ -236,6 +236,7 @@ export default {
     zhTW: '번체 중국어',
     enUS: 'English',
     ruRU: 'Русский',
+    viVN: 'Tiếng Việt',
     koKR: '한국어',
     jaJP: '日本語',
     selectLanguage: '언어 선택',
