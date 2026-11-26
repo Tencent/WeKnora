@@ -3528,6 +3528,15 @@ definitions:
           edited in the knowledge base editor.
         type: boolean
         x-agent: extract_enabled
+      max_graph_chunks_per_document:
+        description: |-
+          MaxGraphChunksPerDocument bounds per-document graph-extraction fan-out.
+          Nil or zero preserves the historical unbounded behavior. A pointer keeps
+          an explicit 0 distinguishable from an omitted override so one upload can
+          restore "unlimited" over a KB default.
+        type: integer
+        x-agent: extract_max_chunks
+        x-agent-detail: true
       nodes:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.GraphNode'
