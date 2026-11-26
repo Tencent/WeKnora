@@ -26,10 +26,14 @@ func (r *reparseScrubPendingRepo) DeleteByDedupKey(_ context.Context, _, _, _, d
 
 type failingCleanupChunkRepo struct {
 	replaceFileChunks
-	err error
+	err     error
+	deletes *int // counts delete calls when set
 }
 
 func (r failingCleanupChunkRepo) DeleteChunksByKnowledgeID(context.Context, uint64, string) error {
+	if r.deletes != nil {
+		*r.deletes++
+	}
 	return r.err
 }
 
@@ -56,6 +60,8 @@ func TestReparseKnowledgeRejectedLeavesPreviousRunUntouched(t *testing.T) {
 		setup     func(h *replaceFileHarness)
 		overrides *types.KnowledgeProcessOverrides
 		wantErr   string
+		// deletes, when set, counts chunk deletes; the test checks it stays 0.
+		deletes *int
 	}{
 		{
 			name: "override validation fails",
@@ -68,17 +74,27 @@ func TestReparseKnowledgeRejectedLeavesPreviousRunUntouched(t *testing.T) {
 			wantErr:   "VLM",
 		},
 		{
-			name: "resource cleanup fails",
+			// A pdf needs the docreader service, which this service does not
+			// have. Cleanup would fail with "database unavailable" if it ran.
+			name: "parser engine unavailable",
 			setup: func(h *replaceFileHarness) {
-				h.svc.chunkRepo = failingCleanupChunkRepo{err: errors.New("database unavailable")}
+				h.repo.row.FileName = "a.pdf"
+				h.repo.row.FileType = "pdf"
 			},
-			wantErr: "database unavailable",
+			wantErr: "is not available",
+			deletes: new(int),
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			h := newReparseHarness(t, types.ParseStatusFinalizing)
 			test.setup(h)
+			if test.deletes != nil {
+				h.svc.chunkRepo = failingCleanupChunkRepo{
+					err:     errors.New("database unavailable"),
+					deletes: test.deletes,
+				}
+			}
 
 			_, err := h.svc.ReparseKnowledge(h.ctx, h.original.ID, test.overrides)
 
@@ -87,6 +103,9 @@ func TestReparseKnowledgeRejectedLeavesPreviousRunUntouched(t *testing.T) {
 			assert.Zero(t, h.svc.spanTracker.(*attemptTracker).opened)
 			assert.Equal(t, types.ParseStatusFinalizing, h.repo.row.ParseStatus)
 			assert.Empty(t, h.tasks.payloads)
+			if test.deletes != nil {
+				assert.Zero(t, *test.deletes, "the existing chunks must not be deleted")
+			}
 		})
 	}
 }

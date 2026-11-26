@@ -38,10 +38,14 @@ func Split(text string, cfg SplitterConfig) []Chunk {
 	cfg = ensureDefaults(cfg)
 	chain, profile := resolveChainWithProfile(text, cfg)
 	totalChars := len([]rune(text))
+	budget := tokenRuneBudget(cfg)
 
 	var lastOut []Chunk
 	for i, tier := range chain {
 		out := runTier(tier, text, cfg, profile)
+		if budget > 0 {
+			out = enforceChunkBudget(out, budget)
+		}
 		if v := ValidateChunks(out, totalChars, cfg.ChunkSize); v.OK {
 			return out
 		} else {
@@ -94,6 +98,7 @@ func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostic
 	}
 	cfg = ensureDefaults(cfg)
 	chain, profile := resolveChainWithProfile(text, cfg)
+	budget := tokenRuneBudget(cfg)
 	diag.TierChain = chain
 	diag.Profile = profile
 	totalChars := len([]rune(text))
@@ -102,6 +107,9 @@ func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostic
 	var lastTier StrategyTier
 	for i, tier := range chain {
 		out := runTier(tier, text, cfg, profile)
+		if budget > 0 {
+			out = enforceChunkBudget(out, budget)
+		}
 		v := ValidateChunks(out, totalChars, cfg.ChunkSize)
 		if v.OK {
 			diag.SelectedTier = tier
@@ -165,8 +173,15 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 	var newParents []Chunk
 	var children []ChildChunk
 	childSeq := 0
+	budget := tokenRuneBudget(childCfg)
 	for _, parent := range parents {
 		subs := mapChildrenToSource(parent, Split(parent.Content, childCfg))
+		for i := range subs {
+			subs[i].ContextHeader = mergeBreadcrumbs(parent.ContextHeader, subs[i].ContextHeader)
+		}
+		if budget > 0 {
+			subs = enforceChunkBudget(subs, budget)
+		}
 
 		parentIndex := -1
 		if len(subs) > 1 || (len(subs) == 1 && subs[0].Content != parent.Content) {
@@ -175,7 +190,6 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 		}
 		for _, sub := range subs {
 			sub.Seq = childSeq
-			sub.ContextHeader = mergeBreadcrumbs(parent.ContextHeader, sub.ContextHeader)
 			children = append(children, ChildChunk{Chunk: sub, ParentIndex: parentIndex})
 			childSeq++
 		}
@@ -336,12 +350,7 @@ func ensureDefaults(cfg SplitterConfig) SplitterConfig {
 		cfg.Separators = []string{"\n\n", "\n", "。"}
 	}
 	if cfg.TokenLimit > 0 {
-		lang := LangMixed
-		if len(cfg.Languages) > 0 {
-			lang = cfg.Languages[0]
-		}
-		charBudget := CharsForTokenLimit(cfg.TokenLimit, lang)
-		if charBudget > 0 && (cfg.ChunkSize == 0 || charBudget < cfg.ChunkSize) {
+		if charBudget := tokenRuneBudget(cfg); charBudget > 0 && charBudget < cfg.ChunkSize {
 			cfg.ChunkSize = charBudget
 		}
 	}

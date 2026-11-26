@@ -71,3 +71,9 @@ test('groupArtifactsByDate keeps order and merges consecutive items', () => {
     ],
   )
 })
+
+test('image filters include modern and scanned image artifacts', () => {
+  for (const ext of ['.avif', '.tif', '.tiff', '.heic', '.heif', '.apng']) {
+    assert.ok(artifactCategoryExtensions('image').includes(ext), ext)
+  }
+})

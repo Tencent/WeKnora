@@ -4,7 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from lxml.etree import XPath
+import lxml.html
+from lxml.etree import ParserError, XPath
 from playwright.async_api import Page, async_playwright
 from trafilatura import extract, utils, xpaths
 
@@ -61,12 +62,62 @@ except (AttributeError, ImportError) as e:
     )
 
 
+# Block-level tags that keep a WeChat ``<section>`` from being a plain
+# paragraph. WeChat's editor wraps every paragraph in ``<section>`` (with
+# ``<span leaf>`` children) instead of ``<p>``; trafilatura does not treat
+# those sections as text blocks, finds no paragraphs inside ``#js_content``
+# and falls back to "wild" text recovery, which on the rendered page picks
+# up popup/dialog strings (e.g. "微信扫一扫 关注该公众号") instead of the
+# article. See Tencent/WeKnora#4513.
+_WECHAT_BLOCK_TAGS = frozenset(
+    {
+        "section", "div", "p", "h1", "h2", "h3", "h4", "h5", "h6",
+        "ul", "ol", "li", "table", "blockquote", "pre", "figure",
+    }
+)
+_WECHAT_CONTENT_XPATH = (
+    '//*[@id="js_content" or contains(concat(" ", normalize-space(@class), " "),'
+    ' " rich_media_content ")]'
+)
+
+
+def normalize_wechat_article_html(html: str) -> str:
+    """Turn leaf ``<section>`` blocks of a WeChat article body into ``<p>``.
+
+    Only touches pages that contain a WeChat article container; any other
+    HTML (or HTML that fails to parse) is returned unchanged.
+    """
+    if "js_content" not in html and "rich_media_content" not in html:
+        return html
+    try:
+        tree = lxml.html.fromstring(html)
+    except (ParserError, ValueError):
+        return html
+    containers = tree.xpath(_WECHAT_CONTENT_XPATH)
+    if not containers:
+        return html
+    changed = False
+    for container in containers:
+        for section in container.iter("section"):
+            if any(
+                isinstance(child.tag, str) and child.tag in _WECHAT_BLOCK_TAGS
+                for child in section.iterdescendants()
+            ):
+                continue
+            section.tag = "p"
+            changed = True
+    if not changed:
+        return html
+    return lxml.html.tostring(tree, encoding="unicode")
+
+
 @dataclass(frozen=True)
 class _ScrapeResult:
     html: str
     visible_text: str
     page_title: str
     error: str = ""
+    http_status: int | None = None
 
 
 def extract_markdown_from_html(html: str) -> Optional[str]:
@@ -74,7 +125,7 @@ def extract_markdown_from_html(html: str) -> Optional[str]:
     if not html or not html.strip():
         return None
     md_text = extract(
-        html,
+        normalize_wechat_article_html(html),
         output_format="markdown",
         with_metadata=True,
         include_images=True,
@@ -187,7 +238,11 @@ class StdWebParser(BaseParser):
             logger.error("URL blocked by SSRF guard before navigation: %s", reason)
             return _ScrapeResult(
                 html="", visible_text="", page_title="",
-                error=f"URL blocked by SSRF guard: {reason}",
+                error=(
+                    f"URL blocked by SSRF guard: {reason}. "
+                    "DocReader uses its own SSRF_WHITELIST and SSRF_WHITELIST_EXTRA "
+                    "environment variables. The app's ssrf.whitelist setting applies only to the app."
+                ),
             )
         try:
             async with SSRFProxy(self.proxy) as proxy, async_playwright() as p:
@@ -199,11 +254,22 @@ class StdWebParser(BaseParser):
 
                 logger.info(f"Navigating to URL: {url}")
                 try:
-                    await page.goto(
+                    response = await page.goto(
                         url,
                         timeout=_GOTO_TIMEOUT_MS,
                         wait_until="domcontentloaded",
                     )
+                    # Playwright does not raise for HTTP error responses.  Do
+                    # not turn the server's error page into indexable knowledge.
+                    # goto returns the final response after HTTP redirects.
+                    if response is not None and response.status >= 400:
+                        status = response.status
+                        logger.warning("URL navigation returned HTTP %d", status)
+                        await browser.close()
+                        return _ScrapeResult(
+                            html="", visible_text="", page_title="",
+                            http_status=status,
+                        )
                     logger.info("Initial page load complete")
                 except Exception as e:
                     logger.error(f"Error navigating to URL: {str(e)}")
@@ -260,6 +326,9 @@ class StdWebParser(BaseParser):
 
         logger.info(f"Scraping web page: {url}")
         scrape_result = asyncio.run(self.scrape(url))
+        if scrape_result.http_status is not None:
+            # Only disclose the status, never the response body or URL.
+            raise WebParseError(f"Web page returned HTTP {scrape_result.http_status}")
         if scrape_result.error or (
             not scrape_result.html and not scrape_result.visible_text
         ):

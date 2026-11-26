@@ -145,6 +145,24 @@ class PrecisionRegressionTest(unittest.TestCase):
         prefix = "Common opening repeated before the important conclusion "
         self.assertEqual(locate_lines(prefix + "failed", [prefix + "passed"]), [None])
 
+    def test_numeric_boundaries_respect_original_line_breaks(self):
+        lines = ["A shipment weighs 20", "30 units are in the next package"]
+        for line_break in ("\n", "\r\n"):
+            with self.subTest(line_break=line_break):
+                page = line_break.join(lines)
+                self.assertEqual(locate_lines(page, lines), [0, page.index(lines[1])])
+
+    def test_numeric_boundaries_still_reject_partial_numbers_on_the_same_line(self):
+        for source, quote in [
+            ("A shipment weighs 200", "A shipment weighs 20"),
+            ("130 units are in the package", "30 units are in the package"),
+            ("A shipment weighs 20 000", "A shipment weighs 20"),
+            ("-30 units are in the package", "30 units are in the package"),
+            ("The discount is 20%", "The discount is 20"),
+        ]:
+            with self.subTest(source=source, quote=quote):
+                self.assertEqual(locate_lines(source, [quote]), [None])
+
     def test_numeric_meaning_is_preserved(self):
         for source, quote in [("limit 15 mm", "limit 1.5 mm"), ("temperature 5 C", "temperature -5 C"), ("rate 5", "rate 5%")]:
             self.assertEqual(locate_lines(source, [quote]), [None])

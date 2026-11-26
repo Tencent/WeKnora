@@ -37,6 +37,41 @@ func TestTopicKeyFoldsCaseWhitespaceAndPunctuation(t *testing.T) {
 	assert.NotEqual(t, TopicKey("K8s"), TopicKey("Kubernetes"), "synonyms are left to the model")
 }
 
+// A language name keeps the mark that distinguishes it: trimming the '#' of
+// "C#" would give the same key as "C", so the two labels would share a count
+// and NormalizeTopicList would keep only whichever came first.
+func TestTopicKeyKeepsNameMarks(t *testing.T) {
+	cases := map[string]string{
+		"C#":       "c#",
+		"c# 异步编程":  "c# 异步编程",
+		" F# ":     "f#",
+		"R#":       "r#",
+		"C++":      "c++",
+		"ASP.NET":  "asp.net",
+		"@notify":  "@notify",
+		"《三体》":     "三体",
+		"'quoted'": "quoted",
+		"GPT-4":    "gpt-4",
+		"CI/CD":    "ci/cd",
+	}
+	for topic, want := range cases {
+		assert.Equal(t, want, TopicKey(topic), "TopicKey(%q)", topic)
+	}
+	for _, pair := range [][2]string{
+		{"C#", "C"}, {"F#", "F"}, {"R#", "R"}, {"C#", "C++"},
+	} {
+		assert.NotEqual(t, TopicKey(pair[0]), TopicKey(pair[1]),
+			"%q and %q are different subjects", pair[0], pair[1])
+	}
+	// A mark with no word to attach to is still formatting.
+	assert.Equal(t, "", TopicKey("#"))
+	assert.Equal(t, "", TopicKey(" ... "))
+	// Markdown emphasis around a keyword is formatting too, not a name mark.
+	assert.Equal(t, "kubernetes", TopicKey("_Kubernetes_"))
+	assert.Equal(t, []string{"C#", "C", "C++"}, NormalizeTopicList([]string{"C#", "C", "C++"}, 10),
+		"a document about C# and C keeps both topic labels")
+}
+
 func TestKnowledgeProfileCloneIsIndependent(t *testing.T) {
 	assert.Nil(t, (*KnowledgeProfile)(nil).Clone())
 	src := &KnowledgeProfile{Gist: "g", Topics: []string{"a", "b"}}

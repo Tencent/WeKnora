@@ -34,6 +34,13 @@ export interface SessionMessagePageFetcher {
   (beforeTime: string, limit: number): Promise<SessionExportMessage[]>
 }
 
+export class SessionHistoryExportLimitError extends Error {
+  constructor() {
+    super('Session history exceeds the Markdown export limit')
+    this.name = 'SessionHistoryExportLimitError'
+  }
+}
+
 const roleOrder = (role?: string): number => {
   if (role === 'user') return 0
   if (role === 'assistant') return 1
@@ -68,8 +75,17 @@ export async function collectAllSessionMessages(
     pages.unshift(page)
 
     const oldestTime = page[0]?.created_at || ''
-    if (page.length < pageSize || !oldestTime || oldestTime === beforeTime) break
+    if (page.length < pageSize) break
+    if (!oldestTime || oldestTime === beforeTime) {
+      throw new Error('Session history cursor did not advance')
+    }
     beforeTime = oldestTime
+
+    // A full final page can be an exact fit. Check for one older message
+    // without adding it to the export or exceeding the collection cap.
+    if (pageIndex + 1 === maxPages && (await fetchPage(beforeTime, 1)).length > 0) {
+      throw new SessionHistoryExportLimitError()
+    }
   }
 
   const seen = new Set<string>()
@@ -91,7 +107,6 @@ export async function collectAllSessionMessages(
 function cleanMessageContent(content?: string): string {
   return String(content || '')
     .replace(KB_WEB_TAG_RE, '')
-    .replace(/[ \t]+\n/g, '\n')
     .trim()
 }
 
@@ -134,7 +149,9 @@ export function buildSessionMarkdown(options: {
 
   for (const message of options.messages) {
     if (message.role !== 'user' && message.role !== 'assistant') continue
-    const content = cleanMessageContent(message.content)
+    const content = message.role === 'assistant'
+      ? cleanMessageContent(message.content)
+      : (message.content || '').trim()
     const attachments = (message.attachments || [])
       .map((attachment) => attachment.file_name?.trim() || '')
       .filter(Boolean)

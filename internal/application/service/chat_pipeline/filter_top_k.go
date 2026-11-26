@@ -130,10 +130,11 @@ func collapseParentSlots(results []*types.SearchResult) []*types.SearchResult {
 	}
 
 	type parentGroup struct {
-		parent   *types.SearchResult
-		best     *types.SearchResult
-		score    float64
-		childIDs []string
+		parent       *types.SearchResult
+		best         *types.SearchResult
+		score        float64
+		childIDs     []string
+		imageSources []*types.SearchResult
 	}
 
 	order := make([]string, 0, len(results))
@@ -158,6 +159,9 @@ func collapseParentSlots(results []*types.SearchResult) []*types.SearchResult {
 		}
 		if result.Score > group.score {
 			group.score = result.Score
+		}
+		if searchutil.IsImageEvidence(result) {
+			group.imageSources = append(group.imageSources, result)
 		}
 		if result.MatchType == types.MatchTypeParentChunk {
 			if group.parent == nil {
@@ -187,6 +191,13 @@ func collapseParentSlots(results []*types.SearchResult) []*types.SearchResult {
 			continue
 		}
 		chosen.Score = group.score
+		// The slot representative can be a text hit. Keep matched images
+		// attached to their original chunk and storage identities.
+		for _, source := range group.imageSources {
+			if source != chosen {
+				searchutil.InheritImageEvidence(chosen, source)
+			}
+		}
 		subChunkIDs := make([]string, 0, len(group.childIDs))
 		for _, id := range group.childIDs {
 			if id != chosen.ID && !containsID(subChunkIDs, id) {

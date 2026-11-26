@@ -97,20 +97,33 @@ func NewInitializationHandler(
 
 // KBModelConfigRequest 知识库模型配置请求（简化版，只传模型ID）
 type KBModelConfigRequest struct {
-	LLMModelID       string           `json:"llmModelId"       binding:"required"`
-	EmbeddingModelID string           `json:"embeddingModelId"` // optional when RAG indexing is disabled
-	VLMConfig        *types.VLMConfig `json:"vlm_config"`
-	ASRConfig        *types.ASRConfig `json:"asr_config"`
+	LLMModelID       string `json:"llmModelId"       binding:"required"`
+	EmbeddingModelID string `json:"embeddingModelId"` // optional when RAG indexing is disabled
+	VLMConfig        *struct {
+		Enabled             *bool   `json:"enabled"`
+		ModelID             *string `json:"model_id"`
+		DescriptionLanguage *string `json:"description_language"`
+		CustomInstructions  *string `json:"custom_instructions"`
+		ModelName           *string `json:"model_name"`
+		BaseURL             *string `json:"base_url"`
+		APIKey              *string `json:"api_key"`
+		InterfaceType       *string `json:"interface_type"`
+	} `json:"vlm_config"`
+	ASRConfig *struct {
+		Enabled  *bool   `json:"enabled"`
+		ModelID  *string `json:"model_id"`
+		Language *string `json:"language"`
+	} `json:"asr_config"`
 
 	// 文档分块配置
 	DocumentSplitting struct {
-		ChunkSize         int                      `json:"chunkSize"`
-		ChunkOverlap      int                      `json:"chunkOverlap"`
-		Separators        []string                 `json:"separators"`
-		ParserEngineRules []types.ParserEngineRule `json:"parserEngineRules,omitempty"`
-		EnableParentChild bool                     `json:"enableParentChild"`
-		ParentChunkSize   int                      `json:"parentChunkSize,omitempty"`
-		ChildChunkSize    int                      `json:"childChunkSize,omitempty"`
+		ChunkSize         *int                      `json:"chunkSize"`
+		ChunkOverlap      *int                      `json:"chunkOverlap"`
+		Separators        *[]string                 `json:"separators"`
+		ParserEngineRules *[]types.ParserEngineRule `json:"parserEngineRules,omitempty"`
+		EnableParentChild *bool                     `json:"enableParentChild"`
+		ParentChunkSize   *int                      `json:"parentChunkSize,omitempty"`
+		ChildChunkSize    *int                      `json:"childChunkSize,omitempty"`
 		// Strategy / TokenLimit / Languages use pointer types so the
 		// handler can distinguish "field absent in payload" (no change)
 		// from "field present with empty/zero value" (clear / disable).
@@ -124,7 +137,7 @@ type KBModelConfigRequest struct {
 
 	// 多模态配置（仅模型相关；存储引擎在 storageProvider 中配置）
 	Multimodal struct {
-		Enabled bool `json:"enabled"`
+		Enabled *bool `json:"enabled"`
 	} `json:"multimodal"`
 
 	// 存储引擎选择（"local" | "minio" | "cos"），影响文档上传与文档内图片存储，参数从全局设置读取
@@ -133,20 +146,20 @@ type KBModelConfigRequest struct {
 
 	// 知识图谱配置
 	NodeExtract struct {
-		Enabled            bool                  `json:"enabled"`
-		Text               string                `json:"text"`
-		Tags               []string              `json:"tags"`
-		Nodes              []types.GraphNode     `json:"nodes"`
-		Relations          []types.GraphRelation `json:"relations"`
-		CustomInstructions string                `json:"customInstructions"`
+		Enabled            *bool                  `json:"enabled"`
+		Text               *string                `json:"text"`
+		Tags               *[]string              `json:"tags"`
+		Nodes              *[]types.GraphNode     `json:"nodes"`
+		Relations          *[]types.GraphRelation `json:"relations"`
+		CustomInstructions *string                `json:"customInstructions"`
 	} `json:"nodeExtract"`
 
 	// 问题生成配置
 	QuestionGeneration struct {
 		ModelID            *string `json:"modelId,omitempty"`
-		Enabled            bool    `json:"enabled"`
-		QuestionCount      int     `json:"questionCount"`
-		CustomInstructions string  `json:"customInstructions"`
+		Enabled            *bool   `json:"enabled"`
+		QuestionCount      *int    `json:"questionCount"`
+		CustomInstructions *string `json:"customInstructions"`
 	} `json:"questionGeneration"`
 }
 
@@ -309,55 +322,97 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		kb.EmbeddingModelID = req.EmbeddingModelID
 	}
 
-	// 处理多模态模型配置
-	kb.VLMConfig = types.VLMConfig{}
-	if req.VLMConfig != nil && req.Multimodal.Enabled && req.VLMConfig.ModelID != "" {
-		vllmModel, err := h.modelService.GetModelByID(ctx, req.VLMConfig.ModelID)
-		if err != nil || vllmModel == nil {
-			logger.Warn(ctx, "VLM model not found")
-		} else {
-			kb.VLMConfig.Enabled = req.VLMConfig.Enabled
-			kb.VLMConfig.ModelID = req.VLMConfig.ModelID
+	// Merge only supplied fields: model-only requests must preserve KB settings.
+	if req.Multimodal.Enabled != nil {
+		kb.VLMConfig.Enabled = *req.Multimodal.Enabled
+	}
+	if req.VLMConfig != nil {
+		if req.VLMConfig.Enabled != nil {
+			kb.VLMConfig.Enabled = *req.VLMConfig.Enabled
+		}
+		if req.VLMConfig.ModelID != nil {
+			kb.VLMConfig.ModelID = *req.VLMConfig.ModelID
+		}
+		if req.VLMConfig.DescriptionLanguage != nil {
+			kb.VLMConfig.DescriptionLanguage = strings.TrimSpace(*req.VLMConfig.DescriptionLanguage)
+		}
+		if req.VLMConfig.CustomInstructions != nil {
+			kb.VLMConfig.CustomInstructions = strings.TrimSpace(*req.VLMConfig.CustomInstructions)
+		}
+		if req.VLMConfig.ModelName != nil {
+			kb.VLMConfig.ModelName = *req.VLMConfig.ModelName
+		}
+		if req.VLMConfig.BaseURL != nil {
+			kb.VLMConfig.BaseURL = *req.VLMConfig.BaseURL
+		}
+		if req.VLMConfig.APIKey != nil {
+			kb.VLMConfig.APIKey = *req.VLMConfig.APIKey
+		}
+		if req.VLMConfig.InterfaceType != nil {
+			kb.VLMConfig.InterfaceType = *req.VLMConfig.InterfaceType
+		}
+
+		if req.VLMConfig.ModelID != nil && kb.VLMConfig.Enabled && kb.VLMConfig.ModelID != "" {
+			model, err := h.modelService.GetModelByID(ctx, kb.VLMConfig.ModelID)
+			if err != nil || model == nil {
+				logger.Warn(ctx, "VLM model not found")
+				kb.VLMConfig.Enabled = false
+				kb.VLMConfig.ModelID = ""
+			}
 		}
 	}
-	if !kb.VLMConfig.Enabled {
+	if (req.Multimodal.Enabled != nil && !*req.Multimodal.Enabled) ||
+		(req.VLMConfig != nil && req.VLMConfig.Enabled != nil && !*req.VLMConfig.Enabled) {
+		// Legacy bindings also enable VLM, independently of Enabled.
+		kb.VLMConfig.Enabled = false
 		kb.VLMConfig.ModelID = ""
+		kb.VLMConfig.ModelName = ""
+		kb.VLMConfig.BaseURL = ""
 	}
+	if req.ASRConfig != nil {
+		if req.ASRConfig.Enabled != nil {
+			kb.ASRConfig.Enabled = *req.ASRConfig.Enabled
+		}
+		if req.ASRConfig.ModelID != nil {
+			kb.ASRConfig.ModelID = *req.ASRConfig.ModelID
+		}
+		if req.ASRConfig.Language != nil {
+			kb.ASRConfig.Language = *req.ASRConfig.Language
+		}
 
-	// 处理ASR语音识别配置
-	kb.ASRConfig = types.ASRConfig{}
-	if req.ASRConfig != nil && req.ASRConfig.Enabled && req.ASRConfig.ModelID != "" {
-		asrModel, err := h.modelService.GetModelByID(ctx, req.ASRConfig.ModelID)
-		if err != nil || asrModel == nil {
-			logger.Warn(ctx, "ASR model not found")
-		} else {
-			kb.ASRConfig.Enabled = true
-			kb.ASRConfig.ModelID = req.ASRConfig.ModelID
-			kb.ASRConfig.Language = req.ASRConfig.Language
+		if req.ASRConfig.ModelID != nil && kb.ASRConfig.Enabled && kb.ASRConfig.ModelID != "" {
+			model, err := h.modelService.GetModelByID(ctx, kb.ASRConfig.ModelID)
+			if err != nil || model == nil {
+				logger.Warn(ctx, "ASR model not found")
+				kb.ASRConfig.Enabled = false
+				kb.ASRConfig.ModelID = ""
+			}
+		}
+		if req.ASRConfig.Enabled != nil && !*req.ASRConfig.Enabled {
+			kb.ASRConfig.ModelID = ""
 		}
 	}
-
-	// 更新文档分块配置
-	if req.DocumentSplitting.ChunkSize > 0 {
-		kb.ChunkingConfig.ChunkSize = req.DocumentSplitting.ChunkSize
+	if req.DocumentSplitting.ChunkSize != nil {
+		kb.ChunkingConfig.ChunkSize = *req.DocumentSplitting.ChunkSize
 	}
-	if req.DocumentSplitting.ChunkOverlap >= 0 {
-		kb.ChunkingConfig.ChunkOverlap = req.DocumentSplitting.ChunkOverlap
+	if req.DocumentSplitting.ChunkOverlap != nil {
+		kb.ChunkingConfig.ChunkOverlap = *req.DocumentSplitting.ChunkOverlap
 	}
-	if len(req.DocumentSplitting.Separators) > 0 {
-		kb.ChunkingConfig.Separators = req.DocumentSplitting.Separators
+	if req.DocumentSplitting.Separators != nil {
+		kb.ChunkingConfig.Separators = *req.DocumentSplitting.Separators
 	}
-	kb.ChunkingConfig.ParserEngineRules = req.DocumentSplitting.ParserEngineRules
-	kb.ChunkingConfig.EnableParentChild = req.DocumentSplitting.EnableParentChild
-	if req.DocumentSplitting.ParentChunkSize > 0 {
-		kb.ChunkingConfig.ParentChunkSize = req.DocumentSplitting.ParentChunkSize
+	if req.DocumentSplitting.ParserEngineRules != nil {
+		kb.ChunkingConfig.ParserEngineRules = *req.DocumentSplitting.ParserEngineRules
 	}
-	if req.DocumentSplitting.ChildChunkSize > 0 {
-		kb.ChunkingConfig.ChildChunkSize = req.DocumentSplitting.ChildChunkSize
+	if req.DocumentSplitting.EnableParentChild != nil {
+		kb.ChunkingConfig.EnableParentChild = *req.DocumentSplitting.EnableParentChild
 	}
-	// Pointer-based fields support clearing (empty string / 0 / empty slice
-	// is a valid "user picked default again" signal; absent in payload means
-	// "no change").
+	if req.DocumentSplitting.ParentChunkSize != nil {
+		kb.ChunkingConfig.ParentChunkSize = *req.DocumentSplitting.ParentChunkSize
+	}
+	if req.DocumentSplitting.ChildChunkSize != nil {
+		kb.ChunkingConfig.ChildChunkSize = *req.DocumentSplitting.ChildChunkSize
+	}
 	if req.DocumentSplitting.Strategy != nil {
 		kb.ChunkingConfig.Strategy = *req.DocumentSplitting.Strategy
 	}
@@ -369,17 +424,6 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 	if req.DocumentSplitting.TableMetadataInstructions != nil {
 		kb.ChunkingConfig.TableMetadataInstructions = strings.TrimSpace(*req.DocumentSplitting.TableMetadataInstructions)
-	}
-
-	// 更新多模态配置
-	if req.Multimodal.Enabled {
-		// VLM model already set above
-	} else {
-		kb.VLMConfig.ModelID = ""
-	}
-	if req.VLMConfig != nil {
-		kb.VLMConfig.DescriptionLanguage = strings.TrimSpace(req.VLMConfig.DescriptionLanguage)
-		kb.VLMConfig.CustomInstructions = strings.TrimSpace(req.VLMConfig.CustomInstructions)
 	}
 
 	// Storage backends resolve per workspace and belong to the owner's
@@ -395,57 +439,72 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		return
 	}
 
-	// 更新知识图谱配置
-	if req.NodeExtract.Enabled {
-		// 转换 Nodes 和 Relations 为指针类型
-		nodes := make([]*types.GraphNode, len(req.NodeExtract.Nodes))
-		for i := range req.NodeExtract.Nodes {
-			nodes[i] = &req.NodeExtract.Nodes[i]
+	if req.NodeExtract.Enabled != nil ||
+		req.NodeExtract.Text != nil ||
+		req.NodeExtract.Tags != nil ||
+		req.NodeExtract.Nodes != nil ||
+		req.NodeExtract.Relations != nil ||
+		req.NodeExtract.CustomInstructions != nil {
+		if kb.ExtractConfig == nil {
+			kb.ExtractConfig = &types.ExtractConfig{}
 		}
-		relations := make([]*types.GraphRelation, len(req.NodeExtract.Relations))
-		for i := range req.NodeExtract.Relations {
-			relations[i] = &req.NodeExtract.Relations[i]
+		if req.NodeExtract.Enabled != nil {
+			kb.ExtractConfig.Enabled = *req.NodeExtract.Enabled
 		}
-
-		kb.ExtractConfig = &types.ExtractConfig{
-			Enabled:            req.NodeExtract.Enabled,
-			Text:               req.NodeExtract.Text,
-			Tags:               req.NodeExtract.Tags,
-			Nodes:              nodes,
-			Relations:          relations,
-			CustomInstructions: strings.TrimSpace(req.NodeExtract.CustomInstructions),
+		if req.NodeExtract.Text != nil {
+			kb.ExtractConfig.Text = *req.NodeExtract.Text
 		}
-	} else if kb.ExtractConfig != nil {
-		kb.ExtractConfig.Enabled = false
-	} else {
-		kb.ExtractConfig = &types.ExtractConfig{Enabled: false}
+		if req.NodeExtract.Tags != nil {
+			kb.ExtractConfig.Tags = *req.NodeExtract.Tags
+		}
+		if req.NodeExtract.Nodes != nil {
+			kb.ExtractConfig.Nodes = make([]*types.GraphNode, len(*req.NodeExtract.Nodes))
+			for i := range *req.NodeExtract.Nodes {
+				kb.ExtractConfig.Nodes[i] = &(*req.NodeExtract.Nodes)[i]
+			}
+		}
+		if req.NodeExtract.Relations != nil {
+			kb.ExtractConfig.Relations = make([]*types.GraphRelation, len(*req.NodeExtract.Relations))
+			for i := range *req.NodeExtract.Relations {
+				kb.ExtractConfig.Relations[i] = &(*req.NodeExtract.Relations)[i]
+			}
+		}
+		if req.NodeExtract.CustomInstructions != nil {
+			kb.ExtractConfig.CustomInstructions = strings.TrimSpace(*req.NodeExtract.CustomInstructions)
+		}
+		if err := validateExtractConfig(kb.ExtractConfig); err != nil {
+			logger.Error(ctx, "Invalid extract configuration", err)
+			_ = c.Error(err)
+			return
+		}
 	}
-	if err := validateExtractConfig(kb.ExtractConfig); err != nil {
-		logger.Error(ctx, "Invalid extract configuration", err)
-		c.Error(err)
-		return
-	}
-
-	// 更新问题生成配置。检索是否使用问句由查询时的开关决定，保存设置不改索引。
-	if req.QuestionGeneration.Enabled {
-		questionCount := req.QuestionGeneration.QuestionCount
-		if questionCount <= 0 {
-			questionCount = 3
+	if req.QuestionGeneration.Enabled != nil ||
+		req.QuestionGeneration.QuestionCount != nil ||
+		req.QuestionGeneration.CustomInstructions != nil ||
+		req.QuestionGeneration.ModelID != nil {
+		firstEnable := kb.QuestionGenerationConfig == nil || !kb.QuestionGenerationConfig.Enabled
+		if kb.QuestionGenerationConfig == nil {
+			kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{}
 		}
-		if questionCount > 10 {
-			questionCount = 10
+		if req.QuestionGeneration.Enabled != nil {
+			kb.QuestionGenerationConfig.Enabled = *req.QuestionGeneration.Enabled
 		}
-		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{
-			ModelID:            questionModelID,
-			Enabled:            true,
-			QuestionCount:      questionCount,
-			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
+		if req.QuestionGeneration.QuestionCount != nil {
+			kb.QuestionGenerationConfig.QuestionCount = *req.QuestionGeneration.QuestionCount
 		}
-	} else {
-		kb.QuestionGenerationConfig = &types.QuestionGenerationConfig{
-			ModelID:            questionModelID,
-			Enabled:            false,
-			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
+		if req.QuestionGeneration.CustomInstructions != nil {
+			kb.QuestionGenerationConfig.CustomInstructions = strings.TrimSpace(
+				*req.QuestionGeneration.CustomInstructions,
+			)
+		}
+		kb.QuestionGenerationConfig.ModelID = questionModelID
+		// Default only a first enable without an explicit count.
+		if firstEnable && req.QuestionGeneration.Enabled != nil && *req.QuestionGeneration.Enabled &&
+			req.QuestionGeneration.QuestionCount == nil && kb.QuestionGenerationConfig.QuestionCount <= 0 {
+			kb.QuestionGenerationConfig.QuestionCount = 3
+		}
+		if req.QuestionGeneration.QuestionCount != nil && kb.QuestionGenerationConfig.QuestionCount > 10 {
+			kb.QuestionGenerationConfig.QuestionCount = 10
 		}
 	}
 	types.NormalizeKnowledgeBasePromptInstructions(kb)
@@ -510,6 +569,11 @@ func kbStorageBindingChanged(kb *types.KnowledgeBase, backendID, provider string
 func (h *InitializationHandler) applyKBStorageBinding(
 	ctx context.Context, kb *types.KnowledgeBase, kbID string, req *KBModelConfigRequest,
 ) error {
+	// Model-only clients omit storage fields. Keep the stored binding and
+	// provider projection instead of implicitly switching them to local.
+	if strings.TrimSpace(req.StorageBackendID) == "" && strings.TrimSpace(req.StorageProvider) == "" {
+		return nil
+	}
 	// Bind the concrete storage instance. Provider remains a compatibility
 	// projection for older clients and historical rows.
 	if strings.TrimSpace(req.StorageBackendID) != "" {

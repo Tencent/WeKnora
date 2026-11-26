@@ -94,6 +94,12 @@ def _header_str(value) -> str:
     return "".join(parts)
 
 
+def _normalize_cid_scheme(value: str) -> str:
+    if value[:4].lower() == "cid:":
+        return "cid:" + value[4:]
+    return value
+
+
 class MHTMLParser(BaseParser):
     """Parser for MHTML web archives."""
 
@@ -127,8 +133,10 @@ class MHTMLParser(BaseParser):
                     try:
                         html_text = payload.decode(charset, errors="ignore")
                     except LookupError:
-                        html_text = payload.decode("utf-8", errors="ignore")
-                else:
+                        # An unknown MIME label is no better than no label:
+                        # let the document's own declaration decide.
+                        charset = None
+                if not charset:
                     # Keep the bytes until HTML declarations and BOMs have
                     # been inspected; decoding as UTF-8 first loses text.
                     html_text = UnicodeDammit(payload, is_html=True).unicode_markup or ""
@@ -202,34 +210,43 @@ class MHTMLParser(BaseParser):
 
     @staticmethod
     def _explicit_html_root(msg: Message) -> Message | None:
-        """Resolve a multipart/related start Content-ID to its HTML root."""
-        start = _header_str(msg.get_param("start", "")).strip().strip("<>")
-        if (
-            not start
-            or msg.get_content_type() != "multipart/related"
-            or not msg.is_multipart()
-        ):
+        """Resolve the related HTML root, including the default first part.
+
+        RFC 2387 specifies the first part when the start parameter is absent.
+        Malformed/unsupported roots retain the existing size-based fallback.
+        """
+        if msg.get_content_type() != "multipart/related" or not msg.is_multipart():
             return None
-        for part in msg.get_payload():
-            content_id = _header_str(part.get("Content-ID", "")).strip().strip("<>")
-            if content_id != start:
-                continue
-            if part.get_content_type() == "text/html":
-                return part
-            if (
-                part.get_content_type() == "multipart/alternative"
-                and part.is_multipart()
-            ):
-                # MIME alternatives are ordered from least to most faithful.
-                return next(
-                    (
-                        alternative
-                        for alternative in reversed(part.get_payload())
-                        if alternative.get_content_type() == "text/html"
-                    ),
-                    None,
-                )
+        parts = msg.get_payload()
+        if not parts:
             return None
+        start_param = msg.get_param("start", None)
+        if start_param is None:
+            part = parts[0]
+            # A missing or mismatched type is malformed and keeps the fallback.
+            declared_type = _header_str(msg.get_param("type", "")).lower()
+            if not declared_type or declared_type != part.get_content_type():
+                return None
+        else:
+            start = _header_str(start_param).strip().strip("<>")
+            if not start:
+                return None
+            part = next(
+                (item for item in parts
+                 if _header_str(item.get("Content-ID", "")).strip().strip("<>") == start),
+                None,
+            )
+            if part is None:
+                return None
+        if part.get_content_type() == "text/html":
+            return part
+        if part.get_content_type() == "multipart/alternative" and part.is_multipart():
+            # MIME alternatives are ordered from least to most faithful.
+            return next(
+                (alternative for alternative in reversed(part.get_payload())
+                 if alternative.get_content_type() == "text/html"),
+                None,
+            )
         return None
 
     @staticmethod
@@ -252,7 +269,7 @@ class MHTMLParser(BaseParser):
                 values.add(f"cid:{unquote(cid)}")
             for value in values:
                 if value:
-                    image_aliases[value] = image_path
+                    image_aliases[_normalize_cid_scheme(value)] = image_path
 
     @staticmethod
     def _image_extension(content_type: str) -> str:
@@ -297,7 +314,10 @@ class MHTMLParser(BaseParser):
         decoded = unquote(html.unescape(_header_str(location).strip()))
         if not decoded or decoded.lower().startswith("cid:"):
             return ""
-        path = urlparse(decoded).path or decoded
+        try:
+            path = urlparse(decoded).path or decoded
+        except ValueError:
+            return ""
         filename = os.path.basename(path)
         if not filename or filename in {".", ".."}:
             return ""
@@ -335,7 +355,13 @@ class MHTMLParser(BaseParser):
             text_fallback = soup.get_text(separator="\n", strip=True)
             self._escape_table_cell_pipes(soup)
             self._move_table_footer_rows_after_body(soup)
-            markdown_text = md(str(soup), heading_style="ATX")
+            # markdownify writes only the alt text of an image in a table cell
+            # or a heading unless the image's parent tag is listed, which
+            # drops the image from the document
+            image_parents = sorted({img.parent.name for img in soup.find_all("img")})
+            markdown_text = md(
+                str(soup), heading_style="ATX", keep_inline_images_in=image_parents
+            )
             result = self._normalize_markdown(markdown_text)
             if not result and text_fallback:
                 logger.warning("Markdown empty, falling back to text extraction")
@@ -411,6 +437,14 @@ class MHTMLParser(BaseParser):
                 # Comments and other special strings keep their own type
                 if type(text) is NavigableString and "|" in text:
                     text.replace_with(text.replace("|", "\\|"))
+        # An image in a cell is written with its alt text and title
+        for img in soup.find_all("img"):
+            if img.find_parent(["td", "th"]) is None:
+                continue
+            for attr in ("alt", "title"):
+                value = img.get(attr)
+                if isinstance(value, str) and "|" in value:
+                    img[attr] = value.replace("|", "\\|")
 
     @staticmethod
     def _normalize_markdown(markdown_text: str) -> str:
@@ -492,6 +526,17 @@ class MHTMLParser(BaseParser):
         image_aliases: Dict[str, str],
         base_location: str = "",
     ) -> None:
+        # HTML uses the first href-bearing base element, relative to the page.
+        base = soup.find("base", href=True)
+        if base is not None:
+            try:
+                resolved_base = urljoin(base_location, base["href"].strip())
+                if urlparse(resolved_base).scheme not in {"data", "javascript"}:
+                    base_location = resolved_base
+            except ValueError:
+                # An invalid base URL must not discard an otherwise usable page.
+                pass
+
         for img in soup.find_all("img"):
             src = (img.get("src") or "").strip()
             if not src:
@@ -507,6 +552,7 @@ class MHTMLParser(BaseParser):
             if base_name:
                 candidates.append(base_name)
             for candidate in candidates:
-                if candidate in image_aliases:
-                    img["src"] = image_aliases[candidate]
+                path = image_aliases.get(_normalize_cid_scheme(candidate))
+                if path is not None:
+                    img["src"] = path
                     break

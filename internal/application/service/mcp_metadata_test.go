@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/mcp"
@@ -196,17 +197,36 @@ func TestMCPMetadataRefreshAndOfflineEditing(t *testing.T) {
 	require.True(t, got.Stale)
 	_, err = metadata.GetMCPMetadata(ctx, 2, "svc")
 	require.ErrorIs(t, err, types.ErrMCPServiceNotFound, "another tenant must not access the snapshot")
+	// A listing that started before the stored refresh does not replace it.
+	require.NoError(t, metadata.PersistMCPMetadata(
+		ctx, 1, "svc", []*types.MCPTool{{Name: "older", InputSchema: schema}}, "older",
+		types.MCPServerInfo{}, time.Now().Add(-time.Hour),
+	))
+	got, err = metadata.GetMCPMetadata(ctx, 1, "svc")
+	require.NoError(t, err)
+	require.NotEqual(t, "older", got.Instructions)
+	listedAt := time.Now().UTC().Truncate(time.Microsecond)
 	require.NoError(t, metadata.PersistMCPMetadata(
 		ctx,
 		1,
 		"svc",
 		[]*types.MCPTool{{Name: "live", Description: "from chat", InputSchema: schema}},
 		"from-chat",
+		types.MCPServerInfo{Name: "orders", Version: "2.1.0", Description: "Order lookups"},
+		listedAt,
 	))
 	got, err = metadata.GetMCPMetadata(ctx, 1, "svc")
 	require.NoError(t, err)
 	require.Equal(t, "live", got.Tools[0].Name)
 	require.Equal(t, "from-chat", got.Instructions)
+	// A directory stored from chat records the server identity, so a later
+	// connection to another server build can be recognized.
+	require.Equal(t, "orders", got.ServerName)
+	require.Equal(t, "2.1.0", got.ServerVersion)
+	require.Equal(t, "Order lookups", got.ServerDescription)
+	// It is dated by when the listing started, like a settings refresh, so the
+	// store's "older refresh never replaces a newer one" rule applies to both.
+	require.True(t, got.SyncedAt.Equal(listedAt), "synced_at %v, listed at %v", got.SyncedAt, listedAt)
 
 	// OAuth metadata belongs to the effective authorizing user, not the admin
 	// who happened to create the shared service configuration.

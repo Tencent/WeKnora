@@ -223,6 +223,41 @@ func TestJsonToMarkdown_LargeObject(t *testing.T) {
 	})
 }
 
+func TestJSONMarkdownOrdersEqualNumericKeys(t *testing.T) {
+	keys := []string{"01", "1", "2", "10"}
+	contents := make(map[string]string, len(keys))
+	for _, key := range keys {
+		// Force each value into its own block so key order determines offsets.
+		contents[key] = strings.Repeat(key, defaultJSONChunkSize)
+	}
+	data, err := json.Marshal(contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The prior comparator treated 01 and 1 as equal, letting map iteration
+	// decide which block was emitted first.
+	for range 64 {
+		result, err := jsonToMarkdown(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		blocks := splitBlocks(result)
+		if len(blocks) != len(keys) {
+			t.Fatalf("got %d blocks, want %d", len(blocks), len(keys))
+		}
+		for i, key := range keys {
+			var block map[string]string
+			if err := json.Unmarshal([]byte(blocks[i]), &block); err != nil {
+				t.Fatalf("block %d is not valid JSON: %v", i, err)
+			}
+			if len(block) != 1 || block[key] != contents[key] {
+				t.Fatalf("block %d does not contain exactly the expected entry for %q", i, key)
+			}
+		}
+	}
+}
+
 func TestJsonToMarkdown_LargeArray(t *testing.T) {
 	arr := make([]interface{}, 100)
 	for i := range arr {

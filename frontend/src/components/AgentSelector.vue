@@ -190,6 +190,7 @@ import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
 import type { SharedAgentInfo } from '@/api/organization';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
+import { agentUsesMcp } from '../utils/agentMcp';
 import { type ModelConfig } from '@/api/model';
 import {
   getAgentNotReadyReasonKeys,
@@ -360,14 +361,11 @@ const getImageUploadCapabilityState = (agent: CustomAgent): string => {
 
 const getMcpCapability = (agent: CustomAgent): string => {
   const config = agent.config || {};
-  if (config.mcp_selection_mode === 'none' || (!config.mcp_services?.length && config.mcp_selection_mode !== 'all')) {
+  if (!agentUsesMcp(config)) {
     return '';
   }
   if (config.mcp_selection_mode === 'all') return t('agent.shareScope.mcpAll');
-  if (config.mcp_services?.length) {
-    return t('agent.shareScope.mcpSelected', { count: config.mcp_services.length });
-  }
-  return t('agent.capabilities.mcpEnabled');
+  return t('agent.shareScope.mcpSelected', { count: config.mcp_services?.length || 0 });
 };
 
 const modelsList = computed(() => props.allModels ?? []);

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -26,7 +27,7 @@ const (
 	// tokens, so a dense scanned page can stop at finish_reason=length; raise
 	// it via VLM_MAX_TOKENS.
 	defaultMaxToks = 5000
-	defaultTemp    = float32(0.1)
+	defaultTemp    = 0.1
 )
 
 // vlmHTTPTimeout returns the HTTP client timeout for VLM requests, read from
@@ -128,11 +129,16 @@ func (v *RemoteAPIVLM) PredictWithOptions(
 		if len(imgBytes) == 0 {
 			continue
 		}
+		// A grayscale, palette or CMYK image goes as RGB: a vision processor
+		// that takes three channels fails on anything else (#5528).
+		if img, err := imageprep.Prepare(imgBytes, imageprep.Limits{}); err == nil {
+			imgBytes = img.Data
+		}
 		totalImageSize += len(imgBytes)
 		dataURI := fmt.Sprintf("data:%s;base64,%s",
 			detectImageMIME(imgBytes), base64.StdEncoding.EncodeToString(imgBytes))
 		parts = append(parts, chat.MessageContentPart{
-			Type: "image_url", ImageURL: &chat.ImageURL{URL: dataURI, Detail: "auto"},
+			Type: "image_url", ImageURL: &chat.ImageURL{URL: dataURI},
 		})
 	}
 	logger.Infof(ctx, "[VLM] Calling chat protocol, model=%s, numImages=%d, totalImageSize=%d",

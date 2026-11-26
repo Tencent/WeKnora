@@ -357,3 +357,56 @@ func TestExtractor_Extract_TruncatedProseIsNotDeclined(t *testing.T) {
 		})
 	}
 }
+
+// A JSON array that mixes valid extraction objects with non-object items
+// (null, strings) must keep the valid items instead of failing the whole
+// chunk; an array with no object at all keeps failing.
+func TestFormater_ParseGraph_NonObjectItems(t *testing.T) {
+	cases := []struct {
+		name      string
+		input     string
+		wantNodes int
+		wantRels  int
+		wantErr   bool
+	}{
+		{
+			name: "null among valid items",
+			input: `[{"entity":"A"}, null, {"entity":"B"},
+				{"entity1":"A","entity2":"B","relation":"controls"}]`,
+			wantNodes: 2,
+			wantRels:  1,
+		},
+		{
+			name:      "string among valid items",
+			input:     `[{"entity":"A"}, "stray", {"entity":"B"}]`,
+			wantNodes: 2,
+		},
+		{
+			name:    "no object at all still fails",
+			input:   `[null, "x", 3]`,
+			wantErr: true,
+		},
+		{
+			name:  "empty array is still no relations",
+			input: `[]`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NewFormater().ParseGraph(context.Background(), tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got.Node) != tc.wantNodes || len(got.Relation) != tc.wantRels {
+				t.Fatalf("got %d nodes %d relations, want %d/%d",
+					len(got.Node), len(got.Relation), tc.wantNodes, tc.wantRels)
+			}
+		})
+	}
+}

@@ -89,7 +89,12 @@ var ErrDuplicateURL = errors.New("URL already exists")
 // KnowledgeProcessOverrides stores per-upload parse config overrides sent as process_config.
 // When nil, the server uses the knowledge base defaults only.
 type KnowledgeProcessOverrides struct {
-	ParserEngineRules        []ParserEngineRule        `json:"parser_engine_rules,omitempty"`
+	ParserEngineOverrides map[string]string `json:"parser_engine_overrides,omitempty"`
+	SummaryEnabled        *bool             `json:"summary_enabled,omitempty"`
+
+	// ParserEngineRules inherits when nil and resets to the server's
+	// type-level defaults when explicitly empty.
+	ParserEngineRules        []ParserEngineRule        `json:"parser_engine_rules,omitzero"`
 	ChunkingConfig           *ChunkingConfig           `json:"chunking_config,omitempty"`
 	EnableMultimodel         *bool                     `json:"enable_multimodel,omitempty"`
 	VLMConfig                *VLMConfig                `json:"vlm_config,omitempty"`
@@ -220,6 +225,8 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 // When FileName or FileType is provided (or the URL path has a known file extension such as .pdf/.docx/.doc/.txt/.md),
 // the server automatically switches to file-download mode instead of web-page crawling.
 type CreateKnowledgeFromURLRequest struct {
+	TagIDs []string `json:"tag_ids,omitempty"`
+
 	// URL is the target URL (required)
 	URL string `json:"url"`
 	// FileName is the optional file name; used to hint file-download mode when URL has no extension
@@ -249,6 +256,9 @@ func (c *Client) CreateKnowledgeFromURL(
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/url", knowledgeBaseID)
 
 	reqBody := req
+	if len(reqBody.TagIDs) == 0 && req.TagID != "" {
+		reqBody.TagIDs = []string{req.TagID}
+	}
 
 	resp, err := c.doRequest(ctx, http.MethodPost, path, reqBody, nil)
 	if err != nil {
@@ -325,6 +335,8 @@ func (c *Client) ListKnowledge(ctx context.Context,
 // string means the knowledge base root. Omit FolderPath entirely for a flat
 // listing across every folder.
 type KnowledgeListFilter struct {
+	// TagIDs matches any listed tag. When empty, TagID selects a single tag.
+	TagIDs      []string
 	TagID       string
 	Keyword     string
 	FileType    string
@@ -350,8 +362,11 @@ func (c *Client) ListKnowledgeWithFilter(ctx context.Context,
 	queryParams := url.Values{}
 	queryParams.Add("page", strconv.Itoa(page))
 	queryParams.Add("page_size", strconv.Itoa(pageSize))
-	if filter.TagID != "" {
-		queryParams.Add("tag_id", filter.TagID)
+	if len(filter.TagIDs) > 0 {
+		queryParams.Set("tag_ids", strings.Join(filter.TagIDs, ","))
+	} else if filter.TagID != "" {
+		queryParams.Set("tag_ids", filter.TagID)
+		queryParams.Set("tag_id", filter.TagID) // Older servers accept the singular filter.
 	}
 	if filter.Keyword != "" {
 		queryParams.Add("keyword", filter.Keyword)
@@ -366,10 +381,10 @@ func (c *Client) ListKnowledgeWithFilter(ctx context.Context,
 		queryParams.Add("source", filter.Source)
 	}
 	if !filter.StartTime.IsZero() {
-		queryParams.Add("start_time", filter.StartTime.Format(time.RFC3339))
+		queryParams.Add("start_time", filter.StartTime.Format(time.RFC3339Nano))
 	}
 	if !filter.EndTime.IsZero() {
-		queryParams.Add("end_time", filter.EndTime.Format(time.RFC3339))
+		queryParams.Add("end_time", filter.EndTime.Format(time.RFC3339Nano))
 	}
 	if filter.FolderPath != nil {
 		queryParams.Add("folder_path", *filter.FolderPath)
@@ -958,6 +973,12 @@ func (c *Client) MoveKnowledge(ctx context.Context, req *MoveKnowledgeRequest) (
 
 // KnowledgeMoveProgress represents the progress of a knowledge move task
 type KnowledgeMoveProgress struct {
+	SourceKBID string `json:"source_kb_id,omitempty"`
+	TargetKBID string `json:"target_kb_id,omitempty"`
+	Failed     int    `json:"failed"`
+	CreatedAt  int64  `json:"created_at,omitempty"`
+	UpdatedAt  int64  `json:"updated_at,omitempty"`
+
 	TaskID    string `json:"task_id"`
 	Status    string `json:"status"`
 	Progress  int    `json:"progress"`

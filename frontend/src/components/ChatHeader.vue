@@ -58,17 +58,20 @@
     >
       <button
         type="button"
+        ref="menuTrigger"
         class="chat-header__menu-btn"
         :class="{ 'is-loading': Boolean(busyAction) }"
         :disabled="!session || Boolean(busyAction)"
         :aria-label="t('chatHeader.moreActions')"
+        :aria-expanded="menuVisible"
+        @keydown.esc="dismissMenu"
         @click.stop
       >
         <t-icon v-if="busyAction" name="loading" size="14px" class="chat-header__menu-loading" />
         <t-icon v-else name="ellipsis" size="16px" />
       </button>
       <template #content>
-        <div class="card-menu" @click.stop>
+        <div class="card-menu" @click.stop @keydown.esc="dismissMenu">
           <template v-if="menuMode === 'menu'">
             <button type="button" class="card-menu-item" @click="onMenuAction('rename')">
               <t-icon class="icon" name="edit-1" />
@@ -174,6 +177,7 @@ const { t } = useI18n()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const busyAction = ref('')
 const menuVisible = ref(false)
+const menuTrigger = ref<HTMLButtonElement | null>(null)
 const menuMode = ref<MenuMode>('menu')
 const titleEditing = ref(false)
 const titleDraft = ref('')
@@ -206,6 +210,15 @@ const workspaceLabel = computed(() => {
 const menuOverlayClass = computed(() => (
   menuMode.value === 'menu' ? 'card-more chat-header-menu-popup' : 'card-more chat-header-menu-popup is-confirm'
 ))
+
+function dismissMenu(event: KeyboardEvent): void {
+  if (!menuVisible.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  menuVisible.value = false
+  menuMode.value = 'menu'
+  nextTick(() => menuTrigger.value?.focus())
+}
 
 function onMenuVisibleChange(visible: boolean): void {
   if (!visible) menuMode.value = 'menu'
