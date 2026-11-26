@@ -154,3 +154,15 @@ func TestDataSourceResponse_NoConfig(t *testing.T) {
 	// No config jsonb stored → no config object in the response.
 	assert.NotContains(t, string(body), `"config":`)
 }
+
+func TestDataSourceResponseOmitsPendingSyncLog(t *testing.T) {
+	ds := &types.DataSource{LastSyncResult: types.JSON(`{"created":3,"_pending_sync_log":{"id":"private-round","resync_config_digest":"private-digest"}}`)}
+	for _, response := range []any{NewDataSourceResponse(ds), NewDataSourceResponses([]*types.DataSource{ds})} {
+		body, err := json.Marshal(response)
+		assert.NoError(t, err)
+		assert.Contains(t, string(body), `"last_sync_result":{"created":3}`)
+		assert.NotContains(t, string(body), "_pending_sync_log")
+		assert.NotContains(t, string(body), "private-round")
+		assert.NotContains(t, string(body), "private-digest")
+	}
+}
