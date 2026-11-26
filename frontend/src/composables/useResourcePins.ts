@@ -14,7 +14,7 @@
 // audit-log derivation, which is a much smaller migration than starting
 // from scratch.
 
-import { ref, computed, watch, type ComputedRef, type Ref } from 'vue'
+import { ref, computed, watch, effectScope, type ComputedRef, type Ref } from 'vue'
 import {
   listFavorites,
   addFavorite,
@@ -94,6 +94,7 @@ const favoritesByType: Record<ResourceType, Ref<PinEntry[]>> = {
 }
 const loaded: Record<ResourceType, boolean> = { kb: false, agent: false }
 const inFlight: Record<ResourceType, Promise<void> | null> = { kb: null, agent: null }
+let scopeGeneration = 0
 
 // recents revision counter — same bump-to-invalidate pattern as before.
 const recentsRevision = ref(0)
@@ -114,9 +115,11 @@ async function fetchFavorites(type: ResourceType): Promise<void> {
   // Single-flight guard: list views mount in parallel and would otherwise
   // each fire a request. Reuse the in-flight promise instead.
   if (inFlight[type]) return inFlight[type]!
+  const generation = scopeGeneration
   inFlight[type] = (async () => {
     try {
       const res = (await listFavorites(type)) as unknown as { success: boolean; data?: any[] }
+      if (generation !== scopeGeneration) return
       const data = res?.data || []
       favoritesByType[type].value = data.map((e: any) => ({
         type: e.resource_type as ResourceType,
@@ -125,27 +128,29 @@ async function fetchFavorites(type: ResourceType): Promise<void> {
       }))
       loaded[type] = true
     } catch (err) {
+      if (generation !== scopeGeneration) return
       console.warn(`[useResourcePins] failed to load ${type} favorites:`, err)
       favoritesByType[type].value = []
     } finally {
-      inFlight[type] = null
+      if (generation === scopeGeneration) inFlight[type] = null
     }
   })()
   return inFlight[type]!
 }
 
-// Invalidate caches when the active tenant changes — favorites are
-// (user, tenant)-scoped on the server, so a tenant switch means the
-// currently loaded list belongs to the *previous* tenant. We trigger one
-// watcher at module load so any later switch refetches automatically.
+// Match the server's (user, tenant) scope. The state is module-wide, so its
+// watcher must outlive the first list component that calls this composable.
 let tenantWatcherInstalled = false
 function installTenantWatcher(): void {
   if (tenantWatcherInstalled) return
-  tenantWatcherInstalled = true
   const authStore = useAuthStore()
-  watch(
-    () => authStore.effectiveTenantId,
+  tenantWatcherInstalled = true
+  effectScope(true).run(() => watch(
+    () => [authStore.user?.id, authStore.effectiveTenantId],
     () => {
+      ++scopeGeneration
+      inFlight.kb = null
+      inFlight.agent = null
       loaded.kb = false
       loaded.agent = false
       favoritesByType.kb.value = []
@@ -157,8 +162,9 @@ function installTenantWatcher(): void {
       // Recents are keyed on the tenant id (see `recentsKey`); bump the
       // revision so any active computed re-reads against the new key.
       bumpRecents()
-    }
-  )
+    },
+    { flush: 'sync' },
+  ))
 }
 
 export interface UseResourcePinsResult {
@@ -200,6 +206,7 @@ export function useResourcePins(): UseResourcePinsResult {
   }
 
   const toggleFavorite = async (type: ResourceType, id: string): Promise<boolean> => {
+    const generation = scopeGeneration
     const list = favoritesByType[type].value
     const idx = list.findIndex((e) => e.id === id)
     // Optimistic update first so the star animation feels instant; on
@@ -214,8 +221,10 @@ export function useResourcePins(): UseResourcePinsResult {
         await removeFavorite(type, id)
         return false
       } catch (err) {
-        favoritesByType[type].value = [removed, ...favoritesByType[type].value]
-        console.warn('[useResourcePins] removeFavorite failed; reverted:', err)
+        if (generation === scopeGeneration) {
+          favoritesByType[type].value = [removed, ...favoritesByType[type].value]
+        }
+        console.warn('[useResourcePins] removeFavorite failed:', err)
         return true
       }
     }
@@ -225,8 +234,10 @@ export function useResourcePins(): UseResourcePinsResult {
       await addFavorite(type, id)
       return true
     } catch (err) {
-      favoritesByType[type].value = favoritesByType[type].value.filter((e) => e.id !== id)
-      console.warn('[useResourcePins] addFavorite failed; reverted:', err)
+      if (generation === scopeGeneration) {
+        favoritesByType[type].value = favoritesByType[type].value.filter((e) => e.id !== id)
+      }
+      console.warn('[useResourcePins] addFavorite failed:', err)
       return false
     }
   }
