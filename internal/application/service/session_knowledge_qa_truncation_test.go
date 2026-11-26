@@ -146,3 +146,25 @@ func TestConsumeFallbackStreamPrematureClose(t *testing.T) {
 		Content: cm.FallbackResponse, Done: true, IsFallback: true,
 	}, answers[1], "a missing Done marker must keep the existing fixed-fallback behavior")
 }
+
+func TestConsumeFallbackStreamStoppedDoesNotAddFixedResponse(t *testing.T) {
+	bus := event.NewEventBus()
+	var answers []event.AgentFinalAnswerData
+	bus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		answers = append(answers, evt.Data.(event.AgentFinalAnswerData))
+		return nil
+	})
+	cm := &types.ChatManage{}
+	cm.EventBus = bus.AsEventBusInterface()
+	cm.FallbackResponse = "configured fallback"
+	ch := make(chan types.StreamResponse, 1)
+	ch <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Content: "partial "}
+	close(ch)
+	// The user pressed stop: the request context is cancelled and the provider
+	// closes its channel without a Done marker.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	(&sessionService{}).consumeFallbackStream(ctx, cm, ch, modelcontext.NewRegistry(false))
+	require.Len(t, answers, 1)
+	require.Equal(t, "partial ", answers[0].Content)
+}
