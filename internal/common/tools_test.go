@@ -1,9 +1,59 @@
 package common
 
 import (
+	"slices"
 	"testing"
 	"unicode/utf8"
 )
+
+func TestDeduplicate(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []string
+		want  []string
+	}{
+		{"preserves first-appearance order", []string{"b", "a", "b", "c", "a"}, []string{"b", "a", "c"}},
+		{"no duplicates keeps order", []string{"x", "y", "z"}, []string{"x", "y", "z"}},
+		{"all duplicates collapse to one", []string{"a", "a", "a"}, []string{"a"}},
+		{"empty input", nil, []string{}},
+		{"single element", []string{"only"}, []string{"only"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Deduplicate(func(s string) string { return s }, tt.input...)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("Deduplicate(%v) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+
+	t.Run("keeps first occurrence on key collision", func(t *testing.T) {
+		type item struct {
+			id  int
+			val string
+		}
+		got := Deduplicate(func(it item) int { return it.id },
+			item{1, "first"}, item{2, "x"}, item{1, "second"})
+		want := []item{{1, "first"}, {2, "x"}}
+		if !slices.Equal(got, want) {
+			t.Errorf("Deduplicate() = %v, want %v", got, want)
+		}
+	})
+
+	// The old implementation collected map values, so the order changed
+	// from run to run. Repeat in-process and rely on -count=10 across
+	// processes to prove the order is stable.
+	t.Run("order is stable across repeats", func(t *testing.T) {
+		input := []string{"m", "a", "z", "m", "b", "a", "q", "z", "c", "m", "b", "q"}
+		want := []string{"m", "a", "z", "b", "q", "c"}
+		for i := 0; i < 100; i++ {
+			got := Deduplicate(func(s string) string { return s }, input...)
+			if !slices.Equal(got, want) {
+				t.Fatalf("repeat %d: Deduplicate() = %v, want %v", i, got, want)
+			}
+		}
+	})
+}
 
 func TestParseLLMJsonResponse(t *testing.T) {
 	type payload struct {
