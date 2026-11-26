@@ -105,62 +105,61 @@ class ExcelParser(BaseParser):
         source_blocks: List[dict] = []
         start, end = 0, 0
 
-        excel_file = _open_excel_file(
+        with _open_excel_file(
             content,
             file_type=self.file_type,
             percent_as_text=self.xlsx_percent_as_text,
-        )
-        
-        # Process each sheet in the Excel file
-        for excel_sheet_name in excel_file.sheet_names:
-            df = _read_sheet_dataframe(
-                excel_file,
-                excel_sheet_name,
-                xlsx_first_row_as_header=self.xlsx_first_row_as_header,
-            )
-            # Process each row in the DataFrame. The index is the 0-based
-            # sheet row (rows are read from row 1 and skipped rows keep
-            # their labels), so index + 1 is the row number users see.
-            for row_index, row in df.iterrows():
-                page_content = []
-                # Build key-value pairs for non-empty values. A blank cell is
-                # read as "" (see _read_sheet_dataframe), so an empty row has
-                # no pairs and is skipped below.
-                for k, v in row.items():
-                    if pd.notna(v) and v != "" and not _is_image_function(v):
-                        page_content.append(f"{k}: {v}")
-                
-                # Skip rows with no valid content
-                if not page_content:
-                    continue
-                
-                # Format row as comma-separated key-value pairs
-                content_row = ",".join(page_content) + "\n"
-                end += len(content_row)
-                text.append(content_row)
-                
-                # Create a chunk for this row with position tracking
-                chunks.append(
-                    Chunk(content=content_row, seq=len(chunks), start=start, end=end)
+        ) as excel_file:
+            # Process each sheet in the Excel file
+            for excel_sheet_name in excel_file.sheet_names:
+                df = _read_sheet_dataframe(
+                    excel_file,
+                    excel_sheet_name,
+                    xlsx_first_row_as_header=self.xlsx_first_row_as_header,
                 )
-                try:
-                    row_number = int(row_index) + 1
-                except (TypeError, ValueError):
-                    row_number = 0
-                if row_number > 0:
-                    source_blocks.append(
-                        {
-                            "start": start,
-                            "end": end,
-                            "locator": {
-                                "type": "sheet",
-                                "sheet": str(excel_sheet_name),
-                                "row_start": row_number,
-                                "row_end": row_number,
-                            },
-                        }
+                # Process each row in the DataFrame. The index is the 0-based
+                # sheet row (rows are read from row 1 and skipped rows keep
+                # their labels), so index + 1 is the row number users see.
+                for row_index, row in df.iterrows():
+                    page_content = []
+                    # Build key-value pairs for non-empty values. A blank cell is
+                    # read as "" (see _read_sheet_dataframe), so an empty row has
+                    # no pairs and is skipped below.
+                    for k, v in row.items():
+                        if pd.notna(v) and v != "" and not _is_image_function(v):
+                            page_content.append(f"{k}: {v}")
+
+                    # Skip rows with no valid content
+                    if not page_content:
+                        continue
+
+                    # Format row as comma-separated key-value pairs
+                    content_row = ",".join(page_content) + "\n"
+                    end += len(content_row)
+                    text.append(content_row)
+
+                    # Create a chunk for this row with position tracking
+                    chunks.append(
+                        Chunk(content=content_row, seq=len(chunks), start=start, end=end)
                     )
-                start = end
+                    try:
+                        row_number = int(row_index) + 1
+                    except (TypeError, ValueError):
+                        row_number = 0
+                    if row_number > 0:
+                        source_blocks.append(
+                            {
+                                "start": start,
+                                "end": end,
+                                "locator": {
+                                    "type": "sheet",
+                                    "sheet": str(excel_sheet_name),
+                                    "row_start": row_number,
+                                    "row_end": row_number,
+                                },
+                            }
+                        )
+                    start = end
 
         # Combine all text and return as Document
         return Document(
@@ -183,7 +182,12 @@ def _read_sheet_dataframe(
     # "N/A", "NA", "NULL", "None", "NaN" or "n/a" as missing, and its pair is
     # dropped, though the cell says "not applicable" or "none". Blank cells are
     # then read as "", which parse_into_text skips like a missing value.
-    df = excel_file.parse(sheet_name=sheet_name, header=None, keep_default_na=False)
+    # Preserve the cell types supplied by the engine. Column inference otherwise
+    # turns text identifiers ("00123", "1e5") into numbers; iterrows can then
+    # coerce a numeric row to floats and lose precision in long identifiers.
+    df = excel_file.parse(
+        sheet_name=sheet_name, header=None, keep_default_na=False, dtype=object
+    )
     if xlsx_first_row_as_header and len(df.index) >= 2:
         df.columns = _stable_header_labels(df.iloc[0].tolist())
         return df.iloc[1:].copy()

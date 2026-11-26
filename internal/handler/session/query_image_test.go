@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"strings"
 	"testing"
@@ -83,6 +84,51 @@ func TestDecodeQueryImage(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "exceeds") {
 			t.Fatalf("error = %v, want it to mention the size limit", err)
+		}
+	})
+}
+
+// The bytes decide, not the declaration: a text payload labelled image/png
+// used to pass this gate and fail downstream as a 500.
+func TestDecodeQueryImageContentOverDeclaration(t *testing.T) {
+	pngB64 := base64.StdEncoding.EncodeToString(samplePNG(t))
+	textB64 := base64.StdEncoding.EncodeToString([]byte("hello"))
+
+	t.Run("octet-stream label on a real png is a mismatch", func(t *testing.T) {
+		_, _, err := decodeQueryImage("data:application/octet-stream;base64," + pngB64)
+		if err == nil {
+			t.Fatal("expected a mismatch error")
+		}
+		if !strings.Contains(err.Error(), "image/png") || !strings.Contains(err.Error(), "application/octet-stream") {
+			t.Fatalf("error = %v, want it to name both types", err)
+		}
+	})
+
+	t.Run("a wrong gif label on a png is a mismatch", func(t *testing.T) {
+		if _, _, err := decodeQueryImage("data:image/gif;base64," + pngB64); err == nil {
+			t.Fatal("expected a mismatch error for a gif label on png bytes")
+		}
+	})
+
+	t.Run("text labelled as png is a mismatch at the gate", func(t *testing.T) {
+		_, _, err := decodeQueryImage("data:image/png;base64," + textB64)
+		if err == nil {
+			t.Fatal("expected the gate to reject text labelled as png")
+		}
+	})
+
+	t.Run("the harmless image/jpg alias matches jpeg content", func(t *testing.T) {
+		var buf bytes.Buffer
+		img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+		if err := jpeg.Encode(&buf, img, nil); err != nil {
+			t.Fatalf("encode jpeg: %v", err)
+		}
+		_, mediaType, err := decodeQueryImage("data:image/jpg;base64," + base64.StdEncoding.EncodeToString(buf.Bytes()))
+		if err != nil {
+			t.Fatalf("decodeQueryImage: %v", err)
+		}
+		if mediaType != "image/jpeg" {
+			t.Fatalf("mediaType = %q, want the sniffed image/jpeg", mediaType)
 		}
 	})
 }

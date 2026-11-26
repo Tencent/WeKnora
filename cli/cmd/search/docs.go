@@ -172,7 +172,14 @@ done:
 		if matches == nil {
 			matches = []sdk.Knowledge{}
 		}
-		meta := &output.Meta{Count: output.IntPtr(len(matches)), TotalCount: output.IntPtr(int(serverTotal)), HasMore: truncated, Hint: emptyContentSearchHint(len(matches))}
+		meta := &output.Meta{
+			Count:      output.IntPtr(len(matches)),
+			TotalCount: output.IntPtr(int(serverTotal)),
+			HasMore:    truncated,
+		}
+		if len(matches) == 0 {
+			meta.Hint = "No matching title or filename. Search contents with weknora search chunks."
+		}
 		return fopts.Emit(iostreams.IO.Out, matches, meta)
 	}
 	if len(matches) == 0 {

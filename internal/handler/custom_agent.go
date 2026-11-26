@@ -28,6 +28,12 @@ type sandboxConfigLookup interface {
 	Get(ctx context.Context, tenantID uint64, id string) (*types.TenantSandboxConfigEntity, error)
 }
 
+// asrModelLookup is the existence check an agent's speech-recognition selection
+// needs, kept narrow for the same reason as sandboxConfigLookup.
+type asrModelLookup interface {
+	GetModelByID(ctx context.Context, id string) (*types.Model, error)
+}
+
 // CustomAgentHandler defines the HTTP handler for custom agent operations
 type CustomAgentHandler struct {
 	service      interfaces.CustomAgentService
@@ -41,7 +47,10 @@ type CustomAgentHandler struct {
 	sandboxConfigs     sandboxConfigLookup
 	usableSkills       usableSkillLister
 	webSearchProviders interfaces.WebSearchProviderRepository
-	desktop            bool
+	// asrModels validates an agent's speech-recognition selection. Optional in
+	// the same way as sandboxConfigs.
+	asrModels asrModelLookup
+	desktop   bool
 }
 
 // NewCustomAgentHandler creates a new custom agent handler instance
@@ -54,6 +63,7 @@ func NewCustomAgentHandler(
 	host service.HostSandboxManager,
 	usableSkills *service.TenantSkillService,
 	webSearchProviders interfaces.WebSearchProviderRepository,
+	models interfaces.ModelService,
 ) *CustomAgentHandler {
 	return &CustomAgentHandler{
 		service:            service,
@@ -63,6 +73,7 @@ func NewCustomAgentHandler(
 		sandboxConfigs:     sandboxConfigs,
 		usableSkills:       usableSkills,
 		webSearchProviders: webSearchProviders,
+		asrModels:          models,
 		desktop:            host.Desktop,
 	}
 }
@@ -91,6 +102,8 @@ type PatchAgentRequest struct {
 	SystemPrompt *string `json:"system_prompt" extensions:"x-agent,x-agent-max-bytes=32000"`
 	// Chat model the agent answers with
 	ModelID *string `json:"model_id" extensions:"x-agent"`
+	// Rerank model for knowledge retrieval; empty clears the selection
+	RerankModelID *string `json:"rerank_model_id" extensions:"x-agent"`
 	// Knowledge bases searched: all, selected (knowledge_bases) or none
 	KBSelectionMode *string `json:"kb_selection_mode" enums:"all,selected,none" extensions:"x-agent"`
 	// Selected knowledge bases, replacing the current ones; without
@@ -133,6 +146,9 @@ func (p PatchAgentRequest) apply(agent *types.CustomAgent) UpdateAgentRequest {
 	}
 	if p.ModelID != nil {
 		cfg.ModelID = *p.ModelID
+	}
+	if p.RerankModelID != nil {
+		cfg.RerankModelID = *p.RerankModelID
 	}
 	if p.KnowledgeBases != nil {
 		cfg.KnowledgeBases = append([]string{}, *p.KnowledgeBases...)
@@ -218,7 +234,7 @@ type UpdateAgentRequest struct {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"agent.create","risk":"write","label_param":"name"}
-// @x-agent-hint "Creates a smart-reasoning agent with default settings, owned by the user. It can call MCP services and skills. Configure it afterwards with agent.update."
+// @x-agent-hint "Creates a smart-reasoning agent with default settings, owned by the user. It can call MCP services and skills. Configure it afterwards with agent.update, including model_id and, for knowledge search, rerank_model_id. Creating an agent does not mean its model configuration is complete."
 // @Router       /agents [post]
 func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -233,11 +249,15 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		return
 	}
 	if err := authorizeAgentKnowledgeScope(ctx, req.Config); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if err := h.validateAgentSandboxConfig(ctx, req.Config); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
+		return
+	}
+	if err := h.validateAgentASRModel(ctx, req.Config, ""); err != nil {
+		_ = c.Error(err)
 		return
 	}
 	if err := normalizeAgentReasoningEffort(&req.Config); err != nil {
@@ -538,7 +558,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @x-agent      {"id":"agent.update","risk":"write","target":"agent.get","label":"name","require_complete_target":true}
-// @x-agent-hint "Changes the listed settings of an agent; a field left out is kept. agent_mode is quick-answer or smart-reasoning; MCP services and skills only run in smart-reasoning, and switching to it turns multi-turn on. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model), knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take web_search_provider_id from web_search_provider.list; an empty value follows the workspace default, and selecting a provider does not change web_search_enabled. Take skill names exactly from skill.list with the agent's sandbox_config_id. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
+// @x-agent-hint "Changes the listed settings of an agent; a field left out is kept. agent_mode is quick-answer or smart-reasoning; MCP services and skills only run in smart-reasoning, and switching to it turns multi-turn on. system_prompt replaces the whole prompt, so start from the full prompt agent.get returns. Take model_id from model.list (a KnowledgeQA model) and rerank_model_id from a Rerank model in that list. Empty rerank_model_id clears the selection; omitting it preserves the saved value. For knowledge-search agents, report a missing chat or rerank model explicitly instead of claiming setup is complete. Take knowledge base ids from knowledge_base.list and MCP service ids from mcp_service.list. Take web_search_provider_id from web_search_provider.list; an empty value follows the workspace default, and selecting a provider does not change web_search_enabled. Take skill names exactly from skill.list with the agent's sandbox_config_id. knowledge_base_ids, mcp_service_ids or selected_skills alone also switch that scope to selected."
 // @Router       /agents/{id} [patch]
 func (h *CustomAgentHandler) PatchAgent(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -650,11 +670,11 @@ func (h *CustomAgentHandler) validateAgentSkillNames(
 func (h *CustomAgentHandler) saveAgentUpdate(c *gin.Context, id string, req UpdateAgentRequest) {
 	ctx := c.Request.Context()
 	if err := authorizeAgentKnowledgeScope(ctx, req.Config); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if err := h.validateAgentSandboxConfig(ctx, req.Config); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	if err := normalizeAgentReasoningEffort(&req.Config); err != nil {
@@ -670,6 +690,10 @@ func (h *CustomAgentHandler) saveAgentUpdate(c *gin.Context, id string, req Upda
 			return
 		}
 		_ = c.Error(errors.NewInternalServerError("Failed to update agent"))
+		return
+	}
+	if err := h.validateAgentASRModel(ctx, req.Config, existing.Config.ASRModelID); err != nil {
+		_ = c.Error(err)
 		return
 	}
 	toolWarnings, err := checkAgentAllowedTools(existing.Config.AllowedTools, &req.Config)
@@ -863,7 +887,7 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 		return
 	}
 	if err := authorizeAgentKnowledgeScope(ctx, sourceAgent.Config); err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -1083,6 +1107,42 @@ func (h *CustomAgentHandler) validateAgentSandboxConfig(
 	}
 	if stored == nil {
 		return errors.NewBadRequestError("所选沙箱后端配置不存在，请重新选择")
+	}
+	return nil
+}
+
+// validateAgentASRModel rejects a speech-recognition selection the workspace
+// does not have, with the rule UpdateTenantDefaultSettings applies to the same
+// field: a newly selected ID must name an active ASR model.
+//
+// For the same reason as the sandbox selection, checking at save time is what
+// makes the mistake fixable: saved unchecked, a wrong ID only fails when the
+// agent is next dictated to, as a server error that names neither the agent
+// nor the setting. An ID kept from the stored agent is not re-checked, so a
+// model removed since does not block an unrelated change such as a rename.
+func (h *CustomAgentHandler) validateAgentASRModel(
+	ctx context.Context, cfg types.CustomAgentConfig, storedID string,
+) error {
+	id := cfg.ASRModelID
+	if id == "" || id == storedID || h.asrModels == nil {
+		return nil
+	}
+	if _, ok := types.TenantIDFromContext(ctx); !ok {
+		return errors.NewUnauthorizedError("Missing workspace context")
+	}
+	model, err := h.asrModels.GetModelByID(ctx, id)
+	if err != nil {
+		if err == service.ErrModelNotFound {
+			return errors.NewBadRequestError("asr_model_id: model not found in this workspace")
+		}
+		return errors.NewInternalServerError("Failed to verify the ASR model").
+			WithDetails(err.Error())
+	}
+	if !model.SupportsType(types.ModelTypeASR) {
+		return errors.NewBadRequestError("asr_model_id must be an ASR model")
+	}
+	if model.Status != types.ModelStatusActive {
+		return errors.NewBadRequestError("asr_model_id: model is not active")
 	}
 	return nil
 }

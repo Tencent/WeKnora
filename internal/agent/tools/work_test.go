@@ -434,3 +434,44 @@ type fakeNamedTool struct{ BaseTool }
 func (*fakeNamedTool) Execute(context.Context, json.RawMessage) (*types.ToolResult, error) {
 	return nil, nil
 }
+
+func TestWorkWaitAnyObservesPreviouslyWaitedIDs(t *testing.T) {
+	for _, terminal := range []string{
+		interfaces.WorkStateSucceeded, interfaces.WorkStateFailed, interfaces.WorkStateCancelled,
+	} {
+		t.Run(terminal, func(t *testing.T) {
+			h := &fakeWorkHandler{}
+			tool, sleeps := newTestWorkWait(h, &recordingMarks{}, nil)
+			_, err := tool.Execute(t.Context(), json.RawMessage(`{"work_ids":["sj_old"],"wait_sec":1}`))
+			require.NoError(t, err)
+			require.Equal(t, 1, *sleeps)
+
+			h.cheap = map[string][]string{
+				"sj_old": {interfaces.WorkStateRunning, terminal},
+				"sj_new": {interfaces.WorkStateRunning},
+			}
+			h.detailed = map[string]string{"sj_old": terminal}
+			result, err := tool.Execute(t.Context(),
+				json.RawMessage(`{"work_ids":["sj_old","sj_new"],"wait_sec":300,"mode":"any"}`))
+			require.NoError(t, err)
+			require.Equal(t, 2, *sleeps, "completion of an older task must end the mixed wait")
+			view := decodeWork(t, result.Output)
+			require.False(t, view.TimedOut)
+			require.Equal(t, terminal, view.Items[0].State)
+		})
+	}
+}
+
+func TestWorkWaitAnyPreviouslyFinishedIDReturnsWithoutSleeping(t *testing.T) {
+	h := &fakeWorkHandler{}
+	tool, sleeps := newTestWorkWait(h, &recordingMarks{}, nil)
+	_, err := tool.Execute(t.Context(), json.RawMessage(`{"work_ids":["sj_old"],"wait_sec":1}`))
+	require.NoError(t, err)
+	h.cheap = map[string][]string{"sj_old": {interfaces.WorkStateSucceeded}}
+	h.detailed = map[string]string{"sj_old": interfaces.WorkStateSucceeded}
+	result, err := tool.Execute(t.Context(),
+		json.RawMessage(`{"work_ids":["sj_old","sj_new"],"wait_sec":300,"mode":"any"}`))
+	require.NoError(t, err)
+	require.Equal(t, 1, *sleeps)
+	require.False(t, decodeWork(t, result.Output).TimedOut)
+}

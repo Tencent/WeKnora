@@ -49,10 +49,12 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 	for _, tc := range []struct {
 		name                    string
 		missingReader           bool
+		missingResult           bool
 		parserError             string
 		getErr, readErr, rpcErr error
 		retryable               bool
 		code                    string
+		message                 string
 	}{
 		{name: "reader unavailable", missingReader: true, code: werrors.ErrCodeDocReaderUnavailable},
 		{
@@ -61,10 +63,22 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 		},
 		{name: "file fetch fails", getErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
 		{name: "file read fails", readErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
+		{
+			name:          "reader returns no result",
+			missingResult: true,
+			retryable:     true,
+			code:          werrors.ErrCodeDocReaderParseFailed,
+		},
 		{name: "reader call fails", rpcErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
 		{
 			name: "CSV expansion budget exceeded", rpcErr: docparser.ErrCSVMarkdownTooLarge,
 			code: werrors.ErrCodeDocReaderParseFailed,
+		},
+		{
+			name:    "anydoc encrypted document",
+			rpcErr:  fmt.Errorf("conversion failed for an uploaded file: %w", anydoc.ErrEncrypted),
+			code:    werrors.ErrCodeDocReaderParseFailed,
+			message: "This document is encrypted. Upload a copy without password protection.",
 		},
 	} {
 		for _, retried := range []int{0, 3} {
@@ -93,6 +107,9 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 						result: &types.ReadResult{Error: tc.parserError}, err: tc.rpcErr,
 					}
 				}
+				if tc.missingResult {
+					svc.documentReader = &spanRetryDocReader{}
+				}
 				result, err := svc.convert(ctx, types.DocumentProcessPayload{
 					FilePath: "doc.pdf", FileName: "doc.pdf", FileType: "pdf",
 				}, &types.KnowledgeBase{ID: "kb"}, knowledge, types.EffectiveProcessConfig{}, retried == 3)
@@ -113,6 +130,10 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 					require.Equal(t, types.SpanStatusFailed, status)
 					require.Equal(t, tc.code, code)
 					require.NotEmpty(t, message)
+					if tc.message != "" {
+						require.Equal(t, tc.message, message)
+						require.Equal(t, tc.message, knowledge.ErrorMessage)
+					}
 				}
 			})
 		}

@@ -168,3 +168,17 @@ func TestCreate_AgentHelp_EmitsUsedFor(t *testing.T) {
 
 	assert.Contains(t, buf.String(), `"used_for"`)
 }
+
+func TestCreateDryRunShowsDocumentClassification(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	root := withRootHarnessDoc(NewCmdCreate(docDryRunFactory(t)),
+		"--kb", "00000000-0000-0000-0000-000000000001", "--text", "Runbook",
+		"--tag-id", "ops", "--channel", "migration", "--dry-run", "--format", "json")
+	require.NoError(t, root.Execute())
+	var envelope struct {
+		Meta struct{ Plan struct{ Args map[string]any } }
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope))
+	assert.Equal(t, "ops", envelope.Meta.Plan.Args["tag_id"])
+	assert.Equal(t, "migration", envelope.Meta.Plan.Args["channel"])
+}

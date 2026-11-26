@@ -30,6 +30,10 @@ func NewWikiRenamePageTool(
 			json.RawMessage(`{
 				"type": "object",
 				"properties": {
+					"knowledge_base_id": {
+						"type": "string",
+						"description": "Optional kb://N handle from search/read results to disambiguate the slug."
+					},
 					"slug": {
 						"type": "string",
 						"description": "The current slug of the Wiki page"
@@ -53,8 +57,9 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 	// revision history distinguishes agent edits from pipeline/user ones.
 	ctx = types.WithWikiEditSource(ctx, types.WikiEditSourceAgent)
 	var params struct {
-		Slug    string `json:"slug"`
-		NewSlug string `json:"new_slug"`
+		KnowledgeBaseID string `json:"knowledge_base_id"`
+		Slug            string `json:"slug"`
+		NewSlug         string `json:"new_slug"`
 	}
 
 	if err := json.Unmarshal(args, &params); err != nil {
@@ -81,8 +86,13 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		return &types.ToolResult{Success: false, Error: "new_slug must be different from old slug"}, nil
 	}
 
+	kbIDs, scopeErr := wikiMutationKBs(t.kbIDs, params.KnowledgeBaseID)
+	if scopeErr != nil {
+		return &types.ToolResult{Success: false, Error: scopeErr.Error()}, nil
+	}
+
 	// Get existing page
-	existingPage, kbID, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
+	existingPage, kbID, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, kbIDs, t.routes)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: "Failed to resolve page to rename: " + err.Error()}, nil
 	}

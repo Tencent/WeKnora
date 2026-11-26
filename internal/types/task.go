@@ -408,6 +408,7 @@ type KBClonePayload struct {
 	SourceID  string        `json:"source_id"`
 	TargetID  string        `json:"target_id"`
 	Initiator TaskInitiator `json:"initiator,omitempty"`
+	Language  string        `json:"language,omitempty"`
 	// New clone destinations are reserved by the server at admission and
 	// created by the worker once. Retries retain both ID and creator.
 	CreateTarget bool   `json:"create_target,omitempty"`
@@ -449,6 +450,7 @@ type KnowledgeListDeletePayload struct {
 	KnowledgeIDs    []string      `json:"knowledge_ids"`
 	Initiator       TaskInitiator `json:"initiator,omitempty"`
 	KnowledgeBaseID string        `json:"knowledge_base_id,omitempty"`
+	Language        string        `json:"language,omitempty"`
 }
 
 // KnowledgeListReparsePayload represents the batch knowledge reparse task payload
@@ -459,6 +461,7 @@ type KnowledgeListReparsePayload struct {
 	KnowledgeIDs    []string                   `json:"knowledge_ids"`
 	ProcessConfig   *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 	Initiator       TaskInitiator              `json:"initiator,omitempty"`
+	Language        string                     `json:"language,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload
@@ -471,6 +474,7 @@ type KnowledgeMovePayload struct {
 	TargetKBID   string        `json:"target_kb_id"`
 	Mode         string        `json:"mode"` // "reuse_vectors" or "reparse"
 	Initiator    TaskInitiator `json:"initiator,omitempty"`
+	Language     string        `json:"language,omitempty"`
 }
 
 // KnowledgeMoveProgress represents the progress of a knowledge move task
@@ -499,6 +503,7 @@ type ManualProcessPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Content         string `json:"content"`      // cleaned markdown content
 	NeedCleanup     bool   `json:"need_cleanup"` // true for update, false for create
+	Language        string `json:"language,omitempty"`
 }
 
 // ImageMultimodalPayload represents the image multimodal processing task payload.
@@ -510,6 +515,9 @@ type ImageMultimodalPayload struct {
 	ChunkID         string `json:"chunk_id"`         // parent text chunk
 	ImageURL        string `json:"image_url"`        // provider:// URL (e.g. local://..., minio://...)
 	ImageLocalPath  string `json:"image_local_path"` // deprecated: kept for backward compat with in-flight tasks
+	// CounterBatch identifies the fan-out that owns the pending image counter.
+	// Empty retains compatibility with tasks queued before batch fencing.
+	CounterBatch string `json:"counter_batch,omitempty"`
 	// ImagePipelineParams carries the tunables of the pipeline this task runs,
 	// resolved from the knowledge base at enqueue time. They are deliberately
 	// not payload fields of their own: two pipelines may each define a field

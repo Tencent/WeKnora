@@ -8,9 +8,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 func TestCSVReaderSourceRows(t *testing.T) {
+	gbkCSV, err := simplifiedchinese.GBK.NewEncoder().String("商品,备注,数量\n\n铅笔,--,3\n\n本子,正常,10")
+	require.NoError(t, err)
 	tests := []struct {
 		name string
 		csv  string
@@ -22,6 +25,15 @@ func TestCSVReaderSourceRows(t *testing.T) {
 			csv:  "\nname,qty\n\npen,2\n\n\nink,1",
 			rows: []int{2, 4, 7},
 			text: []string{"| name | qty |\n| --- | --- |\n", "| pen | 2 |\n", "| ink | 1 |\n"},
+		},
+		{
+			name: "GBK text keeps its original sheet rows and Markdown offsets",
+			csv:  gbkCSV,
+			rows: []int{1, 3, 5},
+			text: []string{
+				"| 商品 | 备注 | 数量 |\n| --- | --- | --- |\n",
+				"| 铅笔 | -- | 3 |\n", "| 本子 | 正常 | 10 |\n",
+			},
 		},
 		{
 			name: "consecutive multiline cells occupy one sheet row",

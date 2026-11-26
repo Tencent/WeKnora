@@ -3,6 +3,7 @@ package yuque
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,11 +14,12 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-// TestMain whitelists loopback for the httptest servers and the default base
-// host so parseYuqueConfig does not resolve www.yuque.com over live DNS during
-// a unit test. Production keeps the default strict SSRF policy.
+const testYuqueCustomHost = "company.yuque.example"
+
+// TestMain whitelists loopback for the httptest servers and the base URLs
+// used by config tests so parsing does not require live DNS.
 func TestMain(m *testing.M) {
-	_ = os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost,www.yuque.com")
+	_ = os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost,www.yuque.com,"+testYuqueCustomHost)
 	secutils.ResetSSRFWhitelistForTest()
 	os.Exit(m.Run())
 }
@@ -307,6 +309,10 @@ func TestConnector_FetchAll_SkipsEmptyBodiesAndHTMLShells(t *testing.T) {
 		{ID: 601, Type: "Doc", Status: "1", Title: "Empty", Slug: "empty", ContentUpdatedAt: "2026-04-20T10:00:00Z"},
 		{ID: 602, Type: "Doc", Status: "1", Title: "Shell", Slug: "shell", ContentUpdatedAt: "2026-04-20T11:00:00Z"},
 		{ID: 603, Type: "Doc", Status: "1", Title: "Real", Slug: "real", ContentUpdatedAt: "2026-04-20T12:00:00Z"},
+		{ID: 604, Type: "Doc", Status: "1", Title: "BOM Empty", Slug: "bom-empty"},
+		{ID: 605, Type: "Doc", Status: "1", Title: "BOM Shell", Slug: "bom-shell"},
+		{ID: 606, Type: "Doc", Status: "1", Title: "BOM Real", Slug: "bom-real"},
+		{ID: 607, Type: "Doc", Status: "1", Title: "HTML Example", Slug: "html-example"},
 	}})
 	emptyBody := " \n\t"
 	f.handleJSON("/api/v2/repos/docs/601", 200, v2DocDetailResponse{
@@ -329,21 +335,60 @@ func TestConnector_FetchAll_SkipsEmptyBodiesAndHTMLShells(t *testing.T) {
 			ContentUpdatedAt: "2026-04-20T12:00:00Z",
 		},
 	})
+	bomMarkdown := "\ufeff \n# real Markdown"
+	customElementMarkdown := "<html-example>Example</html-example>\n\n# Usage"
+	for _, doc := range []struct {
+		id   int64
+		body string
+	}{
+		{604, " \ufeff \n\t"},
+		{605, "\ufeff \n<!DOCTYPE html><html></html>"},
+		{606, bomMarkdown},
+		{607, customElementMarkdown},
+	} {
+		f.handleJSON(fmt.Sprintf("/api/v2/repos/docs/%d", doc.id), 200, v2DocDetailResponse{
+			Data: v2DocDetail{ID: doc.id, Format: "markdown", Body: doc.body, Status: "1"},
+		})
+	}
 
 	items, err := NewConnector().FetchAll(context.Background(), makeDSConfig(f, []string{"14"}), []string{"14"})
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)
 	}
-	if len(items) != 3 {
-		t.Fatalf("want 3 items (2 skips + 1 doc), got %d: %+v", len(items), items)
+	if len(items) != 7 {
+		t.Fatalf("want 7 items (4 skips + 3 docs), got %d: %+v", len(items), items)
+	}
+	wantReasons := map[string]string{
+		"601": "empty document body", "602": "document body is an HTML page shell",
+		"604": "empty document body", "605": "document body is an HTML page shell",
 	}
 	skipped := map[string]*types.FetchedItem{}
+	foundBOMMarkdown := false
+	foundCustomElementMarkdown := false
 	for i := range items {
-		if items[i].ExternalID == "601" || items[i].ExternalID == "602" {
+		if _, ok := wantReasons[items[i].ExternalID]; ok {
 			skipped[items[i].ExternalID] = &items[i]
 		}
+		if items[i].ExternalID == "606" {
+			foundBOMMarkdown = true
+			if string(items[i].Content) != bomMarkdown {
+				t.Errorf("BOM Markdown content = %q, want %q", items[i].Content, bomMarkdown)
+			}
+		}
+		if items[i].ExternalID == "607" {
+			foundCustomElementMarkdown = true
+			if string(items[i].Content) != customElementMarkdown {
+				t.Errorf("custom-element Markdown content = %q, want %q", items[i].Content, customElementMarkdown)
+			}
+		}
 	}
-	for _, id := range []string{"601", "602"} {
+	if !foundBOMMarkdown {
+		t.Fatal("missing BOM Markdown document")
+	}
+	if !foundCustomElementMarkdown {
+		t.Fatal("missing custom-element Markdown document")
+	}
+	for id, wantReason := range wantReasons {
 		it := skipped[id]
 		if it == nil {
 			t.Fatalf("missing skip placeholder for %s", id)
@@ -356,8 +401,8 @@ func TestConnector_FetchAll_SkipsEmptyBodiesAndHTMLShells(t *testing.T) {
 		if len(it.Content) != 0 {
 			t.Errorf("item %s Content = %q, want empty", id, it.Content)
 		}
-		if it.Metadata["skip_reason"] == "" {
-			t.Errorf("item %s should carry skip_reason, got %+v", id, it.Metadata)
+		if it.Metadata["skip_reason"] != wantReason {
+			t.Errorf("item %s skip_reason = %q, want %q", id, it.Metadata["skip_reason"], wantReason)
 		}
 	}
 }
@@ -367,7 +412,11 @@ func TestIsHTMLPageShell(t *testing.T) {
 		"<!doctype html><html></html>",
 		"  \n<!DOCTYPE HTML>\n<html></html>",
 		"\ufeff<html data-kumuhana=\"default\"></html>",
+		"\ufeff \n<html data-kumuhana=\"default\"></html>",
+		" \n\ufeff \t<!DOCTYPE HTML>\n<html></html>",
 		"<html><head><script src=\"/app.js\"></script></head></html>",
+		"<HTML\nlang=\"zh\"></HTML>",
+		"<!doctype html PUBLIC \"-//W3C//DTD HTML 4.01//EN\"><html></html>",
 	}
 	for _, body := range shells {
 		if !isHTMLPageShell(body) {
@@ -376,9 +425,13 @@ func TestIsHTMLPageShell(t *testing.T) {
 	}
 	markdown := []string{
 		"# Title",
+		"\ufeff \n# Title",
+		"\ufeff \n<div>inline HTML is allowed in Markdown</div>",
 		"<div>inline HTML is allowed in Markdown</div>",
 		"```html\n<!doctype html>\n```",
 		"<!-- a comment before prose -->\n\n# Title",
+		"<html-example>Example</html-example>\n\n# Usage",
+		"<!doctype html-example>\n\n# Usage",
 	}
 	for _, body := range markdown {
 		if isHTMLPageShell(body) {

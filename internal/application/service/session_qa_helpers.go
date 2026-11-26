@@ -393,3 +393,26 @@ func (s *sessionService) restrictMentionsToAgentScope(
 
 	return filteredKBs, filteredKnowledge
 }
+
+// resolveKnowledgeQARerankModel fills the KnowledgeQA pipeline's rerank model
+// the same way the retrieval API path resolves it (issue #1800): the tenant's
+// RetrievalConfig, else the tenant's first rerank model. Nothing populated
+// RerankModelID on this path, so the rerank stage skipped with
+// "empty_model_id" and quick answers returned the full retrieval order while
+// the search API reranked the same tenant setting. Agent overrides win by
+// construction — callers only ask here when the override left it empty.
+func (s *sessionService) resolveKnowledgeQARerankModel(ctx context.Context, current string) string {
+	if current != "" {
+		return current
+	}
+	var rc *types.RetrievalConfig
+	if tenantInfo, ok := types.TenantInfoFromContext(ctx); ok && tenantInfo != nil {
+		rc = tenantInfo.RetrievalConfig
+	}
+	modelID, _, err := resolveRerankModelID(ctx, s.modelService, "", rc)
+	if err != nil {
+		logger.Warnf(ctx, "Rerank model resolution failed, KnowledgeQA runs unranked: %v", err)
+		return ""
+	}
+	return modelID
+}

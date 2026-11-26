@@ -36,7 +36,7 @@ export interface ImageAsset {
   caption: string;
   /** Extracted OCR text, if any. */
   ocr_text: string;
-  /** Observed attribute map keyed by source-local attribute name. */
+  /** 模型属性及解析器 source.* 来源位置；source.page 是一基 PDF 页码。 */
   attrs: Record<string, unknown>;
   /** Mirrors the owning chunk's enabled flag. */
   is_enabled: boolean;

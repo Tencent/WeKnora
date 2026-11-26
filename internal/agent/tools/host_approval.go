@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/hostreview"
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -141,14 +142,15 @@ func (a hostModelApprover) emit(ctx context.Context, typ event.EventType, id str
 	})
 }
 
+// hostPayload renders the approval card. The preview is cut by bytes, so it
+// backs off to a rune boundary: writes and diffs are frequently Chinese, and
+// a partial rune would reach the card as U+FFFD through the event JSON.
 func hostPayload(req sandbox.CommandApprovalRequest, reviewer string) event.HostApprovalPayload {
 	preview := req.WriteContent
 	if req.EditDiff != "" {
 		preview = req.EditDiff
 	}
-	if len(preview) > hostPreviewLimit {
-		preview = preview[:hostPreviewLimit]
-	}
+	preview = common.TruncateUTF8Bytes(preview, hostPreviewLimit)
 	return event.HostApprovalPayload{
 		Reason:          req.Reason,
 		Reviewer:        reviewer,
@@ -191,15 +193,13 @@ func maskedEnv(env map[string]string) map[string]string {
 }
 
 // stdinData is stdin the command reads as data. A program on stdin is already
-// part of the command text the card shows.
+// part of the command text the card shows. Like the write preview, the bound
+// is a byte budget, so back off to a rune boundary before cutting.
 func stdinData(req sandbox.CommandApprovalRequest) string {
 	if req.StdinIsProgram {
 		return ""
 	}
-	if len(req.Stdin) > hostPreviewLimit {
-		return req.Stdin[:hostPreviewLimit]
-	}
-	return req.Stdin
+	return common.TruncateUTF8Bytes(req.Stdin, hostPreviewLimit)
 }
 
 func hostScripts(scripts []sandbox.ScriptFact) []event.HostScript {

@@ -94,6 +94,7 @@ type weKnoraCloudVLMResponse struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 }
 
@@ -183,6 +184,11 @@ func (v *WeKnoraCloudVLM) PredictWithOptions(
 	}
 	if len(vlmResp.Choices) == 0 {
 		return "", fmt.Errorf("weknoracloud VLM: no choices in response")
+	}
+
+	if vlmResp.Choices[0].FinishReason == "length" {
+		// Partial output is incomplete and must not be indexed as successful OCR.
+		return "", fmt.Errorf("%w at %d tokens (finish_reason=length)", ErrTruncatedCompletion, defaultMaxToks)
 	}
 
 	content := vlmResp.Choices[0].Message.Content

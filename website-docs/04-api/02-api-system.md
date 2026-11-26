@@ -305,7 +305,7 @@ curl $BASE/api/v1/system/admin/audit-log -H "Authorization: Bearer $TOKEN"
 
 ### GET /api/v1/system/admin/users
 
-分页列出整个部署的用户。查询参数 `offset` 默认 0；`limit` 默认 50，最大 200。响应为未包装对象 `{"users":[UserInfo],"offset":0,"limit":50,"has_more":false}`，不返回密码或哈希。
+分页列出整个部署的用户。查询参数 `q` 可选，按用户名或邮箱不区分大小写模糊匹配（包含正常与已停用账号）；`offset` 默认 0；`limit` 默认 50，最大 200。响应为未包装对象 `{"users":[UserInfo],"offset":0,"limit":50,"has_more":false}`，不返回密码或哈希。
 
 ### POST /api/v1/system/admin/users/status
 

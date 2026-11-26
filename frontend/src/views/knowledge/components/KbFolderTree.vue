@@ -53,7 +53,7 @@
           tabindex="0"
           @click="emit('select', row.path)"
           @keydown.enter.self="emit('select', row.path)"
-          @keydown.space.prevent.self="emit('select', row.path)"
+          @keydown.space.self.prevent="emit('select', row.path)"
         >
           <span
             v-if="row.hasChildren"

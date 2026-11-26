@@ -22,9 +22,10 @@ const (
 	paddleOCRVLCloudDefaultBaseURL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
 	paddleOCRVLCloudDefaultModel   = "PaddleOCR-VL-1.6"
 	paddleOCRVLCloudPollInterval   = 5 * time.Second
-	// paddleOCRVLCloudTimeout bounds how long one job is polled;
-	// WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT overrides it for documents that take
-	// longer, mirroring WEKNORA_MINERU_CLOUD_TIMEOUT on the MinerU cloud reader.
+	// paddleOCRVLCloudTimeout bounds the multipart submit upload and how long
+	// one job is polled; WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT overrides both,
+	// mirroring the self-hosted readers whose configured timeout also bounds
+	// the upload request that carries the file bytes.
 	paddleOCRVLCloudTimeout = 600 * time.Second
 )
 
@@ -152,7 +153,10 @@ func (c *PaddleOCRVLCloudReader) submitJob(ctx context.Context, req *types.ReadR
 	httpReq.Header.Set("Authorization", "bearer "+c.token)
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 
-	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 60 * time.Second, MaxRedirects: 5})
+	// The submit POST carries the whole file in one multipart body, so the
+	// per-job timeout must bound the upload too; the old fixed 60s ceiling
+	// failed every scan larger than ~100MB (#5589).
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: c.timeout, MaxRedirects: 5})
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return "", fmt.Errorf("HTTP request: %w", err)

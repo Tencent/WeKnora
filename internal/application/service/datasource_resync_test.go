@@ -67,7 +67,7 @@ func (c *resyncStreamConnector) FetchStream(
 	return &types.SyncCursor{ConnectorCursor: map[string]interface{}{"space_node_times": map[string]interface{}{}}}, nil
 }
 
-// resyncDSRepo captures Config-writing Update calls (marker clear).
+// resyncDSRepo captures Config-writing patches (marker clear).
 type resyncDSRepo struct {
 	kbDeleteDSRepo
 	updates    int
@@ -75,7 +75,9 @@ type resyncDSRepo struct {
 	syncStates int
 }
 
-func (r *resyncDSRepo) Update(_ context.Context, ds *types.DataSource) error {
+func (r *resyncDSRepo) PatchSyncSettings(
+	_ context.Context, ds *types.DataSource, _ types.JSON, _ []string,
+) error {
 	r.updates++
 	r.configs = append(r.configs, ds.Config)
 	return nil
