@@ -239,6 +239,11 @@ type APIError struct {
 	StatusCode int    // HTTP status (401, 404, 409, 429, 500, …)
 	Body       string // raw response body
 	Code       int    // server's structured error code ({"code":N}); 0 when absent/non-JSON
+	// RetryAfterSeconds is the response's Retry-After header expressed in
+	// whole seconds: the delta-seconds form as sent, the remaining seconds
+	// until the HTTP-date form, 0 when the header is absent, unparsable, or
+	// already in the past.
+	RetryAfterSeconds int
 }
 
 func (e *APIError) Error() string {
@@ -264,10 +269,41 @@ const (
 	ServerErrValidation         = 1010
 )
 
-// newAPIError builds an *APIError from a non-2xx response's status and raw body,
-// extracting the server's structured {"code":N} when the body is JSON.
-func newAPIError(status int, body []byte) *APIError {
-	return &APIError{StatusCode: status, Body: string(body), Code: extractServerCode(body)}
+// newAPIError builds an *APIError from a non-2xx response, extracting the
+// server's structured {"code":N} when the body is JSON and the Retry-After
+// hint when the response carries one.
+func newAPIError(resp *http.Response, body []byte) *APIError {
+	return &APIError{
+		StatusCode:        resp.StatusCode,
+		Body:              string(body),
+		Code:              extractServerCode(body),
+		RetryAfterSeconds: parseRetryAfterSeconds(resp.Header.Get("Retry-After"), time.Now()),
+	}
+}
+
+// parseRetryAfterSeconds converts a Retry-After header value into whole
+// seconds. RFC 9110 allows both delta-seconds ("42") and an HTTP-date
+// ("Wed, 21 Oct 2015 07:28:00 GMT"); both are accepted. Values that carry no
+// usable wait — empty, unparsable, zero/negative, or a date already passed —
+// yield 0 so callers never back off for a deadline that has expired.
+func parseRetryAfterSeconds(value string, now time.Time) int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return seconds
+	}
+	if deadline, err := http.ParseTime(value); err == nil {
+		if wait := deadline.Sub(now); wait > 0 {
+			// Round up: a partial second still means "not before".
+			return int((wait + time.Second - 1) / time.Second)
+		}
+	}
+	return 0
 }
 
 // maxErrorBodyBytes caps how much of a failed response body the SDK reads.
@@ -367,7 +403,7 @@ func parseResponse(resp *http.Response, target interface{}) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return newAPIError(resp.StatusCode, readErrorBody(resp.Body))
+		return newAPIError(resp, readErrorBody(resp.Body))
 	}
 
 	if target == nil {

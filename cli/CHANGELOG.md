@@ -61,6 +61,9 @@ CLI history before v0.3 is recorded in the project root
   per-event `done:true` markers as completion of the whole run.
 - Reference `knowledge_base_id`, `parent_chunk_id`, and `sub_chunk_id` fields
   now survive SDK unmarshal.
+- Typed commands now fill `error.retry_after_seconds` from the response's
+  `Retry-After` header, matching the raw `api` passthrough and the documented
+  error contract.
 - E2E chat step parses the bounded JSON envelope; MCP stream errors include
   `session_id` in `error.detail`; terminal SSE errors classify as
   `server.error` instead of `network.error` or `local.sse_stream_aborted`.

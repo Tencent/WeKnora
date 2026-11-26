@@ -277,7 +277,20 @@ func Wrapf(code ErrorCode, cause error, format string, args ...any) *Error {
 // ClassifyHTTPErrorOutputs() in the acceptance/contract test, which
 // enumerates the codes this helper can yield.
 func WrapHTTP(cause error, format string, args ...any) *Error {
-	return Wrapf(ClassifyHTTPError(cause), cause, format, args...)
+	return withRetryAfter(Wrapf(ClassifyHTTPError(cause), cause, format, args...), cause)
+}
+
+// withRetryAfter copies the response's Retry-After hint onto the typed error.
+// The SDK records it on *sdk.APIError for every non-2xx response; without this
+// hop the wire field retry_after_seconds would only ever be populated by the
+// raw `weknora api` passthrough, leaving every typed command's 429 without the
+// backoff the error contract promises.
+func withRetryAfter(e *Error, cause error) *Error {
+	var apiErr *sdk.APIError
+	if errors.As(cause, &apiErr) && apiErr.RetryAfterSeconds > 0 {
+		e.WithRetryAfter(apiErr.RetryAfterSeconds)
+	}
+	return e
 }
 
 // ClassifySDKError maps SDK transport, HTTP, and terminal SSE stream errors to
@@ -292,7 +305,7 @@ func ClassifySDKError(err error) ErrorCode {
 
 // WrapStream wraps an SDK streaming error with ClassifySDKError.
 func WrapStream(cause error, format string, args ...any) *Error {
-	return Wrapf(ClassifySDKError(cause), cause, format, args...)
+	return withRetryAfter(Wrapf(ClassifySDKError(cause), cause, format, args...), cause)
 }
 
 // FlagError signals user-visible flag/argument problems; the root command
