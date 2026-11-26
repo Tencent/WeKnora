@@ -129,6 +129,25 @@ class MarkdownInlineImageTests(unittest.TestCase):
         path = next(iter(doc.images))
         self.assertEqual(doc.content, f"{code}> ![real]({path})")
 
+    def test_escaped_marker_stays_literal(self):
+        for backslashes in ("\\", "\\\\\\"):
+            with self.subTest(backslashes=len(backslashes)):
+                raw = f"{backslashes}{IMAGE}\n"
+                doc = self.parse(raw)
+                self.assertEqual(doc.content, raw)
+                self.assertEqual(doc.images, {})
+
+    def test_even_backslash_run_leaves_one_real_image(self):
+        escaped = "\\" + IMAGE
+        real = "\\\\" + IMAGE
+        doc = self.parse(f"{escaped}\n\n{real}\n")
+        self.assertEqual(len(doc.images), 1)
+        path, payload = next(iter(doc.images.items()))
+        self.assertEqual(
+            doc.content, f"{escaped}\n\n" + "\\\\" + f"![example]({path})\n"
+        )
+        self.assertEqual(payload, PNG_B64)
+
     def test_helper_preserves_multiline_crlf_code(self):
         raw = f"`first\r\n{IMAGE}\r\nlast`\r\n"
         self.assertEqual(MarkdownImageUtil().extract_base64(raw), (raw, {}))
