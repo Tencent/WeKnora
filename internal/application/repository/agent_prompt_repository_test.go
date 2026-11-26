@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,38 @@ func newAgentPromptTestRepo(t *testing.T) *AgentPromptRepository {
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(&types.AgentPrompt{}))
 	return NewAgentPromptRepository(db).(*AgentPromptRepository)
+}
+
+func TestAgentPromptRepositoryStoresLongPrincipalIdentities(t *testing.T) {
+	ctx := t.Context()
+	repo := newAgentPromptTestRepo(t)
+	principalID := "embed_session:10000:" + strings.Repeat("a", 36) + ":" + strings.Repeat("b", 36)
+	require.Greater(t, len(principalID), 64)
+
+	stmt := &gorm.Statement{DB: repo.db}
+	require.NoError(t, stmt.Parse(&types.AgentPrompt{}))
+	for _, name := range []string{"UserID", "ResolvedBy"} {
+		field := stmt.Schema.LookUpField(name)
+		require.NotNil(t, field)
+		require.EqualValues(t, 512, field.Size)
+	}
+
+	require.NoError(t, repo.Create(ctx, &types.AgentPrompt{
+		ID: "long-principal", TenantID: 7, UserID: principalID, SessionID: "s1",
+		Kind: types.AgentPromptKindAskUser, Status: types.AgentPromptPending,
+	}))
+	resolvedBy := principalID
+	ok, err := repo.Transition(ctx, "long-principal", types.AgentPromptTransition{
+		From: []string{types.AgentPromptPending}, To: types.AgentPromptAnswered,
+		ResolvedBy: &resolvedBy,
+	})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	row, err := repo.Get(ctx, "long-principal")
+	require.NoError(t, err)
+	require.Equal(t, principalID, row.UserID)
+	require.Equal(t, principalID, row.ResolvedBy)
 }
 
 func TestAgentPromptRepositoryTransitionIsCompareAndSet(t *testing.T) {
