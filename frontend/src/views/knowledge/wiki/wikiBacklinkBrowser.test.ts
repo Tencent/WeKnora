@@ -22,11 +22,16 @@ function page(slug: string, titles: Record<string, string> = {}) {
   return { id: slug, slug, title: slug, content: '', version: 1, in_links: Object.keys(titles), in_link_titles: titles }
 }
 
-async function fixture() {
+async function fixture(view: 'browser' | 'graph' = 'browser') {
   const calls: { name: string; args: any[] }[] = []
+  const dataCalls: { name: string; args: any[] }[] = []
   const errors: unknown[][] = []
   let response: any = page('first')
   let failure: Error | undefined
+  const recordDataCall = (name: string, result: any) => async (...args: any[]) => {
+    dataCalls.push({ name, args })
+    return result
+  }
   const api = {
     getWikiPage: async (...args: any[]) => {
       calls.push({ name: 'getWikiPage', args })
@@ -38,11 +43,14 @@ async function fixture() {
       const { in_link_titles, ...updated } = response
       return { data: { ...updated, ...args[2], version: updated.version + 1 } }
     },
-    listWikiIssues: async () => [],
-    listWikiPages: async () => ({ pages: [], total: 0 }),
-    listWikiFolders: async () => ({ folders: [] }),
-    getWikiIndex: async () => ({ groups: [] }),
-    getWikiStats: async () => ({}),
+    listWikiIssues: recordDataCall('listWikiIssues', []),
+    listWikiPages: recordDataCall('listWikiPages', { pages: [], total: 0 }),
+    listWikiFolders: recordDataCall('listWikiFolders', { folders: [] }),
+    getWikiIndex: recordDataCall('getWikiIndex', { groups: [] }),
+    getWikiGraph: recordDataCall('getWikiGraph', {
+      data: { nodes: [], edges: [], meta: { mode: 'overview', total: 0, returned: 0, truncated: false } },
+    }),
+    getWikiStats: recordDataCall('getWikiStats', {}),
   }
   const exports: any = {}
   runInNewContext(compiled, {
@@ -74,17 +82,39 @@ async function fixture() {
     insert() {}, remove() {}, setElementText() {}, setText() {}, patchProp() {},
     parentNode: () => null, nextSibling: () => null,
   })
-  const app = renderer.createApp(exports.default, { knowledgeBaseId: 'kb-1' })
+  const app = renderer.createApp(exports.default, { knowledgeBaseId: 'kb-1', view })
   const vm: any = app.mount({})
   await new Promise(resolve => setImmediate(resolve))
   await nextTick()
   return {
-    vm, calls, errors,
+    vm, calls, dataCalls, errors,
     respond(value: any) { response = value; failure = undefined },
     fail() { failure = new Error('page lookup failed') },
     close: () => app.unmount(),
   }
 }
+
+test('graph view loads graph data without loading the wiki browser sidebar', async () => {
+  const f = await fixture('graph')
+  try {
+    const names = f.dataCalls.map(call => call.name)
+    assert.ok(names.includes('getWikiGraph'))
+    assert.ok(names.includes('getWikiStats'))
+    assert.equal(names.includes('getWikiIndex'), false)
+    assert.equal(names.includes('listWikiPages'), false)
+    assert.equal(names.includes('listWikiFolders'), false)
+  } finally { f.close() }
+})
+
+test('browser view still loads its index and sidebar data', async () => {
+  const f = await fixture('browser')
+  try {
+    const names = f.dataCalls.map(call => call.name)
+    assert.ok(names.includes('getWikiIndex'))
+    assert.ok(names.includes('listWikiPages'))
+    assert.ok(names.includes('listWikiFolders'))
+  } finally { f.close() }
+})
 
 test('page navigation consumes all response titles without a separate title request', async () => {
   const f = await fixture()
