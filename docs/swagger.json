@@ -8636,6 +8636,12 @@
                         "in": "formData"
                     },
                     {
+                        "type": "boolean",
+                        "description": "仅保存文件，稍后启动解析",
+                        "name": "defer_parsing",
+                        "in": "formData"
+                    },
+                    {
                         "type": "string",
                         "description": "处理配置JSON（KnowledgeProcessOverrides）",
                         "name": "process_config",
@@ -11162,6 +11168,54 @@
                     "risk": "read"
                 },
                 "x-agent-hint": "Use when a document is stuck or failed: tells a stalled parse from a running one, names the failed stage."
+            }
+        },
+        "/knowledge/{id}/start-parse": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "开始解析暂存的文件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ]
             }
         },
         "/knowledgebase/{kb_id}/wiki/auto-fix": {

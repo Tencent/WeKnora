@@ -20368,6 +20368,10 @@ paths:
         in: formData
         name: tag_ids
         type: string
+      - description: 仅保存文件，稍后启动解析
+        in: formData
+        name: defer_parsing
+        type: boolean
       - description: 处理配置JSON（KnowledgeProcessOverrides）
         in: formData
         name: process_config
@@ -21628,6 +21632,32 @@ paths:
         risk: read
       x-agent-hint: 'Use when a document is stuck or failed: tells a stalled parse
         from a running one, names the failed stage.'
+  /knowledge/{id}/start-parse:
+    post:
+      parameters:
+      - description: 知识ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge'
+              type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 开始解析暂存的文件
+      tags:
+      - 知识管理
   /knowledge/batch:
     get:
       consumes:
