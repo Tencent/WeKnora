@@ -97,6 +97,19 @@ class ExcelFormatDetectionTest(unittest.TestCase):
         self.assertEqual(detect_excel_format(content), "xls")
         self.assertEqual(engine_for_format("xls"), "xlrd")
 
+    def test_parses_a_workbook_that_arrives_as_bytes(self):
+        # The upload path hands ExcelParser the request body, not a path, so
+        # format detection has to accept bytes on whatever pandas is installed.
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["name", "score"])
+        ws.append(["ann", 7])
+        bio = io.BytesIO()
+        wb.save(bio)
+        text = ExcelParser().parse(bio.getvalue()).content
+        self.assertIn("ann", text)
+        self.assertIn("7", text)
+
     def test_open_legacy_xls_bytes_with_xlsx_extension(self):
         if not shutil.which("soffice"):
             self.skipTest("LibreOffice not available")

@@ -78,7 +78,35 @@ func HoldbackCutoff(chunk string) int {
 	if idx := FindIncompleteRef(chunk); idx >= 0 && idx < cutoff {
 		return idx
 	}
+	if idx := incompleteSchemeSuffix(chunk); idx >= 0 && idx < cutoff {
+		cutoff = idx
+	}
 	return cutoff
+}
+
+// incompleteSchemeSuffix holds a short prefix of a storage scheme. Provider
+// deltas can split before "://", before FindIncompleteRef can recognize it.
+// Match the same ASCII word boundary as the reference regex so ordinary words
+// ending in a scheme prefix do not introduce holdback.
+func incompleteSchemeSuffix(s string) int {
+	for _, scheme := range []string{
+		"resource://", "storage://", "local://", "minio://", "s3://",
+		"cos://", "tos://", "oss://", "obs://", "ks3://",
+	} {
+		for n := min(len(s), len(scheme)-1); n > 0; n-- {
+			start := len(s) - n
+			if start > 0 {
+				b := s[start-1]
+				if b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_' {
+					continue
+				}
+			}
+			if strings.HasSuffix(s, scheme[:n]) {
+				return start
+			}
+		}
+	}
+	return -1
 }
 
 // maxHeldBytes bounds the per-key holdback buffer. A storage reference plus its

@@ -52,6 +52,12 @@ type MCPCatalogSummary struct {
 // PUT / DELETE shape. Sending secret fields in a main PUT body is silently
 // ignored server-side.
 type MCPAuthConfig struct {
+	AuthType              string   `json:"auth_type,omitempty"`
+	Scopes                []string `json:"scopes,omitempty"`
+	AuthServerMetadataURL string   `json:"auth_server_metadata_url,omitempty"`
+	ClientID              string   `json:"client_id,omitempty"`
+	ClientSecret          string   `json:"client_secret,omitempty"`
+
 	APIKey        string            `json:"api_key,omitempty"`
 	Token         string            `json:"token,omitempty"`
 	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
@@ -87,6 +93,8 @@ type MCPResource struct {
 
 // MCPTestResult represents the result of testing an MCP service connection
 type MCPTestResult struct {
+	OAuthRequired bool `json:"oauth_required,omitempty"`
+
 	Success     bool           `json:"success"`
 	Message     string         `json:"message,omitempty"`
 	Description string         `json:"description,omitempty"`

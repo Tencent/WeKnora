@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/api"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -208,6 +209,7 @@ func TestOversizedAudioIsRefusedBeforeUpload(t *testing.T) {
 	_, err = a.Transcribe(context.Background(), make([]byte, 25<<20+1), "long.mp3")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "at most 25 MB")
+	requireRejected(t, err)
 	assert.Zero(t, calls.Load(), "nothing should have been sent")
 
 	_, err = a.Transcribe(context.Background(), make([]byte, 25<<20), "exactly.mp3")
@@ -226,6 +228,7 @@ func TestChatServedCeilingCountsTheWholeDataURI(t *testing.T) {
 
 	_, err = a.Transcribe(context.Background(), make([]byte, 10<<20*3/4), "long.wav")
 	require.Error(t, err)
+	requireRejected(t, err)
 	assert.Zero(t, calls.Load())
 
 	prefix := len("data:audio/wav;base64,")
@@ -282,7 +285,16 @@ func TestUndocumentedFormatIsRefusedBeforeUpload(t *testing.T) {
 	_, err = a.Transcribe(context.Background(), []byte("x"), "memo.m4a")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "wav/mp3")
+	requireRejected(t, err)
 	assert.Zero(t, calls.Load())
+}
+
+// requireRejected pins that a refusal before upload carries the type a caller
+// sorts on, rather than only a message to match.
+func requireRejected(t *testing.T, err error) {
+	t.Helper()
+	var rejected *api.RejectedError
+	require.ErrorAs(t, err, &rejected)
 }
 
 // The knowledge base's language hint reaches each vendor where its reference

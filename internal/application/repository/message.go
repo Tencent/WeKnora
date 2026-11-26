@@ -210,15 +210,35 @@ func (r *messageRepository) ListMessagesBySessionAfterCursor(ctx context.Context
 func (r *messageRepository) ListMessagesBySessionBeforeCursor(
 	ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
 ) ([]*types.Message, error) {
+	messages, err := r.listMessagesBySessionBeforeCursor(ctx, sessionID, before, beforeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
+		return nil, err
+	}
+	return messages, nil
+}
+
+// ListMessagesBySessionBeforeCursorForLLM is the history-loader variant. It
+// deliberately skips Message.Artifacts: agent history replay never reads them,
+// and a long conversation would otherwise issue an artifact lookup for every
+// page just to discard the result before building the prompt.
+func (r *messageRepository) ListMessagesBySessionBeforeCursorForLLM(
+	ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
+) ([]*types.Message, error) {
+	return r.listMessagesBySessionBeforeCursor(ctx, sessionID, before, beforeID, limit)
+}
+
+func (r *messageRepository) listMessagesBySessionBeforeCursor(
+	ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
+) ([]*types.Message, error) {
 	var messages []*types.Message
 	query := r.db.WithContext(ctx).Where("session_id = ?", sessionID)
 	if !before.IsZero() || beforeID != "" {
 		query = query.Where("created_at < ? OR (created_at = ? AND id < ?)", before, before, beforeID)
 	}
 	if err := query.Order("created_at DESC, id DESC").Limit(limit).Find(&messages).Error; err != nil {
-		return nil, err
-	}
-	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
 		return nil, err
 	}
 	return messages, nil

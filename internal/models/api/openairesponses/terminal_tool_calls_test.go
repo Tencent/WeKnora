@@ -20,6 +20,10 @@ func TestChatStreamTerminalToolCalls(t *testing.T) {
 		`{"type":"function_call","id":"fc_1","call_id":"call_1","name":"get_weather","arguments":""}}`
 	const delta = `{"type":"response.function_call_arguments.delta","output_index":0,` +
 		`"item_id":"fc_1","delta":"{\"city\":\"Paris\"}"}`
+	const partialDelta = `{"type":"response.function_call_arguments.delta","output_index":0,` +
+		`"item_id":"fc_1","delta":"{\"city\":\"Par"}`
+	const staleDelta = `{"type":"response.function_call_arguments.delta","output_index":0,` +
+		`"item_id":"fc_1","delta":"{\"city\":\"Lyon\"}"}`
 	const done = `{"type":"response.output_item.done","output_index":0,"item":` + call + `}`
 	const callWithoutID = `{"type":"function_call","call_id":"call_1","name":"get_weather",` +
 		`"arguments":"{\"city\":\"Paris\"}"}`
@@ -39,6 +43,16 @@ func TestChatStreamTerminalToolCalls(t *testing.T) {
 		{name: "deltas without announcement", events: []string{delta}, output: call, wantCalls: 1},
 		{name: "deltas are not duplicated", events: []string{added, delta}, output: call, wantCalls: 1},
 		{name: "done item is not duplicated", events: []string{added, done}, output: call, wantCalls: 1},
+		{name: "done item completes partial arguments", events: []string{added, partialDelta, done}, wantCalls: 1},
+		{
+			name:   "terminal output completes partial arguments",
+			events: []string{added, partialDelta}, output: call, wantCalls: 1,
+		},
+		{
+			name:   "terminal output corrects stale arguments",
+			events: []string{added, staleDelta}, output: call, wantCalls: 1,
+		},
+		{name: "terminal output without arguments keeps deltas", events: []string{added, delta}, wantCalls: 1},
 		{
 			name: "missing parallel call", events: []string{added, delta, done},
 			output: call + `,{"type":"function_call","id":"fc_2","call_id":"call_2",` +

@@ -20,6 +20,7 @@ import {
 } from '@/utils/markdownPreviewImages';
 import { buildHtmlPreview } from '@/utils/htmlPreview';
 import MermaidFilePreview from './mermaid-file/MermaidFilePreview.vue';
+import { renderMermaidImages } from './mermaid-file/renderImages';
 import {
   FILE_PREVIEW_SNIFF_BYTES,
   getHighlightLang as resolveHighlightLang,
@@ -36,6 +37,7 @@ import {
   findInText,
   sourceQuoteText,
   type SourceLocateRequest,
+  type SourceLocator,
 } from '@/utils/sourceLocator';
 import {
   buildTextIndex,
@@ -45,6 +47,7 @@ import {
   rangeForOffsets,
   scrollRectIntoContainer,
 } from '@/utils/sourceLocatorDom';
+import { matchSpreadsheetSourceRows, spreadsheetScopeCovered } from '@/utils/spreadsheetSource';
 import { renderEpubPreview } from '@/utils/epubPreview';
 
 
@@ -350,6 +353,41 @@ function renderTextContent(text: string, fileType: string) {
   highlightedCode.value = auto.value;
 }
 
+const markdownBody = ref<HTMLElement | null>(null);
+
+watch([() => props.active, markdownHtml, markdownBody], ([active, , body], _, onCleanup) => {
+  if (!active || !body) return;
+  const blocks = [...body.querySelectorAll<HTMLPreElement>('pre[data-preview-mermaid]:not([hidden])')];
+  if (!blocks.length) return;
+  const controller = new AbortController();
+  onCleanup(() => controller.abort());
+  void renderMarkdownDiagrams(blocks, controller.signal);
+}, { flush: 'post' });
+
+async function renderMarkdownDiagrams(blocks: HTMLPreElement[], signal: AbortSignal) {
+  try {
+    const images = await renderMermaidImages(blocks.map(block => block.textContent ?? ''), signal);
+    const replaced = await Promise.all(blocks.map(async (block, index) => {
+      const src = images[index];
+      if (!src || signal.aborted) return false;
+      const image = document.createElement('img');
+      image.className = 'markdown-mermaid-diagram';
+      image.alt = t('mermaid.diagram');
+      image.src = src;
+      // Keep the source visible if the browser cannot load the generated image.
+      await image.decode().catch(() => {});
+      if (!image.naturalWidth || signal.aborted || !block.isConnected) return false;
+      block.after(image);
+      // Keep the original text in the source index for citations that span the diagram.
+      block.hidden = true;
+      return true;
+    }));
+    if (!signal.aborted && replaced.some(Boolean)) scheduleLocate();
+  } catch {
+    // The sanitized code blocks remain visible if the renderer is unavailable.
+  }
+}
+
 async function renderMarkdown(blob: Blob) {
   const text = await blob.text();
 
@@ -364,6 +402,7 @@ async function renderMarkdown(blob: Blob) {
   const previewOptions = {
     // 预览工具栏已经显示文件名；正文第一行的同名 H1 属于重复标题。
     titles: [props.fileName],
+    renderMermaid: true,
   };
   // Relative images stay on a data URI unless a sibling file replaces them.
   // Painting the original href makes the browser request it from the page route.
@@ -779,30 +818,77 @@ function sheetRows(table: Element): Map<number, Element> {
   return rows;
 }
 
+function spreadsheetRowCells(row: Element): string[] {
+  return Array.from(row.querySelectorAll('td, th'), (cell) =>
+    Array.from(cell.childNodes, (node) =>
+      node.nodeName.toLowerCase() === 'br' ? '\n' : node.textContent || '',
+    ).join(''),
+  );
+}
+
 function locateExcel(request: SourceLocateRequest): SourceLocateResult {
   const box = previewContent.value;
   if (!box) return NOT_FOUND;
-  const locators = request.locators.filter((l) => l.type === 'sheet' && l.mapping === 'exact' && !l.partial && l.row_start);
+  const locators = request.locators.filter((l) => l.type === 'sheet' && l.mapping === 'exact');
+  const singleCsv = previewExt === 'csv' && excelSheetNames.length === 1;
   const targets: Element[] = [];
+  const verified: SourceLocator[] = [];
+  let missed = false;
   for (const loc of locators) {
-    const byName = loc.sheet ? excelSheetNames.indexOf(loc.sheet) : -1;
-    if (byName < 0) continue;
+    // CSV locators omit the sheet name. Only its single rendered sheet can
+    // supply that identity; workbooks and explicit names still require a match.
+    const byName = loc.sheet ? excelSheetNames.indexOf(loc.sheet) : singleCsv ? 0 : -1;
+    if (byName < 0) {
+      missed = true;
+      continue;
+    }
     const sheetIdx = byName;
-    const table = box.querySelector(`#user-content-sheet-${sheetIdx}`) || box.querySelector(`#sheet-${sheetIdx}`);
-    if (!table) continue;
+    const table =
+      box.querySelector(`#user-content-sheet-${sheetIdx}`) ||
+      box.querySelector(`#sheet-${sheetIdx}`);
+    if (!table) {
+      missed = true;
+      continue;
+    }
     const rows = sheetRows(table);
-    const last = Math.min(loc.row_end || loc.row_start || 0, (loc.row_start || 0) + 200);
-    for (let r = loc.row_start as number; r <= last; r++) {
-      const tr = rows.get(r);
+    const sourceRows = [...rows]
+      .filter(
+        ([number]) =>
+          number >= (loc.row_start || 0) && number <= (loc.row_end ?? loc.row_start ?? 0),
+      )
+      .map(([number, row]) => ({ number, cells: spreadsheetRowCells(row) }));
+    const matched = matchSpreadsheetSourceRows(
+      { ...loc, sheet: excelSheetNames[sheetIdx] },
+      sourceRows,
+      singleCsv,
+      request.sourceMarkdown,
+    );
+    if (!matched.length) {
+      missed = true;
+      continue;
+    }
+    verified.push(loc);
+    // Bound the number of marks, counting only rows covered by the quote.
+    if (matched.length > 201) missed = true;
+    for (const row of matched.slice(0, 201)) {
+      const tr = rows.get(row.number);
       if (tr && !targets.includes(tr)) targets.push(tr);
     }
   }
   if (targets.length) {
     commitMarks([], targets);
     reveal(box, targets[0]);
-    return { found: true, precise: false, granularity: 'block' };
+    const complete = !missed && spreadsheetScopeCovered(request, verified);
+    return {
+      found: true,
+      precise: false,
+      granularity: 'block',
+      ...(!complete ? { reason: 'partial' } : {}),
+    };
   }
-  return locateQuote(box, box, evidenceQuotes(request));
+  // Known sheet mappings must not fall back to identical text in another
+  // sheet. Historical citations without structural evidence still use text.
+  return locators.length ? NOT_FOUND : locateQuote(box, box, evidenceQuotes(request));
 }
 
 function locateEpub(request: SourceLocateRequest): SourceLocateResult {
@@ -1043,7 +1129,7 @@ onUnmounted(() => {
 
     <!-- Markdown -->
     <div v-else-if="previewType === 'markdown' && markdownHtml" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-markdown">
-      <div class="markdown-body" v-html="markdownHtml" />
+      <div ref="markdownBody" class="markdown-body" v-html="markdownHtml" />
     </div>
 
     <!-- Text / Code -->
@@ -1617,6 +1703,11 @@ onUnmounted(() => {
     font-size: 0.92em;
   }
   img { max-width: 100%; border-radius: var(--app-radius-xs); }
+  .markdown-mermaid-diagram {
+    display: block;
+    height: auto;
+    margin: 12px auto;
+  }
   hr { border: none; border-top: 1px solid @border-color; margin: 20px 0; }
   a { color: @accent; text-decoration: none; &:hover { color: @accent-hover; text-decoration: underline; } }
   strong { font-weight: 600; }

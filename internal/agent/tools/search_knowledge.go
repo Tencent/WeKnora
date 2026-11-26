@@ -684,6 +684,8 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 			// panic from it is contained and every target still pending in the
 			// group is reported as failed instead of ending the process.
 			defer RecoverGoroutine(ctx, "search knowledge embedding group", func() {
+				// Embedding can panic before any retrieval attempt is counted.
+				attempt()
 				ids := make([]string, 0, len(targets))
 				for _, st := range targets {
 					ids = append(ids, st.KnowledgeBaseID)
@@ -1146,6 +1148,12 @@ func (t *SearchKnowledgeTool) formatOutput(
 		} else {
 			row["chunk_id"] = result.ID
 			row["chunk_index"] = result.ChunkIndex
+			if result.KnowledgeFilename != "" {
+				row["knowledge_filename"] = result.KnowledgeFilename
+			}
+			if len(result.SourceLocators) > 0 {
+				row["source_locators"] = result.SourceLocators
+			}
 		}
 		formattedResults = append(formattedResults, row)
 	}

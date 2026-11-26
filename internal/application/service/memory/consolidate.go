@@ -213,7 +213,9 @@ func (s *Service) demoteStaleTasks(
 		if last.After(cutoff) {
 			continue
 		}
-		err := s.repo.UpdateItemContent(ctx, scope, item.ID, item.Content, item.NormalizedKey, 1)
+		// Demotion changes ranking only: keep the origin so the item is not
+		// reported as user-authored and keeps its lifecycle semantics.
+		err := s.repo.UpdateItemContent(ctx, scope, item.ID, item.Content, item.NormalizedKey, 1, item.Origin)
 		if err != nil {
 			logger.Warnf(ctx, "memory: demote stale task failed: %v", err)
 			continue

@@ -222,8 +222,8 @@ func ExampleUsage() {
 		}
 	}
 
-	// 10. Clean up resources (optional, in actual use, keep or delete as needed)
-	fmt.Println("\n10. Cleaning up resources...")
+	// 9. Clean up resources (optional, in actual use, keep or delete as needed)
+	fmt.Println("\n9. Cleaning up resources...")
 	if session != nil {
 		if err := apiClient.DeleteSession(context.Background(), session.ID); err != nil {
 			fmt.Printf("Failed to delete session: %v\n", err)

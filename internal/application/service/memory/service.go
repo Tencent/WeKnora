@@ -814,7 +814,9 @@ func (s *Service) UpdateItem(
 	// keeps the correction able to supersede a future extraction.
 	normalizedKey := types.MemoryItemKey(existing.Topic, sanitized)
 	importance = types.ClampMemoryImportance(importance)
-	if err := s.repo.UpdateItemContent(ctx, scope, id, sanitized, normalizedKey, importance); err != nil {
+	if err := s.repo.UpdateItemContent(
+		ctx, scope, id, sanitized, normalizedKey, importance, types.MemoryOriginManual,
+	); err != nil {
 		return nil, err
 	}
 	s.rebuildBlock(ctx, scope)
@@ -1319,7 +1321,7 @@ func (s *Service) renameInterestItem(
 			continue
 		}
 		err := s.repo.UpdateItemContent(
-			ctx, scope, item.ID, newLabel, types.MemoryItemKey(newLabel, newLabel), item.Importance)
+			ctx, scope, item.ID, newLabel, types.MemoryItemKey(newLabel, newLabel), item.Importance, item.Origin)
 		if err != nil {
 			logger.Warnf(ctx, "memory: rename interest item failed: %v", err)
 			continue

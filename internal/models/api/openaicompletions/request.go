@@ -112,8 +112,11 @@ func (c *Client) convertMessages(messages []api.Message) []wireMessage {
 		case len(msg.Images) > 0 && msg.Role == "user":
 			parts := make([]wirePart, 0, len(msg.Images)+1)
 			for _, img := range msg.Images {
+				// detail stays unset: omitempty drops it from the wire, OpenAI
+				// defaults to "auto" server-side, and strict OpenAI-compatible
+				// endpoints reject the explicit value (#3451).
 				parts = append(parts, wirePart{Type: "image_url", ImageURL: &wireImageURL{
-					URL: api.ResolveImageURLForLLM(img), Detail: "auto",
+					URL: api.ResolveImageURLForLLM(img),
 				}})
 			}
 			parts = append(parts, wirePart{Type: "text", Text: msg.Content})

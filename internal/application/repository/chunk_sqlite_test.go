@@ -398,6 +398,42 @@ func TestListPagedChunksByKnowledgeID_StableFAQOrdering(t *testing.T) {
 	assert.Equal(t, "faq-c", listPage(3, "asc")[0].ID)
 }
 
+// read_document pages a FAQ knowledge through the document branch, where every
+// FAQ entry has chunk_index 0.
+func TestListPagedChunksByKnowledgeID_StableOrderingForEqualChunkIndex(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	// Inserted out of ID order, so insertion order cannot pass for ID order.
+	var chunks []*types.Chunk
+	for _, id := range []string{"faq-c", "faq-a", "faq-b"} {
+		chunk := makeChunk("kb-1", "faq-knowledge", types.ChunkTypeFAQ)
+		chunk.ID = id
+		chunk.ChunkIndex = 0
+		chunks = append(chunks, chunk)
+	}
+	require.NoError(t, db.Create(&chunks).Error)
+
+	listPage := func(pageNumber int, sortOrder string) string {
+		page, total, err := repo.ListPagedChunksByKnowledgeID(
+			ctx, 1, "faq-knowledge", &types.Pagination{Page: pageNumber, PageSize: 1},
+			[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, nil, "", "", sortOrder, "", nil,
+		)
+		require.NoError(t, err)
+		require.Equal(t, int64(3), total)
+		require.Len(t, page, 1)
+		return page[0].ID
+	}
+
+	assert.Equal(t, "faq-a", listPage(1, ""))
+	assert.Equal(t, "faq-b", listPage(2, ""))
+	assert.Equal(t, "faq-c", listPage(3, ""))
+	assert.Equal(t, "faq-c", listPage(1, "desc"))
+	assert.Equal(t, "faq-b", listPage(2, "desc"))
+	assert.Equal(t, "faq-a", listPage(3, "desc"))
+}
+
 func makeSuggestedFAQChunk(t *testing.T, kbID, knowledgeID, tagID, question string) *types.Chunk {
 	t.Helper()
 	chunk := makeChunk(kbID, knowledgeID, types.ChunkTypeFAQ)

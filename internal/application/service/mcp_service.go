@@ -81,7 +81,7 @@ func (s *mcpServiceService) GetMCPServiceByID(
 	}
 
 	if service == nil {
-		return nil, fmt.Errorf("MCP service not found")
+		return nil, types.ErrMCPServiceNotFound
 	}
 	return service, nil
 }

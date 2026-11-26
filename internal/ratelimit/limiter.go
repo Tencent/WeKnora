@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,6 +43,7 @@ type Limiter struct {
 	keyPrefix  string
 	window     time.Duration
 	instanceID string
+	seq        atomic.Uint64
 }
 
 // New constructs a limiter. keyPrefix should include a trailing delimiter
@@ -76,11 +78,19 @@ func (l *Limiter) Allow(ctx context.Context, key string, max int) bool {
 	return l.local.allow(key, l.window, max)
 }
 
+// nextMember builds a ZSET member that is unique per request. Using only
+// instanceID:nowMs collapsed every request within the same millisecond into
+// a single member, so bursts were undercounted (ZCARD stayed 1 no matter how
+// many requests arrived in that millisecond).
+func (l *Limiter) nextMember(nowMs int64) string {
+	return fmt.Sprintf("%s:%d:%d", l.instanceID, nowMs, l.seq.Add(1))
+}
+
 func (l *Limiter) redisAllow(ctx context.Context, key string, max int) (bool, error) {
 	redisKey := l.keyPrefix + key
 	nowMs := time.Now().UnixMilli()
 	windowMs := l.window.Milliseconds()
-	member := fmt.Sprintf("%s:%d", l.instanceID, nowMs)
+	member := l.nextMember(nowMs)
 
 	result, err := rateLimitScript.Run(ctx, l.redis,
 		[]string{redisKey},

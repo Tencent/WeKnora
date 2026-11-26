@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -52,6 +53,11 @@ func decodeVaultBody(c *gin.Context, dst any) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, maxCredentialVaultBody))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
+		_ = c.Error(apperrors.NewBadRequestError("invalid request body"))
+		return false
+	}
+	// Reject trailing JSON rather than silently acting on the first value.
+	if err := dec.Decode(new(any)); err != io.EOF {
 		_ = c.Error(apperrors.NewBadRequestError("invalid request body"))
 		return false
 	}

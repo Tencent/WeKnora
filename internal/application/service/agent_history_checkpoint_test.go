@@ -27,6 +27,7 @@ type historyRepo struct {
 	checkpointErr error
 	updates       []string
 	pages         int
+	llmPages      int
 }
 
 func (r *historyRepo) ListMessagesBySessionBeforeCursor(
@@ -47,6 +48,13 @@ func (r *historyRepo) ListMessagesBySessionBeforeCursor(
 		}
 	}
 	return out, nil
+}
+
+func (r *historyRepo) ListMessagesBySessionBeforeCursorForLLM(
+	ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
+) ([]*types.Message, error) {
+	r.llmPages++
+	return r.ListMessagesBySessionBeforeCursor(ctx, sessionID, before, beforeID, limit)
 }
 
 func (r *historyRepo) GetLatestContextCheckpoint(
@@ -127,6 +135,8 @@ func TestLoadAgentHistoryTagsEveryMessageWithItsTurn(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"question 1", "answer 1", "question 2", "answer 2"}, contents(got))
+	assert.Equal(t, 1, repo.llmPages, "LLM history must use the artifact-free reader")
+	assert.Equal(t, 1, repo.pages, "the artifact-free reader delegates the paged query exactly once")
 	for i, want := range []string{"a1", "a1", "a2", "a2"} {
 		assert.Equal(t, want, got[i].TurnID, "message %d", i)
 	}

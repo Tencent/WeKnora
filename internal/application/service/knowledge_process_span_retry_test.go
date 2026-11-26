@@ -54,6 +54,7 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 		getErr, readErr, rpcErr error
 		retryable               bool
 		code                    string
+		message                 string
 	}{
 		{name: "reader unavailable", missingReader: true, code: werrors.ErrCodeDocReaderUnavailable},
 		{
@@ -72,6 +73,12 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 		{
 			name: "CSV expansion budget exceeded", rpcErr: docparser.ErrCSVMarkdownTooLarge,
 			code: werrors.ErrCodeDocReaderParseFailed,
+		},
+		{
+			name:    "anydoc encrypted document",
+			rpcErr:  fmt.Errorf("conversion failed for an uploaded file: %w", anydoc.ErrEncrypted),
+			code:    werrors.ErrCodeDocReaderParseFailed,
+			message: "This document is encrypted. Upload a copy without password protection.",
 		},
 	} {
 		for _, retried := range []int{0, 3} {
@@ -123,6 +130,10 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 					require.Equal(t, types.SpanStatusFailed, status)
 					require.Equal(t, tc.code, code)
 					require.NotEmpty(t, message)
+					if tc.message != "" {
+						require.Equal(t, tc.message, message)
+						require.Equal(t, tc.message, knowledge.ErrorMessage)
+					}
 				}
 			})
 		}
