@@ -13,9 +13,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// googleMaxResults is the largest num value the Custom Search API accepts.
-const googleMaxResults = 10
-
 // GoogleProvider implements web search using Google Custom Search Engine API
 type GoogleProvider struct {
 	srv      *customsearch.Service
@@ -69,11 +66,11 @@ func (p *GoogleProvider) Search(
 	logger.Infof(ctx, "[WebSearch][Google] query=%q maxResults=%d engineID=%s", query, maxResults, p.engineID)
 	cseCall := p.srv.Cse.List().Context(ctx).Cx(p.engineID).Q(query)
 
-	// The Custom Search API accepts num between 1 and 10 and answers 400 otherwise.
-	if maxResults <= 0 {
-		maxResults = 5
+	if maxResults > 0 {
+		cseCall = cseCall.Num(int64(maxResults))
+	} else {
+		cseCall = cseCall.Num(5)
 	}
-	cseCall = cseCall.Num(int64(min(maxResults, googleMaxResults)))
 	cseCall = cseCall.Hl("ch-zh")
 
 	resp, err := cseCall.Do()
