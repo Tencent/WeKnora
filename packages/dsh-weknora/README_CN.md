@@ -75,7 +75,7 @@ patch 是整块替换该行的 `config`，所以要保留的字段需要一并�
 | `weknora_list_knowledge_bases` | `GET /knowledge-bases` | 知识库名称与 id，用于说明有哪些库，或为后续检索缩小范围 |
 | `weknora_search` | `POST /knowledge-search` + `GET /knowledge/search` | 原文片段与排序，每条带 `knowledge_id`、得分、分块序号，外加查询点名的文档 |
 | `weknora_read_document` | `GET /chunks/:knowledge_id` + `GET /knowledge/:id` | 单个文档按序拼回的正文，开头给出标题与摘要，支持翻页 |
-| `weknora_ask` | `POST /sessions` + `POST /knowledge-chat/:id` 或 `POST /agent-chat/:id` | WeKnora 自己的答案、引用、服务端用过的工具，以及可续聊的 `session_id` |
+| `weknora_ask` | `POST /sessions`（仅新建会话时），然后调用 `POST /knowledge-chat/:id` 或 `POST /agent-chat/:id` | WeKnora 自己的答案、引用、服务端用过的工具，以及可续聊的 `session_id` |
 
 `weknora_search` 是主力：它把原文交给 Agent 自己推理，Agent 的结论因此是可审计的。它在同一次调用里同时匹配片段内容和
 文档名，因为模型常常分不清自己要找的是「哪里讲了这件事」还是「那份叫 X 的文档在哪」。当查询读起来像个标题时，结果里会额外
@@ -97,8 +97,9 @@ patch 是整块替换该行的 `config`，所以要保留的字段需要一并�
 
 ## 权限与数据流
 
-插件只读。它不会写 WeKnora：不入库、不改分块、不删除。四个工具里有三个只需要 `retrieve` 能力的 API Key；`weknora_ask`
-额外需要 `chat`，因为它要创建会话并流式取回答案。
+插件不提供入库、修改分块或删除知识库内容的工具。列出知识库、检索和读取文档只需要 `retrieve` 权限。
+`weknora_ask` 还需要 `chat` 权限。未提供 `session_id` 时，它会在 WeKnora 服务端创建会话；提供时则继续该会话。
+这次问答会记录在 WeKnora 会话中；插件会流式获取答案，并返回会话 ID 供后续追问。
 
 Key 通过 `X-API-Key` 发送。如果用的是平台级 API Key，还需要配 `tenantId`，它会作为 `X-Tenant-ID` 选择工作空间。报错信息
 只包含 HTTP 状态码和 WeKnora 自己给出的原因，不会带上 Key。
