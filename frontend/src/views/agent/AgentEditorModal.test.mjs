@@ -232,10 +232,10 @@ async function mcpFixture(t, config) {
   return state
 }
 
-test('legacy empty MCP config opens as all without rewriting persisted config', async t => {
+test('empty MCP config opens as none without rewriting persisted config', async t => {
   const config = { mcp_selection_mode: '', mcp_services: [] }
   const state = await mcpFixture(t, config)
-  assert.equal(state.mcpSelectionMode.value, 'all')
+  assert.equal(state.mcpSelectionMode.value, 'none')
   assert.deepEqual(state.formData.value.config, config)
 })
 

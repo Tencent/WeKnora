@@ -69,6 +69,10 @@ const (
 	RerankOutcomeDisabled RerankOutcome = "disabled"
 	// RerankOutcomeNoCandidates means retrieval returned nothing to rerank.
 	RerankOutcomeNoCandidates RerankOutcome = "no_candidates"
+	// RerankOutcomeNoQuery means the query has no text (a pure-image search),
+	// so there is nothing to send the model: the candidates stand on their
+	// own in retrieval order.
+	RerankOutcomeNoQuery RerankOutcome = "no_query"
 )
 
 // Rerank model ID sources reported in RerankDiagnostics.ModelSource.

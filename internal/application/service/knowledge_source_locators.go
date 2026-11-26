@@ -115,6 +115,11 @@ func buildSourceIndex(
 	type placed struct{ image, at int }
 	var found []placed
 	for i := range images {
+		// A parser's explicit image position is stronger evidence than nearby
+		// text, which can belong to a different page in sparse drawing sets.
+		if len(images[i].SourceLocators) > 0 {
+			continue
+		}
 		if images[i].ServingURL == "" {
 			continue
 		}

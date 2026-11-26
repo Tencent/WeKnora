@@ -417,8 +417,9 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	// Keep webhook delivery in sync with the WebSocket path. In group chats
 	// Feishu may deliver every message when the app has the "receive all group
 	// messages" permission; only continue when this app's own bot is mentioned.
+	botOpenID := ""
 	if msg.ChatType == "group" {
-		botOpenID, err := a.BotOpenID(c.Request.Context())
+		botOpenID, err = a.BotOpenID(c.Request.Context())
 		if err != nil {
 			logger.Warnf(c.Request.Context(),
 				"[%s] failed to resolve bot open_id; ignoring group message: %v", a.region.Label, err)
@@ -461,18 +462,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			return nil, fmt.Errorf("unmarshal text content: %w", err)
 		}
 
-		// Strip @bot mention from group messages
-		content := textContent.Text
-		if chatType == im.ChatTypeGroup {
-			for strings.HasPrefix(content, "@_user_") {
-				idx := strings.Index(content, " ")
-				if idx >= 0 {
-					content = content[idx+1:]
-				} else {
-					break
-				}
-			}
-		}
+		content := renderTextMentions(textContent.Text, msg.Mentions, botOpenID, chatType)
 
 		return &im.IncomingMessage{
 			Platform:    a.region.Platform,
@@ -548,8 +538,9 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			var lineText strings.Builder
 			for _, elem := range line {
 				var tag struct {
-					Tag  string `json:"tag"`
-					Text string `json:"text"`
+					Tag    string `json:"tag"`
+					Text   string `json:"text"`
+					UserID string `json:"user_id"`
 				}
 				if err := json.Unmarshal(elem, &tag); err != nil {
 					continue
@@ -557,6 +548,8 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 				switch tag.Tag {
 				case "text", "a":
 					lineText.WriteString(tag.Text)
+				case "at":
+					lineText.WriteString(renderPostMention(tag.UserID, msg.Mentions, botOpenID, chatType))
 				}
 			}
 			if t := strings.TrimSpace(lineText.String()); t != "" {
@@ -565,17 +558,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		}
 
 		content := strings.Join(textParts, "\n")
-		if chatType == im.ChatTypeGroup {
-			for strings.HasPrefix(content, "@_user_") {
-				idx := strings.Index(content, " ")
-				if idx >= 0 {
-					content = content[idx+1:]
-				} else {
-					break
-				}
-			}
-		}
-		content = strings.TrimSpace(content)
+		content = strings.TrimSpace(renderTextMentions(content, msg.Mentions, botOpenID, chatType))
 		if content == "" {
 			return nil, nil
 		}

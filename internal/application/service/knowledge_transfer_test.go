@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/application/repository"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/alicebob/miniredis/v2"
@@ -540,4 +543,255 @@ func TestCloneCopiesImageVectorsOnlyIntoKBsThatTakeThem(t *testing.T) {
 				"nor its index row: CopyIndices copies only the rows of mapped chunks")
 		})
 	}
+}
+
+func TestLiteTransferProgressAdmissionRaceAndExpiry(t *testing.T) {
+	svc := &knowledgeService{} // redisClient == nil (Lite / Desktop mode)
+	ctx := context.Background()
+
+	require.Error(t, svc.saveKBCloneProgress(ctx, nil))
+	require.Error(t, svc.SaveKBCloneProgress(ctx, nil))
+	require.Error(t, svc.saveKnowledgeMoveProgress(ctx, nil))
+	require.Error(t, svc.SaveKnowledgeMoveProgress(ctx, nil))
+
+	_, err := svc.GetKBCloneProgress(ctx, "missing-clone")
+	var appErr *werrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, werrors.ErrNotFound, appErr.Code)
+
+	_, err = svc.GetKnowledgeMoveProgress(ctx, "missing-move")
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, werrors.ErrNotFound, appErr.Code)
+
+	// Worker completes before handler's Save*Progress (SetNX) runs: must not clobber.
+	require.NoError(t, svc.saveKBCloneProgress(ctx, &types.KBCloneProgress{
+		TaskID: "clone-1", Status: types.KBCloneStatusCompleted, Progress: 100, Total: 3, Processed: 3,
+	}))
+	require.NoError(t, svc.SaveKBCloneProgress(ctx, &types.KBCloneProgress{
+		TaskID: "clone-1", Status: types.KBCloneStatusPending, Progress: 0,
+	}))
+	cloneGot, err := svc.GetKBCloneProgress(ctx, "clone-1")
+	require.NoError(t, err)
+	require.Equal(t, types.KBCloneStatusCompleted, cloneGot.Status)
+	require.Equal(t, 100, cloneGot.Progress)
+
+	// Mutating returned pointer must not mutate stored snapshot.
+	cloneGot.Status = types.KBCloneStatusFailed
+	cloneAgain, err := svc.GetKBCloneProgress(ctx, "clone-1")
+	require.NoError(t, err)
+	require.Equal(t, types.KBCloneStatusCompleted, cloneAgain.Status)
+
+	require.NoError(t, svc.saveKnowledgeMoveProgress(ctx, &types.KnowledgeMoveProgress{
+		TaskID: "move-1", Status: types.KBCloneStatusCompleted, Progress: 100, Total: 2, Processed: 2,
+	}))
+	require.NoError(t, svc.SaveKnowledgeMoveProgress(ctx, &types.KnowledgeMoveProgress{
+		TaskID: "move-1", Status: types.KBCloneStatusPending, Progress: 0,
+	}))
+	moveGot, err := svc.GetKnowledgeMoveProgress(ctx, "move-1")
+	require.NoError(t, err)
+	require.Equal(t, types.KBCloneStatusCompleted, moveGot.Status)
+	require.Equal(t, 100, moveGot.Progress)
+
+	// Expired entries return NotFound and can be replaced by Save*Progress.
+	svc.memKBCloneProgress.Store("expired-clone", memProgressEntry[types.KBCloneProgress]{
+		value:     types.KBCloneProgress{TaskID: "expired-clone", Status: types.KBCloneStatusCompleted},
+		expiresAt: time.Now().Add(-time.Minute),
+	})
+	_, err = svc.GetKBCloneProgress(ctx, "expired-clone")
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, werrors.ErrNotFound, appErr.Code)
+
+	svc.memKnowledgeMoveProgress.Store("expired-move", memProgressEntry[types.KnowledgeMoveProgress]{
+		value:     types.KnowledgeMoveProgress{TaskID: "expired-move", Status: types.KBCloneStatusCompleted},
+		expiresAt: time.Now().Add(-time.Minute),
+	})
+	require.NoError(t, svc.SaveKnowledgeMoveProgress(ctx, &types.KnowledgeMoveProgress{
+		TaskID: "expired-move", Status: types.KBCloneStatusPending, Total: 4,
+	}))
+	replaced, err := svc.GetKnowledgeMoveProgress(ctx, "expired-move")
+	require.NoError(t, err)
+	require.Equal(t, types.KBCloneStatusPending, replaced.Status)
+	require.Equal(t, 4, replaced.Total)
+}
+
+func liteTransferFixture(t *testing.T, operation access.KBTransferOperation) *documentWriteFixture {
+	t.Helper()
+	f := newDocumentWriteFixture(t)
+	require.NoError(t, f.db.AutoMigrate(&types.Tenant{}))
+	require.NoError(t, f.db.Create(&types.Tenant{ID: 7, Name: "tenant", StorageUsed: 5}).Error)
+	require.NoError(
+		t,
+		f.db.Model(&types.Knowledge{}).Where("id = ?", "doc").Update("parse_status", types.ParseStatusCompleted).Error,
+	)
+	ctx, err := access.WithKBTransferTask(
+		context.Background(),
+		f.kbs.values["kb"],
+		f.kbs.values["other"],
+		7,
+		operation,
+		"transfer-task",
+		false,
+	)
+	require.NoError(t, err)
+	f.ctx = context.WithValue(ctx, types.TenantInfoContextKey, &types.Tenant{ID: 7, StorageUsed: 5})
+	return f // f.svc.redisClient remains nil (Lite / Desktop mode)
+}
+
+func TestLiteTransferHonorsSyncExecutorRetryMetadata(t *testing.T) {
+	f := liteTransferFixture(t, access.KBTransferMove)
+
+	require.NoError(t, f.db.Create(&types.Knowledge{
+		ID: "second", TenantID: 7, KnowledgeBaseID: "kb", ParseStatus: types.ParseStatusCompleted,
+	}).Error)
+	require.NoError(t, f.db.Create(&types.Chunk{
+		ID: "second-chunk", TenantID: 7, KnowledgeID: "second", KnowledgeBaseID: "kb",
+		ChunkType: types.ChunkTypeText, Content: "second",
+	}).Error)
+
+	fault := &transferFaultRepo{KnowledgeRepository: f.repo, failID: "second"}
+	f.svc.repo = fault
+	task := moveTask(t, []string{"doc", "second"}, "reuse_vectors")
+
+	// Attempt 0 of 2 under SyncTaskExecutor: transient error must keep status
+	// "processing" (not prematurely "failed") and leave the failed item retryable.
+	attempt0Ctx := types.WithTaskRetryMetadata(context.Background(), 0, 2)
+	require.ErrorContains(t, f.svc.ProcessKnowledgeMove(attempt0Ctx, task), "temporary tag cleanup failure")
+
+	midProgress, err := f.svc.GetKnowledgeMoveProgress(f.ctx, "transfer-task")
+	require.NoError(t, err)
+	require.Equal(t, types.KBCloneStatusProcessing, midProgress.Status)
+	require.Equal(t, 2, midProgress.Total)
+	require.Equal(t, 1, midProgress.Failed)
+
+	secondAfterAttempt0, err := f.repo.GetKnowledgeByID(f.ctx, 7, "second")
+	require.NoError(t, err)
+	require.Equal(t, types.ParseStatusProcessing, secondAfterAttempt0.ParseStatus)
+
+	// Attempt 1 of 2 succeeds after transient failure clears.
+	fault.failID = ""
+	attempt1Ctx := types.WithTaskRetryMetadata(context.Background(), 1, 2)
+	require.NoError(t, f.svc.ProcessKnowledgeMove(attempt1Ctx, task))
+
+	doneProgress, err := f.svc.GetKnowledgeMoveProgress(f.ctx, "transfer-task")
+	require.NoError(t, err)
+	require.Equal(t, types.KBCloneStatusCompleted, doneProgress.Status)
+	require.Equal(t, 100, doneProgress.Progress)
+	require.Zero(t, doneProgress.Failed)
+
+	// Final attempt (2 of 2) marks status as failed when retries are exhausted.
+	require.NoError(t, f.db.Create(&types.Knowledge{
+		ID: "third", TenantID: 7, KnowledgeBaseID: "kb", ParseStatus: types.ParseStatusCompleted,
+	}).Error)
+	require.NoError(t, f.db.Create(&types.Chunk{
+		ID: "third-chunk", TenantID: 7, KnowledgeID: "third", KnowledgeBaseID: "kb",
+		ChunkType: types.ChunkTypeText, Content: "third",
+	}).Error)
+	fault.failID = "third"
+	rawFinal, err := json.Marshal(types.KnowledgeMovePayload{
+		TenantID: 7, TaskID: "transfer-final-fail", SourceKBID: "kb", TargetKBID: "other",
+		KnowledgeIDs: []string{"third"}, Mode: "reuse_vectors",
+	})
+	require.NoError(t, err)
+	finalCtx := types.WithTaskRetryMetadata(context.Background(), 2, 2)
+	require.Error(t, f.svc.ProcessKnowledgeMove(finalCtx, asynq.NewTask(types.TypeKnowledgeMove, rawFinal)))
+
+	failedProgress, err := f.svc.GetKnowledgeMoveProgress(f.ctx, "transfer-final-fail")
+	require.NoError(t, err)
+	require.Equal(t, types.KBCloneStatusFailed, failedProgress.Status)
+
+	// ProcessKBClone retry metadata parity in Lite mode (redisClient == nil).
+	cf := liteTransferFixture(t, access.KBTransferClone)
+	require.NoError(t, cf.db.AutoMigrate(&types.KnowledgeBase{}))
+	for _, kb := range []*types.KnowledgeBase{
+		{ID: "kb", TenantID: 7, Name: "src", Type: types.KnowledgeBaseTypeDocument},
+		{ID: "other", TenantID: 7, Name: "dst", Type: types.KnowledgeBaseTypeDocument},
+	} {
+		require.NoError(t, cf.db.Create(kb).Error)
+	}
+	cf.svc.kbService = NewKnowledgeBaseService(
+		repository.NewKnowledgeBaseRepository(cf.db), cf.repo, cf.chunkRepo,
+		nil, nil, nil, nil, nil, cf.tenants, cf.files,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	cloneFault := &cloneFaultChunks{ChunkRepository: cf.chunkRepo, fail: true}
+	cf.svc.chunkRepo = cloneFault
+	rawClone, err := json.Marshal(types.KBClonePayload{
+		TenantID: 7, TaskID: "clone-retry-task", SourceID: "kb", TargetID: "other",
+	})
+	require.NoError(t, err)
+	cloneTask := asynq.NewTask(types.TypeKBClone, rawClone)
+
+	require.ErrorContains(t,
+		cf.svc.ProcessKBClone(types.WithTaskRetryMetadata(context.Background(), 0, 2), cloneTask),
+		"lost clone acknowledgement",
+	)
+	cloneMid, err := cf.svc.GetKBCloneProgress(cf.ctx, "clone-retry-task")
+	require.NoError(t, err)
+	require.Equal(t, types.KBCloneStatusProcessing, cloneMid.Status)
+
+	cloneFault.fail = false
+	require.NoError(t, cf.svc.ProcessKBClone(types.WithTaskRetryMetadata(context.Background(), 1, 2), cloneTask))
+	cloneDone, err := cf.svc.GetKBCloneProgress(cf.ctx, "clone-retry-task")
+	require.NoError(t, err)
+	require.Equal(t, types.KBCloneStatusCompleted, cloneDone.Status)
+	require.Equal(t, 100, cloneDone.Progress)
+}
+
+type inlineReparseQueue struct {
+	onEnqueue func(task *asynq.Task)
+}
+
+func (q *inlineReparseQueue) Enqueue(task *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+	if q.onEnqueue != nil && task.Type() == types.TypeManualProcess {
+		q.onEnqueue(task)
+	}
+	return &asynq.TaskInfo{ID: "inline-reparse"}, nil
+}
+
+func TestMoveReparseConcurrentWorkerDoesNotPoisonTransferPhase(t *testing.T) {
+	f := liteTransferFixture(t, access.KBTransferMove)
+	row, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+	require.NoError(t, err)
+	require.NoError(t, row.SetManualMetadata(
+		types.NewManualKnowledgeMetadata("# content", types.ManualKnowledgeStatusPublish, 1),
+	))
+	require.NoError(t, f.repo.UpdateKnowledge(f.ctx, row))
+
+	// Simulate SyncTaskExecutor's goroutine loading the row while phase is still
+	// "reparse_pending", validating it, and saving parse_status="completed" AFTER
+	// acknowledgeMovedReparse returns.
+	var workerSnapshot *types.Knowledge
+	f.svc.task = &inlineReparseQueue{
+		onEnqueue: func(_ *asynq.Task) {
+			loaded, loadErr := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+			require.NoError(t, loadErr)
+			require.NoError(t, validateProcessingKnowledge(loaded, 7, "other", "doc"))
+			loaded.ParseStatus = types.ParseStatusProcessing
+			require.NoError(t, f.repo.UpdateKnowledge(f.ctx, loaded))
+			workerSnapshot = loaded
+		},
+	}
+
+	require.NoError(t, f.svc.ProcessKnowledgeMove(context.Background(), moveTask(t, []string{"doc"}, "reparse")))
+	require.NotNil(t, workerSnapshot)
+
+	// Worker finishes indexing and writes its in-memory struct via full-row Save.
+	workerSnapshot.ParseStatus = types.ParseStatusCompleted
+	require.NoError(t, f.repo.UpdateKnowledge(f.ctx, workerSnapshot))
+
+	persisted, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+	require.NoError(t, err)
+	state, err := transferState(persisted)
+	require.NoError(t, err)
+	require.Equal(t, "done", state.Phase)
+
+	// Moving the document back to the original KB must succeed (not fail with
+	// "has an unfinished transfer").
+	returnRaw, err := json.Marshal(types.KnowledgeMovePayload{
+		TenantID: 7, TaskID: "return-move", SourceKBID: "other", TargetKBID: "kb",
+		KnowledgeIDs: []string{"doc"}, Mode: "reuse_vectors",
+	})
+	require.NoError(t, err)
+	returnTask := asynq.NewTask(types.TypeKnowledgeMove, returnRaw)
+	require.NoError(t, f.svc.ProcessKnowledgeMove(context.Background(), returnTask))
 }

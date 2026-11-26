@@ -1,11 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -295,6 +297,37 @@ func TestProjectSkillFileContentMarksBinaryWithoutInlining(t *testing.T) {
 	require.True(t, got.Binary)
 	require.Equal(t, skillFileEncodingBinary, got.Encoding)
 	require.Empty(t, got.Content)
+}
+
+// A text file larger than the 1 MiB browsing cap must be cut between
+// characters: the content goes straight into a JSON response, and half a
+// multi-byte character would reach the admin UI as U+FFFD.
+func TestProjectSkillFileContentKeepsMultiByteCharactersAtTheTextLimit(t *testing.T) {
+	body := []byte(strings.Repeat("知", skillFileTextLimit/3+10))
+	got := projectSkillFileContent("SKILL.md", body)
+
+	require.True(t, got.Truncated)
+	require.LessOrEqual(t, len(got.Content), skillFileTextLimit)
+	require.True(t, utf8.ValidString(got.Content), "truncated content must stay valid UTF-8")
+	require.True(t, strings.HasPrefix(string(body), got.Content), "truncation must keep a prefix")
+}
+
+// The preview is capped at skillFileTextLimit, so its allocation must not grow
+// with the file size. Converting the whole body to a string first copied all
+// 32 MiB for a 1 MiB preview.
+func TestProjectSkillFileContentAllocationIsBoundedByThePreview(t *testing.T) {
+	body := bytes.Repeat([]byte("a"), 32<<20)
+
+	res := testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = projectSkillFileContent("SKILL.md", body)
+		}
+	})
+
+	if got := res.AllocedBytesPerOp(); got > int64(4<<20) {
+		t.Fatalf("preview allocated %d bytes per op, want about the 1 MiB cap", got)
+	}
 }
 
 func TestListSkillFilesDoesNotFallbackToADifferentCatalogBundle(t *testing.T) {

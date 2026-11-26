@@ -18,6 +18,7 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
+	"github.com/xuri/excelize/v2"
 )
 
 // The data-table path reads response.Content directly and never applies the
@@ -126,10 +127,16 @@ type tableSummaryChatAPI = chat.Chat
 type tableSummaryChat struct {
 	tableSummaryChatAPI
 	results []tableSummaryChatResult
+	prompts []string
 	calls   int
 }
 
-func (c *tableSummaryChat) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
+func (c *tableSummaryChat) Chat(
+	_ context.Context, messages []chat.Message, _ *chat.ChatOptions,
+) (*types.ChatResponse, error) {
+	if len(messages) > 0 {
+		c.prompts = append(c.prompts, messages[0].Content)
+	}
 	result := c.results[c.calls]
 	c.calls++
 	return result.response, result.err
@@ -289,4 +296,63 @@ func TestDataTableSummaryHandlePreservesValidOutput(t *testing.T) {
 		indexedContent[info.ChunkID] = info.Content
 	}
 	require.Equal(t, map[string]string{summary.ID: summary.Content, column.ID: column.Content}, indexedContent)
+}
+
+func TestDataTableSummaryHandleMergedHeaderExcel(t *testing.T) {
+	db, err := sql.Open("duckdb", ":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	for _, ext := range []string{"spatial", "excel"} {
+		if _, err := db.Exec("INSTALL " + ext + "; LOAD " + ext + ";"); err != nil {
+			t.Skipf("cannot install/load duckdb %s extension: %v", ext, err)
+		}
+	}
+
+	f := newDocumentWriteFixture(t)
+	dir := t.TempDir()
+	xlsxPath := filepath.Join(dir, "sales_merged.xlsx")
+	wb := excelize.NewFile()
+	require.NoError(t, wb.SetCellValue("Sheet1", "A1", "2026 年度销售统计"))
+	require.NoError(t, wb.MergeCell("Sheet1", "A1", "D1"))
+	for i, h := range []string{"月份", "地区", "销售额", "占比"} {
+		cell, err := excelize.CoordinatesToCellName(i+1, 2)
+		require.NoError(t, err)
+		require.NoError(t, wb.SetCellValue("Sheet1", cell, h))
+	}
+	for i, v := range []any{"1月", "华东", 100, 0.25} {
+		cell, err := excelize.CoordinatesToCellName(i+1, 3)
+		require.NoError(t, err)
+		require.NoError(t, wb.SetCellValue("Sheet1", cell, v))
+	}
+	require.NoError(t, wb.SaveAs(xlsxPath))
+	require.NoError(t, wb.Close())
+
+	require.NoError(t, f.db.Model(&types.Knowledge{}).Where("id = ?", "doc").Updates(map[string]any{
+		"file_type": "xlsx", "file_name": "sales_merged.xlsx",
+		"file_path": xlsxPath, "parse_status": types.ParseStatusCompleted,
+	}).Error)
+
+	model := &tableSummaryChat{results: []tableSummaryChatResult{
+		{response: &types.ChatResponse{Content: "Sales summary"}},
+		{response: &types.ChatResponse{Content: "- 月份\n- 地区\n- 销售额\n- 占比"}},
+	}}
+	index := &tableSummaryIndex{}
+	svc := &DataTableSummaryService{
+		knowledgeService: f.svc, knowledgeBaseService: f.kbs, chunkService: f.chunks,
+		modelService: tableSummaryModelService{model: model}, tenantService: tableSummaryTenantService{},
+		fileService: filesvc.NewLocalFileService(dir, ""), sqlDB: db,
+		retrieveEngine: tableSummaryRegistry{index: index},
+	}
+	payload, err := json.Marshal(DataTableSummaryPayload{TenantID: 7, KnowledgeID: "doc"})
+	require.NoError(t, err)
+	require.NoError(t, svc.Handle(context.Background(), asynq.NewTask(types.TypeDataTableSummary, payload)))
+	require.Len(t, model.prompts, 2)
+	for _, prompt := range model.prompts {
+		require.Contains(t, prompt, "- 月份 (VARCHAR)")
+		require.Contains(t, prompt, "- 地区 (VARCHAR)")
+		require.Contains(t, prompt, "- 销售额 (VARCHAR)")
+		require.Contains(t, prompt, "- 占比 (VARCHAR)")
+		require.NotContains(t, prompt, "2026 年度销售统计")
+		require.Contains(t, prompt, `"地区":"华东"`)
+	}
 }

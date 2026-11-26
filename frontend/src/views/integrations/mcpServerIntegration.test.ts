@@ -15,6 +15,7 @@ test('buildMcpEndpointUrl strips the api prefix and joins the endpoint path', ()
   assert.equal(buildMcpEndpointUrl('https://kb.example.com/api/v1', '/mcp/abc'), 'https://kb.example.com/mcp/abc')
   assert.equal(buildMcpEndpointUrl('https://kb.example.com/api/v1/', 'mcp/abc'), 'https://kb.example.com/mcp/abc')
   assert.equal(buildMcpEndpointUrl('http://localhost:8080', '/mcp/x'), 'http://localhost:8080/mcp/x')
+  assert.equal(buildMcpEndpointUrl('https://mcp.example.com', '/mcp/abc'), 'https://mcp.example.com/mcp/abc')
 })
 
 test('mcpServerKey slugs the endpoint name', () => {

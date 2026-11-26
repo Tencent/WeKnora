@@ -277,7 +277,8 @@ func canSplitDict(d map[string]interface{}) bool {
 
 // sortedKeys returns the keys of a map in sorted order.
 // When all keys are numeric strings (from array-to-dict conversion),
-// sorts numerically so "2" comes before "10".
+// sorts numerically so "2" comes before "10". Equal numbers are ordered
+// by their original key strings.
 func sortedKeys(m map[string]interface{}) []string {
 	keys := make([]string, 0, len(m))
 	allNumeric := true
@@ -293,7 +294,10 @@ func sortedKeys(m map[string]interface{}) []string {
 		sort.Slice(keys, func(i, j int) bool {
 			ni, _ := strconv.Atoi(keys[i])
 			nj, _ := strconv.Atoi(keys[j])
-			return ni < nj
+			if ni != nj {
+				return ni < nj
+			}
+			return keys[i] < keys[j]
 		})
 	} else {
 		sort.Strings(keys)

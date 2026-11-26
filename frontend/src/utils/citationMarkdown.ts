@@ -95,37 +95,38 @@ export function resolveCitationChunkId(
 
   const doc = (attrs.doc || '').trim()
   const kbId = (attrs.kbId || '').trim()
-
-  if (doc) {
-    const byDoc = list.find(
-      (r) =>
-        docTitlesMatch(doc, r.knowledge_title || '') ||
-        docTitlesMatch(doc, r.knowledge_filename || ''),
-    )
-    if (byDoc?.id) return byDoc.id
-  }
+  const titleMatches = doc ? list.filter((r) =>
+    docTitlesMatch(doc, r.knowledge_title || '') ||
+    docTitlesMatch(doc, r.knowledge_filename || ''),
+  ) : []
+  const matchesDocumentHint = (ref: CitationKnowledgeRef) =>
+    !titleMatches.length || titleMatches.includes(ref)
 
   const faqMatch = raw.match(/^FAQ-(\d+)$/i)
   if (faqMatch) {
     const faqRefs = list.filter((r) => r.chunk_type === 'faq')
     const hit = faqRefs[parseInt(faqMatch[1], 10) - 1]
-    if (hit?.id) return hit.id
+    if (hit?.id && matchesDocumentHint(hit)) return hit.id
   }
 
   const docMatch = raw.match(/^DOC-(\d+)$/i)
   if (docMatch) {
     const docRefs = list.filter((r) => r.chunk_type !== 'faq')
     const hit = docRefs[parseInt(docMatch[1], 10) - 1]
-    if (hit?.id) return hit.id
+    if (hit?.id && matchesDocumentHint(hit)) return hit.id
   }
 
   const num = parseInt(raw, 10)
   if (!Number.isNaN(num) && String(num) === raw) {
     const byPos = list[num - 1]
-    if (byPos?.id) return byPos.id
+    if (byPos?.id && matchesDocumentHint(byPos)) return byPos.id
     const byChunkIndex = list.find((r) => r.chunk_index === num || r.chunk_index === num - 1)
-    if (byChunkIndex?.id) return byChunkIndex.id
+    if (byChunkIndex?.id && matchesDocumentHint(byChunkIndex)) return byChunkIndex.id
   }
+
+  // Multiple passages can share a document title. Prefer an explicit index
+  // within that document, but retain title recovery for inconsistent hints.
+  if (titleMatches[0]?.id) return titleMatches[0].id
 
   if (kbId) {
     const scoped = list.filter((r) => r.knowledge_base_id === kbId)
