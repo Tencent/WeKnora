@@ -26699,6 +26699,9 @@
                     "x-agent-detail": true,
                     "x-agent-keys": "remote_model_name"
                 },
+                "fallback_chat_model_id": {
+                    "type": "string"
+                },
                 "interface_type": {
                     "type": "string"
                 },
@@ -33803,6 +33806,10 @@
                         "type": "string"
                     }
                 },
+                "fallback_chat_model_id": {
+                    "description": "FallbackChatModelID is an optional replacement for this workspace model's\nstreaming answer when its provider fails before producing content.",
+                    "type": "string"
+                },
                 "interface_type": {
                     "type": "string"
                 },
@@ -33830,7 +33837,7 @@
                     ]
                 },
                 "supports_vision": {
-                    "description": "Whether the model accepts image/multimodal input",
+                    "description": "SupportsVision indicates whether the model accepts image or multimodal input.",
                     "type": "boolean"
                 }
             }
