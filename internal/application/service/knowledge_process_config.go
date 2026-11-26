@@ -64,7 +64,7 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	if overrides.ChunkingConfig != nil {
 		eff.ChunkingConfig = mergeChunkingConfig(eff.ChunkingConfig, overrides.ChunkingConfig)
 	}
-	if len(overrides.ParserEngineRules) > 0 {
+	if overrides.ParserEngineRules != nil {
 		eff.ChunkingConfig.ParserEngineRules = overrides.ParserEngineRules
 	}
 	if overrides.EnableMultimodel != nil {

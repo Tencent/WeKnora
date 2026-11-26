@@ -360,3 +360,34 @@ func TestSkipDisabledGeneratedQuestionsLeavesFlagsUnsetOnLookupError(t *testing.
 		t.Fatal("a failed knowledge base lookup marked the passage")
 	}
 }
+
+// A pure-image query has no text to rerank with. Calling the model anyway
+// earned a vendor rejection recorded as model_error; the stage now skips and
+// says so.
+func TestPluginRerankSkipsQueryWithoutText(t *testing.T) {
+	plugin := &PluginRerank{modelService: &rerankOnlyModelService{
+		reranker: &failingReranker{},
+	}}
+	cm := rerankChatManage(0.3)
+	cm.RewriteQuery = "   "
+
+	next := func() *PluginError { return nil }
+	err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, cm, next)
+	if err != nil {
+		t.Fatalf("OnEvent: %v", err)
+	}
+	diag := cm.RerankDiagnostics
+	if diag == nil || diag.Outcome != types.RerankOutcomeNoQuery {
+		t.Fatalf("outcome = %v, want no_query", diag)
+	}
+}
+
+// failingReranker records any call: an empty query must not reach the model.
+type failingReranker struct{ called int }
+
+func (r *failingReranker) Rerank(_ context.Context, _ string, _ []string) ([]rerank.RankResult, error) {
+	r.called++
+	return nil, errors.New("query should not be empty")
+}
+func (r *failingReranker) GetModelName() string { return "failing" }
+func (r *failingReranker) GetModelID() string   { return "failing" }

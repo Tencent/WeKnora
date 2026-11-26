@@ -499,6 +499,15 @@ class MarkdownImageUtil:
 
             def replace_image(match: Match[str]) -> str:
                 nonlocal span
+                escapes = 0
+                index = match.start() - 1
+                while index >= 0 and match.string[index] == "\\":
+                    escapes += 1
+                    index -= 1
+                if escapes % 2:
+                    # An odd backslash run escapes the marker, so Markdown
+                    # renders text here rather than an image.
+                    return match.group(0)
                 while span is not None and span[1] <= match.start():
                     span = next(spans, None)
                 if span is not None and span[0] <= match.start() < span[1]:

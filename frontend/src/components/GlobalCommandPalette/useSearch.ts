@@ -70,6 +70,8 @@ export interface CmdkMsgGroup {
 export function useCmdkSearch(options: {
   /** When set, scopes knowledge search to these KBs. Re-evaluated on each search. */
   lockedKbIds?: () => string[]
+  /** Whether the palette may search; closing it invalidates pending work. */
+  enabled?: () => boolean
   /** How many knowledge chunks to keep after grouping; default no-cap. */
   chunkLimit?: number
   /** Debounce delay in ms. */
@@ -78,6 +80,8 @@ export function useCmdkSearch(options: {
   agentsEnabled?: () => boolean
 }) {
   const debounceMs = options.debounceMs ?? 350
+  let disposed = false
+  const isEnabled = () => options.enabled?.() !== false
   const query = ref('')
   const loading = ref(false)
   const hasSearched = ref(false)
@@ -102,12 +106,14 @@ export function useCmdkSearch(options: {
   const menuStore = useMenuStore()
 
   const ensureKbs = async (): Promise<boolean> => {
+    if (disposed) return false
     if (kbsLoaded.value) return true
     if (kbsLoadingPromise) return kbsLoadingPromise
     kbsLoadingPromise = (async () => {
       try {
         const chatResources = useChatResourcesStore()
         await chatResources.ensureKnowledgeBases()
+        if (disposed) return false
         const own: CmdkKb[] = chatResources.rawKnowledgeBases.map((kb: any) => ({
           id: String(kb.id),
           name: kb.name || '',
@@ -126,7 +132,7 @@ export function useCmdkSearch(options: {
         kbsLoaded.value = true
         return true
       } catch (e) {
-        console.error('[cmdk] failed to load knowledge bases', e)
+        if (!disposed) console.error('[cmdk] failed to load knowledge bases', e)
         return false
       } finally {
         kbsLoadingPromise = null
@@ -154,13 +160,14 @@ export function useCmdkSearch(options: {
   // Agents (own + shared). Lazily loaded & cached; no backend search endpoint
   // exists so we always filter client-side.
   const ensureAgents = async (): Promise<void> => {
-    if (options.agentsEnabled?.() === false) return
+    if (disposed || options.agentsEnabled?.() === false) return
     if (agentsLoaded.value) return
     if (agentsLoadingPromise) return agentsLoadingPromise
     agentsLoadingPromise = (async () => {
       try {
         const chatResources = useChatResourcesStore()
         await chatResources.ensureAgents()
+        if (disposed) return
         const own: CmdkAgent[] = chatResources.agents.map((a: any) => ({
           id: String(a.id),
           name: a.name || '',
@@ -185,7 +192,7 @@ export function useCmdkSearch(options: {
         agents.value = [...own, ...sharedList]
         agentsLoaded.value = true
       } catch (e) {
-        console.error('[cmdk] failed to load agents', e)
+        if (!disposed) console.error('[cmdk] failed to load agents', e)
       } finally {
         agentsLoadingPromise = null
       }
@@ -245,14 +252,27 @@ export function useCmdkSearch(options: {
     hasSearched.value = false
   }
 
+  // Invalidate synchronously: Vue's default batching can hide A -> B -> A changes.
+  const invalidateSearch = () => {
+    requestSeq++
+    if (debounceTimer !== null) clearTimeout(debounceTimer)
+    debounceTimer = null
+    loading.value = false
+    clearResults()
+    return requestSeq
+  }
+
+  const isCurrent = (seq: number) => !disposed && isEnabled() && seq === requestSeq
+
   const runSearch = async (q: string, seq: number) => {
+    if (!isCurrent(seq)) return
     loading.value = true
     hasSearched.value = true
     searchFailures.value = []
 
     // Determine knowledge_base_ids for chunk search. A non-empty lockedKbIds
     // narrows the scope and also disables message search (out of scope).
-    const locked = options.lockedKbIds?.() || []
+    const locked = (options.lockedKbIds?.() || []).slice()
     const scoped = locked.length > 0
     let knowledgeAvailable = true
     let kbIds: string[]
@@ -262,7 +282,7 @@ export function useCmdkSearch(options: {
       knowledgeAvailable = await ensureKbs()
       kbIds = knowledgeBases.value.map(k => k.id)
     }
-    if (seq !== requestSeq) return
+    if (!isCurrent(seq)) return
 
     const knowledgePromise = !knowledgeAvailable
       ? Promise.reject(new Error('Knowledge base discovery failed'))
@@ -290,7 +310,7 @@ export function useCmdkSearch(options: {
     const [knowledgeResult, messageResult] = await Promise.allSettled([knowledgePromise, messagesPromise])
 
     // Stale response guard.
-    if (seq !== requestSeq) return
+    if (!isCurrent(seq)) return
 
     if (knowledgeResult.status === 'rejected') {
       searchFailures.value.push('knowledge')
@@ -352,38 +372,33 @@ export function useCmdkSearch(options: {
     loading.value = false
   }
 
-  // Watch query changes (debounced). lockedKbIds is tracked as a derived
-  // string so the search re-runs when the KB scope toggles.
+  // Compare complete scope snapshots independent of order. The sync watcher
+  // still sees intermediate values from in-place multi-KB mutations; callers
+  // should replace the array atomically when reordering the same set of IDs.
   const lockedSignature = () =>
     (options.lockedKbIds?.() || []).slice().sort().join(',')
 
   const retrySearch = () => {
     const trimmed = query.value.trim()
-    if (!trimmed || loading.value) return
+    if (disposed || !isEnabled() || !trimmed || loading.value) return
     if (debounceTimer) clearTimeout(debounceTimer)
     debounceTimer = null
     void runSearch(trimmed, ++requestSeq)
   }
 
-  watch([query, lockedSignature], ([val]) => {
-    const seq = ++requestSeq
-    searchFailures.value = []
-    hasSearched.value = false
-    if (debounceTimer) clearTimeout(debounceTimer)
+  watch([query, lockedSignature, isEnabled], ([val]) => {
+    const seq = invalidateSearch()
     const trimmed = (val as string).trim()
-    if (!trimmed) {
-      loading.value = false
-      clearResults()
-      return
-    }
+    if (!trimmed || !isCurrent(seq)) return
     debounceTimer = setTimeout(() => {
-      runSearch(trimmed, seq)
+      debounceTimer = null
+      void runSearch(trimmed, seq)
     }, debounceMs)
-  })
+  }, { flush: 'sync' })
 
   onBeforeUnmount(() => {
-    requestSeq++
-    if (debounceTimer) clearTimeout(debounceTimer)
+    disposed = true
+    invalidateSearch()
   })
 
   onMounted(() => {
