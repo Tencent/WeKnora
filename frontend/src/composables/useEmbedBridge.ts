@@ -161,6 +161,9 @@ export function useEmbedBridge(channelId: Ref<string>) {
   let removeLocaleListener: (() => void) | null = null
   let removeTokenListener: (() => void) | null = null
   let bootstrapped = false
+  let secureHostChannel = ''
+  let hostBootstrap: Promise<void> | undefined
+  let rotation = 0
   let hostLocalePinned = false
   if (typeof window !== 'undefined') {
     hostLocalePinned = Boolean(readEmbedLocaleFromUrl())
@@ -276,7 +279,7 @@ export function useEmbedBridge(channelId: Ref<string>) {
       const newId = sessionRes?.data?.id || ''
       if (!newId) throw new Error('missing session')
       syncHistoryClear()
-      if (currentOperation !== operation || id !== channelId.value || apiToken !== token.value) return false
+      if (currentOperation !== operation || id !== channelId.value) return false
       const next: StoredSession = {
         id: newId, sig: sessionRes?.data?.sig || '',
         agentId: config.value?.agent_id || '', visitorId: visitorId.value,
@@ -308,7 +311,7 @@ export function useEmbedBridge(channelId: Ref<string>) {
     try {
       await getEmbedMessageList(id, apiToken, entry.id, 1, undefined, entry.sig)
       syncHistoryClear()
-      if (currentOperation !== operation || id !== channelId.value || apiToken !== token.value) return false
+      if (currentOperation !== operation || id !== channelId.value) return false
       sessionHasMessages.value = false
       sessionSig.value = entry.sig
       sessionId.value = entry.id
@@ -349,9 +352,29 @@ export function useEmbedBridge(channelId: Ref<string>) {
       applyEmbedLocale(locale, activeLocale)
     })
 
-    removeTokenListener = onEmbedHostToken((providedToken, providedChannelId) => {
-      if (providedChannelId && providedChannelId !== channelId.value) return
-      bootstrap(providedToken)
+    removeTokenListener = onEmbedHostToken(async (providedToken, providedChannelId) => {
+      const id = channelId.value
+      if (!id || (providedChannelId && providedChannelId !== id)) return
+      if (!bootstrapped) {
+        secureHostChannel = isEmbedSessionToken(providedToken) ? id : ''
+        hostBootstrap = bootstrap(providedToken)
+        return
+      }
+      // Only rotate short-lived credentials supplied by this channel's host.
+      // Static publish tokens and tokens supplied in a direct URL keep their original flow.
+      if (secureHostChannel !== id || providedChannelId !== id
+        || !isEmbedSessionToken(providedToken) || providedToken === token.value) return
+      const attempt = ++rotation
+      await hostBootstrap
+      if (attempt !== rotation || id !== channelId.value || !sessionId.value || !sessionSig.value) return
+      try {
+        // Confirm the candidate authorizes this channel and signed chat before
+        // replacing a working token. Never replay a chat request or change the visitor.
+        const res = await getEmbedMessageList(id, providedToken, sessionId.value, 1, undefined, sessionSig.value)
+        if (res?.success && attempt === rotation && id === channelId.value) token.value = providedToken
+      } catch {
+        // A failed refresh must not invalidate the current chat.
+      }
     })
 
     if (!channelId.value) {
@@ -381,6 +404,7 @@ export function useEmbedBridge(channelId: Ref<string>) {
 
   onUnmounted(() => {
     operation++
+    rotation++
     window.removeEventListener('storage', onHistoryStorage)
     removeHostListener?.()
     removeLocaleListener?.()
