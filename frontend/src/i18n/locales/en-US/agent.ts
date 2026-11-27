@@ -1942,6 +1942,9 @@ export default {
       sectionSession: 'Session',
       sectionCallback: 'Callback URL',
       sectionKnowledge: 'File storage',
+      shareOriginals: 'Share cited originals',
+      shareOriginalsHint: 'Anyone with a link can download the original for one hour. Select one knowledge base owned by this workspace and available to this agent.',
+      saveOriginalSharing: 'Save sharing settings',
       sectionStatus: 'Status'
     },
     agentType: {

@@ -267,6 +267,7 @@ func TestSanitizeQueryRedactsTerminalTicket(t *testing.T) {
 func TestSkipsBodyLoggingForSecretRoutes(t *testing.T) {
 	for _, p := range []string{
 		"/api/v1/agent/secure-forms/p1",
+		"/api/v1/im/citation-download",
 		"/api/v1/me/credential-vault",
 		"/api/v1/me/credential-vault/abc",
 		"/api/v1/local-browser/x",

@@ -875,6 +875,9 @@ export default {
       sectionSession: '會話設定',
       sectionCallback: '回呼地址',
       sectionKnowledge: '檔案存儲',
+      shareOriginals: '引用原始檔案免登入下載',
+      shareOriginalsHint: '持有連結的人可在一小時內下載原始檔案。請選擇此工作區擁有且智慧體可以檢索的知識庫。',
+      saveOriginalSharing: '儲存分享設定',
       sectionStatus: '運行狀態'
     },
     embed: {

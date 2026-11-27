@@ -875,6 +875,9 @@ export default {
       sectionSession: '세션 설정',
       sectionCallback: '콜백 URL',
       sectionKnowledge: '파일 저장',
+      shareOriginals: '인용된 원본 파일 공유',
+      shareOriginalsHint: '링크를 가진 사람은 한 시간 동안 원본을 다운로드할 수 있습니다. 이 워크스페이스가 소유하고 에이전트가 검색할 수 있는 지식 베이스 하나를 선택하세요.',
+      saveOriginalSharing: '공유 설정 저장',
       sectionStatus: '실행 상태'
     },
     embed: {

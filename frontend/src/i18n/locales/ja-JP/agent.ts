@@ -1942,6 +1942,9 @@ export default {
       sectionSession: 'セッション',
       sectionCallback: 'コールバックURL',
       sectionKnowledge: 'ファイル保存',
+      shareOriginals: '引用元ファイルの共有',
+      shareOriginalsHint: 'リンクを受け取った人は1時間以内に元のファイルをダウンロードできます。このワークスペースが所有し、エージェントが検索できるナレッジベースを1つ選択してください。',
+      saveOriginalSharing: '共有設定を保存',
       sectionStatus: 'ステータス'
     },
     agentType: {

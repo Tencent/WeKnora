@@ -273,3 +273,13 @@ imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
 - 各平台适配器：`internal/im/{wecom,feishu,dingtalk,slack,telegram,mattermost,wechat,qqbot,yunzhijia}/`
 - HTTP 接口层：`internal/handler/im.go`
 - 路由：`internal/router/routes_agent.go` 的 `RegisterIMRoutes` / `RegisterIMChannelRoutes`
+
+### 飞书引用原文件免登录下载
+
+管理员可在**已有飞书渠道 → 文件存储 → 引用原文件免登录下载**中启用分享，选择一个本工作区拥有且该智能体能检索的知识库，然后点击“保存分享设置”。默认关闭。传入附件的自动保存目标可单独设置。
+
+![飞书渠道的原文件分享设置，已选择可分享的知识库](/screenshots/im-feishu-original-sharing.png)
+
+飞书回复中实际引用的原始文件可附带一小时有效的下载链接。收件人打开链接后点击下载；转发后，其他持有者也能下载。普通回答、网页引用、手动内容、跨工作区文档，以及未登记存储实例或未绑定原件的历史资料，会继续按普通回复送达。
+
+需要配置 Redis 和外部可访问的 HTTPS `APP_EXTERNAL_URL`。关闭分享会立即撤销现有链接；更换分享知识库、修改渠道或智能体配置、撤销授权管理员的权限、移动或替换文档也会导致原链接失效。

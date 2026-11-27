@@ -11648,6 +11648,13 @@ definitions:
         example: true
         type: boolean
     type: object
+  internal_handler.IMOriginalSharingRequest:
+    properties:
+      knowledge_base_id:
+        type: string
+    required:
+    - knowledge_base_id
+    type: object
   internal_handler.ImageAttrSchemaData:
     properties:
       attributes:
@@ -18226,6 +18233,54 @@ paths:
       summary: 更新 IM 渠道
       tags:
       - IM 渠道
+  /im-channels/{id}/original-sharing:
+    get:
+      parameters:
+      - description: Feishu channel ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: knowledge_base_id is empty when disabled
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - Bearer: []
+      summary: Get the knowledge base selected for sharing cited originals
+      tags:
+      - IM
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Requires an active workspace administrator.
+        Pass an empty knowledge_base_id to revoke outstanding links.
+      parameters:
+      - description: Feishu channel ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Knowledge base to share
+        in: body
+        name: sharing
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.IMOriginalSharingRequest'
+      responses:
+        "204":
+          description: Updated
+      security:
+      - Bearer: []
+      summary: Delegate original-file sharing for one workspace-owned knowledge base
+      tags:
+      - IM
   /im-channels/{id}/toggle:
     post:
       description: 切换指定 IM 渠道的启用状态
@@ -18321,6 +18376,39 @@ paths:
       summary: IM 平台回调
       tags:
       - IM 回调
+  /im/citation-download:
+    get:
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Download confirmation form
+          schema:
+            type: string
+      summary: Open the cited-original download confirmation
+      tags:
+      - IM
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      parameters:
+      - description: Grant from the link fragment
+        in: formData
+        name: token
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Original file
+          schema:
+            type: file
+        "404":
+          description: Invalid, expired or revoked grant
+      summary: Redeem a one-hour grant for a cited original
+      tags:
+      - IM
   /image-attrs/schema:
     get:
       description: 返回当前版本的图片属性注册表、提示词版本和默认动作。全局只读，不绑定知识库。

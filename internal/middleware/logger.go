@@ -194,7 +194,7 @@ func RequestID() gin.HandlerFunc {
 // bodies are never read or buffered. sanitizeBody is no substitute: it only
 // knows fixed key names, and a value containing \" ends its match early.
 func skipsBodyLogging(path string) bool {
-	return strings.HasPrefix(path, "/api/v1/local-browser/") ||
+	return path == "/api/v1/im/citation-download" || strings.HasPrefix(path, "/api/v1/local-browser/") ||
 		path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser") ||
 		strings.HasPrefix(path, "/api/v1/agent/secure-forms/") ||
 		path == "/api/v1/me/credential-vault" || strings.HasPrefix(path, "/api/v1/me/credential-vault/")

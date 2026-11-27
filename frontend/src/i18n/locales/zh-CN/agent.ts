@@ -875,6 +875,9 @@ export default {
       sectionSession: '会话设置',
       sectionCallback: '回调地址',
       sectionKnowledge: '文件存储',
+      shareOriginals: '引用原文件免登录下载',
+      shareOriginalsHint: '持有链接的人可在一小时内下载原件。请选择一个本工作区拥有且智能体可以检索的知识库。',
+      saveOriginalSharing: '保存分享设置',
       sectionStatus: '运行状态'
     },
     embed: {

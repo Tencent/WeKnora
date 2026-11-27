@@ -875,6 +875,9 @@ export default {
       sectionSession: 'Сессии',
       sectionCallback: 'URL обратного вызова',
       sectionKnowledge: 'Хранение файлов',
+      shareOriginals: 'Доступ к цитируемым оригиналам',
+      shareOriginalsHint: 'Любой получатель ссылки сможет скачать оригинал в течение часа. Выберите одну базу знаний рабочего пространства, доступную этому агенту.',
+      saveOriginalSharing: 'Сохранить настройки доступа',
       sectionStatus: 'Статус'
     },
     embed: {
