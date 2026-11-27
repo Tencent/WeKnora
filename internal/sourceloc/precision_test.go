@@ -175,3 +175,26 @@ func TestImagePlaceholderDoesNotInvalidateVerifiedTextLocators(t *testing.T) {
 		require.False(t, loc.Partial)
 	}
 }
+
+// A long passage that legitimately repeats (patent claims restated in the
+// summary and again in the detailed description, issue #5132) must still
+// be placed, by walking its occurrences in document order. A short
+// repeated title stays rejected: see TestAlignRejectsUnaccountedDuplicate.
+func TestAlignPlacesLongRepeatedPassage(t *testing.T) {
+	passage := "所述原始任务模型基于原始数据训练得到，所述初始增量模型的网络结构与训练数据规模相同，并且支持在线更新"
+	// The passage must clear the 40-rune relaxation bound (see
+	// alignRepeatMinRunes); keep the literal in sync if the bound moves.
+	require.GreaterOrEqual(t, len([]rune(passage)), 40)
+	units := []Unit{
+		{Text: passage, Locator: types.SourceLocator{Type: "pdf", Page: 3}},
+	}
+	md := "权利要求：" + passage + "。\n发明内容：" + passage + "。\n具体实施方式：" + passage + "。\n"
+	blocks := Align(md, units)
+	require.Len(t, blocks, 1)
+	require.Equal(t, 3, blocks[0].Locator.Page)
+
+	// The same shape with a short key (a TOC-style title) must still be
+	// rejected, not placed at its TOC occurrence.
+	require.Empty(t, Align("目录：设备验收合格。\n正文：设备验收合格。",
+		[]Unit{{Text: "设备验收合格", Locator: types.SourceLocator{Type: "pdf", Page: 9}}}))
+}

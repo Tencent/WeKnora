@@ -20,6 +20,25 @@ type Unit struct {
 // Skip units too short to place reliably.
 const alignMinRunes = 2
 
+// alignRepeatMinRunes bounds the one-sided relaxation of the exact-count
+// rule below. A long passage that legitimately repeats — patent claims
+// restated in the summary and again in the detailed description (issue
+// #5132) — may be placed by walking its occurrences in document order.
+// Short keys stay under the exact-count rule so a TOC duplicate is still
+// rejected: a chapter title appears once in the TOC and once in the body,
+// and placing it would point the citation at the TOC page
+// (TestAlignRejectsUnaccountedDuplicate). The bound matches the issue's
+// own measurement: the duplicated sentences are all at least 40 chars.
+const alignRepeatMinRunes = 40
+
+// alignExtraOccurrencesOK reports whether a unit whose text occurs more
+// often in the document than among the source units may still be placed.
+// Missing occurrences (fewer positions than units) are never OK: text
+// absent from the markdown cannot be placed.
+func alignExtraOccurrencesOK(key string, positions, count int) bool {
+	return positions > count && utf8.RuneCountInString(key) >= alignRepeatMinRunes
+}
+
 // Align maps complete source units, never extending a hit through unmatched
 // content. Unknown gaps must stay unknown: assigning them to the preceding
 // block can point a citation at an entirely different page. A unit whose
@@ -72,8 +91,9 @@ func Align(markdown string, units []Unit) []types.SourceBlock {
 		// A unit may only be placed when every occurrence of its text in the
 		// document is accounted for by a source unit (not a TOC or an omitted
 		// block). The occurrence index is built in one pass over the document.
+		// Long passages are the exception: see alignExtraOccurrencesOK.
 		positions := matches[key]
-		if len(positions) != counts[key] {
+		if len(positions) != counts[key] && !alignExtraOccurrencesOK(key, len(positions), counts[key]) {
 			continue
 		}
 		matchIndex := sort.SearchInts(positions, cursor)
