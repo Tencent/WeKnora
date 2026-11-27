@@ -148,7 +148,7 @@ func (r *attachmentFileReader) read(ctx context.Context, input ReadFileInput) (*
 			"attachment %s (%s) could not be parsed: %s. If the original file is in the sandbox, "+
 				"shell tools may read it instead", address, document.FileName, document.ErrorMessage)}, nil
 	case document.Status != types.TemporaryDocumentStatusReady:
-		return &types.ToolResult{Success: false, Error: fmt.Sprintf(
+		return &types.ToolResult{AttachmentParsingPending: true, Error: fmt.Sprintf(
 			"attachment %s (%s) is still being parsed. Parsing continues in the background: "+
 				"call read_file on %s again to keep waiting, or work on other parts of the task first. "+
 				"Do not unpack or parse the original file yourself while it is being parsed",

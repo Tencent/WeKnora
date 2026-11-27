@@ -81,6 +81,16 @@ const (
 	// model is told to re-issue the call, writes an even longer one, and hits
 	// the cap again. Without this the turn burns its whole round budget.
 	maxConsecutiveLengthRounds = 3
+
+	// repeatedToolRoundNoticeAt is how many tool rounds in a row may issue the
+	// same calls and get back the same results before the model is told so.
+	// Success does not mean progress: a query that keeps matching nothing
+	// succeeds every time. Comparing results as well as arguments leaves
+	// polling alone, since a poll whose result changes is making progress.
+	repeatedToolRoundNoticeAt = 3
+	// maxRepeatedToolRounds is where the turn is stopped if the model keeps
+	// repeating after the notice. Unlimited iterations otherwise never end it.
+	maxRepeatedToolRounds = 6
 )
 
 // truncatedAnswerFallback is delivered when every attempt at this turn was cut
@@ -101,6 +111,20 @@ const emptyResponseRetryNotice = "<runtime_event>\n" +
 	" previous model response contained no usable answer or tool calls. Continue the " +
 	"existing task from the current state. Tools and waiting remain available; " +
 	"provide a final response when the task is ready to conclude.\"}\n</runtime_event>"
+
+// repeatedToolRoundNotice tells the model its last rounds re-ran the same
+// calls with the same results, so repeating them again will not help.
+const repeatedToolRoundNotice = "<runtime_event>\n" +
+	"{\"source\":\"runtime\",\"type\":\"repeated_tool_calls\",\"message\":\"The last " +
+	"tool rounds ran the same calls and returned the same results. Repeating them " +
+	"will not produce new information. Change the approach, or give a final " +
+	"response based on what has already been gathered.\"}\n</runtime_event>"
+
+// repeatedToolRoundsStoppedAnswer is delivered when the repeated-tool guard
+// ends the turn, so the user learns why instead of seeing a generic failure.
+const repeatedToolRoundsStoppedAnswer = "I stopped because I kept running the same tool calls " +
+	"and getting the same results, without making progress. Try rephrasing the request " +
+	"or giving more specific details."
 
 func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 	if toolName == "local_browser" && len(arguments) > 0 {

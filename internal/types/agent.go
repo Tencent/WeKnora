@@ -389,6 +389,10 @@ type Cleanable interface {
 
 // ToolResult represents the result of a tool execution
 type ToolResult struct {
+	// ShellOutputWithoutTiming is the shell summary used only for loop detection.
+	ShellOutputWithoutTiming string `json:"-"`
+	// AttachmentParsingPending signals that read_file should be retried after background parsing.
+	AttachmentParsingPending bool `json:"-"`
 	// OutputFiles holds sandbox references for this live result only. History
 	// uses the final answer's persistent resource references instead.
 	// A non-nil empty slice means output inspection found no eligible changes;
