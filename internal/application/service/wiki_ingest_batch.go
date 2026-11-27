@@ -1439,11 +1439,14 @@ func (s *wikiIngestService) mapOneDocument(
 		return nil, nil, nil
 	}
 
-	content := appendScannedPageText(
+	rawContent := appendScannedPageText(
 		reconstructEnrichedContent(ctx, s.chunkRepo, payload.TenantID, chunks),
 		chunks,
 	)
-	rawRuneCount := len([]rune(content))
+	rawRuneCount := len([]rune(rawContent))
+	// Pass 0 batches the full document, so it sees the tail too. The legacy
+	// fallback extractor still takes a single prompt, so it keeps the cap.
+	content := rawContent
 	if len([]rune(content)) > maxContentForWiki {
 		content = string([]rune(content)[:maxContentForWiki])
 	}
@@ -1453,7 +1456,7 @@ func (s *wikiIngestService) mapOneDocument(
 	// text — e.g. a scanned PDF whose pages were converted to images but where
 	// VLM OCR produced nothing usable. Without this guard the LLM would have
 	// only image markup left and would happily fabricate entities/concepts.
-	if !hasSufficientTextContent(content) {
+	if !hasSufficientTextContent(rawContent) {
 		logger.Warnf(ctx,
 			"wiki ingest: doc %s has insufficient text content after stripping image markup (raw_len=%d), skipping LLM extraction",
 			knowledgeID, rawRuneCount,
@@ -1498,7 +1501,8 @@ func (s *wikiIngestService) mapOneDocument(
 		"content_chars": utf8.RuneCountInString(content),
 		"old_pages":     len(oldPageSlugs),
 	})
-	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(
+		ctx, chatModel, payload.KnowledgeBaseID, rawContent, lang, oldPageSlugs, batchCtx)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
 		pass0Failed = true

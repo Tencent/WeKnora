@@ -1,7 +1,9 @@
 package service
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -193,4 +195,100 @@ func repeatRune(r rune, n int) string {
 		out[i] = r
 	}
 	return string(out)
+}
+
+// --- Pass 0 batching (issue #5719) ---
+
+// A long document must reach Pass 0 in full: the batches have to concatenate
+// back to the original text, otherwise entities in the tail never get a page.
+func TestSplitContentIntoExtractionBatchesCoversWholeDocument(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 1200; i++ {
+		fmt.Fprintf(&sb, "paragraph %d carries some prose about the topic.\n\n", i)
+	}
+	content := sb.String()
+	budget := 48000
+	if len([]rune(content)) <= budget {
+		t.Fatalf("fixture too short: %d runes", len([]rune(content)))
+	}
+
+	batches := splitContentIntoExtractionBatches(content, budget)
+
+	if len(batches) < 2 {
+		t.Fatalf("expected the document to be split, got %d batch(es)", len(batches))
+	}
+	if got := strings.Join(batches, ""); got != content {
+		t.Fatalf("batches do not reconstruct the document: got %d runes, want %d",
+			len([]rune(got)), len([]rune(content)))
+	}
+	for i, batch := range batches {
+		if n := len([]rune(batch)); n > budget {
+			t.Fatalf("batch %d is %d runes, over the %d budget", i, n, budget)
+		}
+	}
+}
+
+// A batch should end on a paragraph break rather than mid-sentence when the
+// window contains one.
+func TestSplitContentIntoExtractionBatchesPrefersParagraphBoundary(t *testing.T) {
+	content := strings.Repeat("a", 100) + "\n\n" + strings.Repeat("b", 100)
+	budget := 150
+
+	batches := splitContentIntoExtractionBatches(content, budget)
+
+	if len(batches) != 2 {
+		t.Fatalf("expected 2 batches, got %d", len(batches))
+	}
+	if n := len([]rune(batches[0])); n >= budget {
+		t.Fatalf("first batch is %d runes: it took the hard cut instead of the paragraph break", n)
+	}
+	if !strings.HasSuffix(batches[0], "\n") {
+		t.Fatalf("first batch does not end on the paragraph break: %q", batches[0])
+	}
+	if got := strings.Join(batches, ""); got != content {
+		t.Fatal("batches do not reconstruct the document")
+	}
+}
+
+// A paragraph longer than the budget has no break to cut on, so it must be
+// split by the hard cut instead of being dropped.
+func TestSplitContentIntoExtractionBatchesKeepsOversizeParagraph(t *testing.T) {
+	content := strings.Repeat("x", 250)
+	budget := 100
+
+	batches := splitContentIntoExtractionBatches(content, budget)
+
+	if len(batches) != 3 {
+		t.Fatalf("expected 3 batches, got %d", len(batches))
+	}
+	if got := strings.Join(batches, ""); got != content {
+		t.Fatal("batches do not reconstruct the document")
+	}
+}
+
+// The same entity extracted from two batches must collapse into one item with
+// the aliases unioned, not two competing pages.
+func TestMergeExtractedBySlugFoldsDuplicates(t *testing.T) {
+	batches := [][]extractedItem{
+		{{Name: "Acme", Slug: "entity/acme", Aliases: []string{"Acme Corp"}, Description: "first"}},
+		{
+			{Name: "Acme", Slug: "entity/acme", Aliases: []string{"ACME"}, Description: "second"},
+			{Name: "Beta", Slug: "entity/beta"},
+		},
+	}
+
+	got := mergeExtractedBySlug(batches)
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 merged items, got %d", len(got))
+	}
+	if got[0].Slug != "entity/acme" || got[1].Slug != "entity/beta" {
+		t.Fatalf("order not preserved: %v", []string{got[0].Slug, got[1].Slug})
+	}
+	if got[0].Description != "first" {
+		t.Fatalf("first occurrence should win, got %q", got[0].Description)
+	}
+	if !equalStrings(got[0].Aliases, []string{"Acme Corp", "ACME"}) {
+		t.Fatalf("aliases not unioned: %v", got[0].Aliases)
+	}
 }
