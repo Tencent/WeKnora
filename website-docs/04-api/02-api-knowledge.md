@@ -349,7 +349,7 @@ multipart/form-data 字段：
 | `summary_enabled` | bool | true | 是否为本次导入的文档生成摘要；关闭后解析、索引及其他处理照常执行 |
 | `parser_engine_rules` | []object | 知识库配置 | 省略或传 `null` 时沿用知识库规则；显式传 `[]` 时，本次导入或重解析使用各文件类型的默认引擎。非空数组覆盖知识库规则。 |
 | `parser_engine_overrides` | map[string]string | 空 | 引擎参数，如 `pdf_force_scanned` |
-| `chunking_config` | object | 知识库配置 | 分块参数 |
+| `chunking_config` | object | 知识库配置 | 分块参数。文档级 `token_limit` 省略或为 `null` 时沿用知识库预算，显式传 `0` 时关闭预算并使用字符分块大小。正值覆盖估算 Token 预算。 |
 | `enable_multimodel` / `vlm_config` / `asr_config` | - | 知识库配置 | 多模态与语音识别 |
 | `question_generation_config` | object | 知识库配置 | 问题生成 |
 | `graph_enabled` / `extract_config` | - | 知识库配置 | 图谱抽取 |

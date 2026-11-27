@@ -316,7 +316,7 @@ func TestCreateKnowledgeFromFile_PersistsProcessOverrides(t *testing.T) {
 
 	chunkSize := 512
 	overrides := &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: chunkSize},
+		ChunkingConfig: &types.ChunkingConfigOverride{ChunkingConfig: types.ChunkingConfig{ChunkSize: chunkSize}},
 		SummaryEnabled: processConfigBoolPtr(false),
 	}
 

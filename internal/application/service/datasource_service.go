@@ -587,7 +587,7 @@ func (s *DataSourceService) PauseDataSource(ctx context.Context, id string) erro
 	}
 
 	ds.Status = types.DataSourceStatusPaused
-	if err := s.dsRepo.Update(ctx, ds); err != nil {
+	if err := s.dsRepo.UpdateStatus(ctx, id, types.DataSourceStatusPaused); err != nil {
 		logger.Errorf(ctx, "failed to pause data source: %v", err)
 		return err
 	}
@@ -612,7 +612,7 @@ func (s *DataSourceService) ResumeDataSource(ctx context.Context, id string) err
 	}
 
 	ds.Status = types.DataSourceStatusActive
-	if err := s.dsRepo.Update(ctx, ds); err != nil {
+	if err := s.dsRepo.UpdateStatus(ctx, id, types.DataSourceStatusActive); err != nil {
 		logger.Errorf(ctx, "failed to resume data source: %v", err)
 		return err
 	}

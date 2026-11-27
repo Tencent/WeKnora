@@ -2166,6 +2166,12 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 	}
 
 	var remainingSourcesContent strings.Builder
+	// remainingSourceCount separates "the page lost every source" (the only
+	// case where collapsing to the empty-page notice is correct) from "its
+	// source is still attached but shrank". The builder cannot answer that:
+	// inside the retract branch it receives a sentinel line when nothing
+	// remains, so Len() is always non-zero there.
+	var remainingSourceCount int
 	var deletedContent strings.Builder
 	var relatedSlugs strings.Builder
 	var newContentBuilder strings.Builder
@@ -2204,6 +2210,7 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 			} else {
 				fmt.Fprintf(&remainingSourcesContent, "<document>\n<title>%s</title>\n<content>\n(summary not available)\n</content>\n</document>\n\n", refTitle)
 			}
+			remainingSourceCount++
 		}
 		if remainingSourcesContent.Len() == 0 {
 			remainingSourcesContent.WriteString("(no remaining sources)")
@@ -2329,6 +2336,10 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 		if len(retracts) > 0 {
 			hasRetractionsStr = "1"
 		}
+		hasRemainingSourcesStr := ""
+		if remainingSourceCount > 0 {
+			hasRemainingSourcesStr = "1"
+		}
 
 		// Fall back gracefully if title/type are still unset (shouldn't happen
 		// for well-formed updates — both get populated from `additions` above,
@@ -2348,6 +2359,7 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyUserPrompt, map[string]string{
 			"HasAdditions":            hasAdditionsStr,
 			"HasRetractions":          hasRetractionsStr,
+			"HasRemainingSources":     hasRemainingSourcesStr,
 			"PageSlug":                slug,
 			"PageTitle":               pageTitle,
 			"PageType":                pageType,

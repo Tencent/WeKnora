@@ -29039,6 +29039,97 @@
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.ChunkingConfigOverride": {
+            "type": "object",
+            "properties": {
+                "child_chunk_size": {
+                    "description": "ChildChunkSize is the size of child chunks used for embedding (default: 384).\nOnly used when EnableParentChild is true.",
+                    "type": "integer",
+                    "maximum": 10000,
+                    "minimum": 1,
+                    "x-agent": true
+                },
+                "chunk_overlap": {
+                    "description": "Chunk overlap in characters.",
+                    "type": "integer",
+                    "maximum": 5000,
+                    "minimum": 0,
+                    "x-agent": true
+                },
+                "chunk_size": {
+                    "description": "Chunk size in characters. Empty on create uses the server default.",
+                    "type": "integer",
+                    "maximum": 10000,
+                    "minimum": 100,
+                    "x-agent": true
+                },
+                "enable_parent_child": {
+                    "description": "EnableParentChild splits into large parent chunks and small child chunks.\nSearch matches a child and returns its parent.",
+                    "type": "boolean",
+                    "x-agent": true
+                },
+                "languages": {
+                    "description": "Languages hints the splitter, for example de or zh. Empty detects the language from the document.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
+                },
+                "parent_chunk_size": {
+                    "description": "ParentChunkSize is the size of parent chunks (default: 4096).\nOnly used when EnableParentChild is true.",
+                    "type": "integer",
+                    "maximum": 20000,
+                    "minimum": 1,
+                    "x-agent": true
+                },
+                "parser_engine_rules": {
+                    "description": "ParserEngineRules configures which parser engine to use for each file type.\nWhen empty, DefaultParserEngine is used (builtin/simple routing, except\ntypes that only a specific engine can parse: ppt/pptx fall back to\nmarkitdown). A linked anydoc binding is preferred for every type it\nconverts.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
+                    },
+                    "x-agent": true,
+                    "x-agent-response": true
+                },
+                "separators": {
+                    "description": "Separators, in the order they are tried.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "x-agent": true,
+                    "x-agent-maximum": "20"
+                },
+                "strategy": {
+                    "description": "Strategy selects how documents are split: auto, heading, heuristic,\nrecursive or legacy. Empty keeps the server default.",
+                    "type": "string",
+                    "enum": [
+                        "auto",
+                        "heading",
+                        "heuristic",
+                        "recursive",
+                        "legacy"
+                    ],
+                    "x-agent": true
+                },
+                "table_metadata_instructions": {
+                    "description": "TableMetadataInstructions is extra guidance for CSV and Excel summaries. The output format stays fixed.",
+                    "type": "string",
+                    "x-agent": true,
+                    "x-agent-detail": true,
+                    "x-agent-max-bytes": "4000"
+                },
+                "token_limit": {
+                    "description": "TokenLimit inherits the knowledge base budget when nil and disables it when zero.",
+                    "type": "integer",
+                    "maximum": 100000,
+                    "minimum": 0,
+                    "x-agent": true
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.ConnectionConfig": {
             "type": "object",
             "properties": {
@@ -32399,7 +32490,7 @@
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig"
                 },
                 "chunking_config": {
-                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfigOverride"
                 },
                 "enable_multimodel": {
                     "type": "boolean"

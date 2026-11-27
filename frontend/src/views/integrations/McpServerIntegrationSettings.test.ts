@@ -5,7 +5,6 @@ import test from 'node:test'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
-import * as mcpBaseUrl from '../../utils/mcpBaseUrl'
 import * as integration from './mcpServerIntegration'
 
 const filename = new URL('./McpServerIntegrationSettings.vue', import.meta.url)
@@ -57,7 +56,7 @@ async function fixture() {
     'tdesign-vue-next': { MessagePlugin: { error: assert.fail } },
     '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true }) },
     '@/utils/clipboard': { copyWithToast: assert.fail },
-    '@/utils/mcpBaseUrl': mcpBaseUrl,
+    '@/utils/mcpBaseUrl': { resolveMcpBaseUrl: () => '' },
     '@/composables/useApiBaseUrlDisplay': { useApiBaseUrlDisplay: () => ({ apiBaseUrlDisplay: vue.ref('https://example.com') }) },
     '@/components/settings/SettingDrawer.vue': { default: {} },
     '@/stores/chatResources': { useChatResourcesStore: () => resources },

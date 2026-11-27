@@ -41,7 +41,7 @@ permissions:
 env:
   # The harness release this plugin is verified against. Bump it together with
   # the compatibility note in packages/dsh-weknora/README.md.
-  DSH_PINNED_SPEC: "@deepseek-ai/dsh@0.1.0-rc.8"
+  DSH_PINNED_SPEC: "@deepseek-ai/dsh@0.2.2-rc.5"
   # The contract's Go half lives in this repository's module. app.yml runs it
   # only for a Go diff, so a change to the fixture or to the plugin alone would
   # otherwise skip the side that checks WeKnora still serves those calls.
