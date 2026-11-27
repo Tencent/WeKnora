@@ -2,6 +2,7 @@ package ima
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -55,6 +56,10 @@ func (c *Connector) ResolveResourceAncestors(
 // (and the sync task holding it) spinning until the task deadline; the value
 // mirrors the guard Confluence and DingTalk already carry.
 const maxPaginationHops = 10000
+
+// A note without an exportable body remains a deterministic skip for this
+// media ID. This marker cannot collide with a hexadecimal SHA-256 body hash.
+const skippedNoteHash = "skipped"
 
 // nextPageCursor validates the progress of a cursor-paginated loop after page
 // `page` (1-based) has been fetched: a cursor handed back twice means the
@@ -217,11 +222,13 @@ func (c *Connector) FetchAll(
 //     ingest layer's existing
 //     external_id match triggers
 //     delete-and-recreate)
-//   - logical_key unchanged, media_id unchanged      → skip
+//   - logical_key unchanged, media_id unchanged      → skip (files)
+//   - note media_id unchanged, body hash changed     → update
 //   - logical_key present last sync, absent this sync → IsDeleted tombstone
 //
-// LIMITATION: IMA still exposes no per-item updated_at, so an in-place edit
-// that keeps the SAME media_id (same file bytes replaced under the hood by
+// Notes have no listing revision, so incremental sync re-reads their bodies.
+// LIMITATION: For other media, IMA still exposes no per-item updated_at, so an
+// in-place edit that keeps the SAME media_id (same file bytes replaced under the hood by
 // IMA, if that ever happens) is invisible to us. Users needing a full content
 // refresh should periodically run a Full sync.
 func (c *Connector) FetchIncremental(
@@ -273,6 +280,7 @@ func (c *Connector) walk(
 	newCursor := &imaCursor{
 		LastSyncTime: time.Now(),
 		KBLogical:    make(map[string]map[string]string),
+		KBNoteHashes: make(map[string]map[string]string),
 	}
 	var out []types.FetchedItem
 
@@ -283,13 +291,16 @@ func (c *Connector) walk(
 		}
 
 		var prevSet map[string]string
+		var prevNoteHashes map[string]string
 		if incremental && prev != nil {
 			prevSet = prev.KBLogical[kbID]
+			prevNoteHashes = prev.KBNoteHashes[kbID]
 		}
 		// The full listing determines absence; the cursor tracks the last
 		// resolved version of each known document.
 		present := make(map[string]struct{}, len(files))
 		syncedLogical := make(map[string]string, len(files))
+		noteHashes := make(map[string]string)
 		keys := make([]string, len(files))
 		for i, f := range files {
 			key := logicalKey(kbID, f.ParentFolderID, f.Title)
@@ -297,6 +308,7 @@ func (c *Connector) walk(
 			present[key] = struct{}{}
 		}
 		newCursor.KBLogical[kbID] = syncedLogical
+		newCursor.KBNoteHashes[kbID] = noteHashes
 
 		var replaced, failed int
 		for i, f := range files {
@@ -305,16 +317,33 @@ func (c *Connector) walk(
 			// Incremental skip / replacement detection.
 			prevMediaID, seen := prevSet[key]
 			if seen {
-				if prevMediaID == f.MediaID {
+				if prevMediaID == f.MediaID &&
+					(f.MediaType != mediaTypeNote || prevNoteHashes[key] == skippedNoteHash) {
 					syncedLogical[key] = prevMediaID
+					if f.MediaType == mediaTypeNote {
+						noteHashes[key] = skippedNoteHash
+					}
 					continue
 				}
-				replaced++
+				if prevMediaID != f.MediaID {
+					replaced++
+				}
 			}
 
 			item, outcome := fetchOneMedia(ctx, cli, kbID, key, f, folderPath)
 			switch outcome {
 			case fetchOK:
+				if f.MediaType == mediaTypeNote {
+					// IMA's listing has no note revision. Re-read mutable notes,
+					// but emit only new bodies (or a new media ID). Legacy cursors
+					// have no hash and establish one on their first successful read.
+					hash := fmt.Sprintf("%x", sha256.Sum256(item.Content))
+					noteHashes[key] = hash
+					if seen && prevMediaID == f.MediaID && prevNoteHashes[key] == hash {
+						syncedLogical[key] = f.MediaID
+						continue
+					}
+				}
 				// Ingestion derives the knowledge folder from FileName, not metadata.
 				if dir := types.NormalizeKnowledgeFolderPath(f.FolderPath); dir != "" && item.FileName != "" {
 					item.FileName = dir + "/" + item.FileName
@@ -325,11 +354,17 @@ func (c *Connector) walk(
 				// Deterministic skip (unsupported media type, no URL): record it
 				// so we do not pay for get_media_info on every future sync.
 				syncedLogical[key] = f.MediaID
+				if f.MediaType == mediaTypeNote {
+					noteHashes[key] = skippedNoteHash
+				}
 			case fetchFailed:
 				// Keep an existing document tracked for deletion, but retain
 				// its old version so a replacement is still retried.
 				if seen {
 					syncedLogical[key] = prevMediaID
+					if hash := prevNoteHashes[key]; hash != "" {
+						noteHashes[key] = hash
+					}
 				}
 				failed++
 			}
