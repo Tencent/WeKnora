@@ -127,12 +127,19 @@ func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServi
 	}
 	if svc.IsBuiltin {
 		// Builtin services are shared across tenants — strip everything that
-		// could leak how this tenant configured the underlying provider.
+		// could leak how this tenant configured the underlying provider:
+		// transport details (URL, headers, env, stdio) and any credential.
+		// AuthType / Scopes / AuthServerMetadataURL / ClientID survive: they
+		// are public OAuth configuration needed by the settings dialog to
+		// render the Authorize button (#5618); secrets (APIKey, Token,
+		// ClientSecret) have no response fields at all, so they cannot leak.
 		resp.URL = nil
 		resp.Headers = nil
 		resp.EnvVars = nil
 		resp.StdioConfig = nil
-		resp.AuthConfig = nil
+		if resp.AuthConfig != nil {
+			resp.AuthConfig.CustomHeaders = nil
+		}
 	} else {
 		resp.Credentials = map[string]CredentialFieldMetadata{
 			"api_key":       {Configured: svc.AuthConfig != nil && svc.AuthConfig.APIKey != ""},
