@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -122,20 +123,25 @@ func DefaultConfig() SplitterConfig {
 // blank line, and the previous unbounded [^\]]* / [^)]+ let a stray '[' left
 // behind by OCR swallow whole paragraphs as one "protected" atomic span,
 // defeating chunking entirely.
-var protectedPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?s)\$\$.*?\$\$`), // LaTeX block math
+var protectedPatterns = []struct {
+	pattern *regexp.Regexp
+	inline  bool
+}{
+	{pattern: regexp.MustCompile(`(?s)\$\$.*?\$\$`)}, // LaTeX block math
 	// Markdown images / links: single line, bounded so a stray OCR '['
 	// cannot swallow a paragraph (CommonMark forbids blank-line spans).
-	regexp.MustCompile(`!\[[^\]\n]{0,200}\]\([^)\n]{1,500}\)`),
-	regexp.MustCompile(`\[[^\]\n]{1,200}\]\([^)\n]{1,500}\)`),
-	regexp.MustCompile("(?m)[ ]*(?:\\|[^|\\n]*)+\\|[\\r\\n]+\\s*(?:\\|\\s*:?-{3,}:?\\s*)+\\|[\\r\\n]+"), // Table header+separator
-	regexp.MustCompile("(?m)[ ]*(?:\\|[^|\\n]*)+\\|[\\r\\n]+"),                                          // Table rows
-	regexp.MustCompile("(?s)```(?:\\w+)?[\\r\\n].*?```"),                                                // Fenced code blocks
-	regexp.MustCompile("`[^`\\r\\n]+`"),                                                                 // Markdown inline code
+	{pattern: regexp.MustCompile(`!\[[^\]\n]{0,200}\]\([^)\n]{1,500}\)`), inline: true},
+	{pattern: regexp.MustCompile(`\[[^\]\n]{1,200}\]\([^)\n]{1,500}\)`), inline: true},
+	// Table header and separator, followed by the standalone row pattern.
+	{pattern: regexp.MustCompile(`(?m)[ ]*(?:\|[^|\n]*)+\|[\r\n]+\s*(?:\|\s*:?-{3,}:?\s*)+\|[\r\n]+`)},
+	{pattern: regexp.MustCompile(`(?m)[ ]*(?:\|[^|\n]*)+\|[\r\n]+`)},
+	{pattern: regexp.MustCompile("(?s)```(?:\\w+)?[\\r\\n].*?```")}, // Fenced code blocks
+	{pattern: regexp.MustCompile("`[^`\\r\\n]+`"), inline: true},    // Markdown inline code
 }
 
 type span struct {
 	start, end int
+	inline     bool
 }
 
 // protectedSpansRune converts byte-offset protected spans to rune offsets
@@ -162,22 +168,19 @@ func protectedSpansRune(text string, byteSpans []span) []span {
 			byteIdx += size
 			runeIdx++
 		}
-		out = append(out, span{start: startRune, end: runeIdx})
+		out = append(out, span{start: startRune, end: runeIdx, inline: s.inline})
 	}
 	return out
 }
 
 // protectedSpans finds all non-overlapping protected regions in text.
 func protectedSpans(text string) []span {
-	type match struct {
-		start, end int
-	}
-	var all []match
+	var all []span
 	for _, pat := range protectedPatterns {
-		locs := pat.FindAllStringIndex(text, -1)
+		locs := pat.pattern.FindAllStringIndex(text, -1)
 		for _, loc := range locs {
 			if loc[1]-loc[0] > 0 {
-				all = append(all, match{loc[0], loc[1]})
+				all = append(all, span{start: loc[0], end: loc[1], inline: pat.inline})
 			}
 		}
 	}
@@ -187,7 +190,7 @@ func protectedSpans(text string) []span {
 
 	// Matches are grouped by pattern, not document position. Avoid quadratic
 	// insertion sorting when a long document interleaves different patterns.
-	slices.SortFunc(all, func(a, b match) int {
+	slices.SortFunc(all, func(a, b span) int {
 		if a.start != b.start {
 			return cmp.Compare(a.start, b.start)
 		}
@@ -199,11 +202,36 @@ func protectedSpans(text string) []span {
 	lastEnd := 0
 	for _, m := range all {
 		if m.start >= lastEnd {
-			result = append(result, span{m.start, m.end})
+			result = append(result, m)
 			lastEnd = m.end
 		}
 	}
 	return result
+}
+
+// unitProtectedSpans keeps block boundaries and inline spans that could be cut by
+// a configured separator. Other inline spans stay within their prose units.
+func unitProtectedSpans(text string, protected []span, separators []string) []span {
+	var units []span
+	for _, p := range protected {
+		if !p.inline {
+			units = append(units, p)
+			continue
+		}
+		for _, sep := range separators {
+			if sep == "" {
+				continue
+			}
+			// Check enough surrounding text to catch separators crossing either edge.
+			start := max(0, p.start-len(sep)+1)
+			end := min(len(text), p.end+len(sep)-1)
+			if strings.Contains(text[start:end], sep) {
+				units = append(units, p)
+				break
+			}
+		}
+	}
+	return units
 }
 
 // splitUnit is a piece of text with its original position.
@@ -306,13 +334,15 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 	// Step 2: Split non-protected regions by separators, keep protected as atomic units.
 	// chunkSize is forwarded so splitBySeparators can recursively apply lower-priority
 	// separators to oversize pieces (Python-parity recursive split).
-	units := buildUnitsWithProtection(text, protected, separators, chunkSize)
+	unitSpans := unitProtectedSpans(text, protected, separators)
+	units := buildUnitsWithProtection(text, unitSpans, separators, chunkSize)
+	protectedRunes := protectedSpansRune(text, protected)
 	if tokenBudget > 0 {
-		units = splitOversizeUnits(units, tokenBudget)
+		units = splitOversizeUnits(units, tokenBudget, protectedRunes)
 	}
 
 	// Step 3: Merge units into chunks with overlap
-	return mergeUnits(units, chunkSize, chunkOverlap)
+	return mergeUnits(units, chunkSize, chunkOverlap, protectedRunes)
 }
 
 // buildUnitsWithProtection splits text into units, preserving protected spans as atomic.
@@ -411,7 +441,7 @@ func buildUnitsWithProtection(text string, protected []span, separators []string
 // Enforces an absolute maximum chunk size to prevent exceeding downstream limits (e.g., embedding APIs).
 // Active contextual headers (e.g., Markdown table headers) are prepended to new
 // chunks so that every chunk carries its own header context.
-func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
+func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int, protected []span) []Chunk {
 	if len(units) == 0 {
 		return nil
 	}
@@ -443,17 +473,7 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 			runes := []rune(u.text)
 			offset := 0
 			for offset < len(runes) {
-				chunkEnd := offset + absoluteMaxSize
-				if chunkEnd > len(runes) {
-					chunkEnd = len(runes)
-				} else {
-					for i := chunkEnd - 1; i > offset && i > chunkEnd-200; i-- {
-						if runes[i] == '\n' || runes[i] == ' ' {
-							chunkEnd = i + 1
-							break
-						}
-					}
-				}
+				chunkEnd := protectedRuneSplitEnd(runes, offset, absoluteMaxSize, u.start, protected)
 
 				chunkText := string(runes[offset:chunkEnd])
 				chunks = append(chunks, Chunk{
@@ -489,7 +509,7 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 			chunks = append(chunks, buildChunk(current, len(chunks)))
 
 			// Keep overlap from the end of current
-			current, curLen = computeOverlap(current, chunkOverlap, chunkSize, uLen)
+			current, curLen = computeOverlap(current, chunkOverlap, chunkSize, uLen, protected)
 
 			// Shrink overlap further if needed to fit headers + next unit
 			if headers != "" && headersLen+uLen <= chunkSize {
@@ -622,7 +642,7 @@ func buildChunk(units []splitUnit, seq int) Chunk {
 // collapsed to zero overlap for ordinary paragraphs).
 const semanticOverlapLookbehind = 4 // rune length of the longest separator: \r\n\r\n
 
-func computeOverlap(current []splitUnit, chunkOverlap, chunkSize, nextLen int) ([]splitUnit, int) {
+func computeOverlap(current []splitUnit, chunkOverlap, chunkSize, nextLen int, protected []span) ([]splitUnit, int) {
 	if chunkOverlap <= 0 {
 		return nil, 0
 	}
@@ -651,7 +671,8 @@ func computeOverlap(current []splitUnit, chunkOverlap, chunkSize, nextLen int) (
 	if originalWindowStart < 0 {
 		originalWindowStart = 0
 	}
-	boundaryEnd, ok := findSemanticOverlapBoundaryEndingAtOrAfter(windowText, originalWindowStart)
+	boundaryEnd, ok := findSemanticOverlapBoundaryEndingAtOrAfter(
+		windowText, originalWindowStart, window[0].start, protected)
 	if !ok {
 		return nil, 0
 	}
@@ -723,18 +744,11 @@ type semanticOverlapBoundary struct {
 	priority int
 }
 
-// findSemanticOverlapBoundary returns the rune offset immediately after the
-// selected separator. Boundaries inside protected Markdown/code/math regions
-// are ignored, and a boundary is invalid when only whitespace follows it.
-func findSemanticOverlapBoundary(text string) (int, bool) {
-	return findSemanticOverlapBoundaryEndingAtOrAfter(text, 0)
-}
-
 // findSemanticOverlapBoundaryEndingAtOrAfter applies the normal priority and
 // earliest-position rules only to candidates whose end-exclusive rune offset
 // is at least minEnd. Filtering before comparison prevents an earlier but
 // ineligible lookbehind separator from hiding a later eligible boundary.
-func findSemanticOverlapBoundaryEndingAtOrAfter(text string, minEnd int) (int, bool) {
+func findSemanticOverlapBoundaryEndingAtOrAfter(text string, minEnd, sourceStart int, protected []span) (int, bool) {
 	runes := []rune(text)
 	if len(runes) == 0 {
 		return 0, false
@@ -746,13 +760,24 @@ func findSemanticOverlapBoundaryEndingAtOrAfter(text string, minEnd int) (int, b
 		return 0, false
 	}
 
-	protected := protectedSpansRune(text, protectedSpans(text))
-	insideProtected := func(pos int) bool {
+	// Use source ranges so protection survives even when the lookbehind
+	// window starts after an opening delimiter.
+	first := sort.Search(len(protected), func(i int) bool { return protected[i].end > sourceStart })
+	protected = protected[first:]
+	sourceEnd := sourceStart + len(runes)
+	last := sort.Search(len(protected), func(i int) bool { return protected[i].start >= sourceEnd })
+	protected = protected[:last]
+	if last > 0 && protected[last-1].end > sourceEnd {
+		// The current chunk ended inside a span to satisfy a hard size cap.
+		// Every suffix would repeat an incomplete span.
+		return 0, false
+	}
+	intersectsProtected := func(start, end int) bool {
 		for _, p := range protected {
-			if pos < p.start {
+			if p.start >= sourceStart+end {
 				return false
 			}
-			if pos >= p.start && pos < p.end {
+			if p.end > sourceStart+start {
 				return true
 			}
 		}
@@ -766,7 +791,7 @@ func findSemanticOverlapBoundaryEndingAtOrAfter(text string, minEnd int) (int, b
 	found := false
 	consider := func(start, end, priority int) {
 		if start < 0 || end <= start || end < minEnd || end > len(runes) ||
-			insideProtected(start) || !hasMeaningfulTail(end) {
+			intersectsProtected(start, end) || !hasMeaningfulTail(end) {
 			return
 		}
 		candidate := semanticOverlapBoundary{start: start, end: end, priority: priority}
