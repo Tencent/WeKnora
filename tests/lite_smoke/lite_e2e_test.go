@@ -44,16 +44,9 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// TestLiteEditionEndToEndSmoke boots a real compiled WeKnora-lite server
-// subprocess (SQLite + sqlite-vec + FTS5 + local storage + in-memory stream
-// manager, zero external services) and exercises the full user journey:
-// health/system info -> register & login -> model creation -> KB creation ->
-// Markdown upload & async indexing -> hybrid vector/FTS5 search -> streaming
-// RAG chat over SSE -> persisted message history -> graceful SIGTERM shutdown.
-func TestLiteEditionEndToEndSmoke(t *testing.T) {
+func buildLiteServer(t *testing.T) (string, string) {
+	t.Helper()
 	repoRoot := findRepoRoot(t)
-	llmSrv := startLoopbackOpenAIServer(t)
-
 	workDir := t.TempDir()
 	require.NoError(t, os.Symlink(filepath.Join(repoRoot, "config"), filepath.Join(workDir, "config")))
 	require.NoError(t, os.Symlink(filepath.Join(repoRoot, "migrations"), filepath.Join(workDir, "migrations")))
@@ -81,6 +74,11 @@ func TestLiteEditionEndToEndSmoke(t *testing.T) {
 	buildOut, err := buildCmd.CombinedOutput()
 	require.NoErrorf(t, err, "build WeKnora-lite failed:\n%s", string(buildOut))
 
+	return workDir, binPath
+}
+
+func startLiteServer(t *testing.T, workDir, binPath string, extraEnv ...string) (*http.Client, string, func()) {
+	t.Helper()
 	port := allocateFreePort(t)
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 
@@ -110,9 +108,12 @@ func TestLiteEditionEndToEndSmoke(t *testing.T) {
 		"WEKNORA_SANDBOX_MODE=disabled",
 		"ENABLE_GRAPH_RAG=false",
 		"DISABLE_REGISTRATION=false",
+		"WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL=",
+		"WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_PASSWORD=",
 		"SSRF_WHITELIST=127.0.0.1,localhost",
 		"CONCURRENCY_POOL_SIZE=2",
 	)
+	srvCmd.Env = append(srvCmd.Env, extraEnv...)
 	require.NoError(t, srvCmd.Start())
 
 	var waitErr error
@@ -147,6 +148,29 @@ func TestLiteEditionEndToEndSmoke(t *testing.T) {
 		Transport: &http.Transport{Proxy: nil},
 	}
 	waitForHealth(t, client, baseURL, done, func() error { return waitErr }, &serverLogs)
+
+	return client, baseURL, func() {
+		t.Helper()
+		require.NoError(t, srvCmd.Process.Signal(syscall.SIGTERM))
+		select {
+		case <-done:
+			require.NoErrorf(t, waitErr, "WeKnora-lite did not exit cleanly on SIGTERM:\n%s", serverLogs.String())
+		case <-time.After(15 * time.Second):
+			t.Fatalf("timed out waiting for WeKnora-lite graceful shutdown:\n%s", serverLogs.String())
+		}
+	}
+}
+
+// TestLiteEditionEndToEndSmoke boots a real compiled WeKnora-lite server
+// subprocess (SQLite + sqlite-vec + FTS5 + local storage + in-memory stream
+// manager, zero external services) and exercises the full user journey:
+// health/system info -> register & login -> model creation -> KB creation ->
+// Markdown upload & async indexing -> hybrid vector/FTS5 search -> streaming
+// RAG chat over SSE -> persisted message history -> graceful SIGTERM shutdown.
+func TestLiteEditionEndToEndSmoke(t *testing.T) {
+	llmSrv := startLoopbackOpenAIServer(t)
+	workDir, binPath := buildLiteServer(t)
+	client, baseURL, stop := startLiteServer(t, workDir, binPath)
 
 	// 1. Register + login user and verify Lite edition metadata.
 	const (
@@ -386,13 +410,7 @@ func TestLiteEditionEndToEndSmoke(t *testing.T) {
 	moveAndVerify(kbID, moveDstKBID, "reuse_vectors", moveIDs)
 
 	// 9. Graceful shutdown on SIGTERM must exit cleanly (code 0).
-	require.NoError(t, srvCmd.Process.Signal(syscall.SIGTERM))
-	select {
-	case <-done:
-		require.NoErrorf(t, waitErr, "WeKnora-lite did not exit cleanly on SIGTERM:\n%s", serverLogs.String())
-	case <-time.After(15 * time.Second):
-		t.Fatalf("timed out waiting for WeKnora-lite graceful shutdown:\n%s", serverLogs.String())
-	}
+	stop()
 }
 
 func startLoopbackOpenAIServer(t *testing.T) *httptest.Server {
