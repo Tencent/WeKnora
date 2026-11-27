@@ -211,12 +211,13 @@ export async function startMockWeknora(options = {}) {
           return
         }
         const limit = Number(url.searchParams.get('limit') ?? '20')
+        const offset = Number(url.searchParams.get('offset') ?? '0')
+        const named = (options.namedDocuments ?? DOCUMENTS)
+          .filter(document => document.knowledge_title.toLowerCase().includes(keyword.toLowerCase()))
         json(200, {
           success: true,
-          data: DOCUMENTS
-            .filter(document => document.knowledge_title.toLowerCase().includes(keyword.toLowerCase()))
-            .slice(0, limit)
-            .map(document => documentRecord(document)),
+          data: named.slice(offset, offset + limit).map(documentRecord),
+          has_more: offset + limit < named.length,
         })
         return
       }
