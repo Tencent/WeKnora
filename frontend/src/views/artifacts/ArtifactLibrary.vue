@@ -35,7 +35,7 @@
     </div>
 
     <div ref="scrollRoot" class="library-main">
-      <div v-if="loading && !items.length" class="artifact-rows">
+      <div v-if="loading && !items.length && !hasLoadedOnce" class="artifact-rows">
         <div v-for="n in 6" :key="'skel-' + n" class="artifact-row is-skeleton">
           <t-skeleton animation="gradient" :row-col="[[{ width: '32px', height: '38px', type: 'rect' },
             { width: '40%', height: '14px' }]]" />
@@ -252,6 +252,9 @@ const items = ref<ArtifactLibraryItem[]>([])
 const total = ref(0)
 const page = ref(0)
 const loading = ref(false)
+// Only the first load of this view owns the skeleton: later filter changes keep
+// the rows on screen and swap them when the response arrives.
+const hasLoadedOnce = ref(false)
 const loadError = ref(false)
 const downloading = reactive<Record<string, boolean>>({})
 const deleting = reactive<Record<string, boolean>>({})
@@ -309,15 +312,20 @@ async function fetchPage(nextPage: number) {
     if (mine !== ticket) return
     console.error('[ArtifactLibrary] load failed:', err)
     loadError.value = true
-    if (nextPage > 1) MessagePlugin.error(t('artifactLibrary.loadFailed'))
+    // Keep the rows on screen, so a failed refresh needs its own signal instead
+    // of the empty error state that only renders when the list is empty.
+    if (nextPage > 1 || items.value.length) MessagePlugin.error(t('artifactLibrary.loadFailed'))
   } finally {
-    if (mine === ticket) loading.value = false
+    if (mine === ticket) {
+      loading.value = false
+      hasLoadedOnce.value = true
+    }
   }
 }
 
 function reload() {
-  items.value = []
-  total.value = 0
+  // Keep the current rows (stale-while-revalidate): clearing them here would
+  // flash the skeleton/empty state on every tab or search change.
   page.value = 0
   void fetchPage(1)
 }
