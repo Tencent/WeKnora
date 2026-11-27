@@ -33,9 +33,9 @@ func NewBackendScopedFileService(backendID string, inner interfaces.FileService)
 // resolve to their provider path instead of failing scheme/bucket validation.
 func storageBackendInnerPath(path string) string {
 	if _, inner, ok := types.ParseStorageBackendPath(path); ok {
-		return inner
+		path = inner
 	}
-	return path
+	return types.NormalizeStorageProviderPath(path)
 }
 
 func (s *backendScopedFileService) unwrap(path string) (string, error) {

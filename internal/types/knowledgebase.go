@@ -528,10 +528,37 @@ func InferStorageFromFilePath(filePath string) string {
 	}
 }
 
+// NormalizeStorageProviderPath restores provider URIs that were cleaned by
+// filepath.Clean in older versions (for example, "s3:/bucket/key").
+func NormalizeStorageProviderPath(filePath string) string {
+	backendID, providerPath, scoped := ParseStorageBackendPath(filePath)
+	if scoped {
+		filePath = providerPath
+	}
+
+	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs", "dummy"} {
+		legacyPrefix := provider + ":/"
+		if strings.HasPrefix(filePath, legacyPrefix) && !strings.HasPrefix(filePath, provider+"://") {
+			rest := strings.TrimLeft(strings.TrimPrefix(filePath, legacyPrefix), "/")
+			filePath = provider + "://" + rest
+			if scoped {
+				return BuildStorageBackendPath(backendID, filePath)
+			}
+			return filePath
+		}
+	}
+	if scoped {
+		return BuildStorageBackendPath(backendID, filePath)
+	}
+	return filePath
+}
+
 // ParseProviderScheme extracts the provider from a provider:// scheme path.
 // e.g. "minio://bucket/key" → "minio", "local://tenant/file.pdf" → "local"
+// Legacy single-slash provider paths are normalized before parsing.
 // Returns "" if the path does not use a known provider scheme.
 func ParseProviderScheme(filePath string) string {
+	filePath = NormalizeStorageProviderPath(filePath)
 	if _, inner, ok := ParseStorageBackendPath(filePath); ok {
 		filePath = inner
 	}

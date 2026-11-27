@@ -19,6 +19,7 @@ func TestStorageBackendInnerPath(t *testing.T) {
 		{"canonical s3 path", "storage://be-1/s3://weknora/data/a.jpg", "s3://weknora/data/a.jpg"},
 		{"canonical minio path", "storage://be-1/minio://weknora/data/a.jpg", "minio://weknora/data/a.jpg"},
 		{"bare provider path unchanged", "s3://weknora/data/a.jpg", "s3://weknora/data/a.jpg"},
+		{"legacy single-slash provider path normalized", "s3:/weknora/data/a.jpg", "s3://weknora/data/a.jpg"},
 		{
 			"legacy URL unchanged",
 			"https://bucket.cos.region.myqcloud.com/a.jpg",
@@ -46,9 +47,12 @@ func TestParseS3FilePathAcceptsCanonicalBackendPath(t *testing.T) {
 		t.Fatalf("object key = %q, want %q", got, "data/10000/exports/a.jpg")
 	}
 
-	// Bare provider paths keep working.
-	if got, err := svc.parseS3FilePath("s3://weknora/data/a.jpg"); err != nil || got != "data/a.jpg" {
-		t.Fatalf("bare path: key=%q err=%v", got, err)
+	// Bare provider paths keep working, including single-slash paths from older
+	// builds that persisted filepath.Clean output.
+	for _, filePath := range []string{"s3://weknora/data/a.jpg", "s3:/weknora/data/a.jpg"} {
+		if got, err := svc.parseS3FilePath(filePath); err != nil || got != "data/a.jpg" {
+			t.Fatalf("bare path %q: key=%q err=%v", filePath, got, err)
+		}
 	}
 
 	// A canonical path for another bucket must still be rejected.
