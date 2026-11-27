@@ -125,6 +125,9 @@ Server-side ingestion knobs:
 				}
 				opts.EnableMultimodel = &v
 			}
+			if c.Flags().Changed("glob") && !opts.Recursive {
+				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--glob requires --recursive")
+			}
 			if err := validateUploadFlags(opts, args); err != nil {
 				return err
 			}
@@ -151,7 +154,7 @@ Server-side ingestion knobs:
 				if opts.Recursive {
 					planArgs["recursive"] = true
 				}
-				if opts.Glob != "" {
+				if opts.Recursive {
 					planArgs["glob"] = opts.Glob
 				}
 				if handled, err := cmdutil.HandleDryRun(c, true, cmdutil.DryRunPlan{

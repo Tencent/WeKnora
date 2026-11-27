@@ -140,3 +140,11 @@ func TestDocUpload_DryRun_RejectsBadEnableMultimodel(t *testing.T) {
 	require.True(t, errors.As(err, &typed))
 	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
 }
+
+func TestDocUploadRejectsGlobWithoutRecursive(t *testing.T) {
+	for _, flags := range [][]string{{}, {"--dry-run"}} {
+		args := []string{"report.txt", "--glob", "*.pdf"}
+		root := withRootHarnessDoc(NewCmdUpload(docDryRunFactory(t)), append(args, flags...)...)
+		require.ErrorContains(t, root.Execute(), "--glob requires --recursive")
+	}
+}
