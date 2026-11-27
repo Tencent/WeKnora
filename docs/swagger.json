@@ -11818,6 +11818,12 @@
                     },
                     {
                         "type": "string",
+                        "description": "Filter by source knowledge ID",
+                        "name": "source_knowledge_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by page type; comma-separated for multiple (e.g. entity,concept)",
                         "name": "page_type",
                         "in": "query"

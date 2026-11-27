@@ -22517,6 +22517,10 @@ paths:
         name: kb_id
         required: true
         type: string
+      - description: Filter by source knowledge ID
+        in: query
+        name: source_knowledge_id
+        type: string
       - description: Filter by page type; comma-separated for multiple (e.g. entity,concept)
         in: query
         name: page_type

@@ -414,7 +414,7 @@ func TestStabilizeExtractedIdentitiesCoalescesEvidence(t *testing.T) {
 	if got[0].Name != "孔子" {
 		t.Fatalf("compact display name not preferred: %#v", got[0])
 	}
-	if got[0].Description != "中国古代思想家、教育家" || got[0].Details != "更完整的说明" {
+	if got[0].Description != "中国古代思想家、教育家" || got[0].Details != "短\n更完整的说明" {
 		t.Fatalf("richer fallback text not preserved: %#v", got[0])
 	}
 	if len(got[0].SourceChunks) != 2 {
@@ -690,5 +690,33 @@ func TestAttachExactIdentityPagesBatchesAndCaches(t *testing.T) {
 	last := stub.lastByType[types.WikiPageTypeEntity]
 	if len(last) != 1 || last[0] != normalizeWikiIdentityTitle("荀子") {
 		t.Fatalf("second lookup should only ask for 荀子: %v", last)
+	}
+}
+
+type collisionProbeWiki struct {
+	stubNormalizedTitleWiki
+}
+
+func (s *collisionProbeWiki) FindSimilarPages(
+	context.Context,
+	string,
+	string,
+	[]string,
+	int,
+) ([]*types.WikiPageLite, error) {
+	return nil, nil
+}
+
+func TestWikiDedupSeparatesAnExistingPinyinCollision(t *testing.T) {
+	svc := &wikiIngestService{wikiService: &collisionProbeWiki{}}
+	batch := &WikiBatchContext{SlugTitleMany: func(_ context.Context, _ []string) map[string]string {
+		return map[string]string{"entity/yi-li": "仪礼"}
+	}}
+	entities, _ := svc.deduplicateExtractedBatch(context.Background(), nil, "kb", []extractedItem{
+		{Name: "伊犁", Slug: "entity/yi-li", SourceChunks: []string{"geography"}},
+	}, nil, batch)
+	if len(entities) != 1 || entities[0].Slug == "entity/yi-li" || entities[0].Name != "伊犁" ||
+		len(entities[0].SourceChunks) != 1 {
+		t.Fatalf("existing book page would receive geographical facts: %#v", entities)
 	}
 }

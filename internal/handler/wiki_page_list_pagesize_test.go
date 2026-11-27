@@ -117,3 +117,21 @@ func TestWikiListPagesClampsPageSize(t *testing.T) {
 		})
 	}
 }
+
+func TestWikiListPagesPassesSourceScope(t *testing.T) {
+	var got *types.WikiPageListRequest
+	svc := &stubWikiPageService{listPages: func(
+		_ context.Context, req *types.WikiPageListRequest,
+	) (*types.WikiPageListResponse, error) {
+		got = req
+		return &types.WikiPageListResponse{}, nil
+	}}
+	w := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet,
+		"/knowledgebase/kb1/wiki/pages?source_knowledge_id=article-1&page=3&page_size=200"+
+			"&page_type=entity,concept&status=published", nil)
+	newWikiListTestRouter(svc).ServeHTTP(w, listReq)
+	if w.Code != 200 || got == nil || got.SourceKnowledgeID != "article-1" || got.Page != 3 {
+		t.Fatalf("source scope lost: status=%d request=%+v", w.Code, got)
+	}
+}

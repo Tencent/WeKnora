@@ -658,17 +658,19 @@ func (c *WikiConfig) Scan(value interface{}) error {
 
 // WikiPageListRequest represents a request to list wiki pages with filtering
 type WikiPageListRequest struct {
-	KnowledgeBaseID string      `json:"knowledge_base_id"`
-	PageType        string      `json:"page_type,omitempty"`      // filter by type
-	Status          string      `json:"status,omitempty"`         // filter by status
-	Query           string      `json:"query,omitempty"`          // full-text search
-	FolderID        *string     `json:"folder_id,omitempty"`      // exact folder placement ("" = root)
-	CategoryPath    StringArray `json:"category_path,omitempty"`  // exact directory path
-	CategoryDepth   *int        `json:"category_depth,omitempty"` // exact directory depth, including 0 for root
-	Page            int         `json:"page,omitempty"`           // pagination page (1-based)
-	PageSize        int         `json:"page_size,omitempty"`      // pagination size
-	SortBy          string      `json:"sort_by,omitempty"`        // "updated_at", "created_at", "title"
-	SortOrder       string      `json:"sort_order,omitempty"`     // "asc" or "desc"
+	// SourceKnowledgeID filters by the source document, not graph proximity.
+	SourceKnowledgeID string      `json:"source_knowledge_id,omitempty"`
+	KnowledgeBaseID   string      `json:"knowledge_base_id"`
+	PageType          string      `json:"page_type,omitempty"`      // filter by type
+	Status            string      `json:"status,omitempty"`         // filter by status
+	Query             string      `json:"query,omitempty"`          // full-text search
+	FolderID          *string     `json:"folder_id,omitempty"`      // exact folder placement ("" = root)
+	CategoryPath      StringArray `json:"category_path,omitempty"`  // exact directory path
+	CategoryDepth     *int        `json:"category_depth,omitempty"` // exact directory depth, including 0 for root
+	Page              int         `json:"page,omitempty"`           // pagination page (1-based)
+	PageSize          int         `json:"page_size,omitempty"`      // pagination size
+	SortBy            string      `json:"sort_by,omitempty"`        // "updated_at", "created_at", "title"
+	SortOrder         string      `json:"sort_order,omitempty"`     // "asc" or "desc"
 }
 
 // WikiPageListResponse represents a paginated list of wiki pages
@@ -919,4 +921,46 @@ func (p *WikiPage) BuiltFrom(knowledgeIDs map[string]struct{}) bool {
 		}
 	}
 	return false
+}
+
+// SetPendingRetraction prevents public mirrors from exposing a shared page
+// between removal of a source reference and successful rewriting of its body.
+func (p *WikiPage) SetPendingRetraction(knowledgeID string, pending bool) error {
+	metadata, err := p.PageMetadata.Map()
+	if err != nil {
+		return err
+	}
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	var ids []string
+	if raw, ok := metadata["pending_retractions"]; ok {
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(data, &ids); err != nil {
+			return err
+		}
+	}
+	out := make([]string, 0, len(ids)+1)
+	for _, id := range ids {
+		if id != knowledgeID {
+			out = append(out, id)
+		}
+	}
+	if pending {
+		out = append(out, knowledgeID)
+	}
+	if len(out) == 0 {
+		delete(metadata, "pending_retractions")
+	} else {
+		metadata["pending_retractions"] = out
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	p.PageMetadata = JSON(data)
+	return nil
 }

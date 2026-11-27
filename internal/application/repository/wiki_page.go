@@ -446,6 +446,26 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	query := r.db.WithContext(ctx).Model(&types.WikiPage{}).
 		Where("knowledge_base_id = ?", req.KnowledgeBaseID)
 
+	if req.SourceKnowledgeID != "" {
+		prefix := req.SourceKnowledgeID + "|"
+		prefixLen := len([]rune(prefix))
+		if r.wikiDialect() == "sqlite" {
+			query = query.Where(
+				"EXISTS (SELECT 1 FROM json_each(CAST(source_refs AS TEXT)) AS ref "+
+					"WHERE ref.value = ? OR substr(ref.value,1,?) = ?)",
+				req.SourceKnowledgeID, prefixLen, prefix,
+			)
+		} else {
+			needle, _ := json.Marshal([]string{req.SourceKnowledgeID})
+			query = query.Where(
+				"(source_refs @> ?::jsonb OR EXISTS (SELECT 1 "+
+					"FROM jsonb_array_elements_text(source_refs::jsonb) AS ref(value) "+
+					"WHERE left(ref.value,?) = ?))",
+				string(needle), prefixLen, prefix,
+			)
+		}
+	}
+
 	if pageTypes := types.SplitWikiPageTypes(req.PageType); len(pageTypes) == 1 {
 		query = query.Where("page_type = ?", pageTypes[0])
 	} else if len(pageTypes) > 1 {
@@ -511,6 +531,10 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	}
 
 	query = r.applyWikiPageListOrder(query, req.SortBy, req.SortOrder)
+	if req.SourceKnowledgeID != "" {
+		// A source may contain same-title entity/concept pages; stabilize pagination.
+		query = query.Order("id ASC")
+	}
 
 	page := req.Page
 	if page < 1 {

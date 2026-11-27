@@ -69,7 +69,7 @@ type citationPipelineOutcome struct {
 // those will come from the chunk-citation pass instead.
 //
 // Returns (entities, concepts, slugItems, error). On LLM or parse failure it
-// returns an error — the caller can then fall back to the legacy extractor.
+// returns an error; completed segments remain available for the next retry.
 func (s *wikiIngestService) extractCandidateSlugs(
 	ctx context.Context,
 	chatModel chat.Chat,
@@ -77,11 +77,17 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	content, lang string,
 	oldPageSlugs map[string]bool,
 	batchCtx *WikiBatchContext,
+	op *WikiPendingOp,
 ) ([]extractedItem, []extractedItem, map[string]extractedItem, error) {
 	var prevSlugsText string
 	if len(oldPageSlugs) > 0 {
 		var sb strings.Builder
+		slugs := make([]string, 0, len(oldPageSlugs))
 		for slug := range oldPageSlugs {
+			slugs = append(slugs, slug)
+		}
+		sort.Strings(slugs)
+		for _, slug := range slugs {
 			if !strings.HasPrefix(slug, "entity/") && !strings.HasPrefix(slug, "concept/") {
 				continue
 			}
@@ -94,25 +100,44 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	granularity := batchCtx.ExtractionGranularity.Normalize()
-	raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
-		"Content":             content,
-		"Language":            lang,
-		"PreviousSlugs":       prevSlugsText,
-		"Granularity":         string(granularity),
-		"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
-		"CustomInstructions":  batchCtx.ExtractionInstructions,
-		"InstructionScope":    "wiki_extraction",
-	})
+	recipe := map[string]string{
+		"Content": content, "Language": lang, "PreviousSlugs": prevSlugsText,
+		"Granularity": string(granularity), "GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
+		"CustomInstructions": batchCtx.ExtractionInstructions, "InstructionScope": "wiki_extraction",
+		"PromptTemplate": agent.WikiCandidateSlugPrompt,
+	}
+	extract := func(
+		ctx context.Context, segment string,
+	) (combinedExtraction, error) {
+		prompt := agent.WikiCandidateSlugPrompt
+		response, callErr := s.generateWithTemplateResult(ctx, chatModel, prompt, map[string]string{
+			"Content": segment, "Language": lang, "PreviousSlugs": recipe["PreviousSlugs"],
+			"Granularity":         string(granularity),
+			"GranularityGuidance": agent.WikiGranularityGuidance(string(granularity)),
+			"CustomInstructions":  batchCtx.ExtractionInstructions, "InstructionScope": "wiki_extraction",
+		})
+
+		if callErr != nil {
+			return combinedExtraction{}, callErr
+		}
+		if isLengthStopFinishReason(response.FinishReason) {
+			return combinedExtraction{}, fmt.Errorf("candidate extraction truncated at output budget")
+		}
+		var result combinedExtraction
+		parseErr := json.Unmarshal([]byte(cleanLLMJSON(response.Content)), &result)
+		if parseErr == nil && (result.Entities == nil || result.Concepts == nil) {
+			parseErr = fmt.Errorf("candidate extraction must return entities and concepts arrays")
+		}
+		return result, parseErr
+	}
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	runner, err := s.resumableWikiExtraction(ctx, chatModel, op, tenantID, recipe, extract)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	result, err := extractWikiSegments(ctx, content, batchCtx.ExtractionParallel, runner)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("candidate slug extraction failed: %w", err)
-	}
-
-	raw = cleanLLMJSON(raw)
-
-	var result combinedExtraction
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to parse candidate slug JSON: %v\nRaw: %s", err, raw)
-		return nil, nil, nil, fmt.Errorf("parse candidate slug JSON: %w", err)
 	}
 
 	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
