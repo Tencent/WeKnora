@@ -39,6 +39,7 @@
 </template>
 
 <script setup lang="ts">
+import { useProtectedImageLifecycle } from '@/composables/useProtectedImageLifecycle'
 import { computed, defineAsyncComponent, nextTick, onMounted, onUpdated, ref, watch } from 'vue'
 import 'katex/dist/katex.min.css'
 import {
@@ -120,6 +121,7 @@ const props = withDefaults(
 )
 
 const parentMd = ref<HTMLElement | null>(null)
+useProtectedImageLifecycle(() => parentMd.value)
 
 const embedChannelIdRef = computed(() => props.embedChannelId)
 const embedTokenRef = computed(() => props.embedToken)
