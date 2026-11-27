@@ -1,13 +1,87 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+func TestSandboxConnectionCheckE2BControlPlaneAuth(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("a", 32))
+	gin.SetMode(gin.TestMode)
+	const route = "/api/v1/system/sandbox-check"
+	r := gin.New()
+	r.POST(route, (&SystemHandler{}).CheckSandboxConfig)
+
+	for _, tc := range []struct {
+		name        string
+		requireAuth bool
+		invalidKey  bool
+		wantCalls   int32
+	}{
+		{name: "bearer gateway", requireAuth: true, wantCalls: 2},
+		{name: "native API key", wantCalls: 1},
+		{name: "invalid API key", invalidKey: true, wantCalls: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const key = "test-e2b-api-key"
+			const missingAuthorization = `{"code":401,"message":"authorization header is missing"}`
+			var calls atomic.Int32
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				call := calls.Add(1)
+				assert.Equal(t, http.MethodGet, req.Method)
+				assert.Equal(t, "/gateway/v2/sandboxes", req.URL.Path)
+				assert.Equal(t, "1", req.URL.Query().Get("limit"))
+				assert.Equal(t, key, req.Header.Get("X-API-Key"))
+				wantAuthorization := ""
+				if tc.requireAuth && call > 1 {
+					wantAuthorization = "Bearer " + key
+				}
+				assert.Equal(t, wantAuthorization, req.Header.Get("Authorization"))
+				switch {
+				case tc.invalidKey:
+					http.Error(w, `{"code":401,"message":"invalid API key"}`, http.StatusUnauthorized)
+				case tc.requireAuth && req.Header.Get("Authorization") != "Bearer "+key:
+					t.Logf("provider returned %s", missingAuthorization)
+					http.Error(w, missingAuthorization, http.StatusUnauthorized)
+				default:
+					_, _ = fmt.Fprint(w, "[]")
+				}
+			}))
+			t.Cleanup(provider.Close)
+
+			body := fmt.Sprintf(
+				`{"config":{"sandbox_type":"e2b","allow_private_endpoints":true,`+
+					`"e2b":{"api_url":%q,"api_key":%q,"sandbox_domain":"e2b.app"}},"deep":false}`,
+				provider.URL+"/gateway", key,
+			)
+			req := httptest.NewRequest(http.MethodPost, route, strings.NewReader(body))
+			req = req.WithContext(context.WithValue(req.Context(), types.TenantInfoContextKey, &types.Tenant{ID: 1}))
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			var payload struct {
+				Data SandboxCheckResponse `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+			require.Equal(t, !tc.invalidKey, payload.Data.OK, w.Body.String())
+			require.Equal(t, tc.wantCalls, calls.Load())
+		})
+	}
+}
 
 func TestSandboxConnectionCheckConfigAllowsTemplateDiscoveryAfterConnection(t *testing.T) {
 	incoming := &types.TenantSandboxConfig{
