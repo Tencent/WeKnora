@@ -2552,7 +2552,7 @@ type ReparseKnowledgeRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        id    path  string                   true   "知识ID"  extensions(x-agent=knowledge_id)
-// @Param        body  body  ReparseKnowledgeRequest  false  "可选；不传则沿用上传时的处理配置"
+// @Param        body  body  ReparseKnowledgeRequest  false  "可选；不传则沿用上传时的处理配置，但图谱开关按知识库当前策略刷新"
 // @Success      200  {object}  handler.DataMessageResponse{data=types.Knowledge}  "重新解析任务已提交"
 // @Failure      400  {object}  errors.AppError  "请求参数错误"
 // @Failure      403  {object}  errors.AppError  "权限不足"
@@ -2587,8 +2587,9 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 		return
 	}
 
-	// Optional per-reparse parse config override. Empty body keeps the
-	// overrides stored at upload time.
+	// Optional per-reparse parse config override. An empty body keeps the
+	// overrides stored at upload time, except the graph pins, which refresh
+	// from the knowledge base's current strategy.
 	var processOverrides *types.KnowledgeProcessOverrides
 	if c.Request.ContentLength != 0 {
 		var req ReparseKnowledgeRequest

@@ -21537,7 +21537,7 @@ paths:
         required: true
         type: string
         x-agent: knowledge_id
-      - description: 可选；不传则沿用上传时的处理配置
+      - description: 可选；不传则沿用上传时的处理配置，但图谱开关按知识库当前策略刷新
         in: body
         name: body
         schema:

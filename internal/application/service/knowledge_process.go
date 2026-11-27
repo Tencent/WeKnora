@@ -3167,10 +3167,26 @@ func (s *knowledgeService) reparseKnowledge(
 
 	tenantID := existing.TenantID
 
+	// An override-less reparse rebuilds with the knowledge base's current
+	// indexing strategy: the graph pins frozen at upload time are dropped so a
+	// strategy change made after upload (e.g. enabling graph extraction, #5305)
+	// reaches existing documents, while per-document choices — summary,
+	// chunking, VLM/ASR, question generation — keep their stored values.
+	// A knowledge base without a stored snapshot has nothing stale to drop, so
+	// nil stays nil and the config already resolves from the KB.
+	if processOverrides == nil {
+		if stored, _ := existing.ProcessOverrides(); stored != nil {
+			refreshed := *stored
+			refreshed.GraphEnabled = nil
+			refreshed.ExtractConfig = nil
+			processOverrides = &refreshed
+		}
+	}
 	// When the caller supplies new overrides (e.g. via the reparse confirm
 	// dialog), validate them against this knowledge's file type, then persist
 	// to metadata so both this call's enqueue and the worker re-read the same
-	// config. nil keeps whatever was stored at upload time.
+	// config. The derived refresh above travels the same path, which keeps
+	// nil reparses subject to the same validation as explicit requests.
 	if processOverrides != nil {
 		if err := ValidateProcessOverrides(ctx, kb, processOverrides, reparseFileTypes(existing)); err != nil {
 			return nil, err
