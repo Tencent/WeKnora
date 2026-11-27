@@ -21,12 +21,11 @@ const mcpDiscoveryDescription = "" +
 	"Discover authorized MCP tools without loading every schema. If a server_id is " +
 	"already listed in this tool's source summaries, call list_tools or search " +
 	"directly; do not call list_servers first. Use list_servers only when this " +
-	"description says further services are available, or to paginate. Describe tools, " +
-	"not servers; use describe directly only with an exact tool name already returned " +
-	"by this directory. Never infer tool names from server summaries. " +
-	"Server IDs and tool names must come from this directory. Only describe returns " +
-	"a callable tool_ref. Call call_mcp_tool with that tool_ref and arguments " +
-	"matching input_schema. Wait for each discovery result before issuing dependent calls. " +
+	"description says further services are available, or to paginate. For tool names " +
+	"already returned by the directory, use describe for one tool or describe_many " +
+	"with tool_names when you need several tools from the same server. Only those modes " +
+	"return callable tool_ref values. Call call_mcp_tool with a returned ref and arguments " +
+	"matching its input_schema. Wait for discovery before issuing dependent calls. " +
 	"Never construct tool_ref from a service name, tool name, or function_name. " +
 	"Follow next_cursor until has_more is false; an empty " +
 	"page does not mean a capability is unconfigured when a server is unavailable. " +
@@ -45,6 +44,7 @@ const mcpDiscoverySchema = `{
         "list_servers",
         "list_tools",
         "describe",
+        "describe_many",
         "search"
       ]
     },
@@ -55,6 +55,17 @@ const mcpDiscoverySchema = `{
     "tool_name": {
       "description": "For describe, copy an exact name from list_tools or search. Do not guess from summaries.",
       "type": "string"
+    },
+    "tool_names": {
+      "description": "For describe_many, copy exact names from list_tools or search; do not guess. Maximum 20 names.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "maxItems": 20,
+      "uniqueItems": true
     },
     "query": {
       "type": "string"
@@ -81,7 +92,7 @@ const mcpCallSchema = `{
   "type": "object",
   "properties": {
     "tool_ref": {
-      "description": "Copy tool_ref verbatim from describe. Never construct it from service, tool or function names.",
+      "description": "Copy tool_ref verbatim from describe or describe_many. Never construct it from names.",
       "type": "string"
     },
     "arguments": {
@@ -102,7 +113,13 @@ const mcpCallArgumentsHint = ` Pass arguments as a JSON object, not a JSON-encod
 	`otherwise match its input_schema. If the definition is unavailable, use ` +
 	`discover_mcp_tools(mode="describe", server_id=..., tool_name=...).`
 
-const maxMCPDefinitionChars = 256 * 1024
+const (
+	maxMCPDefinitionChars = 256 * 1024
+	// Keep a batch well below the single-definition safety ceiling: loading
+	// several tools also adds their schemas to subsequent model requests.
+	maxMCPBatchDefinitionChars = 64 * 1024
+	maxMCPBatchToolCount       = 20
+)
 
 // mcpExternalDataNotice keeps the trust boundary that the per-tool
 // "[MCP Service: X (external)]" description prefix used to carry: every tool
@@ -171,13 +188,14 @@ type mcpToolSummary struct {
 	Description string `json:"description,omitempty"`
 }
 type mcpDiscoveryArgs struct {
-	Mode     string `json:"mode"`
-	ServerID string `json:"server_id"`
-	ToolName string `json:"tool_name"`
-	Query    string `json:"query"`
-	Cursor   string `json:"cursor"`
-	Limit    int    `json:"limit"`
-	Refresh  bool   `json:"refresh"`
+	Mode      string   `json:"mode"`
+	ServerID  string   `json:"server_id"`
+	ToolName  string   `json:"tool_name"`
+	ToolNames []string `json:"tool_names"`
+	Query     string   `json:"query"`
+	Cursor    string   `json:"cursor"`
+	Limit     int      `json:"limit"`
+	Refresh   bool     `json:"refresh"`
 }
 type mcpDiscoveryPage struct {
 	Mode       string             `json:"mode"`
@@ -190,6 +208,27 @@ type mcpDiscoveryPage struct {
 	HasMore    bool               `json:"has_more"`
 	NextCursor string             `json:"next_cursor,omitempty"`
 	Status     string             `json:"status,omitempty"`
+}
+
+type mcpToolDefinition struct {
+	mcpToolSummary
+	FunctionName      string          `json:"function_name,omitempty"`
+	UsageInstructions string          `json:"usage_instructions,omitempty"`
+	InputSchema       json.RawMessage `json:"input_schema"`
+}
+
+type mcpDescribeResult struct {
+	Notice       string `json:"notice"`
+	Instructions string `json:"server_instructions,omitempty"`
+	mcpToolDefinition
+}
+
+type mcpDescribeManyResult struct {
+	Notice       string              `json:"notice"`
+	Instructions string              `json:"server_instructions,omitempty"`
+	ServerID     string              `json:"server_id"`
+	ServerName   string              `json:"server_name"`
+	Tools        []mcpToolDefinition `json:"tools"`
 }
 
 func newMCPCatalog(
@@ -492,6 +531,136 @@ func mcpJSONResult(value any) (*types.ToolResult, error) {
 	return &types.ToolResult{Success: true, Output: string(data)}, nil
 }
 
+func (t *MCPDiscoverTool) toolDefinition(tool *MCPTool) mcpToolDefinition {
+	functionName := ""
+	if t.advertiseSources {
+		functionName = mcpRegisteredName(tool)
+	}
+	return mcpToolDefinition{
+		mcpToolSummary: mcpToolSummary{
+			ToolRef:     mcpToolRef(tool),
+			ServerID:    tool.service.ID,
+			ServerName:  tool.service.Name,
+			Name:        tool.mcpTool.Name,
+			Description: tool.mcpTool.Description,
+		},
+		FunctionName:      functionName,
+		UsageInstructions: tool.service.EffectiveUsageInstructions(),
+		InputSchema:       tool.Parameters(),
+	}
+}
+
+func validateMCPDescribeManyNames(names []string) error {
+	if len(names) == 0 {
+		return fmt.Errorf("describe_many requires at least one exact name in tool_names")
+	}
+	if len(names) > maxMCPBatchToolCount {
+		return fmt.Errorf("describe_many accepts at most %d tool_names", maxMCPBatchToolCount)
+	}
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("describe_many tool_names must contain non-empty exact names")
+		}
+		if _, exists := seen[name]; exists {
+			return fmt.Errorf("describe_many tool_names must not contain duplicates: %q", name)
+		}
+		seen[name] = struct{}{}
+	}
+	return nil
+}
+
+func (t *MCPDiscoverTool) describeMany(
+	ctx context.Context,
+	serverID string,
+	names []string,
+) (*types.ToolResult, error) {
+	if err := validateMCPDescribeManyNames(names); err != nil {
+		return mcpDiscoveryFailure(err, "error")
+	}
+	tools, status, err := t.catalog.snapshot(ctx, serverID, false)
+	if err != nil {
+		return mcpDiscoveryFailure(err, status)
+	}
+	unavailable := fmt.Errorf("one or more tools are unavailable; list_tools shows the current authorized names")
+	byName := make(map[string]*MCPTool, len(tools))
+	for _, tool := range tools {
+		if tool == nil || tool.mcpTool == nil {
+			continue
+		}
+		if _, exists := byName[tool.mcpTool.Name]; exists {
+			return mcpDiscoveryFailure(unavailable, "unavailable")
+		}
+		byName[tool.mcpTool.Name] = tool
+	}
+	selected := make([]*MCPTool, 0, len(names))
+	for _, name := range names {
+		tool, ok := byName[name]
+		if !ok {
+			return mcpDiscoveryFailure(unavailable, "unavailable")
+		}
+		selected = append(selected, tool)
+	}
+	visible, err := t.catalog.visibleTools(ctx, serverID, selected)
+	if err != nil {
+		return mcpDiscoveryFailure(err, "unavailable")
+	}
+	if len(visible) != len(selected) {
+		return mcpDiscoveryFailure(unavailable, "unavailable")
+	}
+	definitions := make([]mcpToolDefinition, 0, len(visible))
+	for _, tool := range visible {
+		if err := t.catalog.checkEnabled(ctx, tool); err != nil {
+			return mcpDiscoveryFailure(err, "unavailable")
+		}
+		definition := t.toolDefinition(tool)
+		var schemaObject map[string]json.RawMessage
+		if err := json.Unmarshal(definition.InputSchema, &schemaObject); err != nil || schemaObject == nil {
+			return mcpDiscoveryFailure(
+				fmt.Errorf("MCP tool %q does not have an object input schema", definition.Name), "error",
+			)
+		}
+		definitions = append(definitions, definition)
+	}
+	result, err := mcpJSONResult(mcpDescribeManyResult{
+		Notice:       mcpExternalDataNotice,
+		Instructions: visible[0].serverInstructions,
+		ServerID:     serverID,
+		ServerName:   definitions[0].ServerName,
+		Tools:        definitions,
+	})
+	if err != nil || result == nil || !result.Success {
+		return result, err
+	}
+	if utf8.RuneCountInString(result.Output) > maxMCPBatchDefinitionChars {
+		return mcpDiscoveryFailure(
+			fmt.Errorf(
+				"MCP batch definition exceeds the supported %d-character limit; reduce tool_names",
+				maxMCPBatchDefinitionChars,
+			),
+			"error",
+		)
+	}
+	for _, tool := range visible {
+		if err := ctx.Err(); err != nil {
+			return mcpDiscoveryFailure(err, "unavailable")
+		}
+		if err := tool.compileInputSchema(); err != nil {
+			return mcpDiscoveryFailure(
+				fmt.Errorf("MCP tool %q has an invalid input schema", tool.mcpTool.Name), "error",
+			)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return mcpDiscoveryFailure(err, "unavailable")
+	}
+	// Publish nothing until all definitions have passed policy, size and schema checks.
+	for _, definition := range definitions {
+		t.catalog.described.Store(definition.ToolRef, true)
+	}
+	return result, nil
+}
+
 // MCPDiscoverTool exposes the authorized directory and exact tool definitions.
 type MCPDiscoverTool struct {
 	BaseTool
@@ -623,7 +792,7 @@ func installMCPCatalog(registry *ToolRegistry, c *MCPCatalog) {
 		preview += string(row) + "\n"
 	}
 	description := mcpDiscoveryDescription + fmt.Sprintf(
-		"\nAuthorized services: %d. If a server is listed below, call list_tools or describe; "+
+		"\nAuthorized services: %d. If a server is listed below, call list_tools, describe, or describe_many; "+
 			"use list_servers only for services that do not fit this preview:\n",
 		len(ids),
 	) + preview
@@ -643,7 +812,7 @@ func installMCPCatalog(registry *ToolRegistry, c *MCPCatalog) {
 			BaseTool: NewBaseTool(
 				ToolCallMCPTool,
 				"Call an authorized MCP tool using tool_ref returned by discover_mcp_tools. Read its "+
-					"full input_schema with describe before calling; listing does not enable execution. "+
+					"full input_schema with describe or describe_many; listing does not enable execution. "+
 					"Pass the original tool arguments in arguments as a JSON object, never a JSON-encoded string. "+
 					"Discovery does not bypass approval or permissions.",
 				json.RawMessage(mcpCallSchema),
@@ -654,17 +823,22 @@ func installMCPCatalog(registry *ToolRegistry, c *MCPCatalog) {
 	)
 }
 
-// OutputLimitChars permits a single schema to exceed the ordinary text budget. Preserve complete JSON
-// up to an explicit hard ceiling rather than silently truncate parameter rules.
+// OutputLimitChars permits complete MCP definitions to exceed the ordinary text budget. Preserve
+// complete JSON up to an explicit hard ceiling rather than silently truncate parameter rules.
 func (t *MCPDiscoverTool) OutputLimitChars(raw json.RawMessage) int {
 	var args mcpDiscoveryArgs
-	if json.Unmarshal(raw, &args) == nil && args.Mode == "describe" {
-		return maxMCPDefinitionChars
+	if json.Unmarshal(raw, &args) == nil {
+		switch args.Mode {
+		case "describe":
+			return maxMCPDefinitionChars
+		case "describe_many":
+			return maxMCPBatchDefinitionChars
+		}
 	}
 	return 0
 }
 
-// Execute lists authorized services or tools, or describes an exact tool.
+// Execute lists authorized services and tools, or returns exact tool definitions.
 func (t *MCPDiscoverTool) Execute(ctx context.Context, raw json.RawMessage) (*types.ToolResult, error) {
 	if meta, ok := ToolExecFromContext(ctx); ok && meta != nil && meta.ApprovalCtx != nil {
 		// Human OAuth waits use their own configured budget. Connection and
@@ -679,10 +853,10 @@ func (t *MCPDiscoverTool) Execute(ctx context.Context, raw json.RawMessage) (*ty
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return mcpDiscoveryFailure(err, "error")
 	}
-	if args.Limit == 0 {
-		args.Limit = 20
+	if args.Mode != "describe_many" && args.ToolNames != nil {
+		return mcpDiscoveryFailure(fmt.Errorf("tool_names is only accepted by describe_many"), "error")
 	}
-	if args.Limit < 1 || args.Limit > 50 {
+	if args.Limit < 0 || args.Limit > 50 {
 		return mcpDiscoveryFailure(fmt.Errorf("limit must be between 1 and 50"), "error")
 	}
 	if args.Refresh && (args.Mode != "list_tools" || args.Cursor != "") {
@@ -702,12 +876,18 @@ func (t *MCPDiscoverTool) Execute(ctx context.Context, raw json.RawMessage) (*ty
 			page.Servers = append(page.Servers, row)
 		}
 		sort.Slice(page.Servers, func(i, j int) bool { return page.Servers[i].ServerID < page.Servers[j].ServerID })
-	case "list_tools", "search", "describe":
+	case "list_tools", "search", "describe", "describe_many":
 		if args.ServerID == "" {
 			return mcpDiscoveryFailure(
 				fmt.Errorf("server_id is required; copy it from this tool's source summaries or list_servers"),
 				"error",
 			)
+		}
+		if args.Mode == "describe_many" {
+			if args.ToolName != "" || args.Cursor != "" || args.Query != "" || args.Limit != 0 {
+				return mcpDiscoveryFailure(fmt.Errorf("describe_many accepts only server_id and tool_names"), "error")
+			}
+			return t.describeMany(ctx, args.ServerID, args.ToolNames)
 		}
 		if args.Mode == "describe" && (args.ToolName == "" || args.Cursor != "" || args.Query != "") {
 			return mcpDiscoveryFailure(
@@ -747,29 +927,11 @@ func (t *MCPDiscoverTool) Execute(ctx context.Context, raw json.RawMessage) (*ty
 				if err := t.catalog.checkEnabled(ctx, tool); err != nil {
 					return mcpDiscoveryFailure(err, "unavailable")
 				}
-				result, err := mcpJSONResult(struct {
-					Notice       string `json:"notice"`
-					Instructions string `json:"server_instructions,omitempty"`
-					mcpToolSummary
-					FunctionName      string          `json:"function_name,omitempty"`
-					UsageInstructions string          `json:"usage_instructions,omitempty"`
-					InputSchema       json.RawMessage `json:"input_schema"`
-				}{
-					Notice:       mcpExternalDataNotice,
-					Instructions: tool.serverInstructions,
-					mcpToolSummary: mcpToolSummary{
-						ToolRef: mcpToolRef(tool), ServerID: args.ServerID,
-						ServerName: tool.service.Name,
-						Name:       tool.mcpTool.Name, Description: tool.mcpTool.Description,
-					},
-					FunctionName: func() string {
-						if t.advertiseSources {
-							return mcpRegisteredName(tool)
-						}
-						return ""
-					}(),
-					UsageInstructions: tool.service.EffectiveUsageInstructions(),
-					InputSchema:       tool.Parameters(),
+				definition := t.toolDefinition(tool)
+				result, err := mcpJSONResult(mcpDescribeResult{
+					Notice:            mcpExternalDataNotice,
+					Instructions:      tool.serverInstructions,
+					mcpToolDefinition: definition,
 				})
 				if result != nil && utf8.RuneCountInString(result.Output) > maxMCPDefinitionChars {
 					return mcpDiscoveryFailure(
@@ -778,7 +940,7 @@ func (t *MCPDiscoverTool) Execute(ctx context.Context, raw json.RawMessage) (*ty
 					)
 				}
 				if err == nil && result != nil && result.Success {
-					t.catalog.described.Store(mcpToolRef(tool), true)
+					t.catalog.described.Store(definition.ToolRef, true)
 				}
 				return result, err
 			}
@@ -799,9 +961,12 @@ func (t *MCPDiscoverTool) Execute(ctx context.Context, raw json.RawMessage) (*ty
 		}
 	default:
 		return mcpDiscoveryFailure(
-			fmt.Errorf("unknown mode; use list_servers, list_tools, describe, or search"),
+			fmt.Errorf("unknown mode; use list_servers, list_tools, describe, describe_many, or search"),
 			"error",
 		)
+	}
+	if args.Limit == 0 {
+		args.Limit = 20
 	}
 	return paginateMCP(ctx, page, args)
 }
@@ -813,9 +978,10 @@ func paginateMCP(ctx context.Context, page mcpDiscoveryPage, args mcpDiscoveryAr
 	// actually present: list_servers returns locally configured service names.
 	if args.Mode != "list_servers" {
 		page.Notice = mcpExternalDataNotice
-		page.NextStep = `Choose a tool, then use discover_mcp_tools(mode="describe", ` +
-			`server_id=<its server_id>, tool_name=<its name>) to read the full input_schema and obtain ` +
-			`a callable tool_ref. Do not call from this summary.`
+		page.NextStep = `Choose one tool and use discover_mcp_tools(mode="describe", server_id=<its server_id>, ` +
+			`tool_name=<its name>), or choose several tools from this server and use ` +
+			`discover_mcp_tools(mode="describe_many", server_id=<server_id>, tool_names=[...]), ` +
+			`to read complete input_schema values and obtain callable tool_ref values. Do not call from this summary.`
 	}
 	// Service order is by ID. Operational state and editable display metadata
 	// do not change membership and must not invalidate an in-progress traversal.
@@ -938,7 +1104,8 @@ func (t *MCPCallTool) resolve(ctx context.Context, raw json.RawMessage) (*MCPToo
 		return nil, nil, fmt.Errorf(
 			"unknown tool_ref; do not construct references from names. Copy server_id from " +
 				"discover_mcp_tools source summaries (or list_servers), then list_tools and describe " +
-				"the exact tool. Wait for describe and copy its tool_ref verbatim before retrying",
+				"the exact tool, or describe_many exact tools from one server. Wait for the result and " +
+				"copy its tool_ref verbatim before retrying",
 		)
 	}
 	visible, _, err := t.catalog.snapshot(ctx, known.service.ID, false)
@@ -953,7 +1120,7 @@ func (t *MCPCallTool) resolve(ctx context.Context, raw json.RawMessage) (*MCPToo
 			if !t.catalog.knownCallableRef(ref) {
 				return nil, nil, fmt.Errorf(
 					"tool schema has not been described; use discover_mcp_tools(mode=\"describe\", "+
-						"server_id=%q, tool_name=%q) before calling",
+						"server_id=%q, tool_name=%q), or describe_many for several exact tools, before calling",
 					tool.service.ID, tool.mcpTool.Name,
 				)
 			}

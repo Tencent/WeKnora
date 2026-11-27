@@ -442,7 +442,7 @@ flowchart TD
 | `wiki_flag_issue` | `slug`\*、`issue_type`\*（mixed_entities/contradictory_facts/out_of_date/other）、`description`\*、`suspected_knowledge_ids[]`、`knowledge_base_id` | 标记页面事实错误/实体混淆等问题，记录 issue 供人工或自动维护 |
 | `wiki_read_issue` | `issue_id` / `slug` | 查看某条 issue 详情或列出某页面的 pending issue |
 | `wiki_update_issue` | `issue_id`\*、`status`\*（resolved/ignored/pending） | 更新 issue 状态 |
-| `discover_mcp_tools` / `call_mcp_tool` | 发现：`mode`\*（`list_servers`/`list_tools`/`describe`/`search`）、`server_id`、`tool_name`、`query`、`cursor`、`limit`（1–50）、`refresh`；调用：`tool_ref`\*、`arguments`\* | 查询目录、读取完整定义并按需调用，见 [MCP 工具目录](08-mcp.md#mcp-tool-directory) |
+| `discover_mcp_tools` / `call_mcp_tool` | 发现：`mode`\*（`list_servers`/`list_tools`/`describe`/`describe_many`/`search`）、`server_id`、`tool_name`、`tool_names`（`describe_many` 最多 20 个）、`query`、`cursor`、`limit`（1–50）、`refresh`；调用：`tool_ref`\*、`arguments`\* | 查询目录、读取单个或批量完整定义并按需调用，见 [MCP 工具目录](08-mcp.md#mcp-tool-directory) |
 | `mcp_...`（动态，含稳定哈希后缀） | 由 MCP 服务的 InputSchema 决定 | 读取定义后发布的外部函数；描述标明服务和原始工具名，执行时重新校验权限，可挂人工审批与会话内 OAuth |
 | `local_browser` | `method`\*（`observe`、`snapshot`、`navigate`、`click`、`fill`、`tab_*`、`evaluate`、`request_help` 等），其余字段随 method 而定 | 操作用户已连接的本机浏览器；仅在请求开启 `local_browser_enabled` 且部署启用浏览器接入时注册，见[本机浏览器](../05-clients/09-local-browser.md) |
 | `write_skill_file` / `edit_skill_file` | 写：`path`\*、`content`\*（≤ 256 KiB）；改：`path`\*、`old_string`\*、`new_string`\*、`replace_all` | 仅内置技能安装器在安装模式下使用，只能改动正在安装的技能目录 |

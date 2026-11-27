@@ -8,10 +8,8 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// ValidateArguments checks the complete, immutable MCP schema. Compilation is
-// cached per tool snapshot; refreshing a definition creates a new MCPTool.
-// Built-in tools keep their established validation and conversion semantics.
-func (t *MCPTool) ValidateArguments(args json.RawMessage) error {
+// compileInputSchema caches the compiled schema per immutable tool snapshot.
+func (t *MCPTool) compileInputSchema() error {
 	t.schemaOnce.Do(func() {
 		var doc any
 		doc, t.schemaErr = jsonschema.UnmarshalJSON(bytes.NewReader(t.Parameters()))
@@ -29,8 +27,13 @@ func (t *MCPTool) ValidateArguments(args json.RawMessage) error {
 		}
 		t.schema, t.schemaErr = compiler.Compile(schemaURL)
 	})
-	if t.schemaErr != nil {
-		return fmt.Errorf("MCP input schema cannot be validated: %w", t.schemaErr)
+	return t.schemaErr
+}
+
+// ValidateArguments checks arguments against the complete MCP schema.
+func (t *MCPTool) ValidateArguments(args json.RawMessage) error {
+	if err := t.compileInputSchema(); err != nil {
+		return fmt.Errorf("MCP input schema cannot be validated: %w", err)
 	}
 	value, err := jsonschema.UnmarshalJSON(bytes.NewReader(args))
 	if err != nil {
