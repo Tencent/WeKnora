@@ -1191,3 +1191,48 @@ func TestTaskPendingOps_EnqueueBatchRejectsInvalidLanes(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, accepted)
 }
+
+func TestTaskPendingOpsRetryPayloadAndGroupedPeek(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var db *gorm.DB
+			if backend == "postgres" {
+				db = setupWikiSnapshotPostgresDB(t)
+				require.NoError(t, db.AutoMigrate(&types.TaskPendingOp{}))
+			} else {
+				db = setupTaskQueueTestDB(t)
+			}
+			repo := NewTaskPendingOpsRepository(db)
+			ctx := context.Background()
+			old := makePendingOp("wiki:ingest", "knowledge_base", "kb-1", "ingest", "doc", []byte(`{"attempt":1}`))
+			require.NoError(t, repo.Enqueue(ctx, old))
+			require.NoError(t, repo.Enqueue(ctx, makePendingOp("wiki:ingest", "knowledge_base", "kb-1", "ingest", "other", nil)))
+			claimed, err := repo.ClaimBatch(ctx, old.TaskType, old.Scope, old.ScopeID, 1, time.Now().Add(-time.Hour))
+			require.NoError(t, err)
+			require.Len(t, claimed, 1)
+			require.Equal(t, old.ID, claimed[0].ID)
+			_, err = repo.IncrFailCount(ctx, old.ID)
+			require.NoError(t, err)
+			progress := json.RawMessage(`{"attempt":1,"reduce_retry":{"updates":[{"Slug":"entity/alpha","Item":{"name":"Alpha"}}]}}`)
+			require.NoError(t, repo.UpdatePayload(ctx, old.ID, progress))
+			var stored types.TaskPendingOp
+			require.NoError(t, db.First(&stored, old.ID).Error)
+			assert.JSONEq(t, string(progress), string(stored.Payload))
+			assert.Equal(t, 1, stored.FailCount)
+			require.NotNil(t, stored.ClaimedAt)
+			assert.True(t, claimed[0].ClaimedAt.Equal(*stored.ClaimedAt))
+			require.NoError(t, repo.ReleaseByIDs(ctx, []int64{old.ID}))
+
+			newer := makePendingOp(old.TaskType, old.Scope, old.ScopeID, "ingest", old.DedupKey, []byte(`{"attempt":2}`))
+			require.NoError(t, repo.Enqueue(ctx, newer))
+			peeked, err := repo.PeekBatchByKey(ctx, old.TaskType, old.Scope, old.ScopeID, 1)
+			require.NoError(t, err)
+			require.Len(t, peeked, 2)
+			assert.Equal(t, old.ID, peeked[0].ID)
+			assert.Equal(t, newer.ID, peeked[1].ID)
+			assert.Nil(t, peeked[0].ClaimedAt)
+			assert.JSONEq(t, string(progress), string(peeked[0].Payload))
+			assert.JSONEq(t, `{"attempt":2}`, string(peeked[1].Payload))
+		})
+	}
+}

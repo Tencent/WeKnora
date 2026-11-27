@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -36,6 +37,11 @@ type TaskPendingOpsRepository interface {
 	// leave them for the next pass).
 	PeekBatch(ctx context.Context, taskType, scope, scopeID string, limit int) ([]*types.TaskPendingOp, error)
 
+	// PeekBatchByKey returns every row for up to limit distinct dedup keys,
+	// with the least-failed keys picked first and rows returned in enqueue order.
+	// It does not claim rows, so callers must serialize consumption.
+	PeekBatchByKey(ctx context.Context, taskType, scope, scopeID string, limit int) ([]*types.TaskPendingOp, error)
+
 	// ClaimBatch atomically claims eligible rows for the tuple, grouped by
 	// dedup_key, and returns them with claimed_at set to now. `limit`
 	// counts DISTINCT dedup_keys (documents), NOT rows: ALL eligible rows
@@ -60,6 +66,9 @@ type TaskPendingOpsRepository interface {
 	// to re-queue a transiently-failed op without waiting for its claim to
 	// go stale. Harmless on rows that were never claimed (Lite mode).
 	ReleaseByIDs(ctx context.Context, ids []int64) error
+
+	// UpdatePayload saves consumer progress on a row before its claim is released.
+	UpdatePayload(ctx context.Context, id int64, payload json.RawMessage) error
 
 	// DeleteByIDs removes the given rows. No-op for empty input. Used
 	// to consume a successfully-processed batch, and to drop ops that

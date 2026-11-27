@@ -96,8 +96,7 @@ return proposed
 	// (one LLM modify call).
 	wikiSlugLockTTL = 5 * time.Minute
 	// wikiSlugLockWait / Poll bound how long a reduce goroutine blocks
-	// waiting for a contended slug before falling back to a best-effort
-	// skip (matching the pre-existing reduce-failure semantics).
+	// waiting for a contended slug before deferring it to a later batch.
 	wikiSlugLockWait = 2 * time.Minute
 	wikiSlugLockPoll = 50 * time.Millisecond
 
@@ -367,9 +366,21 @@ type WikiPendingOp struct {
 	PageSlugs  []string `json:"page_slugs,omitempty"`
 	FolderIDs  []string `json:"folder_ids,omitempty"`
 
+	ReduceRetry *wikiReduceRetry `json:"reduce_retry,omitempty"`
+
 	// dbID is set by peekPendingList from task_pending_ops.id. Zero in
 	// constructions made outside the queue (e.g. legacy tests).
-	dbID int64 `json:"-"`
+	dbID      int64
+	failCount int
+}
+
+// wikiReduceRetry holds the final, canonical updates for the slugs that
+// still need work. It belongs to one queue row and therefore one parse
+// attempt. Legacy rows and newly queued attempts have no checkpoint.
+type wikiReduceRetry struct {
+	Updates  []SlugUpdate `json:"updates"`
+	DocTitle string       `json:"doc_title,omitempty"`
+	Summary  string       `json:"summary,omitempty"`
 }
 
 // wikiIngestService handles the LLM-powered wiki generation pipeline.
@@ -943,7 +954,7 @@ func (s *wikiIngestService) peekPendingList(ctx context.Context, kbID string, li
 	if limit <= 0 {
 		limit = wikiMaxDocsPerBatch
 	}
-	rows, err := s.pendingRepo.PeekBatch(ctx, wikiTaskType, wikiTaskScope, kbID, limit)
+	rows, err := s.pendingRepo.PeekBatchByKey(ctx, wikiTaskType, wikiTaskScope, kbID, limit)
 	if err != nil {
 		// Surface the error so the caller can distinguish a transient DB
 		// failure from a genuinely empty queue: the former must trigger an
@@ -991,9 +1002,8 @@ func (s *wikiIngestService) claimPendingList(ctx context.Context, kbID string, l
 // Redis mode only: in Lite mode a single process runs one batch per KB at a
 // time (liteLocks), so same-slug contention cannot occur and fn runs
 // directly. Returns (false, nil) if the lock could not be acquired within
-// wikiSlugLockWait — the caller then treats the slug like a best-effort
-// reduce miss (matching pre-existing reduce-failure handling). On a Redis
-// error we fail OPEN (run fn unlocked): a rare lost-update on a shared page
+// wikiSlugLockWait so the batch can defer this slug without spending a retry.
+// On a Redis error we fail OPEN (run fn unlocked): a rare lost-update on a shared page
 // is tolerated by the finalize/dead-link passes, whereas silently dropping
 // the update is strictly worse.
 func (s *wikiIngestService) withSlugLock(ctx context.Context, kbID, slug string, fn func() error) (bool, error) {
@@ -1228,6 +1238,7 @@ func (s *wikiIngestService) decodePendingRows(ctx context.Context, rows []*types
 			}
 		}
 		op.dbID = r.ID
+		op.failCount = r.FailCount
 		all = append(all, op)
 	}
 
@@ -1305,19 +1316,23 @@ func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID
 //   - IncrFailCount on the source row. The repo returns the new total,
 //     so a single round trip handles both bookkeeping and retry-budget
 //     check.
-//   - If the count is <= wikiMaxFailRetries: leave the row in place.
+//   - If the count is <= wikiMaxFailRetries: release the claim for retry.
 //     The next follow-up batch's ClaimBatch / PeekBatch will pick it
 //     up after never-attempted work (both order by fail_count ASC,
 //     then id ASC). The row is not moved, so the fail_count budget
 //     keeps counting down.
 //   - If the count exceeds the retry cap: archive the op into
 //     task_dead_letters and DeleteByIDs to remove it from the queue.
-//     Settlement failures are returned so the caller does not mark claims
-//     settled while rows are still claimed or undeleted.
-func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIngestPayload, ops []WikiPendingOp) error {
-	if s.pendingRepo == nil || len(ops) == 0 {
+
+// Release retryable failures and contention deferrals together after
+// settlement. Before that point the caller still owns all surviving claims.
+func (s *wikiIngestService) requeueFailedOps(
+	ctx context.Context, payload WikiIngestPayload, ops []WikiPendingOp, deferredIDs ...int64,
+) error {
+	if s.pendingRepo == nil {
 		return nil
 	}
+	retryIDs := deferredIDs
 	var settleErrs []error
 	for _, op := range ops {
 		if op.dbID == 0 {
@@ -1335,15 +1350,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			continue
 		}
 		if count <= wikiMaxFailRetries {
-			// Release the claim so the row is immediately eligible for the
-			// next trigger's ClaimBatch instead of waiting out
-			// wikiClaimStaleAfter. No-op in Lite mode (row was peeked, never
-			// claimed). ReleaseByIDs preserves fail_count, so the retry
-			// budget still counts down.
-			if err := s.pendingRepo.ReleaseByIDs(ctx, []int64{op.dbID}); err != nil {
-				logger.Warnf(ctx, "wiki ingest: failed to release claim for retry id=%d: %v", op.dbID, err)
-				settleErrs = append(settleErrs, fmt.Errorf("release retry claim id=%d: %w", op.dbID, err))
-			}
+			retryIDs = append(retryIDs, op.dbID)
 			logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry (attempt %d/%d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 			continue
 		}
@@ -1358,6 +1365,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		}
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {
+			op.ReduceRetry = nil // Keep extracted text out of dead letters.
 			payloadBytes, _ := json.Marshal(op)
 			if dlErr := s.deadLetterRepo.Insert(ctx, &types.TaskDeadLetter{
 				TenantID:  payload.TenantID,
@@ -1378,7 +1386,16 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			settleErrs = append(settleErrs, fmt.Errorf("drop dead-lettered row id=%d: %w", op.dbID, err))
 		}
 	}
-	return errors.Join(settleErrs...)
+	if err := errors.Join(settleErrs...); err != nil {
+		return err
+	}
+	if len(retryIDs) == 0 {
+		return nil
+	}
+	if err := s.pendingRepo.ReleaseByIDs(ctx, retryIDs); err != nil {
+		return fmt.Errorf("release %d retry claims: %w", len(retryIDs), err)
+	}
+	return nil
 }
 
 // docIngestResult captures per-document info for batch post-processing.
@@ -1506,6 +1523,8 @@ type SlugUpdate struct {
 	// product page). The one-line headline alone was too terse to keep the
 	// editor grounded on longer / multi-topic source documents.
 	DocSummary string
+
+	pendingOpID int64
 }
 
 func previewText(s string, maxRunes int) string {
