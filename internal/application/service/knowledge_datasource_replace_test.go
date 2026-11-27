@@ -167,8 +167,10 @@ func TestDataSourceReplacementTagPolicy(t *testing.T) {
 				require.NoError(t, h.svc.tagRepo.Create(h.ctx, tag))
 			}
 			require.NoError(t, h.svc.repo.SetKnowledgeTags(h.ctx, h.original.ID, tc.before))
-			ds := &types.DataSource{ID: "ds-1", TenantID: 7, KnowledgeBaseID: "kb-1",
-				ConflictStrategy: types.ConflictStrategyOverwrite}
+			ds := &types.DataSource{
+				ID: "ds-1", TenantID: 7, KnowledgeBaseID: "kb-1",
+				ConflictStrategy: types.ConflictStrategyOverwrite,
+			}
 			item := &types.FetchedItem{ExternalID: "doc-1", Content: []byte("revised document"), FileName: "doc.md"}
 			svc := &DataSourceService{knowledgeService: h.svc}
 			tags := types.DataSourceSyncTags{SourceTagIDs: []string{"source"}, PreserveExisting: tc.preserve}

@@ -238,6 +238,7 @@ type DataSourceConfig struct {
 	Settings map[string]interface{} `json:"settings"`
 }
 
+// ShouldPreserveExistingTags applies the enabled default to sources saved before this option existed.
 func (d *DataSourceConfig) ShouldPreserveExistingTags() bool {
 	return d == nil || d.PreserveExistingTags == nil || *d.PreserveExistingTags
 }
