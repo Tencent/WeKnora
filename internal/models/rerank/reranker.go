@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/api/cohererank"
 	"github.com/Tencent/WeKnora/internal/models/api/dashscoperank"
+	"github.com/Tencent/WeKnora/internal/models/api/mixedbreadrank"
 	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
 	"github.com/Tencent/WeKnora/internal/models/api/pineconerank"
 	"github.com/Tencent/WeKnora/internal/models/api/teirank"
@@ -201,6 +202,8 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		client = cohererank.New(cohererank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankDashScope:
 		client = dashscoperank.New(dashscoperank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankMixedbread:
+		client = mixedbreadrank.New(mixedbreadrank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankNIM:
 		client = nimrerank.New(nimrerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankPinecone:
