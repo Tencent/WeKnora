@@ -101,6 +101,23 @@ func (r *DataSourceRepository) Update(ctx context.Context, ds *types.DataSource)
 	})
 }
 
+// UpdateStatus changes only the lifecycle status. Pause and resume use this
+// instead of Update: a full-row write from the caller's snapshot would roll
+// back last_sync_cursor, last_sync_at, last_sync_result or error_message that
+// an in-flight sync persisted after the snapshot was read.
+func (r *DataSourceRepository) UpdateStatus(ctx context.Context, id, status string) error {
+	if id == "" {
+		return errors.New("data source id is empty")
+	}
+	return r.db.WithContext(ctx).
+		Model(&types.DataSource{}).
+		Where("id = ?", id).
+		UpdateColumns(map[string]interface{}{
+			"status":     status,
+			"updated_at": time.Now(),
+		}).Error
+}
+
 // UpdateSyncState updates only fields managed by sync execution. GORM's
 // Updates(struct) skips zero values, so use a map here to persist cleared error
 // messages without broadening the generic Update method.

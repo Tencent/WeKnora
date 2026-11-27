@@ -95,6 +95,10 @@ type DataSourceRepository interface {
 	// Update updates an existing data source
 	Update(ctx context.Context, ds *types.DataSource) error
 
+	// UpdateStatus changes only the lifecycle status, leaving sync progress
+	// written by an in-flight worker intact.
+	UpdateStatus(ctx context.Context, id, status string) error
+
 	// PatchSyncSettings updates named settings, checking the original config when replacing resource selection.
 	PatchSyncSettings(ctx context.Context, ds *types.DataSource, expectedConfig types.JSON, fields []string) error
 
