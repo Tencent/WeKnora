@@ -108,14 +108,20 @@ func (f *replaceFileStore) DeleteFile(_ context.Context, filePath string) error 
 }
 
 type replaceFileEnqueuer struct {
-	err      error
-	payloads []types.DocumentProcessPayload
-	events   *[]string
+	err        error
+	payloads   []types.DocumentProcessPayload
+	dispatches []*asynq.Task
+	events     *[]string
 }
 
 func (e *replaceFileEnqueuer) Enqueue(task *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
 	if e.err != nil {
 		return nil, e.err
+	}
+	if task.Type() == types.TypeDocumentDispatch {
+		e.dispatches = append(e.dispatches, task)
+		*e.events = append(*e.events, "dispatch")
+		return &asynq.TaskInfo{ID: "dispatch-1", Queue: types.QueueDocumentDispatch}, nil
 	}
 	var payload types.DocumentProcessPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {

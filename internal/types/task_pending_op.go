@@ -10,12 +10,12 @@ import (
 // Redis-list-backed `wiki:pending:<kbID>` queue: rows survive restarts
 // and are not subject to TTL eviction.
 //
-// The (TaskType, Scope, ScopeID) tuple is the queue identity. A consumer
-// pulls a batch with PeekBatch on that tuple, deduplicates by DedupKey
-// service-side if it cares, processes the ops, then DeleteByIDs the
-// consumed rows. FailCount is incremented per-row by IncrFailCount and
-// the consumer dead-letters the row once the count exceeds a service-
-// defined cap.
+// The (TaskType, Scope, ScopeID) tuple is the queue identity. Wiki ingest and
+// document dispatch are the current consumers. A consumer pulls a batch with
+// PeekBatch or ClaimBatch on that tuple, deduplicates by DedupKey service-side
+// if it cares, processes the ops, then DeleteByIDs the consumed rows.
+// FailCount is incremented per-row by IncrFailCount and the consumer
+// dead-letters the row once the count exceeds a service-defined cap.
 type TaskPendingOp struct {
 	// Auto-increment row id. Tie-break for PeekBatch / ClaimBatch
 	// after fail_count, and the row key for DeleteByIDs / IncrFailCount.
