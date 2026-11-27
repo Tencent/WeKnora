@@ -83,7 +83,7 @@ func NewDataSourceResponse(ds *types.DataSource) *DataSourceResponse {
 		SyncDeletions:        ds.SyncDeletions,
 		LastSyncAt:           ds.LastSyncAt,
 		LastSyncCursor:       json.RawMessage(ds.LastSyncCursor),
-		LastSyncResult:       json.RawMessage(ds.LastSyncResult),
+		LastSyncResult:       json.RawMessage(ds.PublicSyncResult()),
 		ErrorMessage:         ds.ErrorMessage,
 		SyncLogRetentionDays: ds.SyncLogRetentionDays,
 		CreatedAt:            ds.CreatedAt,

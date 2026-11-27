@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -647,11 +648,13 @@ func syncCompletionPersisted(ds *types.DataSource, syncLog *types.SyncLog) bool 
 	if ds.LastSyncAt == nil || ds.LastSyncAt.Before(syncLog.StartedAt) {
 		return false
 	}
-	config, err := ds.ParseConfig()
-	if err != nil {
-		return false
+	// An old terminal task must not consume a resync marker belonging to a
+	// newer round. The same round sets LastSyncAt before writing FinishedAt.
+	if syncLog.FinishedAt != nil && ds.LastSyncAt.After(*syncLog.FinishedAt) {
+		return true
 	}
-	return !resyncRequired(config)
+	config, err := ds.ParseConfig()
+	return err == nil && !resyncRequired(config)
 }
 
 // ProcessSync handles the actual sync operation (called by asynq task)
@@ -734,6 +737,26 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 	wasPaused := ds.Status == types.DataSourceStatusPaused
 
+	// Repair an exact-round completion without loading the connector or
+	// fetching from the cursor the source already committed.
+	if pending, result := ds.PendingLogResult(syncLog); pending != nil {
+		if !terminalResult {
+			resultJSON, err := result.ToJSON()
+			if err != nil {
+				return fmt.Errorf("encode saved sync result: %w", err)
+			}
+			setSyncLogResult(syncLog, result, resultJSON, pending.Status, pending.ErrorMessage, pending.FinishedAt)
+			if err := s.syncLogRepo.UpdateResult(ctx, syncLog); err != nil {
+				return fmt.Errorf("persist sync result: %w", err)
+			}
+			s.recordSyncRunActivity(ctx, ds, syncLog, result)
+		}
+		if pending.ResyncConfigDigest != "" {
+			s.clearResyncMarkerForConfig(ctx, ds, pending.ResyncConfigDigest)
+		}
+		return nil
+	}
+
 	// Get connector
 	connector, err := s.connectorRegistry.Get(ds.Type)
 	if err != nil {
@@ -765,6 +788,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		_ = s.dsRepo.UpdateSyncState(ctx, ds)
 		return err
 	}
+
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
 	// instead of restarting (Tencent/WeKnora#2136). Others fall back below.
@@ -866,12 +890,13 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	if ingestErr != nil {
 		// Keep the previous cursor so a retry can recover items the sink did not accept.
 		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON,
-			types.SyncLogStatusFailed, ingestErr.Error(), wasPaused)
+			types.SyncLogStatusFailed, ingestErr.Error(), wasPaused, "")
 		return ingestErr
 	}
 	if err := allFetchedItemsFailedError(result, nonBlockingFailures); err != nil {
 		logger.Errorf(ctx, "data source sync failed while processing fetched items: %v", err)
-		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
+		_ = s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON,
+			types.SyncLogStatusFailed, err.Error(), wasPaused, "")
 		return err
 	}
 
@@ -907,7 +932,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		}
 	}
 	if err := s.updateSyncRunResult(
-		ctx, ds, syncLog, result, resultJSON, syncStatus, syncErrorMessage, wasPaused,
+		ctx, ds, syncLog, result, resultJSON, syncStatus, syncErrorMessage, wasPaused, "",
 	); err != nil {
 		return err
 	}
@@ -1310,6 +1335,25 @@ func resyncRequired(cfg *types.DataSourceConfig) bool {
 // succeeded so it never fires again. Streaming path only: the feishu/lark
 // connectors the migration tags all implement StreamingConnector.
 func (s *DataSourceService) clearResyncMarker(ctx context.Context, ds *types.DataSource) {
+	s.clearResyncMarkerForConfig(ctx, ds, "")
+}
+
+// resyncConfigDigest binds recovered marker cleanup to the settings used by
+// that run without copying connector configuration into the sync result.
+func resyncConfigDigest(cfg *types.DataSourceConfig) string {
+	if !resyncRequired(cfg) {
+		return ""
+	}
+	encoded, err := cfg.ToJSON()
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(encoded))
+}
+
+func (s *DataSourceService) clearResyncMarkerForConfig(
+	ctx context.Context, ds *types.DataSource, expectedDigest string,
+) {
 	cfg, err := ds.ParseConfig()
 	if err == nil && cfg.Settings[feishuSettingResyncRequired] == nil {
 		return
@@ -1327,6 +1371,10 @@ func (s *DataSourceService) clearResyncMarker(ctx context.Context, ds *types.Dat
 	if err != nil {
 		logger.Warnf(ctx, "failed to clear resync_required marker, config unreadable: ds=%s err=%v", ds.ID, err)
 		return
+	}
+	if expectedDigest != "" && (resyncConfigDigest(cfg) != expectedDigest ||
+		fresh.LastSyncAt == nil || ds.LastSyncAt == nil || !fresh.LastSyncAt.Equal(*ds.LastSyncAt)) {
+		return // A newer configuration or completion owns the marker.
 	}
 	if cfg.Settings[feishuSettingResyncRequired] == nil {
 		return
@@ -1486,7 +1534,7 @@ func (s *DataSourceService) processSyncStreaming(
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant info: %v", err)
 		s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil,
-			types.SyncLogStatusFailed, fmt.Sprintf("Failed to get tenant info: %v", err), wasPaused)
+			types.SyncLogStatusFailed, fmt.Sprintf("Failed to get tenant info: %v", err), wasPaused, "")
 		return err
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
@@ -1494,6 +1542,7 @@ func (s *DataSourceService) processSyncStreaming(
 	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
 
 	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
+	resyncDigest := resyncConfigDigest(config)
 	if resyncRequired(config) {
 		// One-shot legacy upgrade (design §7). The marker is cleared only
 		// after the run succeeds below; a failure keeps it so the retry
@@ -1505,7 +1554,7 @@ func (s *DataSourceService) processSyncStreaming(
 	if err != nil {
 		logger.Errorf(ctx, "failed to parse sync cursor: %v", err)
 		s.updateSyncRunResult(ctx, ds, syncLog, &types.SyncResult{}, nil,
-			types.SyncLogStatusFailed, fmt.Sprintf("Invalid cursor: %v", err), wasPaused)
+			types.SyncLogStatusFailed, fmt.Sprintf("Invalid cursor: %v", err), wasPaused, "")
 		return err
 	}
 
@@ -1530,7 +1579,7 @@ func (s *DataSourceService) processSyncStreaming(
 			if cursorErr != nil {
 				logger.Errorf(ctx, "failed to parse full-sync cursor: %v", cursorErr)
 				s.updateSyncRunResult(ctx, ds, syncLog, result, nil,
-					types.SyncLogStatusFailed, fmt.Sprintf("Invalid cursor: %v", cursorErr), wasPaused)
+					types.SyncLogStatusFailed, fmt.Sprintf("Invalid cursor: %v", cursorErr), wasPaused, "")
 				return cursorErr
 			}
 			fullBaseline = baseline
@@ -1552,7 +1601,7 @@ func (s *DataSourceService) processSyncStreaming(
 		logger.Errorf(ctx, "streaming sync failed: %v", fetchErr)
 		resultJSON, _ := result.ToJSON()
 		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON,
-			types.SyncLogStatusFailed, abortErrMsg, wasPaused)
+			types.SyncLogStatusFailed, abortErrMsg, wasPaused, "")
 		return fetchErr
 	}
 
@@ -1566,7 +1615,7 @@ func (s *DataSourceService) processSyncStreaming(
 		if err := allFetchedItemsFailedError(result, handler.nonBlockingFailures); err != nil {
 			logger.Errorf(ctx, "streaming sync failed while processing fetched items: %v", err)
 			_ = s.updateSyncRunResult(
-				ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused,
+				ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused, "",
 			)
 			return err
 		}
@@ -1596,7 +1645,9 @@ func (s *DataSourceService) processSyncStreaming(
 			errMsg += fmt.Sprintf("; %d deletion failure(s) will only retry on the next full sync", result.DeletionFailed)
 		}
 	}
-	if err := s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, status, errMsg, wasPaused); err != nil {
+	if err := s.updateSyncRunResult(
+		ctx, ds, syncLog, result, resultJSON, status, errMsg, wasPaused, resyncDigest,
+	); err != nil {
 		return err
 	}
 	// The upgraded full pass succeeded (success or partial — per-document
@@ -1656,16 +1707,9 @@ func mergeDeletedItems(cur, prev []types.SyncDeletedItem) []types.SyncDeletedIte
 	return out
 }
 
-func (s *DataSourceService) updateSyncRunResult(
-	ctx context.Context,
-	ds *types.DataSource,
-	syncLog *types.SyncLog,
-	result *types.SyncResult,
-	resultJSON types.JSON,
-	status string,
-	errorMessage string,
-	wasPaused bool,
-) error {
+func setSyncLogResult(syncLog *types.SyncLog, result *types.SyncResult, resultJSON types.JSON,
+	status string, errorMessage string, finishedAt time.Time,
+) {
 	syncLog.ItemsTotal = result.Total
 	syncLog.ItemsCreated = result.Created
 	syncLog.ItemsUpdated = result.Updated
@@ -1673,9 +1717,17 @@ func (s *DataSourceService) updateSyncRunResult(
 	syncLog.ItemsSkipped = result.Skipped
 	syncLog.ItemsFailed = result.Failed
 	syncLog.Status = status
-	syncLog.FinishedAt = timePtr(time.Now().UTC())
+	syncLog.FinishedAt = timePtr(finishedAt)
 	syncLog.ErrorMessage = errorMessage
 	syncLog.Result = resultJSON
+}
+
+func (s *DataSourceService) updateSyncRunResult(
+	ctx context.Context, ds *types.DataSource, syncLog *types.SyncLog,
+	result *types.SyncResult, resultJSON types.JSON, status, errorMessage string, wasPaused bool,
+	resyncDigest string,
+) error {
+	setSyncLogResult(syncLog, result, resultJSON, status, errorMessage, time.Now().UTC())
 	logErr := s.syncLogRepo.UpdateResult(ctx, syncLog)
 	if logErr != nil {
 		logger.Errorf(ctx, "failed to update sync log: %v", logErr)
@@ -1705,6 +1757,15 @@ func (s *DataSourceService) updateSyncRunResult(
 			}
 		}
 	}
+	if (status == types.SyncLogStatusSuccess || status == types.SyncLogStatusPartial) && logErr != nil {
+		// The cursor and recovery snapshot must commit together. A failed
+		// attempt, by contrast, must still resume fetching on redelivery.
+		var err error
+		dsResultJSON, err = result.WithPendingLog(syncLog, resyncDigest)
+		if err != nil {
+			return fmt.Errorf("encode sync completion: %w", err)
+		}
+	}
 	ds.LastSyncResult = dsResultJSON
 	sourceErr := s.dsRepo.UpdateSyncState(ctx, ds)
 	if sourceErr != nil {
@@ -1721,12 +1782,20 @@ func (s *DataSourceService) updateSyncRunResult(
 	if err := errors.Join(logErr, sourceErr); err != nil {
 		return fmt.Errorf("persist sync result: %w", err)
 	}
+	s.recordSyncRunActivity(ctx, ds, syncLog, result)
+	return nil
+}
+
+func (s *DataSourceService) recordSyncRunActivity(
+	ctx context.Context, ds *types.DataSource, syncLog *types.SyncLog, result *types.SyncResult,
+) {
 	action := types.AuditActionDataSourceSyncCompleted
 	outcome := types.AuditOutcomeSuccess
-	if status == types.SyncLogStatusFailed {
+	switch syncLog.Status {
+	case types.SyncLogStatusFailed:
 		action = types.AuditActionDataSourceSyncFailed
 		outcome = types.AuditOutcomeFailed
-	} else if status == types.SyncLogStatusPartial {
+	case types.SyncLogStatusPartial:
 		outcome = types.AuditOutcomePartial
 	}
 	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, action,
@@ -1736,7 +1805,6 @@ func (s *DataSourceService) updateSyncRunResult(
 			"total": result.Total, "created": result.Created, "updated": result.Updated,
 			"deleted": result.Deleted, "skipped": result.Skipped, "failed": result.Failed,
 		})
-	return nil
 }
 
 func allFetchedItemsFailedError(result *types.SyncResult, nonBlockingFailures int) error {
