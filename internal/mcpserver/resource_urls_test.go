@@ -157,9 +157,11 @@ func TestMCPResourceURLsRewriteTextAndTypedStructuredContent(t *testing.T) {
 	require.Contains(t, string(raw), `"large_integer":1152921504606846977`)
 	url := strings.TrimSuffix(strings.TrimPrefix(text, "![figure]("), ")")
 	require.Equal(t, 3, strings.Count(string(raw), url))
-	resource, err := f.srv.resourceCatalog.ResolveAccessGrant(f.ctx, strings.TrimPrefix(
+	require.True(t, strings.HasSuffix(url, ".png"), "image grant URL should retain its display extension")
+	token := strings.TrimSuffix(strings.TrimPrefix(
 		url, "https://weknora.example/prefix/r/",
-	))
+	), ".png")
+	resource, err := f.srv.resourceCatalog.ResolveAccessGrant(f.ctx, token)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), resource.TenantID)
 	var grants int64

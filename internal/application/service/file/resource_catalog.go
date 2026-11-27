@@ -200,18 +200,34 @@ func (s *resourceCatalogFileService) GetFile(ctx context.Context, filePath strin
 }
 
 func (s *resourceCatalogFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
-	physical, isResource, err := s.resolve(ctx, filePath)
+	physical, resource, err := s.catalog.ResolvePath(ctx, filePath)
 	if err != nil {
 		return "", err
 	}
-	if isResource && s.externalURL != "" {
+	if resource != nil && s.externalURL != "" {
 		token, grantErr := s.catalog.CreateAccessGrant(ctx, filePath, 2*time.Hour)
 		if grantErr != nil {
 			return "", grantErr
 		}
-		return s.externalURL + "/r/" + token, nil
+		return s.externalURL + "/r/" + token + resourceDisplayExtension(resource.OriginalName), nil
 	}
 	return s.inner.GetFileURL(ctx, physical)
+}
+
+// resourceDisplayExtension preserves a simple image suffix for IM platforms
+// that require image URLs to end in an extension. The grant token remains the
+// only credential; this suffix is display metadata derived from the resource.
+func resourceDisplayExtension(name string) string {
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
+	if len(ext) == 0 || len(ext) > 10 {
+		return ""
+	}
+	for _, char := range ext {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') {
+			return ""
+		}
+	}
+	return "." + ext
 }
 
 func (s *resourceCatalogFileService) DeleteFile(ctx context.Context, filePath string) error {

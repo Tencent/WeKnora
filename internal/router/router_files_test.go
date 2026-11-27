@@ -27,6 +27,7 @@ type stubResourceCatalog struct {
 	resource     *types.StoredResource
 	fileBindings *types.MessageFileBindings
 	bound        func(context.Context, uint64, string, string) (bool, error)
+	grantTokens  []string
 }
 
 type stubMessageFileLookup struct {
@@ -117,7 +118,8 @@ func (s *stubResourceCatalog) CreateAccessGrant(context.Context, string, time.Du
 	panic("unexpected CreateAccessGrant")
 }
 
-func (s *stubResourceCatalog) ResolveAccessGrant(context.Context, string) (*types.StoredResource, error) {
+func (s *stubResourceCatalog) ResolveAccessGrant(_ context.Context, token string) (*types.StoredResource, error) {
+	s.grantTokens = append(s.grantTokens, token)
 	return s.resource, nil
 }
 
@@ -231,16 +233,17 @@ func TestServeFilesRejectsCrossTenantResourceReference(t *testing.T) {
 func TestResourceGrantServesShortPublicURL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	physical := "local://42/exports/a.png"
+	catalog := &stubResourceCatalog{resource: &types.StoredResource{
+		ID:           "resource-1",
+		TenantID:     42,
+		PhysicalPath: physical,
+		OriginalName: "a.png",
+		MimeType:     "image/png",
+	}}
 	engine := gin.New()
 	serveResourceGrants(
 		engine,
-		&stubResourceCatalog{resource: &types.StoredResource{
-			ID:           "resource-1",
-			TenantID:     42,
-			PhysicalPath: physical,
-			OriginalName: "a.png",
-			MimeType:     "image/png",
-		}},
+		catalog,
 		&stubTenantService{get: func(_ context.Context, id uint64) (*types.Tenant, error) {
 			return &types.Tenant{ID: id}, nil
 		}},
@@ -253,17 +256,26 @@ func TestResourceGrantServesShortPublicURL(t *testing.T) {
 		nil,
 	)
 
-	req := httptest.NewRequest(http.MethodGet, "/r/GrantTokenAbCdEfGhIjKlM", nil)
-	recorder := httptest.NewRecorder()
-	engine.ServeHTTP(recorder, req)
-	if recorder.Code != http.StatusOK || recorder.Body.String() != "image" {
-		t.Fatalf("status=%d body=%q", recorder.Code, recorder.Body.String())
+	for _, requestPath := range []string{
+		"/r/GrantTokenAbCdEfGhIjKlM",
+		"/r/GrantTokenAbCdEfGhIjKlM.png",
+	} {
+		req := httptest.NewRequest(http.MethodGet, requestPath, nil)
+		recorder := httptest.NewRecorder()
+		engine.ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusOK || recorder.Body.String() != "image" {
+			t.Fatalf("path=%s status=%d body=%q", requestPath, recorder.Code, recorder.Body.String())
+		}
+		if got := recorder.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Fatalf("X-Content-Type-Options = %q", got)
+		}
+		if got := recorder.Header().Get("Content-Disposition"); !strings.Contains(got, "a.png") {
+			t.Fatalf("Content-Disposition = %q, want original filename a.png", got)
+		}
 	}
-	if got := recorder.Header().Get("X-Content-Type-Options"); got != "nosniff" {
-		t.Fatalf("X-Content-Type-Options = %q", got)
-	}
-	if got := recorder.Header().Get("Content-Disposition"); !strings.Contains(got, "a.png") {
-		t.Fatalf("Content-Disposition = %q, want original filename a.png", got)
+	if len(catalog.grantTokens) != 2 || catalog.grantTokens[0] != "GrantTokenAbCdEfGhIjKlM" ||
+		catalog.grantTokens[1] != "GrantTokenAbCdEfGhIjKlM" {
+		t.Fatalf("resolved grant tokens = %q, want the bare token twice", catalog.grantTokens)
 	}
 }
 
