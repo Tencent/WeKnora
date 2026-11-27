@@ -1807,6 +1807,13 @@ func hashQuestion(question string) string {
 	return hex.EncodeToString(h[:4])
 }
 
+// faqSimilarQuestionSourceID 生成相似问索引行的 SourceID，全量构建与增量
+// 更新共用。先对问题归一化再取内容哈希，与问题在列表中的位置无关，
+// 删除/重排相似问不会错位；同一问题在两条路径下得到同一 SourceID。
+func faqSimilarQuestionSourceID(chunkID, question string) string {
+	return fmt.Sprintf("%s-%s", chunkID, hashQuestion(types.NormalizeQuestion(question)))
+}
+
 // resolveTagID resolves tag ID (UUID) from payload, prioritizing tag_id (seq_id) over tag_name
 // If no tag is specified, creates or finds the "未分类" tag
 // Returns the internal UUID of the tag
@@ -1960,7 +1967,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 	})
 
 	// 每个相似问创建一个索引项
-	for i, similarQ := range meta.SimilarQuestions {
+	for _, similarQ := range meta.SimilarQuestions {
 		similarContent := similarQ
 		if indexMode == types.FAQIndexModeQuestionAnswer && len(meta.Answers) > 0 {
 			var builder strings.Builder
@@ -1971,7 +1978,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 			}
 			similarContent = builder.String()
 		}
-		sourceID := fmt.Sprintf("%s-%d", chunk.ID, i)
+		sourceID := faqSimilarQuestionSourceID(chunk.ID, similarQ)
 		indexInfoList = append(indexInfoList, &types.IndexInfo{
 			Content:         similarContent,
 			SourceID:        sourceID,
