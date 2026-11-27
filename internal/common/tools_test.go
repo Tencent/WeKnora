@@ -1,6 +1,7 @@
 package common
 
 import (
+	"strings"
 	"testing"
 	"unicode/utf8"
 )
@@ -64,4 +65,68 @@ func BenchmarkParseLLMJsonResponse_Fenced(b *testing.B) {
 		var p payload
 		_ = ParseLLMJsonResponse(content, &p)
 	}
+}
+
+func TestExtractBalancedJSON(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"object in prose", `see {"a":1} done`, `{"a":1}`},
+		{"array in prose", `list [1, 2, {"k": "v"}] end`, `[1, 2, {"k": "v"}]`},
+		{"first opener wins object", `{"a":[1,2]} [3]`, `{"a":[1,2]}`},
+		{"first opener wins array", `[1,2] {"a":3}`, `[1,2]`},
+		{"nested object", `x {"a":{"b":[1,{"c":2}]}} y`, `{"a":{"b":[1,{"c":2}]}}`},
+		// Braces inside a string literal must not close the object early.
+		{"braces in string", `{"key":"a}b"} tail`, `{"key":"a}b"}`},
+		// An escaped quote must not end the string literal.
+		{"escaped quote in string", `{"a":"x\"y"} `, `{"a":"x\"y"}`},
+		{"no json", `just some text`, ``},
+		{"unbalanced object", `{"a":1`, ``},
+		{"empty input", ``, ``},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ExtractBalancedJSON(tt.input); got != tt.want {
+				t.Errorf("ExtractBalancedJSON(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPipelineLog(t *testing.T) {
+	t.Run("defaults stage and action", func(t *testing.T) {
+		if got := PipelineLog("", "", nil); got != "[PIPELINE] stage=PIPELINE action=info" {
+			t.Errorf("PipelineLog() = %q, want %q", got, "[PIPELINE] stage=PIPELINE action=info")
+		}
+	})
+
+	t.Run("fields are sorted and values quoted", func(t *testing.T) {
+		got := PipelineLog("chat", "answer", map[string]interface{}{"kb": "k1", "n": 2})
+		want := `[PIPELINE] stage=chat action=answer kb="k1" n=2`
+		if got != want {
+			t.Errorf("PipelineLog() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("newlines in values are escaped", func(t *testing.T) {
+		got := PipelineLog("s", "a", map[string]interface{}{"k": "a\nb"})
+		// truncatePipelineValue turns the newline into backslash-n, and
+		// strconv.Quote escapes the backslash, so two backslashes land in
+		// the output.
+		want := "[PIPELINE] stage=s action=a k=\"a\\\\nb\""
+		if got != want {
+			t.Errorf("PipelineLog() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("long values are truncated at 300 runes", func(t *testing.T) {
+		got := PipelineLog("s", "a", map[string]interface{}{"k": strings.Repeat("x", 301)})
+		want := "[PIPELINE] stage=s action=a k=\"" + strings.Repeat("x", 300) + `..."`
+		if got != want {
+			t.Errorf("PipelineLog() len = %d, want len %d", len(got), len(want))
+		}
+	})
 }
