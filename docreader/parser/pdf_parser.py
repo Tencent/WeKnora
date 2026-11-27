@@ -27,6 +27,7 @@ import statistics
 import threading
 from decimal import Decimal, ROUND_CEILING
 from typing import Iterator
+from urllib.parse import quote
 
 from docreader.config import CONFIG
 from docreader.models.document import Document
@@ -1814,6 +1815,13 @@ def _render_scanned_pages(
     return out
 
 
+def _pdf_image_stem(file_name: str) -> str:
+    # The same stem feeds Markdown, image payloads, and per-image metadata.
+    # Escape Markdown syntax and literal percent signs while keeping other text.
+    stem = os.path.splitext(file_name or "document")[0]
+    return re.sub(r"[%\\()\[\]<>\s]", lambda match: quote(match[0], safe=""), stem)
+
+
 def _encode_rendered_page_images(rendered: dict, base_name: str) -> dict:
     """Encode rendered pages while releasing each raw JPEG immediately.
 
@@ -2079,7 +2087,7 @@ class PDFScannedParser(BaseParser):
 
         images = {}
         markdown_lines = []
-        base_name = os.path.splitext(self.file_name or "document")[0]
+        base_name = _pdf_image_stem(self.file_name)
 
         logger.info(
             "PDFScannedParser: Rendering PDF pages to JPEG images for %s",
@@ -2146,7 +2154,7 @@ class PDFScannedParser(BaseParser):
         """Return metadata first and lazily render each scanned page."""
         import pypdfium2 as pdfium
 
-        base_name = os.path.splitext(self.file_name or "document")[0]
+        base_name = _pdf_image_stem(self.file_name)
         with _PDFIUM_LOCK:
             pdf = pdfium.PdfDocument(content)
             try:
@@ -2302,7 +2310,7 @@ class PDFParser(BaseParser):
 
         scale = max(1, CONFIG.pdf_render_dpi) / 72
         quality = _normalize_image_quality(CONFIG.pdf_jpeg_quality)
-        base_name = os.path.splitext(self.file_name or "document")[0]
+        base_name = _pdf_image_stem(self.file_name)
 
         # Use a temporary source file for every stream mode so each fixed-size
         # batch can close its PdfDocument before the next batch starts. This
@@ -2338,7 +2346,7 @@ class PDFParser(BaseParser):
         import pypdfium2 as pdfium
         import pypdfium2.raw as pdfium_r
 
-        base_name = os.path.splitext(self.file_name or "document")[0]
+        base_name = _pdf_image_stem(self.file_name)
         scale = max(1, CONFIG.pdf_render_dpi) / 72
         quality = _normalize_image_quality(CONFIG.pdf_jpeg_quality)
 
