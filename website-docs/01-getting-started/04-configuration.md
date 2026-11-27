@@ -144,6 +144,7 @@ flowchart LR
 | `LLM_DEBUG_LOG` | false | true 时在 LOG_PATH 同目录写 `llm_debug.log` |
 | `TZ` | Asia/Shanghai | 时区 |
 | `DEFAULT_LOCALE` | 空 | 前端界面默认语言（frontend 容器读取）：`zh-CN` / `en-US` / `ru-RU` / `ko-KR` / `ja-JP`，非法值忽略。仅影响未手动切换过语言的用户，优先级：用户已选语言 > 本变量 > `zh-CN`；改完重启 frontend 容器即可，无需重建镜像 |
+| `MCP_BASE_URL` | 空 | MCP Server 页面展示的端点对外地址（frontend 容器读取），如 `https://mcp.example.com`，可带路径前缀；MCP 与管理端不在同一域名时设置。留空跟随前端页面域名，非法值忽略；改完重启 frontend 容器即可 |
 | `WEKNORA_LANGUAGE` | 空 | 文档处理语言（问题/摘要生成）。优先级：本变量 > 请求的 `Accept-Language` > 内置 `zh-CN`。文档处理语言可独立于界面语言设置，例如使用英文界面处理韩文文档。未设置回复语言的 IM 渠道也以本变量（未设置时为 `zh-CN`）作为默认回复语言 |
 | `AUTO_MIGRATE` | true | 启动时自动执行数据库迁移。PostgreSQL 下也控制按维度后台建 HNSW 索引，设为 `false` 时两者都不做（见[检索引擎](../03-features/05-retrieval-engines.md)） |
 | `AUTO_RECOVER_DIRTY` | true | 自动修复 golang-migrate 的 dirty 状态（上次迁移中断留下的）。手工排查迁移问题时应临时设为 false，否则启动会自动改写迁移版本记录，见[数据库与迁移](../06-development/02-database-schema.md) |
@@ -332,7 +333,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `WEKNORA_MINERU_TIMEOUT` | 1000s | 自建 MinerU 单次解析超时（V1 API 为整个解析任务，旧版为 `/file_parse` 请求），格式与默认值规则同上；超大 PDF 同样需要外层超时留余量 |
 | `WEKNORA_MINERU_CLOUD_TIMEOUT` | 30m | MinerU 云端（mineru.net）每个批次/分片轮询解析结果的最长时间，格式与默认值规则同上 |
 | `WEKNORA_MINERU_MAX_IMAGE_BYTES` | 536870912（512 MiB） | MinerU Cloud / 自建 V1 每个结果 ZIP 中引用图片的解压总字节上限（正整数）；空值、无效值、溢出或非正数使用默认值。大型扫描 PDF 可设为 `2147483648`（2 GiB），图片全部驻留内存，需为并发解析预留内存；下载 1 GiB、单条目 64 MiB 上限仍生效。修改后重新创建 app 容器 |
-| `WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT` | 600s | PaddleOCR-VL 云端（AI Studio）轮询解析结果的最长时间，格式与默认值规则同上 |
+| `WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT` | 600s | PaddleOCR-VL 云端（AI Studio）提交（整包 multipart 上传）与轮询解析结果的最长时间，格式与默认值规则同上 |
 | `WEKNORA_WEKNORACLOUD_TIMEOUT` | 20m | WeKnoraCloud 托管 docreader 轮询任务结果的最长时间，格式与默认值规则同上；应小于 `WEKNORA_DOCREADER_CALL_TIMEOUT` |
 
 沙箱后端、网络策略、脚本开关与个人环境变量使用空间配置/API 管理，见[技能与沙箱](../03-features/22-skills-sandbox.md)。长期记忆与自动标签均默认关闭，分别使用租户 memory_config 和知识库 auto_tag_config，不用全局环境变量替代各空间配置。

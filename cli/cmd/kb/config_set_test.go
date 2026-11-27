@@ -90,6 +90,7 @@ func TestKBConfigSet_WriteSucceedsReadbackFails(t *testing.T) {
 		Data sdk.KBModelConfigView `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	assert.Contains(t, out.String(), "read-back unavailable")
 	assert.Equal(t, "model_emb", env.Data.Embedding.ModelName, "falls back to applied config when read-back fails")
 }
 

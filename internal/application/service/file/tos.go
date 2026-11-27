@@ -299,7 +299,10 @@ func (s *tosFileService) GetFile(ctx context.Context, filePath string) (io.ReadC
 	if err != nil {
 		return nil, fmt.Errorf("failed to get file from TOS: %w", err)
 	}
-	return output.Content, nil
+	// The SDK's checksum wrapper exposes Seek even though its HTTP body cannot
+	// seek. Hide that method so filetransport streams the response instead of
+	// passing it to http.ServeContent. Keep the SDK's Read/Close (and CRC checks).
+	return struct{ io.ReadCloser }{output.Content}, nil
 }
 
 func (s *tosFileService) DeleteFile(ctx context.Context, filePath string) error {

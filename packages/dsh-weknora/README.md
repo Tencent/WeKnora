@@ -77,7 +77,7 @@ Mounting two deployments is two rows with two prefixes:
 | `weknora_list_knowledge_bases` | `GET /knowledge-bases` | Knowledge base names and ids, to report what exists or to narrow a later search |
 | `weknora_search` | `POST /knowledge-search` + `GET /knowledge/search` | Ranked passages verbatim, each with a `knowledge_id`, score and chunk index, plus any document the query names |
 | `weknora_read_document` | `GET /chunks/:knowledge_id` + `GET /knowledge/:id` | One document's passages reassembled in order, led by its title and summary, with paging |
-| `weknora_ask` | `POST /sessions` + `POST /knowledge-chat/:id` or `POST /agent-chat/:id` | WeKnora's own answer, its citations, the server-side tools it used, and a resumable `session_id` |
+| `weknora_ask` | `POST /sessions` (new sessions only), then `POST /knowledge-chat/:id` or `POST /agent-chat/:id` | WeKnora's own answer, its citations, the server-side tools it used, and a resumable `session_id` |
 
 `weknora_search` is the workhorse: it returns the source text for the agent to reason over, which keeps the agent's own
 reasoning auditable. It answers two questions the model cannot always tell apart — *where is this discussed* and *where
@@ -105,9 +105,10 @@ fan out across ten sub-questions without ten model round trips.
 
 ## Permissions and data flow
 
-The plugin only reads. It never writes to WeKnora: no ingestion, no chunk edits, no deletion. A WeKnora API key scoped
-to `retrieve` is enough for three of the four tools; `weknora_ask` additionally needs `chat`, because it creates a
-session and streams an answer.
+The plugin has no tools for ingesting documents, editing chunks, or deleting knowledge-base content.
+Listing knowledge bases, searching, and reading documents require only the `retrieve` scope. `weknora_ask` also
+requires `chat`. It creates a server-side WeKnora session if no `session_id` is supplied; otherwise it continues the
+specified session. This records a chat turn in WeKnora, streams the answer, and returns the session ID for follow-up.
 
 The key is sent as `X-API-Key`. Set `tenantId` as well if you use a platform-scoped key, which needs `X-Tenant-ID` to
 select a workspace. Errors are reported with the HTTP status and WeKnora's own reason, never with the key.
@@ -166,6 +167,8 @@ plugin still emits exactly those calls, and `contract/contract_test.go` asserts 
 types still accept and serve them — so a rename on either side fails CI instead of a user's agent.
 
 ## Compatibility
+
+The headless integration test uses dsh `0.2.2-rc.5` with a mock WeKnora server and a fake model.
 
 Verified against dsh `0.1.0-rc.8` and WeKnora `0.8.0`. dsh is in developer preview and states that breaking changes
 will happen; this package deliberately has **no runtime dependencies** and hands `ctx.tools.register()` a plain object,

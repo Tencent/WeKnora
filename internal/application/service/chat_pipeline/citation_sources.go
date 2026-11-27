@@ -97,6 +97,14 @@ func (p *PluginMerge) attachCitationSources(ctx context.Context, results []*type
 		if !r.ContentRewritten {
 			continue
 		}
+		// The source lookup can run after a user edits this chunk. The ranked
+		// hit describes the old revision; neither a replacement body under the
+		// same ID nor more text expanded around it was selected by that rank.
+		// Leave this result without citation sources, so model context omits it.
+		if anchor := byID[r.ID]; anchor != nil && anchor.ContentRevision != r.ContentRevision {
+			r.CitationSources = nil
+			continue
+		}
 		allowedParents := map[string]bool{}
 		for _, id := range append([]string{r.ID}, r.SubChunkID...) {
 			if c := byID[id]; c != nil {

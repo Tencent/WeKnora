@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -24,7 +26,7 @@ import (
 
 // DataAnalysisTableName is the only table name the model needs to know when
 // querying a CSV/Excel document through data_analysis. Each document is loaded
-// into a physical DuckDB table named after its knowledge ID; that name is
+// into a physical DuckDB table owned by this tool instance; that name is
 // never shown to the model. Every query runs on a private connection where
 // "dataset" is a temporary view over the selected document, so the model
 // references the same fixed identifier for every document and the knowledge
@@ -189,6 +191,7 @@ type DataAnalysisTool struct {
 	tenantService        interfaces.TenantService
 	db                   *sql.DB
 	sessionID            string
+	tableNamespace       string
 	createdTables        []string        // Cleanup candidates, including failed CREATE attempts
 	loadedTables         map[string]bool // CREATE succeeded, even if a subsequent schema read failed
 	// localBaseDir is the LOCAL_STORAGE_BASE_DIR value captured at construction
@@ -231,6 +234,7 @@ func NewDataAnalysisTool(
 		tenantService:        tenantService,
 		db:                   db,
 		sessionID:            sessionID,
+		tableNamespace:       strings.ReplaceAll(uuid.NewString(), "-", ""),
 		// Capture LOCAL_STORAGE_BASE_DIR once at construction time so that every
 		// call to resolveFileServiceForKnowledge uses the same base path.  The
 		// env var is guaranteed to be set (or empty == "/data/files" fallback)
@@ -564,6 +568,11 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 	logger.Infof(ctx, "[Tool][DataAnalysis] Loading CSV file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
 
 	if !t.loadedTables[tableName] {
+		csvPath, cleanup, err := prepareCSVForDuckDB(ctx, filename)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare CSV for DuckDB: %w", err)
+		}
+		defer cleanup()
 		// Keep cleanup tracking even if CREATE fails; only successful creation
 		// makes the table reusable by a later call.
 		t.recordCreatedTable(tableName)
@@ -573,10 +582,10 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 		// Table will be created in the session schema
 		createTableSQL := fmt.Sprintf(
 			"CREATE TABLE \"%s\" AS SELECT * FROM read_csv_auto('%s', header=true, all_varchar=true)",
-			tableName, sqlSingleQuoteEscape(filename),
+			tableName, sqlSingleQuoteEscape(csvPath),
 		)
 
-		_, err := t.db.ExecContext(ctx, createTableSQL)
+		_, err = t.db.ExecContext(ctx, createTableSQL)
 		if err != nil {
 			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from CSV: %v", err)
 			return nil, fmt.Errorf("failed to create table from CSV: %w", err)
@@ -900,7 +909,7 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 		}
 	}
 
-	if _, err := io.Copy(tmp, reader); err != nil {
+	if _, err := io.Copy(tmp, materializationReader{ctx: ctx, reader: reader}); err != nil {
 		_ = tmp.Close()
 		cleanup()
 		return "", noop, fmt.Errorf("failed to copy knowledge '%s' to temp file: %w", knowledge.ID, err)
@@ -914,6 +923,22 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 		knowledge.ID, tmpPath, t.sessionID)
 
 	return tmpPath, cleanup, nil
+}
+
+type materializationReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r materializationReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.reader.Read(p)
+	if contextErr := r.ctx.Err(); contextErr != nil {
+		return n, contextErr
+	}
+	return n, err
 }
 
 // LoadFromKnowledgeID loads data from a Knowledge ID into a DuckDB table and returns the table schema
@@ -1016,7 +1041,10 @@ func (t *DataAnalysisTool) LoadFromTable(ctx context.Context, tableName string) 
 }
 
 func (t *DataAnalysisTool) TableName(knowledge *types.Knowledge) string {
-	return "k_" + strings.ReplaceAll(knowledge.ID, "-", "_")
+	// The DuckDB pool is shared by agent turns and background extraction.
+	// A document-only (or session-only) name lets overlapping runs collide
+	// during CREATE and lets one run's Cleanup drop another run's table.
+	return "k_" + t.tableNamespace + "_" + strings.ReplaceAll(knowledge.ID, "-", "_")
 }
 
 // Description builds the model-facing schema description. It names the table

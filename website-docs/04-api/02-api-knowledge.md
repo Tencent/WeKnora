@@ -347,9 +347,9 @@ multipart/form-data 字段：
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `summary_enabled` | bool | true | 是否为本次导入的文档生成摘要；关闭后解析、索引及其他处理照常执行 |
-| `parser_engine_rules` | []object | 知识库配置 | 按文件类型指定解析引擎 |
+| `parser_engine_rules` | []object | 知识库配置 | 省略或传 `null` 时沿用知识库规则；显式传 `[]` 时，本次导入或重解析使用各文件类型的默认引擎。非空数组覆盖知识库规则。 |
 | `parser_engine_overrides` | map[string]string | 空 | 引擎参数，如 `pdf_force_scanned` |
-| `chunking_config` | object | 知识库配置 | 分块参数 |
+| `chunking_config` | object | 知识库配置 | 分块参数。文档级 `token_limit` 省略或为 `null` 时沿用知识库预算，显式传 `0` 时关闭预算并使用字符分块大小。正值覆盖估算 Token 预算。 |
 | `enable_multimodel` / `vlm_config` / `asr_config` | - | 知识库配置 | 多模态与语音识别 |
 | `question_generation_config` | object | 知识库配置 | 问题生成 |
 | `graph_enabled` / `extract_config` | - | 知识库配置 | 图谱抽取 |
@@ -627,6 +627,8 @@ curl -X PUT $BASE/api/v1/knowledge/manual/k-1 -H "Authorization: Bearer $TOKEN" 
 
 用途：重新解析知识。权限同上。请求体（可选）：`{"process_config":{...}}`。
 
+也支持 `POST /api/v1/knowledge-bases/:id/knowledge/:knowledge_id/reparse`：`:id` 为知识库 ID，`:knowledge_id` 为知识 ID。权限与原接口一致，知识必须属于 URL 指定的知识库，否则返回 400。
+
 响应：200 `{"success":true,"message":"Reparse task submitted","data":{Knowledge}}`
 
 ```bash
@@ -724,6 +726,8 @@ curl -X PUT $BASE/api/v1/knowledge/tags -H "Authorization: Bearer $TOKEN" \
 ### POST /api/v1/knowledge/batch-reparse
 
 用途：批量重解析。权限：Contributor+；API key `ingest`/full。
+
+也支持 `POST /api/v1/knowledge-bases/:id/knowledge/batch-reparse`：从 URL 获取知识库 ID，可省略请求体中的 `kb_id`；若传入则必须与 URL 一致，否则返回 400。所有知识必须属于该知识库，仍需知识库创建者或 Admin+ 及写权限。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |

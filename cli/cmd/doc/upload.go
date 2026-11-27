@@ -252,6 +252,9 @@ func validateUploadFlags(opts *UploadOptions, args []string) error {
 		return cmdutil.NewFlagError(errors.New(
 			"a file path is required (or use `weknora doc fetch` for URLs, `weknora doc create` for inline text)"))
 	}
+	if opts.Recursive {
+		return validateRecursiveUploadFlags(opts)
+	}
 	return nil
 }
 
@@ -303,18 +306,22 @@ func runUpload(ctx context.Context, opts *UploadOptions, fopts *cmdutil.FormatOp
 	}
 	k, err := svc.CreateKnowledgeFromFile(ctx, kbID, path, meta, opts.EnableMultimodel, opts.Name, cmp.Or(opts.Channel, uploadChannel), nil)
 	if err != nil {
-		return classifyUploadError(err, path)
+		return classifyUploadError(err, k, path)
 	}
 	return renderUploadSuccess(k, fopts, "Uploaded", opts.Name, path)
 }
 
-func classifyUploadError(err error, path string) error {
+func existingDocumentError(cause error, k *sdk.Knowledge, message string) *cmdutil.Error {
+	err := cmdutil.Wrapf(cmdutil.CodeResourceAlreadyExists, cause, "%s", message)
+	if k != nil && k.ID != "" {
+		return err.WithDetail(map[string]string{"knowledge_id": k.ID})
+	}
+	return err
+}
+
+func classifyUploadError(err error, k *sdk.Knowledge, path string) error {
 	if errors.Is(err, sdk.ErrDuplicateFile) {
-		// SDK returns sentinel without an "HTTP error <status>:" prefix
-		// (the duplicate is detected by file hash, not by status code),
-		// so WrapHTTP would misclassify it as network.error.
-		return cmdutil.Wrapf(cmdutil.CodeResourceAlreadyExists, err,
-			"file already uploaded to this knowledge base")
+		return existingDocumentError(err, k, "file already uploaded to this knowledge base")
 	}
 	return cmdutil.WrapHTTP(err, "upload %s", path)
 }

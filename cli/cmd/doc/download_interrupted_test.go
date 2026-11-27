@@ -2,11 +2,14 @@ package doc
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -28,7 +31,10 @@ func TestDownloadInterruptedClobberPreservesExistingFile(t *testing.T) {
 		context.Background(), &DownloadOptions{Output: path, Clobber: true},
 		textFopts(), sdk.NewClient(server.URL), "doc-test",
 	)
-	require.Error(t, err)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeNetworkError, typed.Code)
 	got, readErr := os.ReadFile(path)
 	require.NoError(t, readErr)
 	assert.Equal(t, "previous complete download", string(got))

@@ -164,3 +164,50 @@ func TestWikiSourceDeletionStillReconcilesPages(t *testing.T) {
 		})
 	}
 }
+
+// TestWikiReparseRetractionWithSurvivingSourceDoesNotRequestRemovalNotice pins
+// the gate on the empty-page escape hatch: a page that still has a source
+// document after a retraction must not be told it may collapse to the
+// "(empty page)" notice. Only a page whose sources are all gone qualifies.
+func TestWikiReparseRetractionWithSurvivingSourceDoesNotRequestRemovalNotice(t *testing.T) {
+	ctx := context.Background()
+	pageSvc, page := newWikiWriteGuardStore(t, "# PMP\n\nCertification requirements.")
+	page.SourceRefs = types.StringArray{"kn-1|Certification", "kn-2|Handbook"}
+	require.NoError(t, pageSvc.UpdatePageMeta(ctx, page))
+	svc := &wikiIngestService{
+		wikiService: pageSvc,
+		knowledgeSvc: &wikiKnowledgeLookupStub{lookup: func(context.Context, string) (*types.Knowledge, error) {
+			return &types.Knowledge{ID: "kn-1"}, nil
+		}},
+	}
+	const updatedBody = "# PMP\n\nCertification requirements, now from the handbook."
+	model := &templateCaptureChatModel{response: "SUMMARY: Certification\n" + updatedBody}
+	batchCtx := &WikiBatchContext{
+		SummaryContentByKnowledgeID: func(_ context.Context, id string) string {
+			if id == "kn-2" {
+				return "Handbook contribution."
+			}
+			return ""
+		},
+		SlugTitleMany: func(context.Context, []string) map[string]string { return nil },
+	}
+	updates := []SlugUpdate{{
+		Slug: page.Slug, Type: "retract", KnowledgeID: "kn-1",
+		RetractDocContent: "Certification requirements.",
+	}}
+	changed, _, failed, deferred, err := svc.reduceSlugUpdates(
+		ctx, model, page.KnowledgeBaseID, page.Slug, updates, 1, batchCtx, nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.False(t, failed)
+	require.False(t, deferred)
+	require.NotEmpty(t, model.messages)
+	prompt := model.messages[len(model.messages)-1].Content
+	require.Contains(t, prompt, "Handbook contribution.")
+	require.NotContains(t, prompt, "(no remaining sources)")
+	require.NotContains(t, prompt, "This page's primary source document was removed.")
+	after, err := pageSvc.GetPageBySlug(ctx, page.KnowledgeBaseID, page.Slug)
+	require.NoError(t, err)
+	require.Equal(t, updatedBody, after.Content)
+	require.Equal(t, types.StringArray{"kn-2|Handbook"}, after.SourceRefs)
+}

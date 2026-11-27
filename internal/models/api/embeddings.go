@@ -92,19 +92,52 @@ type ImageEmbedder interface {
 // empty vector, where it is stored and poisons retrieval without anything
 // failing, so a gap is an error instead. So is an index reported twice: one
 // of the two vectors belongs to some other input.
+//
+// A gateway that merges concurrent requests server-side may number this
+// request's inputs within the merged batch: Xinference answers a five-input
+// request with indices 5..9 instead of 0..4. When the reply covers exactly
+// the requested count with one contiguous run of unique indices, that run is
+// rebased onto zero. A gapped run, a duplicate, or a wrong count is still an
+// error.
 func PlaceEmbeddings(want, got int, at func(i int) (int, []float32)) ([][]float32, error) {
+	indices := make([]int, got)
+	vectors := make([][]float32, got)
+	minIndex := 0
+	for i := 0; i < got; i++ {
+		indices[i], vectors[i] = at(i)
+		if i == 0 || indices[i] < minIndex {
+			minIndex = indices[i]
+		}
+	}
+	offset := 0
+	if got == want && got > 0 && minIndex > 0 {
+		unique := make(map[int]struct{}, got)
+		maxIndex := minIndex
+		for _, index := range indices {
+			if _, dup := unique[index]; dup {
+				return nil, fmt.Errorf("embedding index %d returned twice", index)
+			}
+			unique[index] = struct{}{}
+			if index > maxIndex {
+				maxIndex = index
+			}
+		}
+		if maxIndex-minIndex+1 == want {
+			offset = minIndex
+		}
+	}
 	out := make([][]float32, want)
 	seen := make([]bool, want)
 	for i := 0; i < got; i++ {
-		index, vector := at(i)
+		index := indices[i] - offset
 		if index < 0 || index >= want {
-			return nil, fmt.Errorf("embedding index %d out of range for %d inputs", index, want)
+			return nil, fmt.Errorf("embedding index %d out of range for %d inputs", indices[i], want)
 		}
 		if seen[index] {
-			return nil, fmt.Errorf("embedding index %d returned twice", index)
+			return nil, fmt.Errorf("embedding index %d returned twice", indices[i])
 		}
 		seen[index] = true
-		out[index] = vector
+		out[index] = vectors[i]
 	}
 	for i, vector := range out {
 		if len(vector) == 0 {
