@@ -49,12 +49,10 @@ type TaskPendingOp struct {
 	// but useful for ops queries like "rows older than 1h that never
 	// drained".
 	EnqueuedAt time.Time `json:"enqueued_at"`
-	// Optional claim timestamp for future locking workflows. Not used
-	// in the current revision: consumers rely on external mutual
-	// exclusion (e.g. wiki:active:<kbID> Redis SetNX). Reserved column
-	// so future no-lock parallel workers can flip it inside a row-level
-	// lock without another migration.
+	// ClaimedAt 用于判断领取是否超时；写入权限由 ClaimEpoch 区分，避免旧 worker 回写。
 	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
+	// ClaimEpoch 每次领取单调增加，用于阻止失主 worker 提交或清理新一轮任务。
+	ClaimEpoch int64 `json:"-" gorm:"not null;default:0"`
 }
 
 // TableName binds TaskPendingOp to the `task_pending_ops` table.

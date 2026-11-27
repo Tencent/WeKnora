@@ -27,6 +27,11 @@ func NewTaskPendingOpsRepository(db *gorm.DB) interfaces.TaskPendingOpsRepositor
 // Scope/ScopeID/Op (Payload optional). ID, FailCount default to zero;
 // EnqueuedAt is filled with the DB-side default if left zero.
 func (r *taskPendingOpsRepository) Enqueue(ctx context.Context, op *types.TaskPendingOp) error {
+	if _, guarded := types.WikiProgressClaimsFromContext(ctx); guarded {
+		// 包装仓储可能只暴露基础 Enqueue，仍不能绕过持久交接的授权事务。
+		_, err := r.EnqueueIfKnowledgeBaseActive(ctx, op)
+		return err
+	}
 	if err := preparePendingOp(op); err != nil {
 		return err
 	}
@@ -88,6 +93,9 @@ func (r *taskPendingOpsRepository) EnqueueBatchIfKnowledgeBaseActive(
 		if op.TenantID != ops[0].TenantID || op.ScopeID != ops[0].ScopeID || op.TaskType != ops[0].TaskType {
 			return false, errors.New("task pending ops: batch must belong to one tenant and queue lane")
 		}
+	}
+	if claims, guarded := types.WikiProgressClaimsFromContext(ctx); guarded {
+		return r.enqueueWikiProgressHandoffBatch(ctx, ops, claims)
 	}
 	accepted := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -386,7 +394,10 @@ FOR UPDATE SKIP LOCKED`
 		}
 		if err := tx.Model(&types.TaskPendingOp{}).
 			Where("id IN ?", ids).
-			Update("claimed_at", now).Error; err != nil {
+			Updates(map[string]interface{}{
+				"claimed_at":  now,
+				"claim_epoch": gorm.Expr("claim_epoch + 1"),
+			}).Error; err != nil {
 			return err
 		}
 		return tx.Where("id IN ?", ids).Order("id ASC").Find(&claimed).Error

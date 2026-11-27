@@ -389,15 +389,17 @@ type WikiPendingOp struct {
 // both of which are correctness-critical short-lived flags rather
 // than data the system should survive without.
 type wikiIngestService struct {
-	wikiService    interfaces.WikiPageService
-	kbService      interfaces.KnowledgeBaseService
-	knowledgeSvc   interfaces.KnowledgeService
-	knowledgeRepo  interfaces.KnowledgeRepository
-	chunkRepo      interfaces.ChunkRepository
-	modelService   interfaces.ModelService
-	task           interfaces.TaskEnqueuer
-	audit          interfaces.AuditLogService
-	pendingRepo    interfaces.TaskPendingOpsRepository
+	wikiService   interfaces.WikiPageService
+	kbService     interfaces.KnowledgeBaseService
+	knowledgeSvc  interfaces.KnowledgeService
+	knowledgeRepo interfaces.KnowledgeRepository
+	chunkRepo     interfaces.ChunkRepository
+	modelService  interfaces.ModelService
+	task          interfaces.TaskEnqueuer
+	audit         interfaces.AuditLogService
+	pendingRepo   interfaces.TaskPendingOpsRepository
+	// progressRepo 将本轮领取与不可变计划、逐页回执关联；旧的队列替身可不实现。
+	progressRepo   interfaces.WikiIngestProgressRepository
 	deadLetterRepo interfaces.TaskDeadLetterRepository
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
 	// spanTracker lets per-document map work surface as a
@@ -456,6 +458,7 @@ func NewWikiIngestService(
 		redisClient:    redisClient,
 		spanTracker:    spanTracker,
 	}
+	svc.progressRepo, _ = pendingRepo.(interfaces.WikiIngestProgressRepository)
 	return svc
 }
 
@@ -806,6 +809,60 @@ func (s *wikiIngestService) enqueueFinalize(
 	if s.pendingRepo == nil {
 		return 0, nil
 	}
+	rows, failed, err := buildFinalizeRows(payload, affectedSlugs, freshTitleBySlug, changes, folderIDs)
+	if err != nil {
+		return failed, err
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	// Allow larger batches more time, but never detach unbounded work.
+	budget := max(30*time.Second, min(5*time.Minute, time.Duration((len(rows)-1)/100+1)*5*time.Second))
+	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+	defer cancel()
+	accepted, failed, err := s.persistFinalizeRows(enqueueCtx, rows)
+	if err != nil {
+		return failed, err
+	}
+	if accepted {
+		if schedErr := s.scheduleFinalize(enqueueCtx, payload); schedErr != nil {
+			return 0, schedErr
+		}
+	}
+	return 0, nil
+}
+
+// enqueueFinalizeRows 只持久交接整理工作；逐文档结算时不提前启动全局整理，
+// 避免其他文档仍在生成页面时清理它们的链接。触发器由批次退出路径统一发送。
+func (s *wikiIngestService) enqueueFinalizeRows(
+	ctx context.Context,
+	payload WikiIngestPayload,
+	affectedSlugs []string,
+	freshTitleBySlug map[string]string,
+	changes []wikiFinalizeChange,
+	folderIDs []string,
+) (bool, error) {
+	if s.pendingRepo == nil {
+		return false, nil
+	}
+	rows, _, err := buildFinalizeRows(payload, affectedSlugs, freshTitleBySlug, changes, folderIDs)
+	if err != nil {
+		return false, err
+	}
+	if len(rows) == 0 {
+		return false, nil
+	}
+	accepted, _, err := s.persistFinalizeRows(ctx, rows)
+	return accepted, err
+}
+
+func buildFinalizeRows(
+	payload WikiIngestPayload,
+	affectedSlugs []string,
+	freshTitleBySlug map[string]string,
+	changes []wikiFinalizeChange,
+	folderIDs []string,
+) ([]*types.TaskPendingOp, int, error) {
 	rows := make([]*types.TaskPendingOp, 0, len(affectedSlugs)+len(changes)+1)
 	appendRow := func(op, key string, row wikiFinalizeRow) error {
 		b, err := json.Marshal(row)
@@ -821,49 +878,44 @@ func (s *wikiIngestService) enqueueFinalize(
 	for _, slug := range affectedSlugs {
 		row := wikiFinalizeRow{Slug: slug, Title: freshTitleBySlug[slug]}
 		if err := appendRow(wikiFinalizeOpSlug, slug, row); err != nil {
-			return len(affectedSlugs) + len(changes), err
+			return nil, len(affectedSlugs) + len(changes), err
 		}
 	}
 	for i := range changes {
 		if err := appendRow(wikiFinalizeOpChange, "", wikiFinalizeRow{Change: &changes[i]}); err != nil {
-			return len(affectedSlugs) + len(changes), err
+			return nil, len(affectedSlugs) + len(changes), err
 		}
 	}
 	if len(folderIDs) > 0 {
 		row := wikiFinalizeRow{FolderIDs: uniqueWikiFolderIDs(folderIDs)}
 		if err := appendRow(wikiFinalizeOpFolderPrune, "", row); err != nil {
-			return len(rows) + 1, err
+			return nil, len(rows) + 1, err
 		}
 	}
-	if len(rows) == 0 {
-		return 0, nil
-	}
-	// Allow larger batches more time, but never detach unbounded work.
-	budget := max(30*time.Second, min(5*time.Minute, time.Duration((len(rows)-1)/100+1)*5*time.Second))
-	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
-	defer cancel()
-	accepted := false
+	return rows, 0, nil
+}
+
+func (s *wikiIngestService) persistFinalizeRows(
+	ctx context.Context, rows []*types.TaskPendingOp,
+) (bool, int, error) {
 	if batch, ok := s.pendingRepo.(interfaces.TaskPendingOpsKnowledgeBaseBatchGuard); ok {
-		var err error
-		accepted, err = batch.EnqueueBatchIfKnowledgeBaseActive(enqueueCtx, rows)
+		accepted, err := batch.EnqueueBatchIfKnowledgeBaseActive(ctx, rows)
 		if err != nil {
-			return len(rows), fmt.Errorf("wiki finalize: persist %d rows: %w", len(rows), err)
+			return false, len(rows), fmt.Errorf("wiki finalize: persist %d rows: %w", len(rows), err)
 		}
-	} else {
-		// Alternate repositories retain their existing guarded single-row path;
-		// errors still stop the ingest batch from trimming its source operations.
-		for i, row := range rows {
-			ok, err := enqueueWikiPendingOp(enqueueCtx, s.pendingRepo, row)
-			if err != nil {
-				return len(rows) - i, fmt.Errorf("wiki finalize: persist row %d/%d: %w", i+1, len(rows), err)
-			}
-			accepted = accepted || ok
+		return accepted, 0, nil
+	}
+	// Alternate repositories retain their existing guarded single-row path;
+	// errors still stop the ingest batch from trimming its source operations.
+	accepted := false
+	for i, row := range rows {
+		ok, err := enqueueWikiPendingOp(ctx, s.pendingRepo, row)
+		if err != nil {
+			return false, len(rows) - i, fmt.Errorf("wiki finalize: persist row %d/%d: %w", i+1, len(rows), err)
 		}
+		accepted = accepted || ok
 	}
-	if accepted {
-		s.scheduleFinalize(enqueueCtx, payload)
-	}
-	return 0, nil
+	return accepted, 0, nil
 }
 
 func uniqueWikiFolderIDs(values []string) []string {
@@ -883,12 +935,9 @@ func uniqueWikiFolderIDs(values []string) []string {
 	return out
 }
 
-// scheduleFinalize enqueues a debounced, coalesced KB-global finalize trigger.
-// asynq.TaskID ("wiki-finalize-<kbID>") makes concurrent schedules within the
-// debounce window collapse into one pending task; the conflict error is the
-// expected coalescing signal, not a failure. Lite mode reserves stable IDs
-// in-process for the lifetime of each delayed or running task.
-func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIngestPayload) {
+// scheduleFinalize 合并知识库级收尾任务；Lite 模式也在延迟和运行期间保留稳定任务 ID。
+// 已有任务视为成功合并，其他入队错误交给持久化恢复路径处理。
+func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIngestPayload) error {
 	langfuse.InjectTracing(ctx, &payload)
 	b, _ := json.Marshal(payload)
 	t := asynq.NewTask(types.TypeWikiFinalize, b,
@@ -900,10 +949,12 @@ func (s *wikiIngestService) scheduleFinalize(ctx context.Context, payload WikiIn
 	)
 	if _, err := s.task.Enqueue(t); err != nil {
 		if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
-			return // a finalize is already scheduled/running for this KB — coalesced
+			return nil // a finalize is already scheduled/running for this KB — coalesced
 		}
 		logger.Warnf(ctx, "wiki finalize: schedule trigger failed: %v", err)
+		return err
 	}
+	return nil
 }
 
 // scheduleFinalizeRetry is used when folder pruning is waiting for ingest
@@ -1468,7 +1519,9 @@ type WikiBatchContext struct {
 	// reservations. Map workers in one batch run concurrently even though Lite
 	// serializes batches, so they still need to converge before Reduce groups
 	// updates by slug. The map is batch-scoped and disappears with the batch.
-	identityClaims sync.Map
+	// frozenIdentityClaims 在 Map 启动前固定，只读供同批新文档沿用持久计划。
+	frozenIdentityClaims map[string]string
+	identityClaims       sync.Map
 
 	// identityPages memoizes exact title lookups for this batch so concurrent
 	// map workers probing the same (page type, normalized title) share one DB
@@ -2376,19 +2429,35 @@ func splitSummaryLine(raw string) (summary string, content string) {
 
 // publishDraftPages transitions draft pages to published status after ingest completes.
 // This ensures users don't see half-built pages during the ingest process.
-func (s *wikiIngestService) publishDraftPages(ctx context.Context, kbID string, slugs []string) {
+func (s *wikiIngestService) publishDraftPages(
+	ctx context.Context, kbID string, slugs []string, expectedIDs ...map[string]string,
+) error {
+	var publishErrors []error
 	for _, slug := range slugs {
 		page, err := s.wikiService.GetPageBySlug(ctx, kbID, slug)
-		if err != nil || page == nil {
+		if errors.Is(err, apprepo.ErrWikiPageNotFound) {
+			continue
+		}
+		if err != nil {
+			publishErrors = append(publishErrors, err)
+			continue
+		}
+		if page == nil {
+			continue
+		}
+		// 恢复期间同路径可能已属于新页面；只发布本轮回执对应的页面 ID。
+		if len(expectedIDs) > 0 && expectedIDs[0][slug] != page.ID {
 			continue
 		}
 		if page.Status == types.WikiPageStatusDraft {
-			page.Status = types.WikiPageStatusPublished
-			if err := s.wikiService.UpdatePageMeta(ctx, page); err != nil {
+			// 读取后的页面可能已被其他批次更新；发布只按身份修改状态，不能回写旧元数据。
+			if err := s.wikiService.PublishDraftPage(ctx, page.TenantID, kbID, page.ID, slug); err != nil {
 				logger.Warnf(ctx, "wiki ingest: failed to publish page %s: %v", slug, err)
+				publishErrors = append(publishErrors, err)
 			}
 		}
 	}
+	return errors.Join(publishErrors...)
 }
 
 // writeDedupCandidateGroup renders one new item together with its own
