@@ -5,7 +5,7 @@ import { canRegister } from './registrationPolicy'
 for (const [mode, withoutInvite, withInvite] of [
   ['self_serve', true, true],
   ['invite_register', false, true],
-  ['invite_only', false, false],
+  ['invite_only', false, true],
   ['', false, false],
   ['unknown', false, false],
 ] as const) {
