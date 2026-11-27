@@ -151,3 +151,71 @@ func TestWikiLintUsesCurrentMarkdownInsteadOfStaleOutLinks(t *testing.T) {
 		"`[[concept/missing]]`\n\n```md\n[[concept/missing]]\n```\n\n" + `\[[concept/missing]]`
 	assert.Equal(t, want, after.Content)
 }
+
+func TestWikiAutoFixRepairsMixedCaseLegacySlugBeforeStripping(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(
+		&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}, &types.WikiPageIssue{},
+	))
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil, nil)
+	const kbID = "kb-repair-live-links"
+	seedWikiTestKnowledgeBase(t, db, kbID, 1)
+
+	// Legacy row written before creation normalized slugs.
+	legacy := &types.WikiPage{
+		ID: "legacy-target", TenantID: 1, KnowledgeBaseID: kbID,
+		Slug: "concept/bingfa-kuorong-tunTu", Title: "并发扩容吞吐",
+		PageType: types.WikiPageTypeConcept, Status: types.WikiPageStatusPublished,
+		Content: "Legacy page content that is long enough to avoid the empty-page lint finding.",
+		Version: 1,
+	}
+	require.NoError(t, db.Create(legacy).Error)
+	// A similar live slug in another namespace must not win the repair.
+	require.NoError(t, db.Create(&types.WikiPage{
+		ID: "legacy-other-namespace", TenantID: 1, KnowledgeBaseID: kbID,
+		Slug: "entity/bingfa-kuorong-tuntu", Title: "Other namespace",
+		PageType: types.WikiPageTypeEntity, Status: types.WikiPageStatusPublished,
+		Content: "Another page with a long enough body for the lint checks.",
+		Version: 1,
+	}).Error)
+
+	content := "A sufficiently long explanation of the topic and its references.\n\n" +
+		"See [[concept/bingfa-kuorong-tuntu|旧标签]] and `[[concept/bingfa-kuorong-tuntu]]`."
+	source, err := svc.CreatePage(ctx, &types.WikiPage{
+		TenantID: 1, KnowledgeBaseID: kbID, Slug: "summary/main", Title: "Main",
+		PageType: types.WikiPageTypeSummary, Content: content,
+	})
+	require.NoError(t, err)
+
+	kb := &types.KnowledgeBase{ID: kbID}
+	kb.IndexingStrategy.WikiEnabled = true
+	lint := NewWikiLintService(svc, markdownLintKBService{kb: kb}, nil)
+
+	report, err := lint.RunLint(ctx, kbID)
+	require.NoError(t, err)
+	var broken *WikiLintIssue
+	for i := range report.Issues {
+		if report.Issues[i].Type == LintIssueBrokenLink {
+			broken = &report.Issues[i]
+			break
+		}
+	}
+	require.NotNil(t, broken)
+	require.Equal(t, "concept/bingfa-kuorong-tuntu", broken.TargetSlug)
+
+	fixed, err := lint.AutoFix(ctx, kbID)
+	require.NoError(t, err)
+	require.Equal(t, 1, fixed)
+
+	stored, err := svc.GetPageBySlug(ctx, kbID, source.Slug)
+	require.NoError(t, err)
+	require.Contains(t, stored.Content, "[[concept/bingfa-kuorong-tunTu|旧标签]]")
+	require.Contains(t, stored.Content, "`[[concept/bingfa-kuorong-tuntu]]`")
+	require.NotContains(t, stored.Content, "旧标签 and")
+}

@@ -351,6 +351,24 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 		return 0, err
 	}
 
+	liveSlugList, err := s.wikiService.ListAllSlugs(ctx, kbID)
+	if err != nil {
+		return 0, fmt.Errorf("list all slugs: %w", err)
+	}
+	// Match the ingest resolver: compare a dead target only against live
+	// pages in its own namespace. Otherwise a similar slug in another
+	// namespace can win the bigram fallback.
+	liveSlugsByNamespace := make(map[string]map[string]struct{}, len(liveSlugList))
+	for _, slug := range liveSlugList {
+		ns := slugNamespace(slug)
+		pool := liveSlugsByNamespace[ns]
+		if pool == nil {
+			pool = make(map[string]struct{})
+			liveSlugsByNamespace[ns] = pool
+		}
+		pool[slug] = struct{}{}
+	}
+
 	fixed := 0
 	for _, issue := range report.Issues {
 		if !issue.AutoFixable {
@@ -359,8 +377,9 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 
 		switch issue.Type {
 		case LintIssueBrokenLink:
-			// Replace [[broken-slug]] with plain text so the reference text is
-			// preserved but no longer renders as a dangling wiki link.
+			// A link can be dead only because the stored page slug has a
+			// different case or hyphenation. Repair it to the live slug before
+			// falling back to stripping the link text.
 			if issue.TargetSlug == "" {
 				continue
 			}
@@ -372,6 +391,14 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 			updated, changed := rewriteMarkdownWikiLinks(page.Content, func(link markdownWikiLink) string {
 				if link.slug != target {
 					return page.Content[link.start:link.end]
+				}
+				if resolved, ok := resolveDeadSlug(
+					link.slug, link.display, liveSlugsByNamespace[slugNamespace(link.slug)], nil,
+				); ok {
+					if resolved == link.slug {
+						return page.Content[link.start:link.end]
+					}
+					return link.withSlug(resolved)
 				}
 				if link.display != "" {
 					return link.display
