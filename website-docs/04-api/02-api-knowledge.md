@@ -231,7 +231,7 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 | `query_text` | string | 条件必填 | 查询文本（除非提供 `query_embedding`；开启 rerank 时必填） |
 | `query_embedding` | []float32 | 否 | 预计算向量 |
 | `vector_threshold` / `keyword_threshold` | float64 | 否 | 匹配阈值 |
-| `match_count` | int | 否 | 返回条数上限（默认 50） |
+| `match_count` | int | 否 | 主结果条数上限（默认 50）：只限制向量/关键词命中的排名行；父块、邻近块、关系块等上下文扩展行不计入该上限，会在主结果之后额外追加（`skip_context_enrichment` 可关） |
 | `disable_keywords_match` / `disable_vector_match` | bool | 否 | 关闭某一路召回 |
 | `knowledge_base_ids` | []string | 否 | 一次检索多个知识库，路径上的 `:id` 必须在其中；这些知识库的 embedding 模型必须相同，否则返回 400 |
 | `knowledge_ids` | []string | 否 | 限定知识条目 |
@@ -241,6 +241,20 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 | `rerank` | object | 否 | 传入即开启 rerank（`{}` 使用空间配置的模型），字段见 [rerank 对象](./01-api-overview.md#retrieval-api) |
 
 响应：200 `{"success":true,"data":[SearchResult]}`；带 `rerank` 时多一个 `meta.rerank`（见 [meta.rerank 诊断](./01-api-overview.md#retrieval-api)）。
+
+`data` 行按 `match_type` 区分：
+
+| `match_type` | 含义 |
+| --- | --- |
+| `0` | 向量命中（主结果，按 `score` 排序） |
+| `1` | 关键词命中（主结果，按 `score` 排序） |
+| `2` | 邻近块扩展：命中行的前/后一个分块，`score` 为 0 |
+| `4` | 父块扩展：继承命中行的 `score` |
+| `5` | 关系块扩展：`score` 为 0 |
+
+主结果（0/1）受 `match_count` 限制；上下文扩展行（2/4/5）追加在主结果之后、不受 `match_count` 限制，所以 `data` 的总行数可能大于 `match_count`。
+
+请求体里的未知字段会被静默忽略：写错参数名（例如把返回条数写成 `limit`）不会报 400，也不会生效；正确的参数名以本表为准。
 
 ```bash
 curl -X POST "$BASE/api/v1/knowledge-bases/kb-1/hybrid-search?resource_urls=public" -H "X-API-Key: $API_KEY" \

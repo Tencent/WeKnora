@@ -181,7 +181,12 @@ type SearchResult struct {
 	// fusion replaced Score with a rank-based one; 0 for other hits. See
 	// IndexWithScore.VectorScore.
 	VectorScore float64 `json:"-"`
-	// Match type
+	// MatchType is how this row was found. 0 = vector hit, 1 = keyword hit:
+	// the ranked primary results, which match_count counts. 2 = nearby-chunk
+	// expansion (previous/next chunk of a hit), 4 = parent chunk, 5 =
+	// relation chunk: context rows appended after the primary results,
+	// outside match_count; nearby and relation rows carry score 0, a parent
+	// row inherits its hit's score.
 	MatchType MatchType `                              json:"match_type" extensions:"x-agent"`
 	// SubChunkIndex
 	SubChunkID []string `                              json:"sub_chunk_id"`
@@ -270,7 +275,11 @@ type SearchParams struct {
 	VectorThreshold float64 `json:"vector_threshold" extensions:"x-agent"`
 	// Minimum keyword score a hit needs; 0 keeps every keyword hit.
 	KeywordThreshold float64 `json:"keyword_threshold" extensions:"x-agent"`
-	// Number of chunks to return; 0 uses the default.
+	// Number of primary chunks (vector and keyword hits) to return after
+	// fusion and rerank; 0 uses the default. Context-enrichment rows (the
+	// parent, nearby and relation chunks of the hits, match_type 2/4/5) are
+	// appended after the primary rows and are NOT counted against this cap,
+	// so the response can hold more rows than match_count.
 	MatchCount int `json:"match_count" extensions:"x-agent,x-agent-maximum=30"`
 	// Turns keyword matching off, leaving vector matching only.
 	DisableKeywordsMatch bool `json:"disable_keywords_match" extensions:"x-agent"`
