@@ -27,13 +27,13 @@ class PPTXTableCellTests(unittest.TestCase):
         data = _deck(
             [
                 ["Plan", "Price | Currency", "Notes"],
-                ["Basic", "10 | USD", "line one\nline two"],
+                ["Basic", "10 | USD", "line one\vline two\nnew paragraph"],
             ]
         )
         content = Parser().parse_file("deck.pptx", "pptx", data).content
         self.assertIn(
             "| Plan | Price \\| Currency | Notes |\n| --- | --- | --- |\n"
-            "| Basic | 10 \\| USD | line one<br />line two |",
+            "| Basic | 10 \\| USD | line one<br />line two<br />new paragraph |",
             content,
         )
         self.assertIn("# Pricing", content)
