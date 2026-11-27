@@ -1059,6 +1059,37 @@ func TestSplitText_EnTablesNoCrossTableHeader(t *testing.T) {
 	}
 }
 
+func TestSplitText_CompactTableHeadersOnContinuationChunks(t *testing.T) {
+	const columns = "| Item | City |\n"
+	for _, tc := range []struct {
+		name      string
+		header    string
+		separator string
+		labels    string
+	}{
+		{"aligned single hyphen", columns, "| :- | -: |\n", ""},
+		{"empty converter header", "||\n", "| -- | :--: |\n", columns},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var table strings.Builder
+			table.WriteString(tc.header + tc.separator + tc.labels)
+			for i := 0; i < 12; i++ {
+				fmt.Fprintf(&table, "| row-%02d | 北京 |\n", i)
+			}
+			cfg := SplitterConfig{ChunkSize: 78, ChunkOverlap: 0, Separators: []string{"\n\n", "\n"}}
+			chunks := SplitText(table.String(), cfg)
+			if len(chunks) < 2 {
+				t.Fatal("expected the table to span multiple chunks")
+			}
+			for _, chunk := range chunks[1:] {
+				if !strings.HasPrefix(chunk.Content, columns+tc.separator) {
+					t.Errorf("continuation is missing its column labels and alignment: %q", chunk.Content)
+				}
+			}
+		})
+	}
+}
+
 func TestSplitText_MultipleTablesInDocument(t *testing.T) {
 	text := "" +
 		"第一个表格：\n\n" +
