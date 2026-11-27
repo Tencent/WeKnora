@@ -130,3 +130,68 @@ func TestPipelineRequestCarriesQueryImage(t *testing.T) {
 		t.Fatal("PipelineRequest does not carry the query image")
 	}
 }
+
+// imageQueryStubKBService resolves both targets into one model group and
+// fails every image embedding with the given error.
+type imageQueryStubKBService struct {
+	interfaces.KnowledgeBaseService
+	imageErr error
+}
+
+func (s *imageQueryStubKBService) GetKnowledgeBasesByIDsOnly(
+	context.Context, []string,
+) ([]*types.KnowledgeBase, error) {
+	return nil, nil
+}
+
+func (s *imageQueryStubKBService) ResolveEmbeddingModelKeys(
+	context.Context, []*types.KnowledgeBase,
+) map[string]string {
+	return map[string]string{"kb-a": "model-1", "kb-b": "model-1"}
+}
+
+func (s *imageQueryStubKBService) GetQueryImageEmbedding(
+	_ context.Context, _ string, _ []byte,
+) ([]float32, error) {
+	return nil, s.imageErr
+}
+
+// A partial image search must say which knowledge bases it dropped: hits from
+// the surviving targets look like a complete answer otherwise.
+func TestSearchByTargetsRecordsSkippedTargetsWhenImageEmbeddingFails(t *testing.T) {
+	svc := &imageQueryStubKBService{imageErr: errors.New("image endpoint unavailable")}
+	plugin := &PluginSearch{knowledgeBaseService: svc}
+
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			QueryImage: []byte{0x89, 'P', 'N', 'G'},
+			SearchTargets: []*types.SearchTarget{
+				{KnowledgeBaseID: "kb-a", Type: types.SearchTargetTypeKnowledgeBase},
+				{KnowledgeBaseID: "kb-b", Type: types.SearchTargetTypeKnowledgeBase},
+			},
+		},
+		PipelineState: types.PipelineState{RewriteQuery: "diagram"},
+	}
+
+	_, err := plugin.searchByTargets(context.Background(), cm)
+	if err == nil {
+		t.Fatal("expected the embedding failure to surface")
+	}
+	diag := cm.SearchDiagnostics
+	if diag == nil {
+		t.Fatal("the skipped targets were not recorded")
+	}
+	if len(diag.SkippedTargets) != 2 {
+		t.Fatalf("skipped = %v, want both targets", diag.SkippedTargets)
+	}
+	got := map[string]bool{}
+	for _, sk := range diag.SkippedTargets {
+		got[sk.KnowledgeBaseID] = true
+		if !strings.Contains(sk.Reason, "image endpoint unavailable") {
+			t.Fatalf("reason = %q, want the embedding failure", sk.Reason)
+		}
+	}
+	if !got["kb-a"] || !got["kb-b"] {
+		t.Fatalf("skipped = %v, want kb-a and kb-b", got)
+	}
+}

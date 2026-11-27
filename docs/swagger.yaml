@@ -7607,6 +7607,12 @@ definitions:
     properties:
       rerank:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RerankDiagnostics'
+      search:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SearchDiagnostics'
+        description: |-
+          Search records what the search stage skipped: targets left out of a
+          partial result, so a gap in the hits is visible instead of silent.
     type: object
   github_com_Tencent_WeKnora_internal_types.RetrievalMetrics:
     properties:
@@ -7890,6 +7896,16 @@ definitions:
           provider adapter.
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.E2BHostRule'
+        type: array
+    type: object
+  github_com_Tencent_WeKnora_internal_types.SearchDiagnostics:
+    properties:
+      skipped_targets:
+        description: |-
+          SkippedTargets lists every knowledge base that produced nothing because
+          its group could not serve the query, with the reason it was left out.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SkippedTarget'
         type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.SearchParams:
@@ -8430,6 +8446,13 @@ definitions:
       snapshot_id:
         description: SnapshotID is the currently effective snapshot; empty = base
           template.
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.SkippedTarget:
+    properties:
+      knowledge_base_id:
+        type: string
+      reason:
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.SourceLocator:

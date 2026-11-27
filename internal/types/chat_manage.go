@@ -236,6 +236,9 @@ type PipelineState struct {
 	UsedMemories UsedMemories `json:"-"`
 	// RerankDiagnostics records what the rerank stage did this turn.
 	RerankDiagnostics *RerankDiagnostics `json:"-"`
+	// SearchDiagnostics records what the search stage skipped while still
+	// returning results for its other targets.
+	SearchDiagnostics *SearchDiagnostics `json:"-"`
 	// DataAnalysisFailure is non-nil when DATA_ANALYSIS attempted to load or
 	// query a tabular document and failed.
 	DataAnalysisFailure *DataAnalysisFailure `json:"-"`

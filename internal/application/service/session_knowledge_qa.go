@@ -950,7 +950,8 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base search completed, found %d results, rerank outcome: %s",
 		len(results), diag.Outcome)
-	return &types.RetrievalResult{Results: results, Meta: types.RetrievalMeta{Rerank: diag}}, nil
+	meta := types.RetrievalMeta{Rerank: diag, Search: chatManage.SearchDiagnostics}
+	return &types.RetrievalResult{Results: results, Meta: meta}, nil
 }
 
 // applyKnowledgeSearchOverrides applies the caller's knowledge-search

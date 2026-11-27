@@ -112,6 +112,24 @@ type RerankDiagnostics struct {
 // results.
 type RetrievalMeta struct {
 	Rerank *RerankDiagnostics `json:"rerank,omitempty"`
+	// Search records what the search stage skipped: targets left out of a
+	// partial result, so a gap in the hits is visible instead of silent.
+	Search *SearchDiagnostics `json:"search,omitempty"`
+}
+
+// SearchDiagnostics reports what the search stage dropped while still
+// returning results for its other targets.
+type SearchDiagnostics struct {
+	// SkippedTargets lists every knowledge base that produced nothing because
+	// its group could not serve the query, with the reason it was left out.
+	SkippedTargets []SkippedTarget `json:"skipped_targets,omitempty"`
+}
+
+// SkippedTarget is one knowledge base the search stage left out of a partial
+// result, with the reason.
+type SkippedTarget struct {
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	Reason          string `json:"reason"`
 }
 
 // RetrievalResult is a retrieval API result with its diagnostics.
