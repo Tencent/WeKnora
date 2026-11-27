@@ -165,8 +165,13 @@ func TestKnowledgeDeletePreservesLinkedWikiPages(t *testing.T) {
 		batch := &WikiBatchContext{SlugTitleMany: func(context.Context, []string) map[string]string { return nil }}
 		changed, _, failed, deferred, err := ingest.reduceSlugUpdates(ctx, model, kb.ID, target,
 			[]SlugUpdate{
-				{Slug: target, Type: "retract", KnowledgeID: op.KnowledgeID, DocTitle: op.DocTitle,
-					RetractDocContent: op.DocSummary},
+				{
+					Slug:              target,
+					Type:              "retract",
+					KnowledgeID:       op.KnowledgeID,
+					DocTitle:          op.DocTitle,
+					RetractDocContent: op.DocSummary,
+				},
 			}, kb.TenantID, batch, nil)
 		require.NoError(t, err)
 		require.False(t, changed)
