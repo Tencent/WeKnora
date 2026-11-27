@@ -156,6 +156,22 @@ func (a *fullOutputAdapter) EndStream(ctx context.Context, _ *IncomingMessage, _
 	return a.endErr
 }
 
+func (a *fullOutputAdapter) AddReaction(ctx context.Context, _ *IncomingMessage, emojiType string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	a.order.add("reaction:" + emojiType)
+	return "reaction-1", nil
+}
+
+func (a *fullOutputAdapter) RemoveReaction(ctx context.Context, _ *IncomingMessage, reactionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	a.order.add("reaction-remove:" + reactionID)
+	return nil
+}
+
 type fullOutputNoProgressAdapter struct {
 	*fullOutputAdapter
 }
@@ -178,17 +194,22 @@ func newFullOutputHarness(answer string) (*Service, *fullOutputAdapter, *fullOut
 
 func TestHandleMessageFullOutputShowsPlaceholderWithoutIntermediateUpdates(t *testing.T) {
 	service, adapter, _, order := newFullOutputHarness("最终答案")
-	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"}
+	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题", MessageID: "om_123"}
 	session := &types.Session{ID: "session-1"}
 
+	reactions := newIMReactionTracker(adapter, msg)
+	reactions.Begin(context.Background())
 	err := service.handleMessageFullOutput(
-		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil, reactions,
 	)
 	if err != nil {
 		t.Fatalf("handleMessageFullOutput() error = %v", err)
 	}
 
-	wantOrder := []string{"start", "qa", "finalize", "end"}
+	wantOrder := []string{
+		"reaction:OnIt", "start", "qa", "finalize", "end",
+		"reaction-remove:reaction-1", "reaction:DONE",
+	}
 	if got := order.snapshot(); !reflect.DeepEqual(got, wantOrder) {
 		t.Fatalf("lifecycle order = %v, want %v", got, wantOrder)
 	}
@@ -207,14 +228,16 @@ func TestHandleMessageFullOutputReplacesPlaceholderAfterCancel(t *testing.T) {
 	service, adapter, sessionSvc, order := newFullOutputHarness("")
 	sessionSvc.hangUntilCancel = true
 	sessionSvc.started = make(chan struct{})
-	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"}
+	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题", MessageID: "om_123"}
 	session := &types.Session{ID: "session-1"}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	reactions := newIMReactionTracker(adapter, msg)
+	reactions.Begin(ctx)
 	done := make(chan error, 1)
 	go func() {
 		done <- service.handleMessageFullOutput(
-			ctx, msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+			ctx, msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil, reactions,
 		)
 	}()
 
@@ -234,7 +257,11 @@ func TestHandleMessageFullOutputReplacesPlaceholderAfterCancel(t *testing.T) {
 		t.Fatal("timed out waiting for full-output after cancel")
 	}
 
-	wantOrder := []string{"start", "qa", "finalize", "end"}
+	// A cancelled round ends with ERROR, not DONE.
+	wantOrder := []string{
+		"reaction:OnIt", "start", "qa", "finalize", "end",
+		"reaction-remove:reaction-1", "reaction:ERROR",
+	}
 	if got := order.snapshot(); !reflect.DeepEqual(got, wantOrder) {
 		t.Fatalf("lifecycle order = %v, want %v", got, wantOrder)
 	}
@@ -249,17 +276,19 @@ func TestHandleMessageFullOutputReplacesPlaceholderAfterCancel(t *testing.T) {
 func TestHandleMessageFullOutputStartStreamErrorFallsBackToPlainReply(t *testing.T) {
 	service, adapter, _, order := newFullOutputHarness("最终答案")
 	adapter.startErr = errors.New("create card failed")
-	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"}
+	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题", MessageID: "om_123"}
 	session := &types.Session{ID: "session-1"}
 
+	reactions := newIMReactionTracker(adapter, msg)
+	reactions.Begin(context.Background())
 	err := service.handleMessageFullOutput(
-		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil, reactions,
 	)
 	if err != nil {
 		t.Fatalf("handleMessageFullOutput() error = %v", err)
 	}
 
-	wantOrder := []string{"start", "qa", "plain-reply"}
+	wantOrder := []string{"reaction:OnIt", "start", "qa", "plain-reply", "reaction-remove:reaction-1", "reaction:DONE"}
 	if got := order.snapshot(); !reflect.DeepEqual(got, wantOrder) {
 		t.Fatalf("lifecycle order = %v, want %v", got, wantOrder)
 	}
@@ -277,17 +306,22 @@ func TestHandleMessageFullOutputStartStreamErrorFallsBackToPlainReply(t *testing
 func TestHandleMessageFullOutputFinalizeFailureSendsPlainReply(t *testing.T) {
 	service, adapter, _, order := newFullOutputHarness("最终答案")
 	adapter.finalizeErr = errors.New("card update failed")
-	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"}
+	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题", MessageID: "om_123"}
 	session := &types.Session{ID: "session-1"}
 
+	reactions := newIMReactionTracker(adapter, msg)
+	reactions.Begin(context.Background())
 	err := service.handleMessageFullOutput(
-		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil, reactions,
 	)
 	if err != nil {
 		t.Fatalf("successful plain fallback should not return error, got %v", err)
 	}
 
-	wantOrder := []string{"start", "qa", "finalize", "end", "plain-reply"}
+	wantOrder := []string{
+		"reaction:OnIt", "start", "qa", "finalize", "end", "plain-reply",
+		"reaction-remove:reaction-1", "reaction:DONE",
+	}
 	if got := order.snapshot(); !reflect.DeepEqual(got, wantOrder) {
 		t.Fatalf("lifecycle order = %v, want %v", got, wantOrder)
 	}
@@ -301,11 +335,13 @@ func TestHandleMessageFullOutputFinalizeFailureSendsPlainReply(t *testing.T) {
 
 func TestHandleMessageFullOutputThinkOnlyReplacesWithNoAnswerFallback(t *testing.T) {
 	service, adapter, _, _ := newFullOutputHarness("<think>only reasoning</think>")
-	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"}
+	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题", MessageID: "om_123"}
 	session := &types.Session{ID: "session-1"}
 
+	reactions := newIMReactionTracker(adapter, msg)
+	reactions.Begin(context.Background())
 	err := service.handleMessageFullOutput(
-		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil, reactions,
 	)
 	if err != nil {
 		t.Fatalf("handleMessageFullOutput() error = %v", err)
@@ -321,14 +357,17 @@ func TestExecuteQARequestFullOutputDispatchesToProgressSender(t *testing.T) {
 	service.executeQARequest(&qaRequest{
 		ctx:     ctx,
 		cancel:  cancel,
-		msg:     &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"},
+		msg:     &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题", MessageID: "om_123"},
 		session: &types.Session{ID: "session-1"},
 		adapter: adapter,
 		channel: &IMChannel{OutputMode: "full"},
 		userKey: "user-key",
 	})
 
-	wantOrder := []string{"start", "qa", "finalize", "end"}
+	wantOrder := []string{
+		"reaction:OnIt", "start", "qa", "finalize", "end",
+		"reaction-remove:reaction-1", "reaction:DONE",
+	}
 	if got := order.snapshot(); !reflect.DeepEqual(got, wantOrder) {
 		t.Fatalf("lifecycle order = %v, want %v", got, wantOrder)
 	}
@@ -344,14 +383,14 @@ func TestExecuteQARequestFullOutputSkipsProgressWhenNotSupported(t *testing.T) {
 	service.executeQARequest(&qaRequest{
 		ctx:     ctx,
 		cancel:  cancel,
-		msg:     &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"},
+		msg:     &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题", MessageID: "om_123"},
 		session: &types.Session{ID: "session-1"},
 		adapter: adapter,
 		channel: &IMChannel{OutputMode: "full"},
 		userKey: "user-key",
 	})
 
-	wantOrder := []string{"qa", "plain-reply"}
+	wantOrder := []string{"reaction:OnIt", "qa", "plain-reply", "reaction-remove:reaction-1", "reaction:DONE"}
 	if got := order.snapshot(); !reflect.DeepEqual(got, wantOrder) {
 		t.Fatalf("lifecycle order = %v, want %v", got, wantOrder)
 	}

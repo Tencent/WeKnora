@@ -171,6 +171,20 @@ type FullOutputProgressSender interface {
 	SupportsFullOutputProgress() bool
 }
 
+// ReactionSender is an optional interface that adapters can implement to
+// add/remove emoji reactions on the user's original message (Feishu OnIt /
+// DONE / ERROR). Reactions are best-effort status signals for agent clients
+// that need to tell when a round starts, completes, or fails: the IM service
+// logs reaction failures and never fails a round because a reaction failed.
+type ReactionSender interface {
+	// AddReaction adds emojiType to the incoming message and returns the
+	// platform reaction ID, which is needed to remove it later.
+	AddReaction(ctx context.Context, incoming *IncomingMessage, emojiType string) (string, error)
+
+	// RemoveReaction removes a previously added reaction by its ID.
+	RemoveReaction(ctx context.Context, incoming *IncomingMessage, reactionID string) error
+}
+
 // FileDownloader is an optional interface that adapters can implement to support
 // downloading file attachments from the IM platform. It allows file/image
 // messages to be supplied to QA as attachments; when a knowledge_base_id is

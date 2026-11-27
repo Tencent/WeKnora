@@ -22,7 +22,7 @@ func runStreamExitHandler(
 ) error {
 	return service.handleMessageStream(
 		ctx, &IncomingMessage{Platform: PlatformFeishu, UserID: "user", Content: "question"},
-		&types.Session{ID: "session"}, agent, nil, nil, nil, sender, nil, "user", nil,
+		&types.Session{ID: "session"}, agent, nil, nil, nil, sender, nil, "user", nil, nil,
 	)
 }
 

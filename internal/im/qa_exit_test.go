@@ -49,7 +49,7 @@ func startQAExitHandler(
 			sender := &recordingStreamSender{}
 			err := service.handleMessageStream(ctx,
 				&IncomingMessage{Platform: PlatformFeishu, UserID: "user", Content: "question"},
-				session, customAgent, nil, nil, nil, sender, nil, "user", nil)
+				session, customAgent, nil, nil, nil, sender, nil, "user", nil, nil)
 			_, final, ended := sender.snapshot()
 			if err == nil && !ended {
 				err = errors.New("handler returned without ending stream")

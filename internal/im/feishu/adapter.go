@@ -756,6 +756,120 @@ func (a *Adapter) postFeishuMessage(ctx context.Context, accessToken, url string
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Message reactions (Feishu OnIt / DONE / ERROR, see #5726)
+// ──────────────────────────────────────────────────────────────────────
+
+// AddReaction adds an emoji reaction to the user's original message so agent
+// clients can tell when a round starts (OnIt), completes (DONE), or fails
+// (ERROR). It returns the platform reaction ID, which is needed to remove
+// the reaction later.
+// POST /open-apis/im/v1/messages/:message_id/reactions
+func (a *Adapter) AddReaction(ctx context.Context, incoming *im.IncomingMessage, emojiType string) (string, error) {
+	if incoming == nil || incoming.MessageID == "" || !feishuSafePathParam(incoming.MessageID) {
+		return "", fmt.Errorf("invalid message_id for reaction API: %q", incomingMessageID(incoming))
+	}
+	accessToken, err := a.getTenantAccessToken(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get access token: %w", err)
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"reaction_type": map[string]string{"emoji_type": emojiType},
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		a.api("/open-apis/im/v1/messages/%s/reactions", incoming.MessageID),
+		bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// The reaction ID lives in data, so decode the full body like cardkitCreate
+	// instead of using postFeishuMessage (which only returns code/msg).
+	respBody, err := im.ReadIMResponse(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+	var result struct {
+		Code int             `json:"code"`
+		Msg  string          `json:"msg"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("decode: %w (body: %s)", err, string(respBody))
+	}
+	if result.Code != 0 {
+		return "", fmt.Errorf("add reaction error: code=%d msg=%s", result.Code, result.Msg)
+	}
+	var data struct {
+		ReactionID string `json:"reaction_id"`
+	}
+	if err := json.Unmarshal(result.Data, &data); err != nil {
+		return "", fmt.Errorf("parse reaction_id: %w (raw: %s)", err, string(result.Data))
+	}
+	if data.ReactionID == "" {
+		return "", fmt.Errorf("add reaction: empty reaction_id (body: %s)", string(respBody))
+	}
+	return data.ReactionID, nil
+}
+
+// RemoveReaction removes a previously added reaction from the user's original
+// message.
+// DELETE /open-apis/im/v1/messages/:message_id/reactions/:reaction_id
+func (a *Adapter) RemoveReaction(ctx context.Context, incoming *im.IncomingMessage, reactionID string) error {
+	if incoming == nil || incoming.MessageID == "" || !feishuSafePathParam(incoming.MessageID) {
+		return fmt.Errorf("invalid message_id for reaction API: %q", incomingMessageID(incoming))
+	}
+	if reactionID == "" || !feishuSafePathParam(reactionID) {
+		return fmt.Errorf("invalid reaction_id for reaction API: %q", reactionID)
+	}
+	accessToken, err := a.getTenantAccessToken(ctx)
+	if err != nil {
+		return fmt.Errorf("get access token: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
+		a.api("/open-apis/im/v1/messages/%s/reactions/%s", incoming.MessageID, reactionID),
+		nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if err := im.DecodeIMResponse(resp.Body, &result); err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+	if result.Code != 0 {
+		return fmt.Errorf("remove reaction error: code=%d msg=%s", result.Code, result.Msg)
+	}
+	return nil
+}
+
+func incomingMessageID(incoming *im.IncomingMessage) string {
+	if incoming == nil {
+		return ""
+	}
+	return incoming.MessageID
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // File download support via Feishu GetMessageResource API
 // ──────────────────────────────────────────────────────────────────────
 
