@@ -8,12 +8,12 @@ proto:
 # 构建 Go 客户端
 build:
 	@echo "Building Go client..."
-	@go build -o bin/client ./src/client
+	@go build ./client
 
 # 运行 Python 服务
 run:
 	@echo "Running Python server..."
-	@python src/server/server.py
+	@python main.py
 
 # 清理
 clean:
