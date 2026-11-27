@@ -466,7 +466,7 @@ The server **replays all stored events from the start** of the assistant message
 ### Agent contract
 
 1. **Dedupe by message_id** (or maintain a per-message event hash set). Naively processing all received events causes duplicate side effects (re-running tool calls, re-rendering answers).
-2. **Capture message_id from the init event** of the original `chat` or `session ask` invocation — the CLI injects `{"event":"init", "session_id":"...", "message_id":"..."}` as the first NDJSON line.
+2. **Capture the session id from the init event, and the message id from the first `agent_query` frame**. The CLI injects `{"type":"init","session_id":"...","kb_id":"...","profile":"..."}` as the first NDJSON line, but a fresh stream cannot know its assistant message id yet: it only appears as `assistant_message_id` on the SDK's first `agent_query` event. Once the message has persisted, `weknora message list --session <session-id>` returns the same id. (`session resume`'s own init event does carry `message_id` — there the id is an input, not something to discover.)
 3. **Handle `local.sse_stream_aborted` typed error**: server-side buffer expired (TTL exceeded) or process restarted (memory mode). The message is no longer recoverable; restart the original query.
 
 ### Server-side buffer TTL

@@ -371,9 +371,11 @@ weknora api /api/v1/knowledge-bases --dry-run                                   
 The `weknora session resume` command resumes an SSE event stream for an existing assistant message. Useful for network-blip recovery or polling long-running agent invocations:
 
 ```bash
-# Original streaming call captures session_id + message_id from init event:
+# The init line carries the session id; the assistant message id arrives as
+# assistant_message_id on the first agent_query event of the same stream:
 weknora session ask "..." --agent ag_xxxx --format ndjson | tee /tmp/stream.ndjson
-# {"type":"init","session_id":"sess_abc","message_id":"msg_xyz"}
+# {"type":"init","session_id":"sess_abc","kb_id":"kb_abc","profile":"prod"}
+# {"response_type":"agent_query","assistant_message_id":"msg_xyz",...}
 # ... events flow ...
 # [network blip]
 

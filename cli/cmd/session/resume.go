@@ -75,7 +75,8 @@ After TTL expiry the CLI surfaces local.sse_stream_aborted.
 
 Typical use cases:
   - Network blip mid-stream: re-attach with the same session_id + message_id
-    from the original 'session ask' / 'chat' init event.
+    from the original 'session ask' / 'chat' stream (session_id from its init
+    line, message_id from its first agent_query event).
   - Long-running agent invocation: poll progress without blocking the original
     stream.
   - Post-mortem inspection: replay the full event history of a completed
@@ -108,7 +109,8 @@ silently treated as NDJSON.`,
 		},
 	}
 	cmd.Flags().StringVarP(&opts.MessageID, "message", "m", "",
-		"Assistant message ID to resume (from the init or agent_query event of the original stream)")
+		"Assistant message ID to resume (the stream's assistant_message_id from its "+
+			"first agent_query event, or from `weknora message list --session <id>`)")
 	_ = cmd.MarkFlagRequired("message")
 	cmdutil.AddFormatFlag(cmd, resumeFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
