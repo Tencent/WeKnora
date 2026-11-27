@@ -74,8 +74,8 @@ const (
 	// ChunkFlagHot    ChunkFlags = 1 << 2  // 热门
 )
 
-// The retry bit is persisted until reindexing succeeds. Keep it untyped
-// so Swagger excludes it from the public ChunkFlags enum.
+// ChunkFlagFAQAppendIndexPending persists until reindexing succeeds.
+// Keep it untyped so Swagger excludes it from the public ChunkFlags enum.
 const ChunkFlagFAQAppendIndexPending = 1 << 3
 
 // MarshalJSON keeps the persisted FAQ retry bit out of public chunk responses.
