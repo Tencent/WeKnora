@@ -82,7 +82,7 @@ export default {
     tagsPlaceholder: '관계 유형 입력, 예: 근무처, 동료, 친구 등',
     generateRandomTags: '랜덤 태그 생성',
     sampleTextLabel: '샘플 텍스트',
-    sampleTextDescription: '엔티티 관계 추출 테스트용 샘플 텍스트',
+    sampleTextDescription: '엔티티 관계 추출 규칙 정의에 사용되는 샘플 텍스트(추출 활성화 시 필수)',
     sampleTextPlaceholder: '엔티티와 관계가 포함된 텍스트 입력...',
     customInstructionsLabel: '추가 추출 지침',
     customInstructionsDescription: '구조화된 출력 규칙은 유지하면서 도메인 범위와 엔티티 속성 지침을 추가합니다',
@@ -122,7 +122,12 @@ export default {
     checkingAvailability: '지식 그래프 사용 가능 여부를 확인하는 중…',
     checkAvailabilityFailed: '지식 그래프 사용 가능 여부를 확인할 수 없습니다. 다시 시도해 주세요.',
     disabledWarning: '지식 그래프 데이터베이스가 활성화되지 않아 엔티티 관계 추출 기능을 사용할 수 없습니다',
-    howToEnable: '지식 그래프를 활성화하는 방법?'
+    howToEnable: '지식 그래프를 활성화하는 방법?',
+    tagsRequired: '관계 유형을 하나 이상 추가해 주세요',
+    sampleTextRequired: '엔티티 관계 추출을 위한 샘플 텍스트를 입력해 주세요',
+    nodesRequired: '엔티티를 하나 이상 추가해 주세요',
+    nodeNameRequired: '엔티티 이름은 비워둘 수 없습니다',
+    duplicateNodeName: '중복된 엔티티 이름: {name}'
   },
   retrievalSettings: {
     recallTab: '검색 후보',

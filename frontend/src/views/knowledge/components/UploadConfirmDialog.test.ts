@@ -86,3 +86,9 @@ test('preserves an explicit zero chunk overlap when loading saved settings', () 
   assert.doesNotMatch(dialog, /chunk_overlap \|\| 80/)
   assert.doesNotMatch(editor, /chunk_overlap \|\| 80/)
 })
+
+test('validates knowledge graph settings before upload confirmation with KB default inheritance', () => {
+  assert.match(dialog, /uiState\.value\.nodeExtractConfig\.enabled && uiState\.value\.graphEnabled/)
+  assert.match(dialog, /props\.kbInfo\?\.extract_config/)
+  assert.match(dialog, /goToSection\('graph'\)/)
+})

@@ -82,7 +82,7 @@ export default {
     tagsPlaceholder: '輸入關係類型，如：工作於、同事、朋友等',
     generateRandomTags: '生成隨機標籤',
     sampleTextLabel: '示例文字',
-    sampleTextDescription: '用於測試實體關係提取的示例文字',
+    sampleTextDescription: '用於定義實體關係提取規範的示例文字（啟用提取時必填）',
     sampleTextPlaceholder: '輸入一段包含實體和關係的文字...',
     customInstructionsLabel: '額外提取要求',
     customInstructionsDescription: '補充領域範圍、實體篩選和屬性提取要求；系統仍負責結構化輸出協議',
@@ -122,7 +122,12 @@ export default {
     checkingAvailability: '正在檢查知識圖譜服務…',
     checkAvailabilityFailed: '無法檢查知識圖譜服務，請重試。',
     disabledWarning: '知識圖譜資料庫未啟用，實體關係提取功能將無法使用',
-    howToEnable: '如何啟用知識圖譜？'
+    howToEnable: '如何啟用知識圖譜？',
+    tagsRequired: '請至少添加一個關係類型',
+    sampleTextRequired: '請輸入用於實體關係提取的示例文字',
+    nodesRequired: '請至少添加一個實體',
+    nodeNameRequired: '實體名稱不能為空',
+    duplicateNodeName: '實體名稱重複：{name}'
   },
   retrievalSettings: {
     recallTab: '召回',

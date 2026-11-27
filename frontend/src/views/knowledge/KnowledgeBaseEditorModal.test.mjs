@@ -59,3 +59,18 @@ test('Wiki auto-generation setting defaults on, loads from the KB, and is submit
   assert.match(source, /knowledgeEditor\.wiki\.autoGenerateLabel/)
   assert.match(source, /knowledgeEditor\.wiki\.autoGenerateTip/)
 })
+
+test('validates knowledge graph configuration before submission when entity extraction is enabled', () => {
+  // Regression #5603: enabling entity extraction without tags, sample text, or nodes
+  // must be caught and routed to the graph section before sending, preventing backend
+  // 'text cannot be empty' English errors.
+  const validationBlock = source.match(/const validateForm = \(\): boolean => \{([\s\S]*?)^\s{2}return true/m)?.[1]
+  assert.ok(validationBlock, 'expected to find validateForm body')
+
+  assert.match(validationBlock, /formData\.value\.nodeExtractConfig\?\.enabled/)
+  assert.match(validationBlock, /graphSettings\.tagsRequired/)
+  assert.match(validationBlock, /graphSettings\.sampleTextRequired/)
+  assert.match(validationBlock, /graphSettings\.nodesRequired/)
+  assert.match(validationBlock, /graphSettings\.nodeNameRequired/)
+  assert.match(validationBlock, /currentSection\.value = 'graph'/)
+})

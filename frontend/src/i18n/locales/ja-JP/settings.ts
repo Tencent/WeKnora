@@ -1309,7 +1309,7 @@ export default {
     tagsPlaceholder: 'リレーションの種類を入力（例: works_at, colleague, friend）',
     generateRandomTags: 'タグをランダム生成',
     sampleTextLabel: 'サンプルテキスト',
-    sampleTextDescription: 'エンティティとリレーションの抽出をテストするためのサンプルテキスト',
+    sampleTextDescription: 'エンティティとリレーションの抽出ルールを定義するためのサンプルテキスト（抽出有効時は必須）',
     sampleTextPlaceholder: 'エンティティとリレーションを含むテキストを入力...',
     customInstructionsLabel: '抽出の追加指示',
     customInstructionsDescription: '構造化出力の形式は維持したまま、対象分野の範囲、エンティティの絞り込み、属性の指針などを追加できます',
@@ -1349,7 +1349,12 @@ export default {
     checkingAvailability: 'ナレッジグラフの利用状況を確認中…',
     checkAvailabilityFailed: 'ナレッジグラフの利用状況を確認できませんでした。再試行してください。',
     disabledWarning: 'ナレッジグラフのデータベースが有効になっていないため、エンティティとリレーションの抽出は利用できません',
-    howToEnable: 'ナレッジグラフを有効にするには？'
+    howToEnable: 'ナレッジグラフを有効にするには？',
+    tagsRequired: '関係タイプを少なくとも1つ追加してください',
+    sampleTextRequired: 'エンティティ関係抽出用のサンプルテキストを入力してください',
+    nodesRequired: 'エンティティを少なくとも1つ追加してください',
+    nodeNameRequired: 'エンティティ名は空にできません',
+    duplicateNodeName: '重複したエンティティ名：{name}'
   },
   credential: {
     configured: '設定済み',
