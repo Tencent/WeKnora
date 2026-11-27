@@ -21,7 +21,7 @@ const flush = async () => {
   await vue.nextTick()
 }
 
-async function fixture() {
+async function fixture(mcpBaseUrl = '') {
   const calls = { knowledgeBases: 0, sharedKnowledgeBases: 0, agents: 0 }
   const resources = vue.reactive({
     rawKnowledgeBases: [] as { id: string; name: string }[],
@@ -46,7 +46,7 @@ async function fixture() {
     },
   })
   const endpoint = {
-    id: 'endpoint', name: 'Docs', description: '', enabled: true,
+    id: 'endpoint', name: 'Docs', description: '', enabled: true, path: '/api/v1/mcp/test',
     knowledge_base_ids: ['shared-kb'], tools: ['ask'], default_agent_id: 'agent',
     rate_limit_per_minute: 60,
   }
@@ -55,6 +55,7 @@ async function fixture() {
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     'tdesign-vue-next': { MessagePlugin: { error: assert.fail } },
     '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true }) },
+    '@/utils/mcpBaseUrl': { resolveMcpBaseUrl: () => mcpBaseUrl },
     '@/utils/clipboard': { copyWithToast: assert.fail },
     '@/composables/useApiBaseUrlDisplay': { useApiBaseUrlDisplay: () => ({ apiBaseUrlDisplay: vue.ref('https://example.com') }) },
     '@/components/settings/SettingDrawer.vue': { default: {} },
@@ -151,3 +152,11 @@ test('returning from connection settings preserves unsaved configuration', async
   assert.deepEqual(f.calls, { knowledgeBases: 2, sharedKnowledgeBases: 2, agents: 2 },
     'returning to configuration must reload options even after an earlier load')
 })
+
+for (const mcpBaseUrl of ['', 'https://mcp.example.test/proxy']) {
+  test(`endpoint URL uses ${mcpBaseUrl ? 'the configured MCP base URL' : 'the API origin by default'}`, async t => {
+    const f = await fixture(mcpBaseUrl)
+    t.after(f.close)
+    assert.equal(f.state.endpointUrl(f.endpoint), (mcpBaseUrl || 'https://example.com') + f.endpoint.path)
+  })
+}
