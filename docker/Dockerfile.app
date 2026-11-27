@@ -1,5 +1,16 @@
 # Build extension and daemon from the same pinned source on the runtime architecture.
 FROM --platform=$TARGETPLATFORM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS browserskill
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG http_proxy
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ENV HTTP_PROXY=$HTTP_PROXY HTTPS_PROXY=$HTTPS_PROXY \
+    http_proxy=$http_proxy https_proxy=$https_proxy \
+    NO_PROXY=$NO_PROXY no_proxy=$no_proxy
+
 WORKDIR /build
 # Use the same optional Debian mirror as the Go builder and runtime stages.
 ARG APK_MIRROR_ARG
