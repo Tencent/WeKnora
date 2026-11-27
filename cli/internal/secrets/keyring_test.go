@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -64,4 +65,45 @@ func TestKeyringStore_Ref(t *testing.T) {
 	k := NewKeyringStore()
 	got := k.Ref("prod", "access")
 	assert.Equal(t, "keychain://weknora/prod/access", got)
+}
+
+// A backend that never answers must not hold the command: the probe gives up
+// after keyringProbeTimeout and falls back to the file store.
+func TestNewBestEffortStoreFallsBackWhenTheProbeHangs(t *testing.T) {
+	prev := keyringGet
+	release := make(chan struct{})
+	probeReturned := make(chan struct{})
+	// Restore the seam only after the probe has returned. The probe goroutine
+	// reads keyringGet when it starts, which can happen after the timeout branch
+	// has already returned, so an unsequenced restore is a data race.
+	t.Cleanup(func() {
+		close(release)
+		<-probeReturned
+		keyringGet = prev
+	})
+
+	keyringGet = func(_, _ string) (string, error) {
+		defer close(probeReturned)
+		<-release
+		return "", keyring.ErrNotFound
+	}
+
+	type result struct {
+		store Store
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		s, err := NewBestEffortStore()
+		done <- result{store: s, err: err}
+	}()
+
+	select {
+	case got := <-done:
+		require.NoError(t, got.err)
+		_, ok := got.store.(*FileStore)
+		assert.True(t, ok, "a hung keyring probe must fall back to the file store")
+	case <-time.After(keyringProbeTimeout + 3*time.Second):
+		t.Fatal("NewBestEffortStore blocked on a hung keyring backend")
+	}
 }
