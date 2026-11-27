@@ -85,7 +85,7 @@ Please output in the following format (one paragraph per column):
 
 // NewChunkExtractTask creates a new chunk extract task. It returns
 // (enqueued, err): enqueued is true only when a task was actually placed on
-// the queue. When NEO4J is disabled the call is a no-op and returns
+// the queue. When the graph backend is disabled the call is a no-op and returns
 // (false, nil) — callers that seeded a pending-subtask counter for this chunk
 // MUST release that slot, otherwise the parent knowledge stays stuck in
 // "finalizing" forever (the graph subtask it's waiting on was never enqueued).
@@ -99,8 +99,8 @@ func NewChunkExtractTask(
 	attempt int,
 	chunkIndex int,
 ) (bool, error) {
-	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
-		logger.Warn(ctx, "NEO4J is not enabled, skip chunk extract task")
+	if !config.GraphEnabled() {
+		logger.Warn(ctx, "Graph backend is not enabled, skip chunk extract task")
 		return false, nil
 	}
 	taskPayload := types.ExtractChunkPayload{

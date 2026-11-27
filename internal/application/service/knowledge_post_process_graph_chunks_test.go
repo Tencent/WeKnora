@@ -177,7 +177,25 @@ func TestWikiIngestKeepsScannedPageOCR(t *testing.T) {
 }
 
 func TestKnowledgePostProcessGraphEnqueueSelection(t *testing.T) {
-	t.Setenv("NEO4J_ENABLE", "true")
+	for _, backend := range []string{"", "neo4j", "hologres"} {
+		name := backend
+		if name == "" {
+			name = "legacy"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("GRAPH_BACKEND", backend)
+			legacy := "false"
+			if backend == "" {
+				legacy = "true"
+			}
+			t.Setenv("NEO4J_ENABLE", legacy)
+			testGraphEnqueueSelection(t)
+		})
+	}
+}
+
+func testGraphEnqueueSelection(t *testing.T) {
+	t.Helper()
 
 	const knowledgeID = "knowledge-graph-ocr"
 	const kbID = "kb-graph"

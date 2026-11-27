@@ -11,6 +11,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
+	"github.com/stretchr/testify/require"
 )
 
 // TestRetrieveEngineRegistryWiring checks that the container can still build
@@ -56,4 +58,51 @@ func TestRetrieveEngineRegistryWiring(t *testing.T) {
 	if err != nil {
 		t.Fatalf("container could not build the registry: %v", err)
 	}
+}
+
+func TestGraphRepositoriesWiringAndConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		backend, legacy, wantError string
+	}{
+		{"", "false", ""},
+		{"", "true", ""},
+		{"none", "true", ""},
+		{"neo4j", "false", ""},
+		{"hologres", "true", "HOLOGRES_GRAPH_DSN is required"},
+		{"invalid", "false", "GRAPH_BACKEND must be"},
+	} {
+		t.Run(tc.backend+"/"+tc.legacy, func(t *testing.T) {
+			t.Setenv("GRAPH_BACKEND", tc.backend)
+			t.Setenv("NEO4J_ENABLE", tc.legacy)
+			t.Setenv("HOLOGRES_GRAPH_DSN", "")
+			t.Setenv("HOLOGRES_GRAPH_AUTO_CREATE", "false")
+			t.Setenv("HOLOGRES_GRAPH_NAME", "")
+			c := dig.New()
+			require.NoError(t, c.Provide(func() neo4j.Driver { return nil }))
+			require.NoError(t, c.Provide(NewResourceCleaner))
+			require.NoError(t, c.Provide(initGraphRepositories))
+			called := false
+			err := c.Invoke(func(retrieve interfaces.RetrieveGraphRepository, search interfaces.GraphSearchRepository) {
+				called = true
+				require.NotNil(t, retrieve)
+				require.NotNil(t, search)
+			})
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				require.False(t, called)
+			} else {
+				require.NoError(t, err)
+				require.True(t, called)
+			}
+		})
+	}
+}
+
+func TestHologresSelectionDoesNotInitializeNeo4j(t *testing.T) {
+	t.Setenv("GRAPH_BACKEND", "hologres")
+	t.Setenv("NEO4J_ENABLE", "true")
+	t.Setenv("NEO4J_URI", "invalid://must-not-connect")
+	driver, err := initNeo4jClient()
+	require.NoError(t, err)
+	require.Nil(t, driver)
 }

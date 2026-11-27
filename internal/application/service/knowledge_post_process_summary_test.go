@@ -39,6 +39,7 @@ func (r *optionalSummaryKnowledgeRepo) CompleteProcessingWithoutSubtasks(context
 }
 
 func TestKnowledgePostProcessOptionalSummary(t *testing.T) {
+	t.Setenv("GRAPH_BACKEND", "")
 	t.Setenv("NEO4J_ENABLE", "true")
 	for _, tt := range []struct {
 		name         string

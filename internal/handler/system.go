@@ -336,7 +336,7 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	// Get vector store engine from config or RETRIEVE_DRIVER
 	vectorStoreEngine := h.getVectorStoreEngine()
 
-	// Get graph database engine from NEO4J_ENABLE
+	// Get the selected graph backend; configuration does not prove connectivity.
 	graphDatabaseEngine := h.getGraphDatabaseEngine()
 
 	// Get MinIO enabled status
@@ -638,6 +638,9 @@ func (h *SystemHandler) getVectorStoreEngine() string {
 
 // getGraphDatabaseEngine returns the graph database engine name
 func (h *SystemHandler) getGraphDatabaseEngine() string {
+	if config.GraphBackend() == config.GraphBackendHologres {
+		return "Hologres AGE"
+	}
 	if h.neo4jDriver == nil {
 		return "Not Enabled"
 	}

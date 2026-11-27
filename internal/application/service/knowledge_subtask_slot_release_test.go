@@ -78,7 +78,8 @@ func (r *shortfallReleaseRepo) FinalizeSubtask(ctx context.Context, id string, a
 // enqueue. A release that fails for good must not abandon the rest: each
 // remaining slot has no other owner.
 func TestKnowledgePostProcessShortfallReleaseContinuesPastFailure(t *testing.T) {
-	// NEO4J off: the two planned graph-extract slots are never enqueued.
+	// Graph off: the two planned graph-extract slots are never enqueued.
+	t.Setenv("GRAPH_BACKEND", "none")
 	t.Setenv("NEO4J_ENABLE", "false")
 	const knowledgeID = "knowledge-shortfall"
 	const kbID = "kb-shortfall"

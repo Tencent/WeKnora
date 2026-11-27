@@ -38,3 +38,38 @@ func TestExtractRelationsFromTextReportsModelRefusal(t *testing.T) {
 		t.Fatalf("expected an error for a prose refusal, got %+v", res)
 	}
 }
+
+func TestNodeExtractConfigGraphBackend(t *testing.T) {
+	for _, backend := range []string{"neo4j", "hologres", "none"} {
+		t.Run(backend, func(t *testing.T) {
+			t.Setenv("GRAPH_BACKEND", backend)
+			t.Setenv("NEO4J_ENABLE", "false")
+			req := &InitializationRequest{}
+			req.NodeExtract.Enabled = true
+			req.NodeExtract.Text = "Acme is located in Shanghai."
+			req.NodeExtract.Tags = []string{"company", "city"}
+			req.NodeExtract.Nodes = []struct {
+				Name       string   `json:"name"`
+				Attributes []string `json:"attributes"`
+			}{{Name: "Acme"}, {Name: "Shanghai"}}
+			req.NodeExtract.Relations = []struct {
+				Node1 string `json:"node1"`
+				Node2 string `json:"node2"`
+				Type  string `json:"type"`
+			}{{Node1: "Acme", Node2: "Shanghai", Type: "LOCATED_IN"}}
+			err := validateNodeExtractConfig(context.Background(), req)
+			if (err == nil) != (backend != "none") {
+				t.Fatalf("backend %s validation: %v", backend, err)
+			}
+			// Backend selection must not bypass extraction data validation.
+			req.NodeExtract.Relations = nil
+			if err := validateNodeExtractConfig(context.Background(), req); err == nil {
+				t.Fatal("expected incomplete extraction data to be rejected")
+			}
+			req.NodeExtract.Enabled = false
+			if err := validateNodeExtractConfig(context.Background(), req); err != nil {
+				t.Fatalf("disabled extraction: %v", err)
+			}
+		})
+	}
+}

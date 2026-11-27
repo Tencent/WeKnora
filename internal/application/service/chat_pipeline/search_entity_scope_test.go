@@ -115,7 +115,25 @@ func (m *entityTargetChat) Chat(context.Context, []chat.Message, *chat.ChatOptio
 // Exercise extraction and search together: both stages must keep the same
 // normalized scope, even when legacy request IDs disagree with it.
 func TestEntityRetrievalUsesSearchTargets(t *testing.T) {
-	t.Setenv("NEO4J_ENABLE", "true")
+	for _, backend := range []string{"", "hologres"} {
+		name := backend
+		if name == "" {
+			name = "legacy"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("GRAPH_BACKEND", backend)
+			legacy := "false"
+			if backend == "" {
+				legacy = "true"
+			}
+			t.Setenv("NEO4J_ENABLE", legacy)
+			testEntityRetrievalUsesSearchTargets(t)
+		})
+	}
+}
+
+func testEntityRetrievalUsesSearchTargets(t *testing.T) {
+	t.Helper()
 	tests := []struct {
 		name       string
 		rawKBs     []string
