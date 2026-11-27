@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// DefaultSettings is the workspace's choice of default models, stored as
+// DefaultSettings is the workspace's choice of default models and vector store, stored as
 // JSONB on the tenant. An empty field leaves the slot to the deployment's
 // default (the is_default flag a built-in model YAML sets).
 //
@@ -27,6 +27,9 @@ type DefaultSettings struct {
 	VLMModelID string `json:"vlm_model_id"`
 	// ASRModelID is the default ASR model.
 	ASRModelID string `json:"asr_model_id"`
+	// VectorStoreID selects a registered store for KB creation requests
+	// that opt in to the workspace default. Empty uses the deployment vector store.
+	VectorStoreID string `json:"vector_store_id"`
 }
 
 // Normalize trims every ID.
@@ -37,6 +40,7 @@ func (c *DefaultSettings) Normalize() {
 	c.RerankModelID = strings.TrimSpace(c.RerankModelID)
 	c.VLMModelID = strings.TrimSpace(c.VLMModelID)
 	c.ASRModelID = strings.TrimSpace(c.ASRModelID)
+	c.VectorStoreID = strings.TrimSpace(c.VectorStoreID)
 }
 
 // ModelSlots maps each model-type slot to the capability its model must support. The

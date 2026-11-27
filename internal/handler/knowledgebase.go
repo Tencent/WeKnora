@@ -464,7 +464,7 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
-// @Param        request  body      types.KnowledgeBase  true  "知识库信息"
+// @Param        request  body      types.KnowledgeBase{use_workspace_default_vector_store=bool}  true  "知识库信息"
 // @Success      201      {object}  handler.DataResponse{data=handler.KnowledgeBaseView}  "创建的知识库"
 // @Failure      400      {object}  errors.AppError                                      "请求参数错误"
 // @Failure      500      {object}  errors.AppError                                      "服务器错误"
@@ -494,6 +494,36 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
+	}
+	// Preserve KnowledgeBase.UnmarshalJSON compatibility for legacy fields
+	// while decoding the creation-only option separately.
+	var options struct {
+		UseWorkspaceDefaultVectorStore bool `json:"use_workspace_default_vector_store"`
+	}
+	if err := json.Unmarshal(body, &options); err != nil {
+		_ = c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	if options.UseWorkspaceDefaultVectorStore {
+		if req.HasVectorStore() {
+			_ = c.Error(apperrors.NewBadRequestError("use_workspace_default_vector_store and vector_store_id are mutually exclusive"))
+			return
+		}
+		tenant, _ := types.TenantInfoFromContext(ctx)
+		tenantID, _ := types.TenantIDFromContext(ctx)
+		if tenant == nil || tenantID == 0 || tenant.ID != tenantID {
+			_ = c.Error(apperrors.NewBadRequestError("workspace context missing"))
+			return
+		}
+		if tenant.DefaultSettings != nil {
+			id := strings.TrimSpace(tenant.DefaultSettings.VectorStoreID)
+			if id != "" {
+				req.VectorStoreID = &id
+			}
+		}
+		// Use the existing creation validation below. In particular, an
+		// unavailable or deleted configured store must not silently fall
+		// back to the environment and bind the new KB to another engine.
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
