@@ -32,6 +32,7 @@ type messageService struct {
 	modelService   interfaces.ModelService         // Service for model operations (rerank model)
 	suggestionRepo interfaces.MessageSuggestionRepository
 	historyRedis   *redis.Client
+	answerFeedback interfaces.AnswerFeedbackService
 }
 
 // NewMessageService creates a new message service instance with the required repositories
@@ -43,6 +44,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 	modelService interfaces.ModelService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
 	historyRedis *redis.Client,
+	answerFeedback interfaces.AnswerFeedbackService,
 ) interfaces.MessageService {
 	return &messageService{
 		messageRepo:    messageRepo,
@@ -53,6 +55,7 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 		modelService:   modelService,
 		suggestionRepo: suggestionRepo,
 		historyRedis:   historyRedis,
+		answerFeedback: answerFeedback,
 	}
 }
 
@@ -267,8 +270,25 @@ func (s *messageService) UpdateMessage(ctx context.Context, message *types.Messa
 		return err
 	}
 
+	s.recordAnswerChunkLinks(ctx, message)
 	logger.Info(ctx, "Message updated successfully")
 	return nil
+}
+
+// recordAnswerChunkLinks stores the knowledge chunks a completed assistant
+// answer cited. A failure here must not fail the message write: the rating
+// path can rebuild the same links from the stored message.
+func (s *messageService) recordAnswerChunkLinks(ctx context.Context, message *types.Message) {
+	if s.answerFeedback == nil || message == nil || message.Role != "assistant" || !message.IsCompleted {
+		return
+	}
+	refs := types.AnswerChunkRefsFromMessage(message)
+	if len(refs) == 0 {
+		return
+	}
+	if err := s.answerFeedback.RecordAnswerChunks(ctx, message.SessionID, message.ID, refs); err != nil {
+		logger.Warnf(ctx, "Failed to record answer chunk links for message %s: %v", message.ID, err)
+	}
 }
 
 // UpdateMessageImages updates only the images JSONB column for a message.

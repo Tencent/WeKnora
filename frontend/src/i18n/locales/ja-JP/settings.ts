@@ -1294,6 +1294,17 @@ export default {
     rerankModelLabel: 'リランクモデル',
     rerankModelDescription: '検索結果のリランクに使用するモデルを選択します',
     rerankModelRequired: 'リランクモデルを選択してください。検索結果のリランクにはこのモデルが必要です。',
+    feedbackTab: 'フィードバック重み',
+    feedbackDescription: '既定: 好評率 80% 以上で再呼び出し重みを 1.2 に上げ、50%–80% は 1 のまま、50% 未満は 0.8 に下げ、30% 未満は要改善にします。',
+    feedbackEnabled: '好評率で再呼び出し重みを調整',
+    feedbackEnabledDescription: '回答への評価は、引用されたチャンクが再び検索される可能性を変えます。オフにすると件数と要改善の印は残りますが、重みは変えません。',
+    feedbackBoostThreshold: 'この好評率以上で上げる',
+    feedbackDegradeThreshold: 'この好評率以上は据え置く',
+    feedbackNeedsOptimizationThreshold: 'この値未満を要改善にする',
+    feedbackBoostWeight: '上げた後の重み',
+    feedbackNeutralWeight: '据え置きの重み',
+    feedbackDegradeWeight: '下げた後の重み',
+    feedbackMinSamples: '調整を始める最小評価数',
     toasts: {
       saveSuccess: '検索設定を保存しました',
       saveFailed: '設定の保存に失敗しました: {message}'

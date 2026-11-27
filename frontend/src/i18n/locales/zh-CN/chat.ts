@@ -1,4 +1,18 @@
 export default {
+  answerFeedback: {
+    like: '点赞',
+    dislike: '点踩',
+    liked: '已点赞',
+    disliked: '已点踩',
+    dialogTitle: '这条回答哪里不合适？',
+    dialogHint: '选填。原因会记到这条回答引用的知识片段上。',
+    reasonPlaceholder: '需要改正的地方',
+    submit: '提交',
+    cancel: '取消',
+    saved: '已记录反馈',
+    cancelled: '已取消评价',
+    failed: '反馈保存失败'
+  },
   localBrowser: {
     pipOpen: '弹出悬浮窗',
     pipReturn: '返回对话小窗',

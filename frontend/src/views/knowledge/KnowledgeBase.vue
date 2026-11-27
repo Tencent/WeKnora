@@ -57,6 +57,7 @@ import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/upload
 import { useUploadTasksStore } from '@/stores/uploadTasks';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import ImageGallery from './gallery/ImageGallery.vue';
+import ChunkFeedbackPanel from './ChunkFeedbackPanel.vue';
 import { getWikiStats } from '@/api/wiki';
 import {
   isKnowledgeParseInFlight,
@@ -97,7 +98,7 @@ const kbLoading = ref(false);
 const docListLoading = ref(true);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
 const isWiki = computed(() => !!kbInfo.value?.indexing_strategy?.wiki_enabled);
-const validTabs = ['documents', 'wiki', 'graph', 'gallery'] as const
+const validTabs = ['documents', 'wiki', 'graph', 'gallery', 'feedback'] as const
 type KbTab = typeof validTabs[number]
 const initTab = validTabs.includes(route.query.tab as any) ? (route.query.tab as KbTab) : 'documents'
 const activeKbTab = ref<KbTab>(initTab);
@@ -130,6 +131,7 @@ const kbViewTabs = computed(() => {
     )
   }
   tabs.push({ key: 'gallery', icon: 'image', label: t(`${w}.tabGallery`), tip: t(`${w}.tabGalleryTip`) })
+  tabs.push({ key: 'feedback', icon: 'thumb-up', label: t('chunkFeedback.tab'), tip: t('chunkFeedback.tabTip') })
   return tabs
 })
 const shownKbTab = computed<KbTab>(() =>
@@ -2585,9 +2587,11 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
       <!-- Image Gallery (4th tab) -->
       <ImageGallery v-if="activeKbTab === 'gallery' && kbId" :knowledge-base-id="kbId" :can-edit="canEdit" @open-source-doc="openSourceDoc" />
 
+      <ChunkFeedbackPanel v-if="activeKbTab === 'feedback' && kbId" :knowledge-base-id="kbId" :can-reset="canManage" />
+
       <!-- wiki/graph tabs only exist on wiki KBs; a stale tab (?tab= or one
            carried over from a previous KB) falls back to documents. -->
-      <template v-if="activeKbTab === 'documents' || (!isWiki && activeKbTab !== 'gallery')">
+      <template v-if="activeKbTab === 'documents' || (!isWiki && activeKbTab !== 'gallery' && activeKbTab !== 'feedback')">
         <div class="knowledge-main">
           <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
             :loading="folderTreeLoading" :can-edit="canEdit" :root-label="kbInfo?.name"

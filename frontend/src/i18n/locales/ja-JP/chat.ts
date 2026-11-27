@@ -1,4 +1,18 @@
 export default {
+  answerFeedback: {
+    like: '役に立った',
+    dislike: '役に立たなかった',
+    liked: '役に立った',
+    disliked: '役に立たなかった',
+    dialogTitle: 'この回答のどこが不適切でしたか？',
+    dialogHint: '任意です。理由は、この回答が参照した知識チャンクに記録されます。',
+    reasonPlaceholder: '直すべき点',
+    submit: '送信',
+    cancel: 'キャンセル',
+    saved: 'フィードバックを保存しました',
+    cancelled: '評価を取り消しました',
+    failed: 'フィードバックを保存できませんでした'
+  },
   localBrowser: {
     pipOpen: 'プレビューを別ウィンドウで表示',
     pipReturn: '会話内のプレビューに戻す',

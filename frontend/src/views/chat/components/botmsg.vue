@@ -54,7 +54,7 @@
             </div>
             <!-- 复制和添加到知识库按钮 - 非 Agent 模式下显示 -->
             <div v-if="answerFullyRendered && (content || session.content)" class="answer-toolbar"
-                :class="{ 'answer-toolbar--persistent': hasArtifacts || artifactsCollecting }">
+                :class="{ 'answer-toolbar--persistent': hasArtifacts || artifactsCollecting || ratingEcho }">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
                     <t-button size="small" variant="outline" shape="round" @click.stop="emitFork">
                         <ChatActionIcon name="git-branch" />
@@ -86,6 +86,8 @@
                     :title="$t('agent.copy')">
                     <ChatActionIcon name="copy" />
                 </t-button>
+                <AnswerFeedbackBar :session-id="sessionId" :message-id="feedbackMessageId"
+                    :feedback="session?.feedback" @saved="onFeedbackSaved" />
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge"
                     :title="$t('agent.addToKnowledgeBase')">
                     <ChatActionIcon name="bookmark-add" />
@@ -153,6 +155,7 @@ import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
 import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
+import AnswerFeedbackBar from './AnswerFeedbackBar.vue';
 import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
@@ -435,6 +438,15 @@ const { displayed: typedAnswer } = useTypewriter(
 // The backend completion event can arrive while the local typewriter still has
 // buffered text to reveal. Treat the answer as visually complete only after the
 // displayed text has caught up, so actions never appear beside a moving answer.
+const feedbackMessageId = computed(() => persistedAssistantId(props.session) || '');
+const ratingEcho = computed(() => {
+    const rating = props.session?.feedback?.rating;
+    return rating === 'like' || rating === 'dislike';
+});
+const onFeedbackSaved = (state) => {
+    if (!props.session) return;
+    props.session.feedback = state.rating === 'none' ? null : state;
+};
 const answerFullyRendered = computed(() =>
     Boolean(props.session?.is_completed) && typedAnswer.value.length >= answerText.value.length
 );

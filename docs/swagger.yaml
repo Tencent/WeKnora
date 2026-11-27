@@ -2398,6 +2398,8 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.Chunk:
     properties:
+      approval_rate:
+        type: number
       chunk_index:
         description: Index position of the chunk in the original document
         type: integer
@@ -2425,6 +2427,8 @@ definitions:
         allOf:
         - $ref: '#/definitions/gorm.DeletedAt'
         description: Soft delete marker, supports data recovery
+      dislike_count:
+        type: integer
       end_at:
         description: Ending character position in the original text
         type: integer
@@ -2469,9 +2473,17 @@ definitions:
       last_editor_id:
         description: LastEditorID records the actor that produced the current revision.
         type: string
+      like_count:
+        description: |-
+          LikeCount and DislikeCount are cumulative user ratings attributed from
+          answers that cited this chunk. ApprovalRate is likes/(likes+dislikes)
+          and is nil when the chunk has no ratings.
+        type: integer
       metadata:
         description: Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据
         type: object
+      needs_optimization:
+        type: boolean
       next_chunk_id:
         description: Next chunk ID
         type: string
@@ -2481,6 +2493,12 @@ definitions:
       pre_chunk_id:
         description: Previous chunk ID
         type: string
+      recall_weight:
+        description: |-
+          RecallWeight multiplies this chunk's retrieval score. 0 means "unset"
+          and is treated as 1 so rows written before the column existed do not
+          drop out of search. NeedsOptimization marks a very low approval rate.
+        type: number
       relation_chunks:
         description: 关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk
         items:
@@ -2515,6 +2533,25 @@ definitions:
       updated_at:
         description: Chunk last update time
         type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.ChunkFeedbackConfig:
+    properties:
+      boost_threshold:
+        type: number
+      boost_weight:
+        type: number
+      degrade_threshold:
+        type: number
+      degrade_weight:
+        type: number
+      enabled:
+        type: boolean
+      min_samples:
+        type: integer
+      needs_optimization_threshold:
+        type: number
+      neutral_weight:
+        type: number
     type: object
   github_com_Tencent_WeKnora_internal_types.ChunkFlags:
     enum:
@@ -6268,6 +6305,12 @@ definitions:
         allOf:
         - $ref: '#/definitions/gorm.DeletedAt'
         description: Soft delete timestamp
+      feedback:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MessageFeedbackState'
+        description: |-
+          Feedback is the calling user's like/dislike on this assistant message.
+          It is filled when history is loaded and is never stored on the row.
       id:
         description: Unique identifier for the message
         type: string
@@ -6436,6 +6479,15 @@ definitions:
       total_chunks:
         description: Total parsed chunks
         type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.MessageFeedbackState:
+    properties:
+      chunk_count:
+        type: integer
+      rating:
+        type: string
+      reason:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.MessageImage:
     properties:
@@ -7653,6 +7705,12 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.RetrievalConfig:
     properties:
+      chunk_feedback:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkFeedbackConfig'
+        description: |-
+          ChunkFeedback is the approval-rate policy that adjusts chunk recall
+          weight. Nil means DefaultChunkFeedbackConfig (the feature is on).
       embedding_top_k:
         description: 'EmbeddingTopK is the maximum number of chunks returned by vector
           search (default: 50)'
@@ -10882,6 +10940,8 @@ definitions:
     type: object
   internal_handler.AgentChunkDetail:
     properties:
+      approval_rate:
+        type: number
       chunk_index:
         description: Index position of the chunk in the original document
         type: integer
@@ -10909,6 +10969,8 @@ definitions:
         allOf:
         - $ref: '#/definitions/gorm.DeletedAt'
         description: Soft delete marker, supports data recovery
+      dislike_count:
+        type: integer
       end_at:
         description: Ending character position in the original text
         type: integer
@@ -10953,9 +11015,17 @@ definitions:
       last_editor_id:
         description: LastEditorID records the actor that produced the current revision.
         type: string
+      like_count:
+        description: |-
+          LikeCount and DislikeCount are cumulative user ratings attributed from
+          answers that cited this chunk. ApprovalRate is likes/(likes+dislikes)
+          and is nil when the chunk has no ratings.
+        type: integer
       metadata:
         description: Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据
         type: object
+      needs_optimization:
+        type: boolean
       next_chunk_id:
         description: Next chunk ID
         type: string
@@ -10965,6 +11035,12 @@ definitions:
       pre_chunk_id:
         description: Previous chunk ID
         type: string
+      recall_weight:
+        description: |-
+          RecallWeight multiplies this chunk's retrieval score. 0 means "unset"
+          and is treated as 1 so rows written before the column existed do not
+          drop out of search. NeedsOptimization marks a very low approval rate.
+        type: number
       relation_chunks:
         description: 关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk
         items:
