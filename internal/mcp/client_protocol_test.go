@@ -77,7 +77,7 @@ func newProtocolProbeTestClient(t *testing.T, timeout int, live, probe protocolT
 func TestProtocolDiscoveryRetry(t *testing.T) {
 	for _, mode := range []string{
 		"method-not-found", "transient-unavailable", "transient-unauthorized", "transient-timeout",
-		"silent-legacy", "unavailable", "cancelled", "cancelled-after-handshake",
+		"silent-legacy", "unavailable", "cancelled", "cancelled-after-handshake", "cancelled-during-rejection",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -103,7 +103,8 @@ func TestProtocolDiscoveryRetry(t *testing.T) {
 			}
 			c := newProtocolProbeTestClient(t, 1, peer(false), peer(true))
 			result, err := c.Initialize(ctx)
-			if mode == "cancelled" || mode == "cancelled-after-handshake" || mode == "unavailable" {
+			switch mode {
+			case "cancelled", "cancelled-after-handshake", "cancelled-during-rejection", "unavailable":
 				require.Error(t, err)
 				require.Nil(t, result)
 				require.False(t, c.initialized.Load())
@@ -167,6 +168,10 @@ func protocolRetryPeer(t *testing.T, mode string, discoverCount *int, cancel con
 			}
 			return result(`{"capabilities":{"tools":{}},"protocolVersions":["2026-07-28"]}`)
 		case "initialize":
+			if mode == "cancelled-during-rejection" {
+				cancel()
+				return nil, errors.New("request failed with status 503")
+			}
 			if mode == "unavailable" {
 				return nil, errors.New("request failed with status 503")
 			}
@@ -574,6 +579,63 @@ func TestOutboundProtocolNegotiation(t *testing.T) {
 				} else {
 					require.Equal(t, 2, discoverCount, "transport failure gets exactly one retry")
 				}
+			}
+		})
+	}
+}
+
+func TestInitializeErrorAtDeadline(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	for _, tc := range []struct {
+		kind   types.MCPTransportType
+		status string
+	}{
+		{types.MCPTransportSSE, "rejected"},
+		{types.MCPTransportSSE, "silent"},
+		{types.MCPTransportHTTPStreamable, "rejected"},
+		{types.MCPTransportHTTPStreamable, "silent"},
+	} {
+		t.Run(string(tc.kind)+"/"+tc.status, func(t *testing.T) {
+			sse := server.NewSSEServer(server.NewMCPServer("peer", "1"))
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					sse.ServeHTTP(w, r)
+					return
+				}
+				var request struct{ Method string }
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+					return
+				}
+				if request.Method != string(sdk.MethodInitialize) {
+					http.Error(w, "discovery unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				if tc.status == "rejected" {
+					// Only part of the diagnostic body arrives before the deadline.
+					w.WriteHeader(http.StatusServiceUnavailable)
+					_, _ = io.WriteString(w, "initialize rejected")
+					w.(http.Flusher).Flush()
+				}
+				<-r.Context().Done()
+			}))
+			t.Cleanup(upstream.Close)
+			endpoint := upstream.URL + "/mcp"
+			if tc.kind == types.MCPTransportSSE {
+				endpoint = upstream.URL + "/sse"
+			}
+			manager := NewMCPManager(nil)
+			t.Cleanup(manager.Shutdown)
+			_, err := manager.GetOrCreateClient(t.Context(), &types.MCPService{
+				ID: "peer", Enabled: true, URL: &endpoint, TransportType: tc.kind,
+				AdvancedConfig: &types.MCPAdvancedConfig{Timeout: 1},
+			})
+			if tc.status == "rejected" {
+				require.ErrorContains(t, err, "status 503: initialize rejected")
+				require.NotErrorIs(t, err, context.DeadlineExceeded)
+			} else {
+				require.ErrorIs(t, err, context.DeadlineExceeded)
 			}
 		})
 	}

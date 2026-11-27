@@ -128,6 +128,34 @@ func (t *discoverTransport) RequiresLegacyProtocol() bool {
 	return ok && legacy.RequiresLegacyProtocol()
 }
 
+type boundedStreamableHTTPConnection struct {
+	*transport.StreamableHTTP
+	timeout time.Duration
+}
+
+func (c *boundedStreamableHTTPConnection) SendRequest(
+	ctx context.Context, request transport.JSONRPCRequest,
+) (*transport.JSONRPCResponse, error) {
+	// The SDK must see the service deadline while it waits for the final SSE
+	// event. An http.Client timeout alone only interrupts the body reader.
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	response, err := c.StreamableHTTP.SendRequest(ctx, request)
+	// mcp-go v1.1.1 drops SSE read errors when its response channel closes.
+	// It exposes no sentinel. Only recover a cancellation for that SDK error.
+	if err != nil && err.Error() == "unexpected nil response" {
+		if cause := ctx.Err(); cause != nil {
+			return nil, cause
+		}
+		// The HTTP client's timer can interrupt the body after the request
+		// deadline but before the context timer's callback runs.
+		if deadline, _ := ctx.Deadline(); !time.Now().Before(deadline) {
+			return nil, context.DeadlineExceeded
+		}
+	}
+	return response, err
+}
+
 // applyAuthHeaders injects the auth header for the SELECTED strategy only —
 // driven by AuthType so static API key / bearer are mutually exclusive (the old
 // code emitted both whenever the fields happened to be set, which double-authed
@@ -212,7 +240,7 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 	}
 
 	// Create HTTP client with timeout
-	timeout := serviceTimeout(config.Service)
+	timeout := config.Service.ConnectionTimeout()
 
 	clientCfg := secutils.DefaultSSRFSafeHTTPClientConfig()
 	clientCfg.SameOriginRedirectsOnly = true
@@ -247,6 +275,7 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		// separately without putting an expiration on the event stream.
 		sseHTTPClient := *httpClient
 		sseHTTPClient.Timeout = 0
+		sseHTTPClient.Transport = ssePostTransport{base: httpClient.Transport}
 		options := []transport.ClientOption{
 			transport.WithHTTPClient(&sseHTTPClient),
 			transport.WithHeaders(headers),
@@ -272,10 +301,11 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		if useOAuth {
 			options = append(options, transport.WithHTTPOAuth(oauthConfig))
 		}
-		connection, err = transport.NewStreamableHTTP(*config.Service.URL, options...)
+		streamable, err := transport.NewStreamableHTTP(*config.Service.URL, options...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create HTTP streamable client: %w", err)
 		}
+		connection = &boundedStreamableHTTPConnection{StreamableHTTP: streamable, timeout: timeout}
 	case types.MCPTransportStdio:
 		// Stdio transport is disabled for security reasons (potential command injection vulnerabilities)
 		return nil, fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
@@ -313,18 +343,11 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 	return instance, nil
 }
 
-func serviceTimeout(service *types.MCPService) time.Duration {
-	if service.AdvancedConfig != nil && service.AdvancedConfig.Timeout > 0 {
-		return time.Duration(service.AdvancedConfig.Timeout) * time.Second
-	}
-	return 30 * time.Second
-}
-
 // Each of at most two probes gets a quarter of the service timeout, capped at
 // 2.5s: together they use at most half the budget and 5s, leaving time for
 // legacy handshakes even with a 1s service timeout.
 func discoverProbeTimeout(service *types.MCPService) time.Duration {
-	return min(serviceTimeout(service)/4, 2500*time.Millisecond)
+	return min(service.ConnectionTimeout()/4, 2500*time.Millisecond)
 }
 
 // buildOAuthConfig returns the OAuth configuration for an OAuth-enabled MCP
@@ -485,8 +508,10 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 
 	result, err := oauthCall(ctx, c, func() (*mcp.InitializeResult, error) {
 		result, err := c.client.Initialize(ctx, req)
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		// A deadline can expire while the transport reads an HTTP rejection.
+		// Keep that error, but honor an explicit cancellation or a late success.
+		if ctxErr := ctx.Err(); ctxErr != nil && (ctxErr == context.Canceled || err == nil) {
+			return nil, ctxErr
 		}
 		return result, err
 	})

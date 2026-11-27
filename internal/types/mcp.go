@@ -58,6 +58,14 @@ func (s *MCPService) EffectiveUsageInstructions() string {
 	return strings.TrimSpace(s.Description)
 }
 
+// ConnectionTimeout is the effective transport timeout for this service.
+func (s *MCPService) ConnectionTimeout() time.Duration {
+	if s.AdvancedConfig != nil && s.AdvancedConfig.Timeout > 0 {
+		return time.Duration(s.AdvancedConfig.Timeout) * time.Second
+	}
+	return time.Duration(GetDefaultAdvancedConfig().Timeout) * time.Second
+}
+
 // MCPHeaders represents HTTP headers as a map
 type MCPHeaders map[string]string
 
