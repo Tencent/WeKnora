@@ -281,6 +281,20 @@ func (e *AgentEngine) clampCompletionBudgetToContext(currentTokens int) int {
 	return max(min(budget, available), 1)
 }
 
+// wireCompletionBudget is the completion cap to place on the outbound
+// request, given the context-clamped budget. A model whose max output is
+// unknown gets NO wire cap: providers bound output by the model itself, and
+// a fixed budget on a model that cannot emit that much is rejected outright
+// (input + 24576 vs a 32k-context model's limit). The internal budget still
+// sizes the history reserve via reserveTokensFor, so compaction behaviour is
+// unchanged.
+func (e *AgentEngine) wireCompletionBudget(clamped int) int {
+	if e.config == nil || e.config.ModelMaxOutputTokens <= 0 {
+		return 0
+	}
+	return clamped
+}
+
 // generateEventID generates a unique event ID with type suffix for better traceability
 func generateEventID(suffix string) string {
 	return fmt.Sprintf("%s-%s", uuid.New().String()[:8], suffix)
