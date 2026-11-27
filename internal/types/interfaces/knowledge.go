@@ -111,6 +111,10 @@ type KnowledgeService interface {
 	DeleteKnowledgeList(ctx context.Context, ids []string) error
 	// GetKnowledgeFile retrieves the file associated with the knowledge.
 	GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error)
+	// GetKnowledgeSourceContent reads an editable text source under KB write permissions.
+	GetKnowledgeSourceContent(ctx context.Context, id string) (*types.KnowledgeSourceContent, error)
+	// UpdateKnowledgeSourceContent replaces a text source only if its revision is current.
+	UpdateKnowledgeSourceContent(ctx context.Context, id, content, revision string) (*types.Knowledge, error)
 	// UpdateKnowledge updates knowledge information.
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	// RegenerateKnowledgeSummary refreshes the document description and summary retrieval chunk.
@@ -320,6 +324,11 @@ type KnowledgeRepository interface {
 	// statement so callers that flip several related fields (e.g. parse_status +
 	// error_message) cannot leave the row in a half-updated state.
 	UpdateKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) error
+	// UpdateKnowledgeSourceIfUnchanged atomically checks the source snapshot and
+	// terminal parse state before publishing a replacement source.
+	UpdateKnowledgeSourceIfUnchanged(
+		ctx context.Context, previous *types.Knowledge, values map[string]interface{},
+	) (bool, error)
 	// UpdateActiveDeletingKnowledgeColumns updates an active, non-deleted knowledge row
 	// only when it is still in the transient deleting state.
 	UpdateActiveDeletingKnowledgeColumns(

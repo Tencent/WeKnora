@@ -1,4 +1,13 @@
 export default {
+  sourceEditor: {
+    title: 'Edit source', content: 'Original file content',
+    hint: 'Edit the original UTF-8 text file (up to 2 MiB). Saving rebuilds chunks, search indexes, Wiki and graph content using the current processing settings. Manual chunk edits may be replaced. The document ID and tags are preserved.',
+    save: 'Save and rebuild', saved: 'Source saved. Check document processing for rebuild progress.',
+    reload: 'Reload source', loadFailed: 'Could not load the source. Try reloading.',
+    saveFailed: 'Could not save. Your draft is kept; reload the source if it has changed.',
+    discardTitle: 'Discard unsaved changes?', discardBody: 'Copy your changes first if you want to keep them.',
+    discard: 'Discard changes', size: '{size} / 2,097,152 bytes',
+  },
   upload: {
     uploadDocument: 'Upload Document',
     uploadFolder: 'Upload Folder',

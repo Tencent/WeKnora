@@ -27,6 +27,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useAssistantStore } from '@/stores/assistant';
 import AssistantActionsButton from '@/components/assistant/AssistantActionsButton.vue';
 import DocumentPreview from '@/components/document-preview.vue';
+import KnowledgeSourceEditor from '@/components/knowledge-source-editor.vue';
 import DocumentFileIcon from '@/views/knowledge/components/DocumentFileIcon.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
 import { resolveKnowledgeDownloadFileName } from '@/views/knowledge/knowledgeDownloadFileName';
@@ -45,6 +46,16 @@ const canDeleteGeneratedQuestion = computed(() => {
   return authStore.hasRole('admin');
 });
 const canEditContent = canDeleteGeneratedQuestion;
+const sourceEditorVisible = ref(false);
+const sourceEditor = ref<{ requestClose: () => void }>();
+const canEditSource = computed(() => canEditContent.value && props.details?.type === 'file'
+  && ['md', 'markdown', 'txt'].includes((props.details?.file_type || '').toLowerCase())
+  && ['completed', 'failed', 'cancelled'].includes(props.details?.parse_status));
+const onSourceSaved = (knowledge: { id: string; parse_status: string }) => {
+  if (knowledge.id !== props.details?.id) return;
+  Object.assign(props.details, knowledge);
+  emit('getDoc', 1);
+};
 
 type MetadataValueType = 'text' | 'number' | 'boolean' | 'null';
 interface MetadataDraftRow {
@@ -957,6 +968,10 @@ const processMarkdown = (markdownText) => {
   return result;
 };
 const handleClose = () => {
+  if (sourceEditorVisible.value) {
+    sourceEditor.value?.requestClose();
+    return;
+  }
   emit("closeDoc", false);
   const scrollEl = document.querySelector('.doc-main-drawer .t-drawer__body') as HTMLElement | null;
   if (scrollEl) scrollEl.scrollTop = 0;
@@ -1590,6 +1605,8 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
 </script>
 <template>
   <div class="doc_content" ref="mdContentWrap">
+    <KnowledgeSourceEditor v-if="sourceEditorVisible && visible" :key="details.id" ref="sourceEditor"
+      :knowledge-id="details.id" @close="sourceEditorVisible = false" @saved="onSourceSaved" />
     <teleport to="body">
       <div v-if="visible" class="doc-drawer-resize-handle" :style="{ right: `${mainDrawerWidth}px` }" role="separator"
         aria-orientation="vertical" @mousedown.prevent="onMainDrawerResizeStart">
@@ -1608,6 +1625,9 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
             <div class="doc-drawer-header-title">{{ getDisplayTitle() }}</div>
           </div>
           <div class="header-actions">
+            <t-button v-if="canEditSource" size="small" variant="outline" @click="sourceEditorVisible = true">
+              {{ $t('sourceEditor.title') }}
+            </t-button>
             <t-button v-if="canDownloadKB && (details.type === 'file' || details.type === 'manual')" class="header-action-btn" size="small"
               variant="text" shape="square" theme="default" :title="$t('common.download') || 'Download'"
               @click="downloadFile()">

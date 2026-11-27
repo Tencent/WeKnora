@@ -41,6 +41,13 @@ import (
 func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	knowledgeID string, file *multipart.FileHeader, customFileName string, metadata map[string]string,
 ) (*types.Knowledge, error) {
+	return s.replaceKnowledgeFile(ctx, knowledgeID, file, customFileName, metadata, "")
+}
+
+func (s *knowledgeService) replaceKnowledgeFile(ctx context.Context,
+	knowledgeID string, file *multipart.FileHeader, customFileName string, metadata map[string]string,
+	expectedSourceRevision string,
+) (*types.Knowledge, error) {
 	if file == nil {
 		return nil, werrors.NewBadRequestError("file is required")
 	}
@@ -56,6 +63,14 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	}
 	if existing.ParseStatus == types.ParseStatusDeleting {
 		return nil, werrors.NewBadRequestError("knowledge is being deleted")
+	}
+	if expectedSourceRevision != "" {
+		if err := validateEditableKnowledgeSource(existing); err != nil {
+			return nil, err
+		}
+		if knowledgeSourceRevision(existing) != expectedSourceRevision {
+			return nil, werrors.NewConflictError("Source changed; reload it before saving")
+		}
 	}
 	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
@@ -148,7 +163,9 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	// Drop queued parse tasks of the previous source before the row
 	// points at the new file. The new TypeDocumentProcess task is
 	// enqueued later by ReparseKnowledge.
-	s.dequeueKnowledgeTasks(cleanupCtx, existing.ID)
+	if expectedSourceRevision == "" {
+		s.dequeueKnowledgeTasks(cleanupCtx, existing.ID)
+	}
 
 	sourceColumns := map[string]interface{}{
 		"title":         title,
@@ -164,7 +181,18 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 		"error_message": "",
 		"updated_at":    time.Now(),
 	}
-	if err := s.repo.UpdateKnowledgeColumns(ctx, existing.ID, sourceColumns); err != nil {
+	var updateErr error
+	if expectedSourceRevision == "" {
+		updateErr = s.repo.UpdateKnowledgeColumns(ctx, existing.ID, sourceColumns)
+	} else {
+		var updated bool
+		updated, updateErr = s.repo.UpdateKnowledgeSourceIfUnchanged(ctx, existing, sourceColumns)
+		if updateErr == nil && !updated {
+			s.discardReplacementFile(cleanupCtx, fileSvc, existing.TenantID, existing.ID, newPath)
+			return nil, werrors.NewConflictError("Source changed or parsing started; reload it before saving")
+		}
+	}
+	if err := updateErr; err != nil {
 		current, readErr := s.repo.GetKnowledgeByID(cleanupCtx, existing.TenantID, existing.ID)
 		if readErr != nil || current == nil || current.FilePath != newPath {
 			logger.Errorf(ctx, "Failed to point knowledge %s at its replacement file: %v", existing.ID, err)
@@ -175,6 +203,11 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 			existing.ID, err)
 	}
 
+	if expectedSourceRevision != "" {
+		// Only the editor that published its source may cancel retired tasks.
+		// A losing compare-and-swap must leave the winner's work untouched.
+		s.dequeueKnowledgeTasks(cleanupCtx, existing.ID)
+	}
 	reparsed, err := s.reparseKnowledge(ctx, existing.ID, nil, true)
 	if err != nil {
 		logger.Errorf(ctx, "Reparse after replacing the file of knowledge %s failed, restoring source: %v",

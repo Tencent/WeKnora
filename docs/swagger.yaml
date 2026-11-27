@@ -5457,6 +5457,15 @@ definitions:
           answers.
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.KnowledgeSourceContent:
+    properties:
+      content:
+        type: string
+      file_name:
+        type: string
+      revision:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.KnowledgeTag:
     properties:
       color:
@@ -13743,6 +13752,16 @@ definitions:
         example: true
         type: boolean
     type: object
+  internal_handler.UpdateKnowledgeSourceRequest:
+    properties:
+      content:
+        type: string
+      revision:
+        type: string
+    required:
+    - content
+    - revision
+    type: object
   internal_handler.UpdateMCPServiceRequest:
     properties:
       advanced_config:
@@ -21466,6 +21485,93 @@ paths:
         label: title
         risk: write
         target: knowledge.get
+  /knowledge/{id}/content:
+    get:
+      parameters:
+      - description: Knowledge ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeSourceContent'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Read an uploaded UTF-8 text source for editing
+      tags:
+      - Knowledge
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Knowledge ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Content and source revision
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateKnowledgeSourceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Save an uploaded UTF-8 text source and rebuild its derived content
+      tags:
+      - Knowledge
   /knowledge/{id}/download:
     get:
       consumes:

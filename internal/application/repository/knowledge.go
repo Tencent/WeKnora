@@ -633,6 +633,22 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
 }
 
+// UpdateKnowledgeSourceIfUnchanged prevents simultaneous editors from publishing
+// two replacements of the same snapshot. The state check also rejects a source
+// whose parsing or deletion began while the replacement was being uploaded.
+func (r *knowledgeRepository) UpdateKnowledgeSourceIfUnchanged(
+	ctx context.Context, previous *types.Knowledge, values map[string]interface{},
+) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("id = ? AND tenant_id = ? AND file_path = ? AND file_hash = ? AND updated_at = ?",
+			previous.ID, previous.TenantID, previous.FilePath, previous.FileHash, previous.UpdatedAt).
+		Where("parse_status IN ?", []string{
+			types.ParseStatusCompleted, types.ParseStatusFailed, types.ParseStatusCancelled,
+		}).
+		Updates(values)
+	return result.RowsAffected == 1, result.Error
+}
+
 // UpdateActiveDeletingKnowledgeColumns only touches rows that are still visible
 // to normal queries and have not moved out of the transient deleting state.
 func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
