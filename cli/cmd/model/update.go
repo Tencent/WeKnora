@@ -32,6 +32,7 @@ type modelUpdateFlags struct{ displayName, description, baseURL, def bool }
 // fetch (GetModel) is mandatory — without the baseline, any field not touched
 // by a flag would clobber to its zero value.
 type UpdateService interface {
+	defaultSettingsService
 	GetModel(ctx context.Context, id string) (*sdk.Model, error)
 	UpdateModel(ctx context.Context, id string, req *sdk.UpdateModelRequest) (*sdk.Model, error)
 }
@@ -48,6 +49,8 @@ reference it keep working (unlike delete + re-create, which orphans references).
 Rotate the provider key with --api-key-stdin, or change --base-url,
 --display-name, --description, extra --param entries, or --default. A model's
 type and source are immutable — register a new model to change them.
+--default writes the workspace default settings; --default=false clears the
+slot only when this model holds it.
 
 Reversible write: without -y/--yes in a non-TTY / JSON context it exits 10
 (input.confirmation_required) without applying the change.`,
@@ -103,7 +106,9 @@ Reversible write: without -y/--yes in a non-TTY / JSON context it exits 10
 	cmd.Flags().StringVar(&opts.BaseURL, "base-url", "", "New model API base URL")
 	cmd.Flags().BoolVar(&opts.APIKeyStdin, "api-key-stdin", false, "Rotate the provider API key, read from stdin (kept out of argv / history)")
 	cmd.Flags().StringArrayVar(&opts.Params, "param", nil, "Set an extra provider parameter as key=value, repeatable (value parsed as JSON)")
-	cmd.Flags().BoolVar(&opts.Default, "default", false, "Mark this the default model for its type (--default=false to unset)")
+	cmd.Flags().BoolVar(&opts.Default, "default", false,
+		"Set or clear the workspace default for this model type "+
+			"(--default=false clears it only when this model holds it)")
 	cmdutil.AddFormatFlag(cmd, modelListFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetWriteRisk(cmd, "model.update")
@@ -162,7 +167,6 @@ func runUpdate(ctx context.Context, opts *UpdateOptions, fopts *cmdutil.FormatOp
 		DisplayName: cur.DisplayName,
 		Description: cur.Description,
 		Parameters:  merged,
-		IsDefault:   cur.IsDefault,
 	}
 	if opts.flags.displayName {
 		req.DisplayName = opts.DisplayName
@@ -170,18 +174,27 @@ func runUpdate(ctx context.Context, opts *UpdateOptions, fopts *cmdutil.FormatOp
 	if opts.flags.description {
 		req.Description = opts.Description
 	}
-	if opts.flags.def {
-		req.IsDefault = opts.Default
-	}
 
 	updated, err := svc.UpdateModel(ctx, id, req)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "update model %s", id)
 	}
+	if opts.flags.def {
+		// The model body carries no writable default; the workspace default
+		// settings are what model list responses project into is_default.
+		if err := setWorkspaceDefaultModel(ctx, svc, cur.Type, id, opts.Default); err != nil {
+			return defaultFailure(fmt.Sprintf("model %s was updated", id), err)
+		}
+		updated.IsDefault = opts.Default
+	}
 	if fopts.WantsJSON() {
 		return fopts.Emit(iostreams.IO.Out, updated, nil)
 	}
-	fmt.Fprintf(iostreams.IO.Out, "✓ Updated model %q (id: %s)\n", updated.Name, updated.ID)
+	suffix := ""
+	if opts.flags.def && opts.Default {
+		suffix = ", workspace default"
+	}
+	_, _ = fmt.Fprintf(iostreams.IO.Out, "✓ Updated model %q (id: %s%s)\n", updated.Name, updated.ID, suffix)
 	return nil
 }
 
