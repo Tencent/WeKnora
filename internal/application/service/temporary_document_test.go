@@ -281,3 +281,46 @@ func TestSelectTemporaryDocumentContentHonorsSharedPromptBudget(t *testing.T) {
 		t.Fatalf("selected=%d total=%d, want 2/10 within a 2500-token share", selected, total)
 	}
 }
+
+func TestOCRScannedAttachmentRunsOCRForImageOnlyContent(t *testing.T) {
+	fv := &fakeVLM{response: "扫描页文字"}
+	refs := []types.ImageRef{
+		{ImageData: []byte("page-1")},
+		{OriginalRef: "remote-only"},
+		{ImageData: []byte("page-2")},
+		{ImageData: []byte("page-3")},
+	}
+	got := OCRScannedAttachment(context.Background(), &fakeVLMModelService{model: fv},
+		"fake", "![p](page-1.png)", refs, 2)
+	if !strings.Contains(got, "扫描页文字") {
+		t.Fatalf("image-only attachment should get OCR text, got %q", got)
+	}
+	if fv.calls != 2 {
+		t.Fatalf("VLM calls = %d, want 2 (page cap, refs without bytes skipped)", fv.calls)
+	}
+}
+
+func TestOCRScannedAttachmentSkipsWhenNotApplicable(t *testing.T) {
+	pages := []types.ImageRef{{ImageData: []byte("page-1")}}
+	longText := strings.Repeat("这是一段已经解析出来的正文内容。", 40)
+	cases := []struct {
+		name    string
+		modelID string
+		content string
+		refs    []types.ImageRef
+	}{
+		{"no VLM model", "", "![p](x)", pages},
+		{"text-rich content", "fake", longText, pages},
+		{"no page image bytes", "fake", "![p](x)", []types.ImageRef{{OriginalRef: "x"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fv := &fakeVLM{}
+			got := OCRScannedAttachment(context.Background(), &fakeVLMModelService{model: fv},
+				tc.modelID, tc.content, tc.refs, 0)
+			if got != "" || fv.calls != 0 {
+				t.Fatalf("got %q with %d VLM calls, want no OCR", got, fv.calls)
+			}
+		})
+	}
+}
