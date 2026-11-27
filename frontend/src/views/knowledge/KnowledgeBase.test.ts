@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import * as vue from 'vue'
 import * as stall from '../../utils/knowledgeProcessingStall.ts'
+import * as youtube from '../../utils/youtube.ts'
 import { change, fixture, flush } from '../../test-utils/vueFixture.ts'
 
 async function setup(t: TestContext, translate = (key: string, _params?: unknown) => key) {
@@ -40,7 +41,7 @@ async function setup(t: TestContext, translate = (key: string, _params?: unknown
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/utils/kbPermission': { permissionCanEditKB: () => true, permissionCanManageKB: () => true },
     '@/utils/knowledgeDeletion': { waitForKnowledgeDeletion }, '@/utils/knowledgeTrace': {},
-    '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
+    '@/utils/knowledgeProcessingStall': stall, '@/utils/youtube': youtube, '@/api/wiki': {}, '@/api/knowledge-base': {},
     '@/api/knowledge-base/index': {
       listKnowledgeFolders, listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }),
       batchReparseKnowledge: async () => ({ success: true }),

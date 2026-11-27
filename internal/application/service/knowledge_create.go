@@ -327,20 +327,31 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
 	return s.createKnowledgeFromURL(ctx, kbID, rawURL, fileName, fileType, enableMultimodel,
-		title, tagIDs, channel, processOverrides, nil)
+		title, tagIDs, channel, processOverrides, "", nil)
 }
 
+// createKnowledgeFromURL implements CreateKnowledgeFromURL. folderPath places
+// a web page knowledge entry in a folder; it does not apply to file
+// downloads, which keep their existing root placement. replacement is set
+// when a datasource update replaces an existing entry.
 func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool,
 	title string, tagIDs []string, channel string,
 	processOverrides *types.KnowledgeProcessOverrides,
+	folderPath string,
 	replacement *knowledgeReplacement,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
 
+	// YouTube video links are fetched as transcripts, never as file downloads.
+	rawURL, isYouTube, err := normalizeYouTubeImportURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+
 	// Route to file_url logic when the URL points to a downloadable file
-	if isFileURL(rawURL, fileName, fileType) {
+	if !isYouTube && isFileURL(rawURL, fileName, fileType) {
 		return s.createKnowledgeFromFileURLWithReplacement(
 			ctx, kbID, rawURL, fileName, fileType, enableMultimodel,
 			title, tagIDs, channel, processOverrides, replacement,
@@ -417,6 +428,7 @@ func (s *knowledgeService) createKnowledgeFromURL(ctx context.Context,
 		Channel:          defaultChannel(channel),
 		Title:            title,
 		Source:           url,
+		FolderPath:       types.NormalizeKnowledgeFolderPath(folderPath),
 		FileType:         "html",
 		FileHash:         fileHash,
 		ParseStatus:      "pending",

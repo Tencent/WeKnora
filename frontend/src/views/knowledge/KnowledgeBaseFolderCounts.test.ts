@@ -4,6 +4,7 @@ import test, { type TestContext } from 'node:test'
 import { createI18n } from 'vue-i18n'
 import * as vue from 'vue'
 import * as stall from '../../utils/knowledgeProcessingStall.ts'
+import * as youtube from '../../utils/youtube.ts'
 import { fixture, flush } from '../../test-utils/vueFixture.ts'
 import enUS from '../../i18n/locales/en-US'
 import zhCN from '../../i18n/locales/zh-CN'
@@ -80,7 +81,7 @@ async function setup(t: TestContext, tree: unknown) {
     '@/hooks/useMarqueeSelect': { useMarqueeSelect: () => ({}) },
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/utils/kbPermission': {}, '@/utils/knowledgeDeletion': {}, '@/utils/knowledgeTrace': {},
-    '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
+    '@/utils/knowledgeProcessingStall': stall, '@/utils/youtube': youtube, '@/api/wiki': {}, '@/api/knowledge-base': {},
     '@/api/knowledge-base/index': { listKnowledgeFolders, listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }) },
   })
   await flush()

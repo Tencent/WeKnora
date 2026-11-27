@@ -8907,7 +8907,7 @@
         },
         "/knowledge-bases/{id}/knowledge/url": {
             "post": {
-                "description": "从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式",
+                "description": "从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式。\nYouTube 视频链接会抓取字幕（无字幕时下载音频并用知识库的 ASR 模型转写），再用摘要模型整理为文档；播放列表或批量链接请使用 youtube 接口",
                 "consumes": [
                     "application/json"
                 ],
@@ -8985,6 +8985,78 @@
                     "target": "knowledge_base.get"
                 },
                 "x-agent-hint": "Imports a user-provided public web page or file URL as a source document; ingests asynchronously. Check knowledge.get_parse_progress."
+            }
+        },
+        "/knowledge-bases/{id}/knowledge/youtube": {
+            "post": {
+                "description": "接收一组 YouTube 视频或播放列表链接（最多 100 个），展开播放列表并按视频去重后，为每个视频创建一条 URL 知识\n（异步抓取字幕或转写音频后生成文档并入库）。无法识别的链接与失败的视频计入 failed，已存在的视频计入 duplicates，\n均不会导致整体失败；单个视频放入 folder_path，每个播放列表的视频放入 folder_path 下以播放列表标题命名的子文件夹；\n单次导入的视频数上限由 YOUTUBE_MAX_VIDEOS_PER_IMPORT 控制",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "批量导入YouTube视频与播放列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "导入请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "folder_path": {
+                                    "type": "string"
+                                },
+                                "tag_ids": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "urls": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "导入结果",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubeImportResult"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误或没有可导入的视频",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ]
             }
         },
         "/knowledge-bases/{id}/move-targets": {
@@ -39224,6 +39296,86 @@
                 "total_pages": {
                     "type": "integer",
                     "x-agent": true
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.YouTubeImportItem": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "url": {
+                    "description": "URL is the canonical video URL, or the link as submitted when it could\nnot be resolved to a video.",
+                    "type": "string"
+                },
+                "video_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.YouTubeImportPlaylist": {
+            "type": "object",
+            "properties": {
+                "folder_path": {
+                    "description": "FolderPath is the folder this playlist's videos were placed in.",
+                    "type": "string"
+                },
+                "playlist_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "videos": {
+                    "description": "Videos is the number of importable videos taken from this playlist.",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.YouTubeImportResult": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge"
+                    }
+                },
+                "duplicates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubeImportItem"
+                    }
+                },
+                "failed": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubeImportItem"
+                    }
+                },
+                "playlists": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubeImportPlaylist"
+                    }
+                },
+                "total_videos": {
+                    "description": "TotalVideos is the number of distinct videos considered.",
+                    "type": "integer"
+                },
+                "truncated": {
+                    "description": "Truncated reports that the links resolved to more videos than\nYOUTUBE_MAX_VIDEOS_PER_IMPORT and only the first ones were imported.",
+                    "type": "boolean"
                 }
             }
         },

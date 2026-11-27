@@ -91,6 +91,10 @@ type knowledgeService struct {
 	spanTracker SpanTracker
 	audit       interfaces.AuditLogService
 
+	// youtubeSource fetches YouTube playlists and transcripts. Nil uses the
+	// shared yt-dlp client configured from YOUTUBE_* env vars.
+	youtubeSource youTubeSource
+
 	// In-memory transfer progress fallbacks for Lite / Desktop mode (no Redis)
 	memKBCloneProgress       sync.Map // taskID -> memProgressEntry[types.KBCloneProgress]
 	memKnowledgeMoveProgress sync.Map // taskID -> memProgressEntry[types.KnowledgeMoveProgress]
