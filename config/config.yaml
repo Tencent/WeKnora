@@ -29,7 +29,7 @@ conversation:
     max_input_chars: 8192
     repeat_penalty: 1.0
     temperature: 0.3
-    max_completion_tokens: 1024
+    max_completion_tokens: 4096
     no_match_prefix: |-
       <think>
       </think>
