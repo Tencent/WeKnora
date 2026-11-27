@@ -255,7 +255,11 @@ func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, str
 		body["tool_choice"] = choice
 	}
 
-	systemParts, converted := c.convertMessages(messages, opts)
+	// The thinking-off variant cannot carry block_binding, so a signed block
+	// from an earlier turn whose tools/messages prefix has since changed is
+	// rejected ("bound to a different conversation"). Claude's own remedy is to
+	// remove the block; with thinking off nothing requires it back.
+	systemParts, converted := c.convertMessages(messages, plan.body == nil || plan.enabled)
 	systemText := strings.Join(systemParts, "\n\n")
 	if marker == nil {
 		if systemText != "" {
@@ -331,8 +335,9 @@ func (c *Client) betaHeader(plan thinkingPlan, opts *api.Options, userValue stri
 // convertMessages maps neutral messages onto Anthropic messages. System
 // messages are lifted out; tool calls become tool_use blocks; consecutive
 // tool results merge into one user message; thinking blocks are replayed
-// only when they carry a signature (the API rejects unsigned ones).
-func (c *Client) convertMessages(messages []api.Message, _ *api.Options) ([]string, []message) {
+// only when they carry a signature (the API rejects unsigned ones) and
+// replayThinking is set.
+func (c *Client) convertMessages(messages []api.Message, replayThinking bool) ([]string, []message) {
 	var system []string
 	var result []message
 	for _, msg := range messages {
@@ -347,7 +352,7 @@ func (c *Client) convertMessages(messages []api.Message, _ *api.Options) ([]stri
 				system = append(system, content)
 			}
 		case "assistant":
-			blocks := c.assistantBlocks(msg, content)
+			blocks := c.assistantBlocks(msg, content, replayThinking)
 			if len(blocks) == 0 {
 				continue
 			}
@@ -381,8 +386,11 @@ func (c *Client) convertMessages(messages []api.Message, _ *api.Options) ([]stri
 	return system, result
 }
 
-func (c *Client) assistantBlocks(msg api.Message, content string) []contentBlock {
-	blocks := replayThinkingBlocks(msg)
+func (c *Client) assistantBlocks(msg api.Message, content string, replayThinking bool) []contentBlock {
+	var blocks []contentBlock
+	if replayThinking {
+		blocks = replayThinkingBlocks(msg)
+	}
 	if content == "" {
 		content = textFromMultiContent(msg.MultiContent)
 	}
