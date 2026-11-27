@@ -311,3 +311,30 @@ func TestLinkifyContent_RepeatedLinkifyIsIdempotent(t *testing.T) {
 		t.Fatalf("second run altered content:\nbefore: %q\nafter:  %q", once, twice)
 	}
 }
+
+// A fence inside a list item is indented. Its body is still code.
+func TestLinkifyContent_SkipsInsideIndentedFencedCode(t *testing.T) {
+	refs := []linkRef{{slug: "entity/redis", matchText: "Redis"}}
+	for _, fence := range []string{"~~~", "```"} {
+		in := "1. Start:\n   " + fence + "bash\n   Redis --version\n\n   Redis --help\n   " + fence + "\n"
+		got, changed := linkifyContent(in, refs, "")
+		if changed || got != in {
+			t.Fatalf("linked inside an indented %s fence:\n%s", fence, got)
+		}
+		got, _ = linkifyContent(in+"\nRedis is a store.\n", refs, "")
+		if !strings.HasSuffix(got, "\n[[entity/redis|Redis]] is a store.\n") {
+			t.Fatalf("text after the indented %s fence not linked:\n%s", fence, got)
+		}
+	}
+}
+
+// A name inside a bare URL is part of the address, not a mention.
+func TestLinkifyContent_SkipsInsideBareURL(t *testing.T) {
+	refs := []linkRef{{slug: "entity/weknora", matchText: "WeKnora"}}
+	in := "Repo: https://github.com/Tencent/WeKnora\n\nWeKnora is a RAG framework."
+	got, _ := linkifyContent(in, refs, "")
+	want := "Repo: https://github.com/Tencent/WeKnora\n\n[[entity/weknora|WeKnora]] is a RAG framework."
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
