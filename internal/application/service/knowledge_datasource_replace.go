@@ -20,7 +20,7 @@ var errInvalidJSONContent = errors.New("invalid JSON content")
 type knowledgeReplacement struct {
 	previous  *types.Knowledge
 	metadata  map[string]string
-	tagIDs    []string
+	tags      types.DataSourceSyncTags
 	committed bool
 	keepFile  bool // a failed commit/read may still have published the new path
 }
@@ -47,7 +47,7 @@ func (s *knowledgeService) persistKnowledgeForCreation(ctx context.Context, know
 		return err
 	}
 	knowledge.Metadata = metadata
-	if err := s.repo.ReplaceKnowledge(ctx, replacement.previous, knowledge, replacement.tagIDs); err != nil {
+	if err := s.repo.ReplaceKnowledge(ctx, replacement.previous, knowledge, replacement.tags); err != nil {
 		// A commit can succeed while its acknowledgement is lost. Only discard
 		// the staged file when a read confirms the previous row is still live.
 		cleanupCtx := context.WithoutCancel(ctx)
@@ -71,7 +71,7 @@ func (s *knowledgeService) persistKnowledgeForCreation(ctx context.Context, know
 // transaction covers both knowledge rows and new tag relations; parsing remains asynchronous
 // and cleanup of the retired row's external resources is best-effort after commit.
 func (s *knowledgeService) ReplaceKnowledgeFromDataSource(ctx context.Context, knowledgeID string,
-	item *types.FetchedItem, metadata map[string]string, tagIDs []string, channel string,
+	item *types.FetchedItem, metadata map[string]string, tags types.DataSourceSyncTags, channel string,
 ) (*types.Knowledge, error) {
 	if item == nil || (len(item.Content) == 0 && item.URL == "") {
 		return nil, fmt.Errorf("item has neither content nor URL")
@@ -86,10 +86,14 @@ func (s *knowledgeService) ReplaceKnowledgeFromDataSource(ctx context.Context, k
 		stored["datasource_id"] != metadata["datasource_id"] || stored["external_id"] != metadata["external_id"] {
 		return nil, fmt.Errorf("datasource knowledge identity changed")
 	}
+	var tagIDs []string
+	if !tags.PreserveExisting {
+		tagIDs = tags.SourceTagIDs
+	}
 	if err := s.validateKnowledgeTagIDs(plan.ctx, previous.TenantID, previous.KnowledgeBaseID, tagIDs); err != nil {
 		return nil, err
 	}
-	replacement := &knowledgeReplacement{previous: previous, metadata: metadata, tagIDs: tagIDs}
+	replacement := &knowledgeReplacement{previous: previous, metadata: metadata, tags: tags}
 	var created *types.Knowledge
 	if len(item.Content) > 0 {
 		file, buildErr := bytesToFileHeader(item.Content, item.FileName)

@@ -26432,6 +26432,10 @@
         "github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO": {
             "type": "object",
             "properties": {
+                "preserve_existing_tags": {
+                    "type": "boolean",
+                    "x-agent": true
+                },
                 "resource_ids": {
                     "type": "array",
                     "items": {
@@ -41885,6 +41889,11 @@
                         "overwrite",
                         "skip"
                     ],
+                    "x-agent": true
+                },
+                "preserve_existing_tags": {
+                    "description": "Keep current document tags on overwrite. False reapplies data source tags.",
+                    "type": "boolean",
                     "x-agent": true
                 },
                 "resource_ids": {

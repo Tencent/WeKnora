@@ -51,7 +51,8 @@ func TestReplaceKnowledgePostgresRollbackAndCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, repo.SetKnowledgeTags(ctx, old.ID, []string{"old-tag"}))
 	replacement := &types.Knowledge{ID: occupied.ID, TenantID: 7, KnowledgeBaseID: "kb", Type: "file"}
-	require.Error(t, repo.ReplaceKnowledge(ctx, old, replacement, []string{"new-tag"}))
+	tagsOnOverwrite := types.DataSourceSyncTags{SourceTagIDs: []string{"new-tag"}}
+	require.Error(t, repo.ReplaceKnowledge(ctx, old, replacement, tagsOnOverwrite))
 	retained, err := repo.GetKnowledgeByID(ctx, 7, old.ID)
 	require.NoError(t, err, "failed insertion must roll back the retirement")
 	require.False(t, retained.DeletedAt.Valid)
@@ -60,7 +61,7 @@ func TestReplaceKnowledgePostgresRollbackAndCommit(t *testing.T) {
 	require.Len(t, tags, 1)
 	require.Equal(t, "old-tag", tags[0].TagID)
 	replacement.ID = "new"
-	require.NoError(t, repo.ReplaceKnowledge(ctx, old, replacement, []string{"new-tag"}))
+	require.NoError(t, repo.ReplaceKnowledge(ctx, old, replacement, tagsOnOverwrite))
 	_, err = repo.GetKnowledgeByID(ctx, 7, old.ID)
 	require.Error(t, err)
 	_, err = repo.GetKnowledgeByID(ctx, 7, replacement.ID)
@@ -70,5 +71,6 @@ func TestReplaceKnowledgePostgresRollbackAndCommit(t *testing.T) {
 	require.Len(t, tags, 1)
 	require.Equal(t, "new-tag", tags[0].TagID)
 	replacement.ID = "stale-replacement"
-	require.ErrorContains(t, repo.ReplaceKnowledge(ctx, old, replacement, nil), "knowledge changed")
+	err = repo.ReplaceKnowledge(ctx, old, replacement, types.DataSourceSyncTags{})
+	require.ErrorContains(t, err, "knowledge changed")
 }

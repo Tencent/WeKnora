@@ -329,10 +329,10 @@ flowchart LR
 - **入库核心 `applyFetchedItem` → `ingestItem`**：
   - `IsDeleted=true` 且 `sync_deletions=true` 时，按租户、知识库、数据源 ID 和 external_id 查找并真实删除对应知识；关闭同步删除则保留已有知识。删除能力还取决于连接器是否提供可靠的删除检测；
   - 有 `Content` 字节 → 包装成 `multipart.FileHeader` 走 `KnowledgeService.CreateKnowledgeFromFile`（完整文档解析流水线）；只有 `URL` → 走 `CreateKnowledgeFromURL` 由 WeKnora 下载解析；
-  - **更新 = 先删后建**：按 metadata `external_id` 查到既有知识条目就先 `DeleteKnowledge` 再重建，计为 Updated；
+  - 按数据源和 `external_id` 找到已有文档后，「跳过已存在」保留原版本，「覆盖更新」在同一事务中替换文档和标签关联，成功后计为 Updated；
   - 重复文件（`DuplicateKnowledgeError`）计为 Skipped，不算失败；
   - 每个条目自动带上 metadata：`external_id`、`source_resource_id`、`datasource_id` 以及连接器附加的 metadata。若源端提供时间，还保存 UTC RFC3339 格式的 `source_created_at` / `source_updated_at`；它们表示源文档时间，与 WeKnora 的 created_at/updated_at 分开。
-- **自动打标**：`resolveAutoTagIDs` 按数据源名称在目标 KB 中 FindOrCreate 一个标签，所有同步条目自动挂上，便于在 KB 中识别来源；打标失败不阻断同步。
+- **自动打标**：`resolveSyncTags` 按数据源名称在目标 KB 中 FindOrCreate 一个标签，打标失败不阻断同步。新文档首次同步时使用该标签。「覆盖更新」默认勾选「保留当前标签」，已有文档更新正文时保留完整的当前标签，包括手工清空的情况。取消勾选后，下次覆盖更新会按数据源规则重新打标。
 - **结果状态**：按条目独立跟踪游标的流式连接器（Feishu/Lark、Seafile、Nextcloud、Confluence）实现 `ItemFailureIsolatingConnector`，单个条目的入库失败会被隔离（不推进该条目游标以便后续重试，连续失败达到上限或配额超限等全局异常仍立即中止），不会阻塞同目录其余文件或新增目录；增量轮次若存在游标命中的未变更条目，残留的单条失败仍记为 `partial` 并保持定时同步活跃。全部条目失败且无未变更/非阻断条目 → `failed`（`allFetchedItemsFailedError`）；RSS 部分 feed 失败（`PartialFetchError`）或存在单条失败文档 → `partial`；其余 → `success`。失败样本以 `SyncItemError` 形式最多保留 100 条。
 - 抓取失败时若连接器返回了新游标（如 RSS），仍会持久化游标，避免瞬时故障后被迫全量重抓。
 

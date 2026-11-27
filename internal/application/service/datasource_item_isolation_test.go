@@ -41,14 +41,14 @@ func (k *failingFeishuKnowledgeService) CreateKnowledgeFromFile(
 
 func (k *failingFeishuKnowledgeService) ReplaceKnowledgeFromDataSource(
 	ctx context.Context, existingID string, item *types.FetchedItem,
-	metadata map[string]string, tagIDs []string, channel string,
+	metadata map[string]string, tags types.DataSourceSyncTags, channel string,
 ) (*types.Knowledge, error) {
 	k.attempted = append(k.attempted, item.ExternalID)
 	if err := k.failByExtID[item.ExternalID]; err != nil {
 		return nil, err
 	}
 	return k.feishuStatefulKnowledgeService.ReplaceKnowledgeFromDataSource(
-		ctx, existingID, item, metadata, tagIDs, channel,
+		ctx, existingID, item, metadata, tags, channel,
 	)
 }
 
@@ -815,13 +815,13 @@ func (k *failingRealKnowledgeService) CreateKnowledgeFromFile(
 
 func (k *failingRealKnowledgeService) ReplaceKnowledgeFromDataSource(
 	ctx context.Context, existingID string, item *types.FetchedItem,
-	metadata map[string]string, tagIDs []string, channel string,
+	metadata map[string]string, tags types.DataSourceSyncTags, channel string,
 ) (*types.Knowledge, error) {
 	if err := k.failByExtID[item.ExternalID]; err != nil {
 		return nil, err
 	}
 	return k.knowledgeService.ReplaceKnowledgeFromDataSource(
-		ctx, existingID, item, metadata, tagIDs, channel,
+		ctx, existingID, item, metadata, tags, channel,
 	)
 }
 

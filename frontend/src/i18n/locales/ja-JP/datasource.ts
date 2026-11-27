@@ -432,6 +432,8 @@ export default {
       overwrite: '上書き',
       skip: '既存をスキップ'
     },
+    preserveExistingTags: '現在のタグを保持',
+    preserveExistingTagsHint: 'チェックを外すと、既存のドキュメントを次に更新するときに、手動で付けたタグがデータソースのタグ付けルールで上書きされます。',
     syncDeletions: '削除を同期（同期元で削除されたナレッジをナレッジベースからも削除）',
     createAndSync: '作成して今すぐ同期',
     createAndSyncSuccess: 'データソースを作成し、同期タスクを送信しました',

@@ -659,6 +659,9 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_handler_dto.DataSourceConfigDTO:
     properties:
+      preserve_existing_tags:
+        type: boolean
+        x-agent: true
       resource_ids:
         items:
           type: string
@@ -12784,6 +12787,11 @@ definitions:
         - overwrite
         - skip
         type: string
+        x-agent: true
+      preserve_existing_tags:
+        description: Keep current document tags on overwrite. False reapplies data
+          source tags.
+        type: boolean
         x-agent: true
       resource_ids:
         description: Replaces the complete selection. Get IDs from data_source.list_resources;

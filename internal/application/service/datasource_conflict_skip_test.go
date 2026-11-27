@@ -63,12 +63,14 @@ func (conflictSkipConnector) FetchIncremental(
 type conflictSkipKnowledgeService struct {
 	*sweepFakeKS
 	replacements int
+	tags         types.DataSourceSyncTags
 }
 
 func (s *conflictSkipKnowledgeService) ReplaceKnowledgeFromDataSource(
-	_ context.Context, _ string, _ *types.FetchedItem, _ map[string]string, _ []string, _ string,
+	_ context.Context, _ string, _ *types.FetchedItem, _ map[string]string, tags types.DataSourceSyncTags, _ string,
 ) (*types.Knowledge, error) {
 	s.replacements++
+	s.tags = tags
 	return &types.Knowledge{ID: "new-knowledge"}, nil
 }
 
@@ -164,9 +166,23 @@ func TestProcessSync_OverwriteStrategyReplacesExisting(t *testing.T) {
 	assert.Empty(t, repo.hardDeleted)
 	assert.Empty(t, ks.events, "the caller must not delete or create outside the replacement transaction")
 	assert.Equal(t, 1, ks.replacements)
+	assert.True(t, ks.tags.PreserveExisting, "existing sources default to keeping their tags")
 	assert.Equal(t, 0, log.ItemsCreated)
 	assert.Equal(t, 1, log.ItemsUpdated)
 	assert.Equal(t, 0, log.ItemsSkipped)
+}
+
+func TestProcessSync_OverwriteUsesSavedTagPolicy(t *testing.T) {
+	svc, ds, _, ks, syncLog := newConflictSkipHarness(t, types.ConflictStrategyOverwrite)
+	cfg, err := ds.ParseConfig()
+	require.NoError(t, err)
+	keep := false
+	cfg.PreserveExistingTags = &keep
+	ds.Config, err = cfg.ToJSON()
+	require.NoError(t, err)
+	log := runConflictSkipSync(t, svc, ds, syncLog)
+	require.Equal(t, 1, log.ItemsUpdated)
+	require.False(t, ks.tags.PreserveExisting)
 }
 
 // ingestItem-level: with skip strategy the lookup hit short-circuits into a
@@ -190,7 +206,7 @@ func TestIngestItem_SkipStrategyShortCircuitsAsDuplicate(t *testing.T) {
 		Content:     []byte("# v2\n"),
 		ContentType: "text/markdown",
 		FileName:    "existing.md",
-	}, nil)
+	}, types.DataSourceSyncTags{})
 
 	require.Error(t, err)
 	var dupErr *types.DuplicateKnowledgeError
@@ -219,7 +235,7 @@ func TestIngestItem_SkipStrategyKeepsExistingURLItem(t *testing.T) {
 		ExternalID: "url:1",
 		URL:        "https://example.com/doc",
 		Title:      "Existing URL Doc",
-	}, nil)
+	}, types.DataSourceSyncTags{})
 
 	require.Error(t, err)
 	var dupErr *types.DuplicateKnowledgeError

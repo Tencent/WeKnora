@@ -432,6 +432,8 @@ export default {
       overwrite: 'Overwrite',
       skip: 'Skip existing'
     },
+    preserveExistingTags: 'Keep current tags',
+    preserveExistingTagsHint: 'If unchecked, the next update to an existing document replaces its manual tags with the tags assigned by the data source.',
     syncDeletions: 'Sync deletions (remove knowledge when deleted at source)',
     createAndSync: 'Create & Sync Now',
     createAndSyncSuccess: 'Data source created and sync task submitted',

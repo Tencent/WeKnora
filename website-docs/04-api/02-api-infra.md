@@ -341,6 +341,7 @@ curl -X POST $BASE/api/v1/datasource/validate-credentials -H "Authorization: Bea
 | `sync_schedule` | string | 否 | cron 表达式 |
 | `sync_mode` | string | 否 | `incremental`（默认）/`full` |
 | `conflict_strategy` | string | 否 | `overwrite`（默认）/`skip` |
+| `config.preserve_existing_tags` | bool | 否 | 覆盖更新时保留文档当前标签（默认 true，含空标签集合）。false 按数据源规则重新打标。首次同步始终使用数据源标签。 |
 | `sync_deletions` | bool | 否 | 默认 true |
 | `sync_log_retention_days` | int | 否 | 本数据源同步日志保留天数，默认 30；非正值按 30 天处理 |
 

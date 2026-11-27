@@ -33,7 +33,7 @@ type atomicIngestService struct {
 }
 
 func (s *atomicIngestService) ReplaceKnowledgeFromDataSource(
-	context.Context, string, *types.FetchedItem, map[string]string, []string, string,
+	context.Context, string, *types.FetchedItem, map[string]string, types.DataSourceSyncTags, string,
 ) (*types.Knowledge, error) {
 	s.replacements++
 	return nil, s.createErr
@@ -58,7 +58,7 @@ func TestIngestItemReplacementFailureKeepsPreviousKnowledge(t *testing.T) {
 			s := &DataSourceService{knowledgeService: ks}
 			ds := &types.DataSource{ID: "ds-1", TenantID: 7, KnowledgeBaseID: "kb-1"}
 
-			_, err := s.ingestItem(context.Background(), ds, item, nil)
+			_, err := s.ingestItem(context.Background(), ds, item, types.DataSourceSyncTags{})
 			require.Error(t, err)
 			require.Same(t, old, repo.row, "a failed replacement must retain the previous row")
 			require.Empty(t, ks.deleted, "old resources must not be deleted before replacement commits")
@@ -72,7 +72,8 @@ func TestIngestItemLookupFailureDoesNotCreateDuplicate(t *testing.T) {
 	ks := &atomicIngestService{sweepFakeKS: sweepFakeKS{repo: repo}}
 	s := &DataSourceService{knowledgeService: ks}
 	_, err := s.ingestItem(context.Background(), &types.DataSource{ID: "ds-1"},
-		&types.FetchedItem{ExternalID: "doc-1", Content: []byte("content"), FileName: "doc.md"}, nil)
+		&types.FetchedItem{ExternalID: "doc-1", Content: []byte("content"), FileName: "doc.md"},
+		types.DataSourceSyncTags{})
 	require.ErrorContains(t, err, "lookup failed")
 	require.Empty(t, ks.events)
 }

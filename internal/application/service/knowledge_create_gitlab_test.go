@@ -51,7 +51,7 @@ func TestCreateKnowledgeFromFileGitLabPreservesSourcePaths(t *testing.T) {
 		Content:    []byte("# same content"),
 	}
 	result := &types.SyncResult{}
-	(&DataSourceService{knowledgeService: svc}).applyFetchedItem(ctx, ds, item, nil, result)
+	(&DataSourceService{knowledgeService: svc}).applyFetchedItem(ctx, ds, item, types.DataSourceSyncTags{}, result)
 	require.Equal(t, 1, result.Created, "identical content at a different repository path must still be imported")
 	require.Zero(t, result.Skipped)
 	require.Zero(t, result.Failed)

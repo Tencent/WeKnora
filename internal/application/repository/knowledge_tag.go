@@ -18,6 +18,12 @@ func (r *knowledgeRepository) SetKnowledgeTags(
 	tagIDs []string,
 ) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Serialize manual edits with datasource replacement; a stale edit must not
+		// succeed against the retired knowledge ID.
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").
+			Take(&types.Knowledge{}, "id = ?", knowledgeID).Error; err != nil {
+			return err
+		}
 		// Delete all existing tag relations for this knowledge
 		if err := tx.Where("knowledge_id = ?", knowledgeID).
 			Delete(&types.KnowledgeTagRelation{}).Error; err != nil {

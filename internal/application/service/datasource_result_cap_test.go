@@ -25,7 +25,7 @@ func TestApplyFetchedItem_CapsErrorSampleButKeepsAccurateFailedCount(t *testing.
 			ExternalID: "node",
 			Title:      "doc",
 			Metadata:   map[string]string{"error": "export failed: rate limited"},
-		}, nil, result)
+		}, types.DataSourceSyncTags{}, result)
 	}
 
 	assert.Equal(t, failures, result.Failed,
@@ -55,7 +55,7 @@ func TestApplyFetchedItem_ProducesLocalisableStructuredError(t *testing.T) {
 			"error_reason_code_value": "1663",
 			"error_reason":            "Feishu API error (code=1663); will retry automatically",
 		},
-	}, nil, result)
+	}, types.DataSourceSyncTags{}, result)
 
 	assert.Equal(t, 1, len(result.Errors))
 	got := result.Errors[0]

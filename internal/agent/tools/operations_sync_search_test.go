@@ -35,10 +35,11 @@ func TestSyncSettingsApprovalAndAccessPolicy(t *testing.T) {
 				runArgs(
 					"data_source.update_sync",
 					map[string]any{
-						"data_source_id": "ds1",
-						"sync_schedule":  "",
-						"sync_deletions": true,
-						"resource_ids":   []string{"folder-a", "folder-b"},
+						"data_source_id":         "ds1",
+						"sync_schedule":          "",
+						"sync_deletions":         true,
+						"preserve_existing_tags": false,
+						"resource_ids":           []string{"folder-a", "folder-b"},
 					},
 				),
 			)
@@ -58,6 +59,7 @@ func TestSyncSettingsApprovalAndAccessPolicy(t *testing.T) {
 					"Team docs",
 					"manual only",
 					"Future syncs may delete",
+					"replace current document tags",
 					"folder-a, folder-b",
 				} {
 					assert.Contains(t, gate.requests[0].Description, text)
@@ -68,7 +70,8 @@ func TestSyncSettingsApprovalAndAccessPolicy(t *testing.T) {
 				require.NotEmpty(t, result.Data)
 				assert.JSONEq(
 					t,
-					`{"sync_schedule":"","sync_deletions":true,"resource_ids":["folder-a","folder-b"]}`,
+					`{"sync_schedule":"","sync_deletions":true,"preserve_existing_tags":false,
+						"resource_ids":["folder-a","folder-b"]}`,
 					string(d.calls[len(d.calls)-1].call.Body),
 				)
 			} else {
