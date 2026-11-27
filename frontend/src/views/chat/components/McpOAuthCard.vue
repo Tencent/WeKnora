@@ -62,6 +62,7 @@ import {
 import { markPromptSubmitted, promptSubmission, usePromptDock } from '@/composables/usePromptDock'
 import { isSubmitKey } from '@/utils/promptKeys'
 import { getApiBaseUrl } from '@/utils/api-base'
+import { useSettingsStore } from '@/stores/settings'
 
 const props = defineProps<{
   pendingId: string
@@ -95,6 +96,14 @@ const useEmbedOAuth = () =>
 
 const { t } = useI18n()
 const dock = usePromptDock()
+
+// A shared agent's OAuth token lives in its owner's workspace; name the agent
+// so the backend resolves the service there.
+const settingsStore = useSettingsStore()
+const agentScope = computed(() => ({
+  agentId: settingsStore.settings.selectedAgentId,
+  sourceTenantId: settingsStore.settings.selectedAgentSourceTenantId ?? undefined,
+}))
 
 const submission = computed(() => promptSubmission(props.pendingId))
 const open = computed(() => !props.resolved && !submission.value)
@@ -219,7 +228,7 @@ const authorize = async () => {
       : await getMCPOAuthAuthorizeURL(props.serviceId, {
         redirect_uri: redirectUri,
         frontend_redirect: frontendRedirect,
-      })
+      }, agentScope.value)
     if (!authorization.authorizationUrl || !authorization.authorizationAttempt) {
       MessagePlugin.error(t('agentStream.mcpOAuth.startFailed'))
       authorizing.value = false
@@ -240,7 +249,7 @@ const authorize = async () => {
             props.serviceId,
             authorization.authorizationAttempt,
           )
-          : await getMCPOAuthStatus(props.serviceId, authorization.authorizationAttempt)
+          : await getMCPOAuthStatus(props.serviceId, authorization.authorizationAttempt, agentScope.value)
       } catch {
         /* transient; keep polling */
       }
@@ -259,7 +268,7 @@ const authorize = async () => {
               { service_id: props.serviceId, decision: 'authorize' },
             )
           } else {
-            await resolveMCPOAuth(props.pendingId, { service_id: props.serviceId, decision: 'authorize' })
+            await resolveMCPOAuth(props.pendingId, { service_id: props.serviceId, decision: 'authorize' }, agentScope.value)
             try {
               await refreshMCPMetadata(props.serviceId)
             } catch {

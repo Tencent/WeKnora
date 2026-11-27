@@ -13,7 +13,7 @@ test('in-chat OAuth polling is bound to the newly opened authorization attempt',
   assert.match(cardSource, /authorization\.authorizationAttempt/)
   assert.match(
     cardSource,
-    /getMCPOAuthStatus\(props\.serviceId, authorization\.authorizationAttempt\)/,
+    /getMCPOAuthStatus\(props\.serviceId, authorization\.authorizationAttempt, agentScope\.value\)/,
   )
   assert.match(
     cardSource,
@@ -32,13 +32,13 @@ test('in-chat OAuth success refreshes the caller MCP directory', () => {
   assert.match(cardSource, /refreshMCPMetadata/)
   assert.match(
     cardSource,
-    /await resolveMCPOAuth\(props\.pendingId, \{ service_id: props\.serviceId, decision: 'authorize' \}\)/,
+    /await resolveMCPOAuth\(props\.pendingId, \{ service_id: props\.serviceId, decision: 'authorize' \}, agentScope\.value\)/,
   )
   assert.match(cardSource, /await refreshMCPMetadata\(props\.serviceId\)/)
 })
 
 test('OAuth status API sends the attempt id to the backend', () => {
-  assert.match(apiSource, /authorization_attempt=\$\{encodeURIComponent\(authorizationAttempt\)\}/)
+  assert.match(apiSource, /params\.set\('authorization_attempt', authorizationAttempt\)/)
 })
 
 test('settings distinguishes refreshable tokens from usable authorization', () => {
