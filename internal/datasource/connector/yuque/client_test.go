@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -113,6 +114,33 @@ func TestClient_Ping_403WrapsInvalidCredentials(t *testing.T) {
 	}
 	if !errors.Is(err, datasource.ErrInvalidCredentials) {
 		t.Errorf("403 should wrap ErrInvalidCredentials, got: %v", err)
+	}
+}
+
+func TestClient_Ping_ReportsNonUTF8ErrorBody(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		suffix string
+	}{
+		{name: "short"},
+		{name: "truncated", suffix: strings.Repeat("a", 500)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = io.WriteString(w, "拒绝\xffaccess"+tc.suffix)
+			}))
+			defer srv.Close()
+
+			c := newClient(&Config{APIToken: "insufficient", BaseURL: srv.URL})
+			err := c.Ping(context.Background())
+			if !errors.Is(err, datasource.ErrInvalidCredentials) {
+				t.Fatalf("Ping error = %v, want ErrInvalidCredentials", err)
+			}
+			if got := err.Error(); !utf8.ValidString(got) || !strings.Contains(got, "拒绝?access") {
+				t.Fatalf("Ping error should contain a valid UTF-8 body preview, got %q", got)
+			}
+		})
 	}
 }
 
