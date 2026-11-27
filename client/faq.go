@@ -378,7 +378,7 @@ func (c *Client) exportFAQEntries(ctx context.Context, path string) ([]byte, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, newAPIError(resp.StatusCode, readErrorBody(resp.Body))
+		return nil, newAPIError(resp, readErrorBody(resp.Body))
 	}
 
 	// Export endpoints return raw file data rather than a JSON response envelope.

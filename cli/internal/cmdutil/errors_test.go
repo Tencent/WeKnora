@@ -110,3 +110,48 @@ func TestClassifyHTTPError_500Generic_StaysServerError(t *testing.T) {
 		})
 	}
 }
+
+// Wrapf is where Retry-After reaches the typed error, so the hint survives
+// even when a command overrides the classified code: chat and session ask
+// report server.session_create_failed instead of server.rate_limited, and an
+// agent still needs the backoff to know when to retry.
+func TestWrapfCarriesRetryAfterFromCause(t *testing.T) {
+	cause := &sdk.APIError{StatusCode: 429, RetryAfterSeconds: 42}
+
+	for _, tc := range []struct {
+		name string
+		code ErrorCode
+	}{
+		{"classified code", CodeServerRateLimited},
+		{"overridden code", CodeSessionCreateFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := Wrapf(tc.code, cause, "list knowledge bases")
+			if err.Code != tc.code {
+				t.Errorf("Code = %v, want %v", err.Code, tc.code)
+			}
+			if err.RetryAfterSeconds != 42 {
+				t.Errorf("RetryAfterSeconds = %d, want 42", err.RetryAfterSeconds)
+			}
+		})
+	}
+
+	// Transport layers wrap the SDK error; errors.As has to see through that.
+	wrapped := Wrapf(CodeServerRateLimited, fmt.Errorf("do request: %w", cause), "list knowledge bases")
+	if wrapped.RetryAfterSeconds != 42 {
+		t.Errorf("RetryAfterSeconds through %%w = %d, want 42", wrapped.RetryAfterSeconds)
+	}
+}
+
+// A cause with no Retry-After (or no SDK error at all) must leave the field at
+// zero so the wire envelope omits it instead of reporting a zero backoff.
+func TestWrapfWithoutRetryAfterHint(t *testing.T) {
+	for _, cause := range []error{
+		&sdk.APIError{StatusCode: 500},
+		errors.New("connection refused"),
+	} {
+		if err := Wrapf(CodeServerError, cause, "server exploded"); err.RetryAfterSeconds != 0 {
+			t.Errorf("RetryAfterSeconds = %d, want 0 for cause %v", err.RetryAfterSeconds, cause)
+		}
+	}
+}

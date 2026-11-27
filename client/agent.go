@@ -121,7 +121,7 @@ func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return newAPIError(resp.StatusCode, readErrorBody(resp.Body))
+		return newAPIError(resp, readErrorBody(resp.Body))
 	}
 
 	// Process SSE stream
