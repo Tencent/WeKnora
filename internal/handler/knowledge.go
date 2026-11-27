@@ -1587,6 +1587,7 @@ func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
 	})
 }
 
+// KnowledgeFolderPathRequest identifies a document folder relative to its knowledge base.
 type KnowledgeFolderPathRequest struct {
 	FolderPath string `json:"folder_path" binding:"required" example:"Projects/Specs"`
 }
@@ -1629,21 +1630,21 @@ func (h *KnowledgeHandler) DeleteEmptyKnowledgeFolder(c *gin.Context) {
 func (h *KnowledgeHandler) writeKnowledgeFolder(c *gin.Context, write func(context.Context, string, string) error) {
 	var req KnowledgeFolderPathRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError("需要文件夹路径"))
+		_ = c.Error(errors.NewBadRequestError("需要文件夹路径"))
 		return
 	}
 	kbID, tenantID, err := h.requireKnowledgeWriteAccess(c, c.Param("id"))
 	if err != nil {
-		c.Error(err)
+		_ = c.Error(err)
 		return
 	}
 	ctx := types.WithExecutionTenant(c.Request.Context(), tenantID)
 	if err := write(ctx, kbID, req.FolderPath); err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 		} else {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("文件夹操作失败"))
+			_ = c.Error(errors.NewInternalServerError("文件夹操作失败"))
 		}
 		return
 	}

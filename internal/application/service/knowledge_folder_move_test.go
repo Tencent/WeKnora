@@ -138,7 +138,10 @@ func (r *folderMoveRepoStub) GetKnowledgeBatch(
 }
 
 func TestExplicitFolderWritesRequireTargetKBGrant(t *testing.T) {
-	svc := &knowledgeService{repo: &folderMoveRepoStub{}, kbService: &writeKBLookup{kb: &types.KnowledgeBase{ID: "other", TenantID: 2}}}
+	svc := &knowledgeService{
+		repo:      &folderMoveRepoStub{},
+		kbService: &writeKBLookup{kb: &types.KnowledgeBase{ID: "other", TenantID: 2}},
+	}
 	ctx := folderMoveContext()
 	require.Error(t, svc.CreateKnowledgeFolder(ctx, "other", "Specs"))
 	require.Error(t, svc.DeleteEmptyKnowledgeFolder(ctx, "other", "Specs"))
