@@ -104,6 +104,42 @@ type KnowledgeProcessOverrides struct {
 	ExtractConfig            *ExtractConfig            `json:"extract_config,omitempty"`
 }
 
+// MarshalJSON drops an unset chunk_overlap/token_limit from the per-upload
+// chunking override. The server merges this object into the knowledge base
+// config and treats an explicit zero as "disable the inherited value", while
+// these plain int fields cannot tell zero from unset. Omitting keeps the
+// knowledge base defaults; use the raw API when a document really needs an
+// explicit zero.
+func (o KnowledgeProcessOverrides) MarshalJSON() ([]byte, error) {
+	type alias KnowledgeProcessOverrides
+	raw, err := json.Marshal(alias(o))
+	if err != nil {
+		return nil, err
+	}
+	if o.ChunkingConfig == nil ||
+		(o.ChunkingConfig.ChunkOverlap != 0 && o.ChunkingConfig.TokenLimit != 0) {
+		return raw, nil
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, err
+	}
+	var chunking map[string]json.RawMessage
+	if err := json.Unmarshal(envelope["chunking_config"], &chunking); err != nil {
+		return nil, err
+	}
+	if o.ChunkingConfig.ChunkOverlap == 0 {
+		delete(chunking, "chunk_overlap")
+	}
+	if o.ChunkingConfig.TokenLimit == 0 {
+		delete(chunking, "token_limit")
+	}
+	if envelope["chunking_config"], err = json.Marshal(chunking); err != nil {
+		return nil, err
+	}
+	return json.Marshal(envelope)
+}
+
 // CreateKnowledgeFromFile creates a knowledge entry from a local file path
 // Parameters:
 //   - knowledgeBaseID: The ID of the knowledge base
