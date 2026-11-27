@@ -26,12 +26,24 @@ const (
 	EmbeddingArk EmbeddingAPI = "ark-embeddings"
 	// EmbeddingGoogle is Gemini's batchEmbedContents.
 	EmbeddingGoogle EmbeddingAPI = "google-embeddings"
+	// EmbeddingVoyage is Voyage AI's POST /embeddings: the OpenAI shape plus
+	// input_type and output_dimension, answered in an envelope whose failures
+	// are {"detail": "..."}.
+	EmbeddingVoyage EmbeddingAPI = "voyage-embeddings"
+	// EmbeddingVoyageContextualized is Voyage's /contextualizedembeddings,
+	// where the input is a list of documents and each answers with its
+	// chunk vectors.
+	EmbeddingVoyageContextualized EmbeddingAPI = "voyage-contextualized-embeddings"
+	// EmbeddingVoyageMultimodal is Voyage's /multimodalembeddings: every input
+	// is a {"content": [...]} of text and image parts and yields one vector.
+	EmbeddingVoyageMultimodal EmbeddingAPI = "voyage-multimodal-embeddings"
 )
 
 // Known reports whether the value names a protocol this build implements.
 func (a EmbeddingAPI) Known() bool {
 	switch a {
-	case EmbeddingOpenAI, EmbeddingDashScope, EmbeddingArk, EmbeddingGoogle:
+	case EmbeddingOpenAI, EmbeddingDashScope, EmbeddingArk, EmbeddingGoogle,
+		EmbeddingVoyage, EmbeddingVoyageContextualized, EmbeddingVoyageMultimodal:
 		return true
 	}
 	return false

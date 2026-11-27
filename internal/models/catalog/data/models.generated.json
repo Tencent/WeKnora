@@ -6381,6 +6381,273 @@
         "context_window": 8192,
         "source": "https://api.runcrate.ai/v1/models"
       }
+    ],
+    "voyage": [
+      {
+        "id": "voyage-4-large",
+        "name": "Voyage 4 Large",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.12,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/embeddings"
+      },
+      {
+        "id": "voyage-4",
+        "name": "Voyage 4",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.06,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/embeddings"
+      },
+      {
+        "id": "voyage-4-lite",
+        "name": "Voyage 4 Lite",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.02,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/embeddings"
+      },
+      {
+        "id": "voyage-code-4",
+        "name": "Voyage Code 4",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.12,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/embeddings"
+      },
+      {
+        "id": "voyage-3-large",
+        "name": "Voyage 3 Large",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.18,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/embeddings"
+      },
+      {
+        "id": "voyage-3.5",
+        "name": "Voyage 3.5",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.06,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/embeddings"
+      },
+      {
+        "id": "voyage-3.5-lite",
+        "name": "Voyage 3.5 Lite",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.02,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/embeddings"
+      },
+      {
+        "id": "voyage-code-3",
+        "name": "Voyage Code 3",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.18,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/embeddings"
+      },
+      {
+        "id": "voyage-finance-2",
+        "name": "Voyage Finance 2",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.12,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/embeddings",
+        "compat": {
+          "dimensions_field": ""
+        }
+      },
+      {
+        "id": "voyage-law-2",
+        "name": "Voyage Law 2",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 16000,
+        "cost": {
+          "input": 0.12,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/embeddings",
+        "compat": {
+          "dimensions_field": ""
+        }
+      },
+      {
+        "id": "voyage-context-4",
+        "name": "Voyage Context 4 (contextualized)",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.12,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/contextualized-chunk-embeddings",
+        "compat": {
+          "api": "voyage-contextualized-embeddings"
+        }
+      },
+      {
+        "id": "voyage-context-3",
+        "name": "Voyage Context 3 (contextualized)",
+        "type": "Embedding",
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.18,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/contextualized-chunk-embeddings",
+        "compat": {
+          "api": "voyage-contextualized-embeddings"
+        }
+      },
+      {
+        "id": "voyage-multimodal-3.5",
+        "name": "Voyage Multimodal 3.5",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.12,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/multimodal-embeddings",
+        "compat": {
+          "api": "voyage-multimodal-embeddings",
+          "max_image_bytes": 20000000,
+          "image_mime_types": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ]
+        }
+      },
+      {
+        "id": "voyage-multimodal-3",
+        "name": "Voyage Multimodal 3",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image"
+        ],
+        "dimension": 1024,
+        "context_window": 32000,
+        "cost": {
+          "input": 0.12,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/multimodal-embeddings",
+        "compat": {
+          "api": "voyage-multimodal-embeddings",
+          "max_image_bytes": 20000000,
+          "image_mime_types": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "dimensions_field": ""
+        }
+      },
+      {
+        "id": "rerank-3",
+        "name": "Rerank 3",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32000,
+        "cost": {
+          "input": 0.05,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/reranker"
+      },
+      {
+        "id": "rerank-3-lite",
+        "name": "Rerank 3 Lite",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32000,
+        "cost": {
+          "input": 0.02,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/reranker"
+      },
+      {
+        "id": "rerank-2.5",
+        "name": "Rerank 2.5",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32000,
+        "cost": {
+          "input": 0.05,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/reranker"
+      },
+      {
+        "id": "rerank-2.5-lite",
+        "name": "Rerank 2.5 Lite",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32000,
+        "cost": {
+          "input": 0.02,
+          "output": 0
+        },
+        "source": "https://docs.voyageai.com/docs/reranker"
+      }
     ]
   }
 }

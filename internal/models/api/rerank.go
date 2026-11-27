@@ -26,6 +26,9 @@ const (
 	// RerankPinecone is Pinecone Inference's standalone /rerank endpoint:
 	// documents are objects and results live under data with a score field.
 	RerankPinecone RerankAPI = "pinecone-rerank"
+	// RerankVoyage is Voyage AI's /rerank: {model, query, documents, top_k,
+	// return_documents} answering results under data with a relevance_score.
+	RerankVoyage RerankAPI = "voyage-rerank"
 	// RerankTEI is the native Text Embeddings Inference shape: POST /rerank
 	// with {query, texts}, answering a bare array of {index, score}.
 	RerankTEI RerankAPI = "tei-rerank"
@@ -40,7 +43,7 @@ const (
 // Known reports whether the value names a protocol this build implements.
 func (a RerankAPI) Known() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI,
+	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankVoyage, RerankTEI,
 		RerankTencentLKEAP, RerankVolcengineKnowledge:
 		return true
 	}
@@ -52,7 +55,7 @@ func (a RerankAPI) Known() bool {
 // vendor SDKs are imported.
 func (a RerankAPI) HTTPServed() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI:
+	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankVoyage, RerankTEI:
 		return true
 	}
 	return false

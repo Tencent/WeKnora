@@ -240,7 +240,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 
 | 字段 | 类型 | 协议默认 | 说明 |
 | --- | --- | --- | --- |
-| `api` | string | 厂商默认 | 向量协议：`openai-embeddings`、`dashscope-embeddings`、`ark-embeddings`、`google-embeddings` |
+| `api` | string | 厂商默认 | 向量协议：`openai-embeddings`、`dashscope-embeddings`、`ark-embeddings`、`google-embeddings`、`voyage-embeddings`、`voyage-contextualized-embeddings`、`voyage-multimodal-embeddings` |
 | `path` | string | 空 | 追加在 `base_url` 之后的路径 |
 | `send_encoding_format` | bool | false | 是否发送 `encoding_format: "float"` |
 | `dimensions_field` | string | 空 | 指定输出维度的字段名；仅在开启「自定义输出维度」时发送 |
@@ -298,7 +298,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 
 ## 内置厂商
 
-内置 31 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 32 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -333,6 +333,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 | Hugging Face TEI | `huggingface_tei` | | | ✓ | | |
 | Pinecone | `pinecone` | | | ✓ | | |
 | Cohere | `cohere` | | | ✓ | | |
+| Voyage AI | `voyage` | | ✓ | ✓ | | |
 
 表中的「视觉」指可在视觉模型类型下选择该厂商；对话模型本身是否接受图片，以模型目录和「支持视觉/多模态」开关为准。WeKnora 云服务需先在设置中保存云服务凭证，模型名称可选 `chat`、`embedding`、`rerank`、`vlm`。
 
@@ -363,6 +364,43 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 [Cohere API 建议](https://docs.cohere.com/v2/reference/rerank)，将超过 1000 篇的候选集
 拆成多个请求；1000 是采用的推荐批次大小。省略 `top_n` 以获取全部候选的分数，
 超长文档沿用服务端默认截断行为。本接入仅提供 Cohere 文本重排。
+
+### Voyage AI
+
+新增远程向量或重排模型时选择 **Voyage AI**，填写 Voyage API Key。默认地址为
+`https://api.voyageai.com/v1`。**模型名称没有默认值**，必须自己填写；接口不认识的名称（包括其他厂商的模型）由 Voyage 拒绝，错误信息取自它返回的 `{"detail": "..."}`。
+
+| 类型 | 模型 | 端点 | 说明 |
+| --- | --- | --- | --- |
+| 向量 | `voyage-4-large`、`voyage-4`、`voyage-4-lite`、`voyage-code-4`、`voyage-3-large`、`voyage-3.5`、`voyage-3.5-lite`、`voyage-code-3` | `/embeddings` | 默认 1024 维，开启「自定义输出维度」后可选 2048 / 1024 / 512 / 256（`output_dimension`） |
+| 向量 | `voyage-finance-2`、`voyage-law-2` | `/embeddings` | 固定 1024 维，不发送 `output_dimension` |
+| 向量 | `voyage-context-4`、`voyage-context-3` | `/contextualizedembeddings` | 上下文向量，见下 |
+| 向量（多模态） | `voyage-multimodal-3.5`、`voyage-multimodal-3` | `/multimodalembeddings` | 文本与图片同一向量空间，可用于图片索引与召回；`3.5` 可选 2048 / 1024 / 512 / 256 维，`3` 固定 1024 维 |
+| 重排 | `rerank-3`、`rerank-3-lite`、`rerank-2.5`、`rerank-2.5-lite` | `/rerank` | 单次最多 1000 篇文档，超出自动分批 |
+
+通过 `POST /api/v1/models` 创建时，请求体示例：
+
+```json
+{
+  "name": "voyage-4-large",
+  "type": "Embedding",
+  "source": "remote",
+  "parameters": {
+    "provider": "voyage",
+    "base_url": "https://api.voyageai.com/v1",
+    "api_key": "your-voyage-api-key"
+  }
+}
+```
+
+要点：
+
+- 检索时发送 `input_type`：入库文本为 `document`，查询为 `query`；不发送 `truncation`、`output_dtype`、`encoding_format`，沿用 Voyage 默认（返回 float 向量，超长输入由服务端截断）。
+- 单次请求最多 1000 条输入，超出自动分批并保持原顺序。Voyage 还限制单次请求的总 token 数（按模型 120K / 320K / 1M），计数需要 Voyage 自己的分词器，Go 里没有官方实现，因此**不做 token 估算**：批次按调用方给出的样子发送，请控制 `BATCH_EMBED_SIZE` 与分块大小。
+- 上下文向量（`voyage-context-*`）：入库时把每条文本作为一篇文档，以 `enable_auto_chunking: true`、`chunk_size: 32000` 发送（自动分块只在 `input_type: document` 下可用，输入为一维字符串列表）；每条文本必须恰好返回一个分块，被拆成多块的文本按调用失败处理。查询以每条一个元素的二维列表发送，不分块。WeKnora 先分块再入库，因此这里得到的是单块文档向量，按文档整体生成的上下文分块向量需要知识库索引流程另行支持。
+- 多模态模型的图片以 `image_base64` 数据 URL 发送（png、jpeg、webp、gif，单张不超过 20 MB），每个请求一张图片；视频与图片 URL 输入不经由向量层使用。
+- 响应中的用量字段不参与计算；WeKnora 不对向量调用计费，模型目录里的 `cost`（每百万 token 美元）仅作元数据。多模态模型另按像素计费（每十亿像素 0.60 美元），目录只记录文本 token 价格。
+- 部署级密钥：在 `config/models.json` 中写 `"voyage": {"api_key": "${VOYAGE_API_KEY}"}`，模型行未保存密钥时使用。
 
 ### Runcrate
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -14,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
 	"github.com/Tencent/WeKnora/internal/models/api/pineconerank"
 	"github.com/Tencent/WeKnora/internal/models/api/teirank"
+	"github.com/Tencent/WeKnora/internal/models/api/voyagerank"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 
 	// modelruntime.Resolve answers from the vendor catalog, which is empty until
@@ -168,6 +170,12 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 	if config == nil {
 		return nil, fmt.Errorf("rerank config is nil")
 	}
+	// The model is always the row's own choice: no vendor supplies one, so an
+	// empty name is refused here, as it is for embeddings, instead of being
+	// sent to the vendor to fail there.
+	if strings.TrimSpace(config.ModelName) == "" {
+		return nil, fmt.Errorf("model name is required")
+	}
 	resolved, err := modelruntime.Resolve(modelruntime.Ref{
 		Provider:  config.Provider,
 		Model:     config.ModelName,
@@ -205,6 +213,8 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		client = nimrerank.New(nimrerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankPinecone:
 		client = pineconerank.New(pineconerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankVoyage:
+		client = voyagerank.New(voyagerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankTEI:
 		client = teirank.New(teirank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankTencentLKEAP:

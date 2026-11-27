@@ -138,6 +138,12 @@ func answer(r *http.Request, body map[string]any) string {
 			parts = append(parts, fmt.Sprintf(`{"index":%d,"score":%v}`, i, probability(docs[i])))
 		}
 		return `{"data":[` + strings.Join(parts, ",") + `]}`
+	case isVoyageModel(body["model"]): // Voyage: results under data, score as relevance_score
+		docs := texts(body["documents"])
+		for i := len(docs) - 1; i >= 0; i-- {
+			parts = append(parts, fmt.Sprintf(`{"index":%d,"relevance_score":%v}`, i, probability(docs[i])))
+		}
+		return `{"object":"list","data":[` + strings.Join(parts, ",") + `],"usage":{"total_tokens":1}}`
 	default: // Cohere
 		docs := texts(body["documents"])
 		score := probability
@@ -149,6 +155,14 @@ func answer(r *http.Request, body map[string]any) string {
 		}
 		return `{"results":[` + strings.Join(parts, ",") + `]}`
 	}
+}
+
+// isVoyageModel tells Voyage's rerank-3 / rerank-2.5 from Cohere's rerank-v3.5:
+// both answer the same path, so the model name is the only difference.
+func isVoyageModel(model any) bool {
+	name, _ := model.(string)
+	rest, ok := strings.CutPrefix(name, "rerank-")
+	return ok && rest != "" && rest[0] >= '0' && rest[0] <= '9'
 }
 
 func documents(n int) []string {
@@ -212,6 +226,17 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			name: "jina echoes documents", provider: "jina", model: "jina-reranker-v3", base: "/v1",
 			wantPath: "/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
 			wantBody: cohere("jina-reranker-v3", three, map[string]any{"return_documents": true}),
+		},
+		{
+			name: "voyage echoes documents", provider: "voyage", model: "rerank-3", base: "/v1",
+			wantPath: "/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: cohere("rerank-3", three, map[string]any{"return_documents": true}),
+		},
+		{
+			name: "voyage takes up to a thousand documents", provider: "voyage", model: "rerank-3-lite",
+			base: "/v1", docs: documents(1001), wantRequests: 2,
+			wantPath: "/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: cohere("rerank-3-lite", documents(1000), map[string]any{"return_documents": true}),
 		},
 		{
 			name: "cohere v2", provider: "cohere", model: "rerank-v4.0-pro", base: "/v2",
