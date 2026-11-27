@@ -299,7 +299,21 @@ func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, str
 	if plan.effort != "" {
 		body["output_config"] = map[string]any{"effort": plan.effort}
 	}
-	api.MergeExtraBody(body, s.ExtraBody, opts != nil && opts.Isolated)
+	extra := s.ExtraBody
+	if plan.body != nil && !plan.enabled {
+		// The thinking-off variant (e.g. between_tools) rejects the knobs of
+		// the enabled one such as block_binding with 400 "Extra inputs are
+		// not permitted", so thinking extras apply only when thinking is on.
+		if _, ok := extra["thinking"]; ok {
+			extra = make(map[string]any, len(s.ExtraBody))
+			for k, v := range s.ExtraBody {
+				if k != "thinking" {
+					extra[k] = v
+				}
+			}
+		}
+	}
+	api.MergeExtraBody(body, extra, opts != nil && opts.Isolated)
 	return body, nil
 }
 

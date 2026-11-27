@@ -131,6 +131,24 @@ func TestBuildRequestBody_ThinkingOffType(t *testing.T) {
 	assert.Equal(t, map[string]any{"type": "adaptive", "display": "summarized"}, on["thinking"])
 }
 
+func TestBuildRequestBody_ExtraBodyExtendsThinking(t *testing.T) {
+	binding := map[string]any{"prefix_mismatch_behavior": "drop_block"}
+	c := newClient(t, "https://api.anthropic.com/v1", func(cfg *Config) {
+		cfg.Settings.ThinkingMode = api.AnthropicThinkingAdaptive
+		cfg.Settings.SupportsEffort = true
+		cfg.Settings.ThinkingOffType = "between_tools"
+		cfg.Settings.ExtraBody = map[string]any{"thinking": map[string]any{"block_binding": binding}}
+	})
+	off := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
+		&api.Options{ReasoningEffort: api.ReasoningOff}, false)
+	// The off variant does not accept block_binding.
+	assert.Equal(t, map[string]any{"type": "between_tools"}, off["thinking"])
+
+	on := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
+		&api.Options{ReasoningEffort: api.ReasoningHigh}, false)
+	assert.Equal(t, map[string]any{"type": "adaptive", "display": "summarized", "block_binding": binding}, on["thinking"])
+}
+
 func TestBuildRequestBody_NoThinkingKeepsSampling(t *testing.T) {
 	c := newClient(t, "https://api.anthropic.com/v1", nil)
 	out := bodyJSON(t, c, []api.Message{{Role: "user", Content: "Hi"}},
