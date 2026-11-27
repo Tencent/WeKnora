@@ -121,7 +121,8 @@ reached or the KB is exhausted. Pass --all-pages=false to stop after one page.`,
 		UsedFor:       "Find documents in a knowledge base by keyword (server-side LIKE filter on title/file_name). The KB comes from --kb (id or name), else WEKNORA_KB_ID, else the linked directory. Results come with meta.count; use --limit to cap and --all-pages=false to stop after one page.",
 		RequiredFlags: []string{"<query> (positional)", "--kb (or WEKNORA_KB_ID / linked directory)"},
 		Examples:      []string{`weknora search docs "spec" --kb engineering --format json`},
-		Output:        "envelope.data is an array of Knowledge objects with id, title, file_name, parse_status; meta.count is the returned count, meta.total_count the server's full match count, meta.has_more=true if more matched than --limit",
+		Output: "envelope.data lists matching documents. meta.count is the returned count; " +
+			"meta.total_count is the full match count; meta.has_more is true when additional documents match.",
 	})
 	return cmd
 }
@@ -175,7 +176,7 @@ done:
 		meta := &output.Meta{
 			Count:      output.IntPtr(len(matches)),
 			TotalCount: output.IntPtr(int(serverTotal)),
-			HasMore:    truncated,
+			HasMore:    int64(len(matches)) < serverTotal || truncated,
 		}
 		if len(matches) == 0 {
 			meta.Hint = "No matching title or filename. Search contents with weknora search chunks."

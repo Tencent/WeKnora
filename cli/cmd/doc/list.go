@@ -123,7 +123,8 @@ backend storage order is not guaranteed and varies between deployments.`,
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:  "List documents in the resolved knowledge base. Results come with meta.count; use --limit to cap, --all-pages to walk every server page, --status/--keyword to filter server-side.",
 		Examples: []string{"weknora doc list --format json", "weknora doc list --all-pages --limit 200 --format json"},
-		Output:   "envelope.data is an array of Knowledge objects with id, title, file_name, parse_status; meta.count is the returned count; meta.total_count is the server-side total before client-side --limit truncation; meta.has_more=true when --limit truncated",
+		Output: "envelope.data lists matching documents. meta.count is the returned count; " +
+			"meta.total_count is the full match count; meta.has_more is true when additional documents match.",
 	})
 	return cmd
 }
@@ -211,6 +212,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		}
 		serverTotal = total
 		items = chunk
+		truncated = int64(len(items)) < total
 	}
 	if items == nil {
 		items = []sdk.Knowledge{} // ensure JSON [] not null
