@@ -231,8 +231,16 @@ type DataSourceConfig struct {
 	// Selected resource IDs to sync (e.g., folder IDs, space IDs)
 	ResourceIDs []string `json:"resource_ids"`
 
+	// Nil keeps existing documents' tags on overwrite, including on sources created before this option existed.
+	PreserveExistingTags *bool `json:"preserve_existing_tags,omitempty"`
+
 	// Connector-specific configuration
 	Settings map[string]interface{} `json:"settings"`
+}
+
+// ShouldPreserveExistingTags applies the enabled default to sources saved before this option existed.
+func (d *DataSourceConfig) ShouldPreserveExistingTags() bool {
+	return d == nil || d.PreserveExistingTags == nil || *d.PreserveExistingTags
 }
 
 // HasCredentials reports whether the credentials map carries any value at

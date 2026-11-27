@@ -47,9 +47,10 @@ type DataSourceResponse struct {
 // DataSourceConfigDTO is types.DataSourceConfig with the Credentials map
 // removed by construction. Type, ResourceIDs and Settings remain visible.
 type DataSourceConfigDTO struct {
-	Type        string                 `json:"type"`
-	ResourceIDs []string               `json:"resource_ids,omitempty" extensions:"x-agent"`
-	Settings    map[string]interface{} `json:"settings,omitempty"`
+	Type                 string                 `json:"type"`
+	ResourceIDs          []string               `json:"resource_ids,omitempty" extensions:"x-agent"`
+	Settings             map[string]interface{} `json:"settings,omitempty"`
+	PreserveExistingTags bool                   `json:"preserve_existing_tags" extensions:"x-agent"`
 }
 
 // NewDataSourceResponse converts a stored entity into its response shape.
@@ -62,9 +63,10 @@ func NewDataSourceResponse(ds *types.DataSource) *DataSourceResponse {
 	configured := false
 	if parsed, err := ds.ParseConfig(); err == nil && parsed != nil {
 		cfgDTO = &DataSourceConfigDTO{
-			Type:        parsed.Type,
-			ResourceIDs: parsed.ResourceIDs,
-			Settings:    parsed.Settings,
+			Type:                 parsed.Type,
+			ResourceIDs:          parsed.ResourceIDs,
+			Settings:             parsed.Settings,
+			PreserveExistingTags: parsed.ShouldPreserveExistingTags(),
 		}
 		enrichRSSFeedURLsInSettings(ds.Type, parsed, cfgDTO)
 		configured = parsed.HasConfiguredCredentials(ds.Type)

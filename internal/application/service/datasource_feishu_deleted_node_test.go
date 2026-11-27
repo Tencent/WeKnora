@@ -248,7 +248,7 @@ func (k *feishuStatefulKnowledgeService) CreateKnowledgeFromFile(
 
 func (k *feishuStatefulKnowledgeService) ReplaceKnowledgeFromDataSource(
 	_ context.Context, existingID string, item *types.FetchedItem,
-	metadata map[string]string, _ []string, channel string,
+	metadata map[string]string, _ types.DataSourceSyncTags, channel string,
 ) (*types.Knowledge, error) {
 	metaJSON, _ := json.Marshal(metadata)
 	row := &types.Knowledge{

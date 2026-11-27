@@ -65,6 +65,12 @@ type TagReferenceCounts struct {
 	ChunkCount     int64
 }
 
+// DataSourceSyncTags controls the tags assigned on first import and on overwrite.
+type DataSourceSyncTags struct {
+	SourceTagIDs     []string
+	PreserveExisting bool
+}
+
 // KnowledgeTagRelation represents a many-to-many association between
 // a document knowledge entry and a tag in the knowledge_tag_relations table.
 type KnowledgeTagRelation struct {

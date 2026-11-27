@@ -101,6 +101,8 @@ type PatchDataSourceSyncRequest struct {
 	SyncMode *string `json:"sync_mode"         extensions:"x-agent"                    enums:"incremental,full"`
 	// Overwrite existing content or skip conflicts.
 	ConflictStrategy *string `json:"conflict_strategy" extensions:"x-agent"                    enums:"overwrite,skip"`
+	// Keep current document tags on overwrite. False reapplies data source tags.
+	PreserveExistingTags *bool `json:"preserve_existing_tags" extensions:"x-agent"`
 	// Whether future syncs delete documents that were removed upstream.
 	SyncDeletions *bool `json:"sync_deletions"    extensions:"x-agent"`
 	// Replaces the complete selection. Get IDs from data_source.list_resources; never infer them from names.
@@ -109,7 +111,7 @@ type PatchDataSourceSyncRequest struct {
 
 func (p PatchDataSourceSyncRequest) apply(existing *types.DataSource) (*types.DataSource, error) {
 	if p.SyncSchedule == nil && p.SyncMode == nil && p.ConflictStrategy == nil && p.SyncDeletions == nil &&
-		p.ResourceIDs == nil {
+		p.ResourceIDs == nil && p.PreserveExistingTags == nil {
 		return nil, fmt.Errorf("at least one sync setting is required")
 	}
 	updated := *existing
@@ -145,6 +147,8 @@ func (p PatchDataSourceSyncRequest) apply(existing *types.DataSource) (*types.Da
 			}
 			seen[id] = true
 		}
+	}
+	if p.ResourceIDs != nil || p.PreserveExistingTags != nil {
 		// Keep connector settings as raw JSON. Credentials are merged by the service,
 		// so the partial update never decrypts or replaces them.
 		var cfg map[string]json.RawMessage
@@ -152,7 +156,12 @@ func (p PatchDataSourceSyncRequest) apply(existing *types.DataSource) (*types.Da
 			return nil, fmt.Errorf("saved connector configuration is invalid")
 		}
 		delete(cfg, "credentials")
-		cfg["resource_ids"], _ = json.Marshal(*p.ResourceIDs)
+		if p.ResourceIDs != nil {
+			cfg["resource_ids"], _ = json.Marshal(*p.ResourceIDs)
+		}
+		if p.PreserveExistingTags != nil {
+			cfg["preserve_existing_tags"], _ = json.Marshal(*p.PreserveExistingTags)
+		}
 		blob, err := json.Marshal(cfg)
 		if err != nil {
 			return nil, err
@@ -200,13 +209,13 @@ func (h *DataSourceHandler) PatchSyncSettings(c *gin.Context) {
 	for name, present := range map[string]bool{
 		"sync_schedule": patch.SyncSchedule != nil, "sync_mode": patch.SyncMode != nil,
 		"conflict_strategy": patch.ConflictStrategy != nil, "sync_deletions": patch.SyncDeletions != nil,
-		"config": patch.ResourceIDs != nil,
+		"config": patch.ResourceIDs != nil || patch.PreserveExistingTags != nil,
 	} {
 		if present {
 			fields = append(fields, name)
 		}
 	}
-	if patch.ResourceIDs == nil {
+	if patch.ResourceIDs == nil && patch.PreserveExistingTags == nil {
 		// A schedule-only change must not rewrite or validate connector configuration.
 		updated.Config = nil
 	}

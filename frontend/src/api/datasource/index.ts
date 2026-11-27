@@ -8,7 +8,13 @@ export interface DataSource {
   knowledge_base_id: string
   name: string
   type: string
-  config: any
+  config?: {
+    type?: string
+    credentials?: Record<string, any>
+    resource_ids?: string[]
+    settings?: Record<string, any>
+    preserve_existing_tags?: boolean
+  }
   sync_schedule: string
   sync_mode: 'incremental' | 'full'
   status: 'active' | 'paused' | 'error'

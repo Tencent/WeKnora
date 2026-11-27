@@ -203,7 +203,10 @@ func (s *DataSourceService) updateDataSource(
 	if len(ds.Config) > 0 {
 		incomingCfg, parseIncErr := ds.ParseConfig()
 		existingCfg, parseExErr := existing.ParseConfig()
-		if parseIncErr == nil && parseExErr == nil && incomingCfg != nil {
+		if parseIncErr != nil {
+			return nil, datasource.ErrInvalidConfig
+		}
+		if parseExErr == nil && incomingCfg != nil {
 			if incomingCfg.HasCredentials() {
 				logger.Warnf(ctx,
 					"deprecated: credentials in PUT /datasource/%s body are ignored; use PUT /credentials instead",
@@ -212,6 +215,9 @@ func (s *DataSourceService) updateDataSource(
 			merged := *incomingCfg
 			if existingCfg != nil {
 				merged.Credentials = existingCfg.Credentials
+				if merged.PreserveExistingTags == nil {
+					merged.PreserveExistingTags = existingCfg.PreserveExistingTags
+				}
 			} else {
 				merged.Credentials = nil
 			}
@@ -230,6 +236,8 @@ func (s *DataSourceService) updateDataSource(
 	// structurally identical.
 	configActuallyChanged := true
 	if mergedCfg != nil && existingParsedCfg != nil {
+		// The tag policy is local to ingestion and does not affect connector validation.
+		existingParsedCfg.PreserveExistingTags = mergedCfg.PreserveExistingTags
 		configActuallyChanged = !reflect.DeepEqual(*mergedCfg, *existingParsedCfg)
 	}
 	hasCreds := mergedCfg != nil && mergedCfg.HasConfiguredCredentials(ds.Type)
@@ -848,13 +856,13 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 
 	// Auto-tag: find or create a tag for this data source so synced items are easily identifiable
-	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
+	tags := s.resolveSyncTags(ctx, ds, config)
 
 	var ingestErr error
 	nonBlockingFailures := 0
 	for _, item := range items {
 		item := item
-		nonBlocking, err := s.applyFetchedItem(withKBActivitySuppressed(ctx), ds, &item, autoTagIDs, result)
+		nonBlocking, err := s.applyFetchedItem(withKBActivitySuppressed(ctx), ds, &item, tags, result)
 		if nonBlocking || errors.Is(err, ErrInvalidFileType) {
 			nonBlockingFailures++
 		} else if err != nil && ingestErr == nil {
@@ -918,18 +926,19 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	return nil
 }
 
-// resolveAutoTagIDs finds or creates the per-data-source tag applied to every
-// synced item so results are identifiable in the KB. A tag failure is
-// non-fatal: the sync proceeds untagged.
-func (s *DataSourceService) resolveAutoTagIDs(ctx context.Context, ds *types.DataSource) []string {
-	autoTagIDs := []string{}
+// resolveSyncTags resolves the source tag once per run. A lookup failure remains
+// non-fatal and does not affect tags preserved on existing documents.
+func (s *DataSourceService) resolveSyncTags(
+	ctx context.Context, ds *types.DataSource, config *types.DataSourceConfig,
+) types.DataSourceSyncTags {
+	tags := types.DataSourceSyncTags{PreserveExisting: config.ShouldPreserveExistingTags()}
 	if autoTag, tagErr := s.tagService.FindOrCreateTagByName(ctx, ds.KnowledgeBaseID, ds.Name); tagErr != nil {
 		logger.Warnf(ctx, "failed to find/create auto-tag %q: %v (proceeding without tag)", ds.Name, tagErr)
 	} else if autoTag != nil {
-		autoTagIDs = append(autoTagIDs, autoTag.ID)
+		tags.SourceTagIDs = []string{autoTag.ID}
 		logger.Infof(ctx, "using auto-tag %q (id=%s) for data source sync", ds.Name, autoTag.ID)
 	}
-	return autoTagIDs
+	return tags
 }
 
 // maxSyncResultErrors bounds the per-item error sample retained in
@@ -1089,7 +1098,7 @@ func fetchFailureSyncError(item *types.FetchedItem, rawMsg string) types.SyncIte
 // The boolean marks oversized downloads that should not disable scheduled syncs.
 func (s *DataSourceService) applyFetchedItem(
 	ctx context.Context, ds *types.DataSource, item *types.FetchedItem,
-	tagIDs []string, result *types.SyncResult,
+	tags types.DataSourceSyncTags, result *types.SyncResult,
 ) (nonBlockingFailure bool, ingestErr error) {
 	if item.IsDeleted {
 		selectedDeleted := item.Metadata[types.MetaKeySelectedResourceDeleted] == "true"
@@ -1187,7 +1196,7 @@ func (s *DataSourceService) applyFetchedItem(
 		return false, nil
 	}
 
-	isUpdate, err := s.ingestItem(ctx, ds, item, tagIDs)
+	isUpdate, err := s.ingestItem(ctx, ds, item, tags)
 	if err != nil {
 		itemLabel := syncErrorItemLabel(item)
 		var dupErr *types.DuplicateKnowledgeError
@@ -1356,7 +1365,7 @@ const maxConsecutiveIsolatedIngestFailures = 10
 type streamSyncHandler struct {
 	svc       *DataSourceService
 	ds        *types.DataSource
-	tagIDs    []string
+	tags      types.DataSourceSyncTags
 	result    *types.SyncResult
 	syncLog   *types.SyncLog
 	ingestErr error
@@ -1394,7 +1403,7 @@ func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) er
 	failedBefore := h.result.Failed
 	createdBefore := h.result.Created
 	updatedBefore := h.result.Updated
-	nonBlocking, err := h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
+	nonBlocking, err := h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tags, h.result)
 	if item.RetryOnFailure && h.result.Failed > failedBefore {
 		h.ingestErr = fmt.Errorf("streamed item %q was not accepted; retry synchronization", item.ExternalID)
 		return h.ingestErr
@@ -1491,7 +1500,7 @@ func (s *DataSourceService) processSyncStreaming(
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 
-	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
+	tags := s.resolveSyncTags(ctx, ds, config)
 
 	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
 	if resyncRequired(config) {
@@ -1517,7 +1526,7 @@ func (s *DataSourceService) processSyncStreaming(
 	handler := &streamSyncHandler{
 		svc:                 s,
 		ds:                  ds,
-		tagIDs:              autoTagIDs,
+		tags:                tags,
 		result:              result,
 		syncLog:             syncLog,
 		isolateItemFailures: isolateItemFailures,
@@ -1815,7 +1824,9 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 //   - Has URL only      → CreateKnowledgeFromURL  (让 WeKnora 下载并解析)
 //
 // Returns (isUpdate, error) — isUpdate is true when an existing item was replaced.
-func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagIDs []string) (bool, error) {
+func (s *DataSourceService) ingestItem(
+	ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tags types.DataSourceSyncTags,
+) (bool, error) {
 	// Reject unsupported source files before replacing an existing document.
 	// Do not classify generic BadRequest errors: missing storage configuration
 	// also uses that type and must remain retryable.
@@ -1902,7 +1913,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 				}
 			}
 			_, err := s.knowledgeService.ReplaceKnowledgeFromDataSource(
-				ctx, existing.ID, item, metadata, tagIDs, channel)
+				ctx, existing.ID, item, metadata, tags, channel)
 			var dupErr *types.DuplicateKnowledgeError
 			if err == nil || (errors.As(err, &dupErr) && dupIsSameNode(dupErr, item)) {
 				s.sweepStaleSubtree(ctx, ds, item)
@@ -1925,9 +1936,9 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			ds.KnowledgeBaseID,
 			fh,
 			metadata,
-			nil,           // use KB default for multimodal
-			item.FileName, // customFileName — must include extension for file-type validation
-			tagIDs,        // auto-tag from data source
+			nil,               // use KB default for multimodal
+			item.FileName,     // customFileName — must include extension for file-type validation
+			tags.SourceTagIDs, // auto-tag from data source
 			channel,
 			nil,
 		); err != nil {
@@ -1954,7 +1965,7 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 			"",  // auto-detect file type
 			nil, // use KB default for multimodal
 			item.Title,
-			tagIDs, // auto-tag from data source
+			tags.SourceTagIDs, // auto-tag from data source
 			channel,
 			nil,
 		)

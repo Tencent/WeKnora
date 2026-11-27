@@ -683,6 +683,8 @@ export default {
     permissionDocLink: '페이슈 위키 권한 설정 문서 보기',
     syncScheduleLabel: '동기화 주기',
     conflictLabel: '충돌 전략',
+    preserveExistingTags: '현재 태그 유지',
+    preserveExistingTagsHint: '선택을 해제하면 기존 문서를 다음에 업데이트할 때 데이터 소스의 태그 규칙이 수동으로 지정한 태그를 덮어씁니다.',
     syncDeletions: '삭제 동기화 (소스에서 삭제 시 지식베이스에서도 삭제)',
     createAndSync: '생성 후 즉시 동기화',
     createAndSyncSuccess: '데이터 소스가 생성되었으며 동기화 작업이 제출되었습니다',

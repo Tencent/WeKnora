@@ -14,7 +14,7 @@ type KnowledgeService interface {
 	// ReplaceKnowledgeFromDataSource atomically retires the previous row and inserts
 	// its replacement before enqueueing parsing or deleting the previous resources.
 	ReplaceKnowledgeFromDataSource(ctx context.Context, knowledgeID string, item *types.FetchedItem,
-		metadata map[string]string, tagIDs []string, channel string) (*types.Knowledge, error)
+		metadata map[string]string, tags types.DataSourceSyncTags, channel string) (*types.Knowledge, error)
 
 	// CreateKnowledgeFromFile creates knowledge from a file.
 	// channel identifies the ingestion channel (e.g. "web", "api", "wechat"); empty defaults to "web".
@@ -250,7 +250,7 @@ type KnowledgeRepository interface {
 	// ReplaceKnowledge soft-deletes before and inserts after with its tag relations
 	// in one short transaction.
 	// A stale before snapshot is rejected without deleting or inserting either row.
-	ReplaceKnowledge(ctx context.Context, before, after *types.Knowledge, tagIDs []string) error
+	ReplaceKnowledge(ctx context.Context, before, after *types.Knowledge, tags types.DataSourceSyncTags) error
 
 	CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	GetKnowledgeByID(ctx context.Context, tenantID uint64, id string) (*types.Knowledge, error)

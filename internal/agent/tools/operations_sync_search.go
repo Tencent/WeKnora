@@ -29,6 +29,13 @@ func syncAndSearchDetail(op operations.Operation, params map[string]json.RawMess
 			lines = append(lines, key+": "+value)
 		}
 	}
+	if value, ok := rawBool(params, "preserve_existing_tags"); ok {
+		if value {
+			lines = append(lines, "Overwrites will keep current document tags.")
+		} else {
+			lines = append(lines, "Overwrites will replace current document tags with data source tags.")
+		}
+	}
 	if value, ok := rawBool(params, "sync_deletions"); ok {
 		lines = append(lines, fmt.Sprintf("Sync upstream deletions: %t", value))
 		if value {

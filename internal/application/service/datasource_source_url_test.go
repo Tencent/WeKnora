@@ -72,7 +72,7 @@ func TestIngestItemPersistsOriginalSourceURLForDownloadedContent(t *testing.T) {
 					FileName:   "doc.md",
 					Content:    []byte("document"),
 				},
-				nil)
+				types.DataSourceSyncTags{})
 			require.NoError(t, err)
 			require.Equal(t, tc.want, knowledgeService.metadata["source_url"])
 			if tc.want == "" {

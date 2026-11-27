@@ -683,6 +683,8 @@ export default {
     permissionDocLink: '查看飞书知识库权限配置文档',
     syncScheduleLabel: '同步频率',
     conflictLabel: '冲突策略',
+    preserveExistingTags: '保留当前标签',
+    preserveExistingTagsHint: '取消勾选后，下次更新已有文档时，数据源的打标规则会覆盖手工标签。',
     syncDeletions: '同步删除（源端删除时同步删除知识库中的条目）',
     createAndSync: '创建并立即同步',
     createAndSyncSuccess: '数据源创建成功，同步任务已提交',

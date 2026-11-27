@@ -198,6 +198,7 @@ const form = ref({
   config: {
     credentials: {} as Record<string, any>,
     resource_ids: [] as string[],
+    preserve_existing_tags: true,
     settings: {} as Record<string, any>,
   },
   sync_schedule: '0 0 */6 * * *',
@@ -914,6 +915,7 @@ watch(visible, async (v) => {
       config: {
         credentials: {},
         resource_ids: editConfig.resource_ids || [],
+        preserve_existing_tags: editConfig.preserve_existing_tags ?? true,
         settings: props.dataSource.type === 'rss'
           ? hydrateRssFeedUrlsFromConfig(editConfig)
           : { ...(editConfig.settings || {}) },
@@ -950,7 +952,7 @@ watch(visible, async (v) => {
     form.value = {
       name: '',
       type: '',
-      config: { credentials: {}, resource_ids: [], settings: {} },
+      config: { credentials: {}, resource_ids: [], settings: {}, preserve_existing_tags: true },
       sync_schedule: '0 0 */6 * * *',
       sync_mode: 'incremental',
       conflict_strategy: 'overwrite',
@@ -1477,6 +1479,7 @@ function buildConfigPayload(): Record<string, unknown> {
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
+    preserve_existing_tags: form.value.config.preserve_existing_tags,
     settings: form.value.config.settings,
   }
 }
@@ -2374,6 +2377,13 @@ const drawerConfirmText = computed(() => {
               {{ t('datasource.conflict.skip') }}
             </button>
           </div>
+        </div>
+
+        <div v-if="form.conflict_strategy === 'overwrite'" class="form-item form-item--flat">
+          <t-checkbox v-model="form.config.preserve_existing_tags">
+            {{ t('datasource.preserveExistingTags') }}
+          </t-checkbox>
+          <p class="form-desc">{{ t('datasource.preserveExistingTagsHint') }}</p>
         </div>
 
         <div v-if="isFeishuFamilyConnector(form.type)" class="form-item form-item--flat">

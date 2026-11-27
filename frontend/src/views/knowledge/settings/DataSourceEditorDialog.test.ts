@@ -135,6 +135,36 @@ async function fixture({
   return { vm, calls, warnings, replace, storedToken: () => storedToken, close: () => app.unmount() }
 }
 
+test('new data sources preserve tags by default and can opt out', async () => {
+  const f = await fixture({ create: true })
+  try {
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'gitlab'))
+    await f.vm.ensureTempDataSource()
+    const draft = f.calls.find(call => call.method === 'createDataSource')
+    assert.equal(draft?.args[0].config.preserve_existing_tags, true)
+
+    f.vm.form.config.preserve_existing_tags = false
+    await f.vm.handleSubmit()
+    const saved = f.calls.find(call => call.method === 'updateDataSource')
+    assert.equal(saved?.args[1].config.preserve_existing_tags, false)
+  } finally { f.close() }
+})
+
+test('editing a data source preserves an explicit opt-out and defaults a missing tag policy to enabled', async () => {
+  for (const config of [{}, { preserve_existing_tags: false }]) {
+    const f = await fixture({ dataSource: {
+      id: 'source-one', name: 'GitLab', type: 'gitlab', conflict_strategy: 'overwrite', config,
+    } })
+    try {
+      const expected = config.preserve_existing_tags ?? true
+      assert.equal(f.vm.form.config.preserve_existing_tags, expected)
+      await f.vm.handleSubmit()
+      const saved = f.calls.find(call => call.method === 'updateDataSource')
+      assert.equal(saved?.args[1].config.preserve_existing_tags, expected)
+    } finally { f.close() }
+  }
+})
+
 test('rotated GitLab credentials are tested without updating the saved data source', async () => {
   const f = await fixture()
   try {

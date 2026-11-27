@@ -187,6 +187,31 @@ func TestDataSourceSyncPatchPersistsFalseAndManualSchedule(t *testing.T) {
 	require.Equal(t, original.Name, saved.Name)
 	require.JSONEq(t, string(original.Config), string(saved.Config))
 	require.Zero(t, scheduler.EntryCount(), "patch must not resume a paused source")
+	require.Contains(t, response.Body.String(), `"preserve_existing_tags":true`, "preserve tags on legacy sources")
+	response = settingsRequest(router, "PATCH", "/datasource/ds/sync-settings", `{"preserve_existing_tags":false}`)
+	require.Equal(t, 200, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"preserve_existing_tags":false`)
+	saved, err = repo.FindByID(context.Background(), "ds")
+	require.NoError(t, err)
+	cfg, err := saved.ParseConfig()
+	require.NoError(t, err)
+	require.False(t, cfg.ShouldPreserveExistingTags())
+	require.Equal(t, []string{"old"}, cfg.ResourceIDs)
+	require.Equal(t, "saved-secret", cfg.Credentials["auth_headers"])
+
+	// Older editors can still update the source without knowing this option.
+	router.PUT("/datasource/:id", h.UpdateDataSource)
+	response = settingsRequest(router, "PUT", "/datasource/ds", `{
+		"name":"Docs","type":"rss",
+		"config":{"type":"rss","resource_ids":["old"],
+			"settings":{"feed_urls":"https://example.org/feed","nested":{"keep":true}}}
+	}`)
+	require.Equal(t, 200, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"preserve_existing_tags":false`)
+	response = settingsRequest(router, "PATCH", "/datasource/ds/sync-settings", `{"preserve_existing_tags":true}`)
+	require.Equal(t, 200, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"preserve_existing_tags":true`)
+
 	for _, body := range []string{
 		`{}`,
 		`{"sync_schedule":"0 9 * * *"}`,

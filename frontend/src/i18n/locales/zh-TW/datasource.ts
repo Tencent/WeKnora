@@ -683,6 +683,8 @@ export default {
     permissionDocLink: '查看飛書知識庫權限設定文件',
     syncScheduleLabel: '同步頻率',
     conflictLabel: '衝突策略',
+    preserveExistingTags: '保留目前標籤',
+    preserveExistingTagsHint: '取消勾選後，下次更新現有文件時，資料來源的標籤規則會覆寫手動設定的標籤。',
     syncDeletions: '同步刪除（源端刪除時同步刪除知識庫中的條目）',
     createAndSync: '建立並立即同步',
     createAndSyncSuccess: '資料源建立成功，同步任務已提交',

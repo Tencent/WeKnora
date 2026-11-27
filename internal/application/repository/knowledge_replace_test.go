@@ -42,7 +42,7 @@ func TestReplaceKnowledgeRollsBackRetirementWhenInsertFails(t *testing.T) {
 	require.NoError(t, db.Exec(`CREATE TRIGGER fail_replacement BEFORE INSERT ON knowledges
 		WHEN NEW.id = 'new' BEGIN SELECT RAISE(FAIL, 'forced insert failure'); END`).Error)
 
-	err := repo.ReplaceKnowledge(context.Background(), before, after, nil)
+	err := repo.ReplaceKnowledge(context.Background(), before, after, types.DataSourceSyncTags{})
 	require.ErrorContains(t, err, "forced insert failure")
 	persisted, err := repo.GetKnowledgeByID(context.Background(), 7, before.ID)
 	require.NoError(t, err)
@@ -55,7 +55,7 @@ func TestReplaceKnowledgeRollsBackRetirementWhenInsertFails(t *testing.T) {
 
 func TestReplaceKnowledgeCommitsBothRowsAndRejectsStaleReplacement(t *testing.T) {
 	db, repo, before, after := replacementFixture(t)
-	require.NoError(t, repo.ReplaceKnowledge(context.Background(), before, after, nil))
+	require.NoError(t, repo.ReplaceKnowledge(context.Background(), before, after, types.DataSourceSyncTags{}))
 	_, err := repo.GetKnowledgeByID(context.Background(), 7, before.ID)
 	require.Error(t, err)
 	persisted, err := repo.GetKnowledgeByID(context.Background(), 7, after.ID)
@@ -66,7 +66,8 @@ func TestReplaceKnowledgeCommitsBothRowsAndRejectsStaleReplacement(t *testing.T)
 	require.True(t, retired.DeletedAt.Valid, "retain a tombstone until resource cleanup succeeds")
 
 	after.ID = "racing-replacement"
-	require.ErrorContains(t, repo.ReplaceKnowledge(context.Background(), before, after, nil), "knowledge changed")
+	err = repo.ReplaceKnowledge(context.Background(), before, after, types.DataSourceSyncTags{})
+	require.ErrorContains(t, err, "knowledge changed")
 	var count int64
 	require.NoError(t, db.Model(&types.Knowledge{}).Count(&count).Error)
 	require.EqualValues(t, 1, count)
@@ -90,7 +91,7 @@ func TestReplaceKnowledgeRejectsChangedOrForeignSnapshot(t *testing.T) {
 				require.NoError(t, db.Exec(`CREATE TRIGGER fail_retirement BEFORE UPDATE OF deleted_at ON knowledges
 					BEGIN SELECT RAISE(FAIL, 'forced delete failure'); END`).Error)
 			}
-			require.Error(t, repo.ReplaceKnowledge(context.Background(), before, after, nil))
+			require.Error(t, repo.ReplaceKnowledge(context.Background(), before, after, types.DataSourceSyncTags{}))
 			_, err := repo.GetKnowledgeByID(context.Background(), 7, before.ID)
 			require.NoError(t, err)
 			var count int64
@@ -137,7 +138,8 @@ func TestReplaceKnowledgeTagsCommitOrRollbackWithRows(t *testing.T) {
 				require.NoError(t, db.Exec(`CREATE TRIGGER fail_new_tags BEFORE INSERT ON knowledge_tag_relations
 					WHEN NEW.knowledge_id = 'new' BEGIN SELECT RAISE(FAIL, 'forced tag failure'); END`).Error)
 			}
-			err := repo.ReplaceKnowledge(context.Background(), before, after, []string{"new-tag"})
+			tags := types.DataSourceSyncTags{SourceTagIDs: []string{"new-tag"}}
+			err := repo.ReplaceKnowledge(context.Background(), before, after, tags)
 			if fail {
 				require.ErrorContains(t, err, "forced tag failure")
 				_, err = repo.GetKnowledgeByID(context.Background(), 7, before.ID)
