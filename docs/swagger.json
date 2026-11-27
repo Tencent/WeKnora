@@ -9275,6 +9275,42 @@
                 ]
             }
         },
+        "/knowledge-bases/{id}/retry-failed-summaries": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "批量补跑失败的文档摘要",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.DataResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
         "/knowledge-bases/{id}/shares": {
             "get": {
                 "description": "获取知识库的所有共享记录",

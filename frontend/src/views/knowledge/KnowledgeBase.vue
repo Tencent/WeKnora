@@ -33,6 +33,7 @@ import {
   batchDownloadKnowledge,
   delKnowledgeDetails,
   batchReparseKnowledge,
+  retryFailedSummaries,
   getKnowledgeSpans,
   getKnowledgeDetails,
   listKnowledgeFolders,
@@ -2081,6 +2082,34 @@ const handleViewTrace = (index: number, item: KnowledgeCard) => {
   });
 };
 
+const retryingSummaries = ref(false);
+const retryKnowledgeBaseSummaries = async () => {
+  const id = kbId.value;
+  if (!id || retryingSummaries.value) return;
+  retryingSummaries.value = true;
+  try {
+    const res: any = await retryFailedSummaries(id);
+    if (!res?.success) throw new Error(res?.message || t('knowledgeBase.retrySummariesFailed'));
+    const { submitted, failed } = res.data;
+    if (failed) {
+      MessagePlugin.warning(t('knowledgeBase.retrySummariesPartial', { submitted, failed }));
+    } else if (submitted) {
+      MessagePlugin.success(t('knowledgeBase.retrySummariesSubmitted', { count: submitted }));
+    } else {
+      MessagePlugin.info(t('knowledgeBase.retrySummariesEmpty'));
+    }
+    if (submitted && kbId.value === id) {
+      resetPage();
+      loadKnowledgeFiles(id);
+      scheduleWikiStatusProbes();
+    }
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.retrySummariesFailed'));
+  } finally {
+    retryingSummaries.value = false;
+  }
+};
+
 const confirmRebuildKnowledge = async (index: number, item: KnowledgeCard) => {
   if (isFAQ.value) return;
   if (!canEdit.value) return;
@@ -2739,6 +2768,16 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     </t-tooltip>
                   </div>
                   <div v-if="canEdit" class="doc-filter-actions">
+                    <t-popconfirm v-if="canManage && (isOwner || authStore.hasRole('admin')) && kbInfo?.summary_model_id"
+                      :content="$t('knowledgeBase.retrySummariesConfirm')" placement="bottom-right"
+                      @confirm="retryKnowledgeBaseSummaries">
+                      <t-tooltip :content="$t('knowledgeBase.retrySummaries')" placement="top">
+                        <button type="button" class="content-bar-icon-btn" :disabled="retryingSummaries"
+                          :aria-label="$t('knowledgeBase.retrySummaries')">
+                          <t-icon name="refresh" size="16px" />
+                        </button>
+                      </t-tooltip>
+                    </t-popconfirm>
                     <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
                       :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="add" :trigger-label="t('knowledgeBase.addDocument')"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"

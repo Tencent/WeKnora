@@ -3553,6 +3553,47 @@ func (h *KnowledgeHandler) RebuildKnowledgeBaseIndex(c *gin.Context) {
 	})
 }
 
+// RetryFailedKnowledgeSummaries submits summary refreshes for parsed documents in a knowledge base.
+// @Summary      批量补跑失败的文档摘要
+// @Tags         知识管理
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  handler.DataResponse
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/retry-failed-summaries [post]
+func (h *KnowledgeHandler) RetryFailedKnowledgeSummaries(c *gin.Context) {
+	kbID := c.Param("id")
+	_, _, effectiveTenantID, permission, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, kbID)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		_ = c.Error(errors.NewForbiddenError("no permission to retry summaries of this knowledge base"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		_ = c.Error(err)
+		return
+	}
+	ctx := types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+	submitted, failed, err := h.kgService.RetryFailedKnowledgeSummaries(ctx, kbID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to retry summaries: %v", err)
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+		} else {
+			_ = c.Error(errors.NewInternalServerError("failed to retry summaries"))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    gin.H{"submitted": submitted, "failed": failed},
+	})
+}
+
 func requireTenantAPIKeyKnowledgeBase(ctx context.Context, kbID string) error {
 	return requireTenantAPIKeyKnowledgeBases(ctx, kbID)
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -206,4 +207,67 @@ func TestTriggerManualProcessingFailsEmptyContent(t *testing.T) {
 	assert.Equal(t, types.ParseStatusFailed, row.ParseStatus)
 	assert.NotEmpty(t, row.ErrorMessage)
 	assert.True(t, row.UpdatedAt.After(before))
+}
+
+type summaryRetryRepo struct {
+	interfaces.KnowledgeRepository
+	rows   []*types.Knowledge
+	status map[string]string
+}
+
+func (r *summaryRetryRepo) ListFailedKnowledgeSummaries(context.Context, uint64, string) ([]*types.Knowledge, error) {
+	return r.rows, nil
+}
+
+func (r *summaryRetryRepo) TransitionKnowledgeSummaryStatus(
+	_ context.Context, k *types.Knowledge, from, to string,
+) (bool, error) {
+	if r.status[k.ID] != from {
+		return false, nil
+	}
+	r.status[k.ID] = to
+	return true, nil
+}
+
+type summaryRetryEnqueuer struct {
+	t     *testing.T
+	calls []string
+}
+
+func (q *summaryRetryEnqueuer) Enqueue(task *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+	require.Equal(q.t, types.TypeSummaryGeneration, task.Type())
+	var payload types.SummaryGenerationPayload
+	require.NoError(q.t, json.Unmarshal(task.Payload(), &payload))
+	require.True(q.t, payload.Refresh)
+	require.Equal(q.t, uint64(1), payload.TenantID)
+	require.Equal(q.t, "kb-1", payload.KnowledgeBaseID)
+	q.calls = append(q.calls, payload.KnowledgeID)
+	if payload.KnowledgeID == "queue-fails" {
+		return nil, errors.New("queue unavailable")
+	}
+	return &asynq.TaskInfo{}, nil
+}
+
+func TestRetryFailedKnowledgeSummariesRestoresFailedEnqueuesAndSkipsExistingJobs(t *testing.T) {
+	kb := summaryKB()
+	repo := &summaryRetryRepo{status: map[string]string{
+		"queue-fails":    types.SummaryStatusFailed,
+		"success":        types.SummaryStatusFailed,
+		"already-queued": types.SummaryStatusPending,
+	}}
+	for _, id := range []string{"queue-fails", "success", "already-queued"} {
+		repo.rows = append(repo.rows, &types.Knowledge{
+			ID: id, TenantID: kb.TenantID, KnowledgeBaseID: kb.ID,
+		})
+	}
+	queue := &summaryRetryEnqueuer{t: t}
+	svc := &knowledgeService{repo: repo, task: queue, kbService: &reparseFailureKBService{kb: kb}}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, kb.TenantID)
+	submitted, failed, err := svc.RetryFailedKnowledgeSummaries(ctx, kb.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, submitted)
+	require.Equal(t, 1, failed)
+	require.Equal(t, []string{"queue-fails", "success"}, queue.calls)
+	require.Equal(t, types.SummaryStatusPending, repo.status["success"])
+	require.Equal(t, types.SummaryStatusFailed, repo.status["queue-fails"])
 }
