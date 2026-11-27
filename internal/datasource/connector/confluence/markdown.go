@@ -11,6 +11,7 @@ import (
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/base"
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/commonmark"
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/strikethrough"
+	"github.com/PuerkitoBio/goquery"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"golang.org/x/net/html"
 )
@@ -88,7 +89,9 @@ func convertPageHTML(content string) (string, error) {
 		protected.WriteString("</div>")
 		markers = append(markers, marker)
 		block := content[tableStart:offset]
-		if nested {
+		if links, ok := attachmentMacroLinks(block); ok {
+			block = links
+		} else if nested {
 			// The shared normalizer matches non-nested tables. Keep nested HTML
 			// intact and put rows on separate lines for downstream chunking.
 			block = strings.TrimSpace(nestedTableRow.ReplaceAllStringFunc(block, func(tag string) string {
@@ -112,4 +115,37 @@ func convertPageHTML(content string) (string, error) {
 		markdown = strings.ReplaceAll(markdown, marker, strings.TrimSpace(tables[i]))
 	}
 	return markdown, nil
+}
+
+// attachmentMacroLinks retains the downloads from Confluence's attachments
+// table. The surrounding table UI (sort controls, relative times, and hidden
+// detail rows) is not page content.
+func attachmentMacroLinks(table string) (string, bool) {
+	if !strings.Contains(table, "attachments") {
+		return "", false
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(table))
+	if err != nil {
+		return "", false
+	}
+	macro := doc.Find("table").First()
+	if !macro.Is(".attachments.aui") {
+		return "", false
+	}
+	var list strings.Builder
+	list.WriteString("<ul>")
+	macro.Find("tr[data-attachment-id] a[href]").Each(func(_ int, link *goquery.Selection) {
+		href, _ := link.Attr("href")
+		if !strings.Contains(href, "/download/attachments/") {
+			return
+		}
+		list.WriteString("<li>")
+		if err := html.Render(&list, link.Get(0)); err != nil {
+			return
+		}
+		list.WriteString("</li>")
+	})
+	list.WriteString("</ul>")
+	markdown, err := convertHTML(list.String())
+	return markdown, err == nil
 }
