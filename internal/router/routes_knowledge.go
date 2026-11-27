@@ -81,6 +81,9 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		// 原始文件下载沿用单文件下载的 Contributor + Editor 权限边界。
 		kbRead.POST("/batch-download", g.Contributor(), g.KBAccessWrite("id"), handler.BatchDownloadKnowledge)
 		kbRead.GET("/folders", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledgeFolders)
+		kb.With(apiKeyFullAccess()).DELETE("/folders/empty",
+			g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteEmptyKnowledgeFolder)
+		kb.POST("/folders", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFolder)
 		kb.PUT("/folders", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.RenameKnowledgeFolder)
 		// Clearing all contents under a KB is a destructive op; gate
 		// behind Admin instead of Contributor.

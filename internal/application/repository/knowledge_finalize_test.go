@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -70,6 +71,9 @@ func setupKnowledgeTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.Exec(knowledgesTestDDL).Error)
+	folderSchema, err := os.ReadFile("../../../migrations/sqlite/000054_knowledge_folders.up.sql")
+	require.NoError(t, err)
+	require.NoError(t, db.Exec(string(folderSchema)).Error)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	return db
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/types"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +19,62 @@ func folderPathOf(t *testing.T, db *gorm.DB, id string) string {
 	var path string
 	require.NoError(t, db.Raw(`SELECT folder_path FROM knowledges WHERE id = ?`, id).Scan(&path).Error)
 	return path
+}
+
+func TestExplicitKnowledgeFolder(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		require.NoError(t, repo.CreateKnowledgeFolder(ctx, 1, "kb", "Projects/Specs"))
+	}
+	require.NoError(t, repo.CreateKnowledgeFolder(ctx, 2, "other", "foreign"))
+	counts, err := repo.ListKnowledgeFolderCounts(ctx, 1, "kb")
+	require.NoError(t, err)
+	require.Len(t, counts, 1)
+	require.Equal(t, int64(0), counts[0].Count)
+	id := insertKnowledgeInFolder(t, db, 1, "kb", "Projects/Specs", "spec.md")
+	moved, err := repo.RenameKnowledgeFolderPath(ctx, 1, "kb", "Projects", "Archive")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, moved)
+	require.Equal(t, "Archive/Specs", folderPathOf(t, db, id))
+	_, err = repo.UpdateKnowledgeFolderPath(ctx, 1, "kb", []string{id}, "")
+	require.NoError(t, err)
+	counts, err = repo.ListKnowledgeFolderCounts(ctx, 1, "kb")
+	require.NoError(t, err)
+	tree := types.BuildKnowledgeFolderTree(counts)
+	require.Equal(t, int64(1), tree.TotalDocumentCount)
+	require.Equal(t, "Archive/Specs", tree.Folders[0].Children[0].Path)
+	require.Zero(t, tree.Folders[0].TotalCount)
+}
+
+func TestDeleteEmptyKnowledgeFolder(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	ctx := context.Background()
+	for _, path := range []string{"A_1", "A_1/empty", "AB1/other", "a_1/other"} {
+		require.NoError(t, repo.CreateKnowledgeFolder(ctx, 1, "kb", path))
+	}
+	try := func(path string, want bool) {
+		t.Helper()
+		got, err := repo.DeleteEmptyKnowledgeFolder(ctx, 1, "kb", path)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	}
+	try("A_1", false)
+	try("A_1/empty", true)
+	doc := insertKnowledgeInFolder(t, db, 1, "kb", "A_1/sub", "file.txt")
+	try("A_1", false)
+	_, err := repo.UpdateKnowledgeFolderPath(ctx, 1, "kb", []string{doc}, "A_1")
+	require.NoError(t, err)
+	try("A_1", false)
+	got, err := repo.DeleteEmptyKnowledgeFolder(ctx, 2, "kb", "A_1")
+	require.NoError(t, err)
+	require.False(t, got)
+	_, err = repo.UpdateKnowledgeFolderPath(ctx, 1, "kb", []string{doc}, "AB1/other")
+	require.NoError(t, err)
+	try("A_1", true)
+	require.Equal(t, "AB1/other", folderPathOf(t, db, doc))
 }
 
 func TestUpdateKnowledgeFolderPath(t *testing.T) {

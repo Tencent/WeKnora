@@ -8687,7 +8687,7 @@
         },
         "/knowledge-bases/{id}/knowledge/folders": {
             "get": {
-                "description": "返回知识库内由文件夹上传形成的目录树，包含每个文件夹的直接文档数与含子目录的总数",
+                "description": "返回知识库内显式创建和由文档路径形成的目录树，包含每个文件夹的直接文档数与含子目录的总数",
                 "consumes": [
                     "application/json"
                 ],
@@ -8828,6 +8828,156 @@
                     "target": "knowledge_base.get"
                 },
                 "x-agent-hint": "Moves a document folder and everything under it to a new path; an existing path is merged into."
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "创建知识库文件夹",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "知识库内的目录路径",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.KnowledgeFolderPathRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.KnowledgeFolderPathRequest"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/knowledge-bases/{id}/knowledge/folders/empty": {
+            "delete": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "删除空的知识库叶目录",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "x-agent": "knowledge_base_id",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "知识库内的目录路径",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.KnowledgeFolderPathRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.KnowledgeFolderPathRequest"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ]
             }
         },
         "/knowledge-bases/{id}/knowledge/manual": {
@@ -41016,6 +41166,18 @@
                     ],
                     "x-agent": true,
                     "x-agent-detail": true
+                }
+            }
+        },
+        "internal_handler.KnowledgeFolderPathRequest": {
+            "type": "object",
+            "required": [
+                "folder_path"
+            ],
+            "properties": {
+                "folder_path": {
+                    "type": "string",
+                    "example": "Projects/Specs"
                 }
             }
         },

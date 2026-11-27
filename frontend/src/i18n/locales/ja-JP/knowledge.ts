@@ -115,6 +115,10 @@ export default {
     },
     tagEditDialogHeading: 'タグを編集',
     folderTree: {
+      deleteEmpty: '空のフォルダーを削除',
+      confirmDeleteEmpty: '空のフォルダー「{path}」を削除しますか？',
+      create: '新規フォルダー',
+      invalidName: '末尾にピリオドを付けず、フォルダー名を1つ入力してください',
       totalDocuments: '全 {count} 件',
       countHint: 'このフォルダ内 {direct} 件、サブフォルダを含めて {total} 件',
       filteredCount: '{count} 件一致',

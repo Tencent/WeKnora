@@ -1395,6 +1395,10 @@ export default {
     tagUpdateSuccess: '標籤已更新',
     tagEditDialogHeading: '編輯標籤',
     folderTree: {
+      deleteEmpty: '刪除空資料夾',
+      confirmDeleteEmpty: '確定刪除空資料夾「{path}」嗎？',
+      create: '新增資料夾',
+      invalidName: '請輸入單一資料夾名稱，結尾不能是句點',
       totalDocuments: '共 {count} 個文件',
       countHint: '當前目錄 {direct} 個文件，含子目錄共 {total} 個',
       filteredCount: '比對 {count} 個文件',

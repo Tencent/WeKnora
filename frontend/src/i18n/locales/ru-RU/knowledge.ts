@@ -1395,6 +1395,10 @@ export default {
     tagUpdateSuccess: 'Тег успешно обновлен',
     tagEditDialogHeading: 'Редактировать теги',
     folderTree: {
+      deleteEmpty: 'Удалить пустую папку',
+      confirmDeleteEmpty: 'Удалить пустую папку «{path}»?',
+      create: 'Новая папка',
+      invalidName: 'Введите имя одной папки без точки в конце',
       totalDocuments: 'Всего документов: {count}',
       countHint: 'В этой папке: {direct}, с подпапками: {total}',
       filteredCount: 'Найдено документов: {count}',

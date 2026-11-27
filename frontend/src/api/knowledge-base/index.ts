@@ -591,6 +591,14 @@ export interface KnowledgeFolderTree {
   folders: KnowledgeFolderNode[];
 }
 
+export function deleteEmptyKnowledgeFolder(kbId: string, folderPath: string) {
+  return del(`/api/v1/knowledge-bases/${kbId}/knowledge/folders/empty`, { folder_path: folderPath });
+}
+
+export function createKnowledgeFolder(kbId: string, folderPath: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/folders`, { folder_path: folderPath });
+}
+
 export function listKnowledgeFolders(kbId: string, options?: KnowledgeReadOptions) {
   return get(withKnowledgeReadContext(`/api/v1/knowledge-bases/${kbId}/knowledge/folders`, options), { signal: options?.signal });
 }

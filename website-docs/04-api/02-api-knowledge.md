@@ -466,11 +466,17 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/batch-download \
   -d '{"ids":["k-1","k-2"]}' -o knowledge-files.zip
 ```
 
+### 显式创建和删除空目录
+
+![目录行的新建按钮与空目录操作菜单](/screenshots/document-folder-actions.png)
+
+向 `/api/v1/knowledge-bases/:id/knowledge/folders` 发送 `POST` 请求即可创建目录。向 `/api/v1/knowledge-bases/:id/knowledge/folders/empty` 发送 `DELETE` 请求可删除空的叶目录。两者均接收 JSON 请求体，例如 `{"folder_path":"Projects/Specs"}`，路径相对于知识库根目录。创建同一路径可安全重试。成功返回 HTTP 200 和 `data.folder_path`。删除时，若目录不存在、含子目录或文档，返回 HTTP 409。根目录不能删除。两项操作复用文件夹重命名的用户写权限。使用 API 密钥时，创建需要知识库的写入能力，删除需要该库的完整访问权限。
+
 ### GET /api/v1/knowledge-bases/:id/knowledge/folders
 
 用途：获取知识库的文件夹目录树。整目录上传时目录结构会被保留（migration `000079` 起存在 `knowledges.folder_path` 列，历史 `file_name` 中的路径已回填到该字段）。权限：Viewer+ + KBAccessRead。
 
-目录树由知识条目的 `folder_path` 汇总生成；没有直接文档但包含子目录文档的中间目录也会返回。目录下最后一份文档及所有子目录文档移走后，该目录不再出现在树中。
+目录树由知识条目的 `folder_path` 汇总生成；没有直接文档但包含子目录文档的中间目录也会返回。由文档路径推导出的目录在最后一份文档移走后消失。通过目录树的「＋」显式创建的文件夹会保留，空目录也可以作为上传目标。
 
 响应：200。示例（仅有上述上传的 `docs/spec/design.md`）：
 

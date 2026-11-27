@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
@@ -271,7 +272,50 @@ func (r *knowledgeRepository) ListKnowledgeFolderCounts(
 		Find(&counts).Error; err != nil {
 		return nil, err
 	}
+	var folders []string
+	if err := r.db.WithContext(ctx).Table("knowledge_folders").
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Pluck("folder_path", &folders).Error; err != nil {
+		return nil, err
+	}
+	for _, path := range folders {
+		counts = append(counts, &types.KnowledgeFolderCount{FolderPath: path})
+	}
 	return counts, nil
+}
+
+type explicitKnowledgeFolder struct {
+	TenantID        uint64
+	KnowledgeBaseID string
+	FolderPath      string
+}
+
+func (r *knowledgeRepository) CreateKnowledgeFolder(ctx context.Context, tenantID uint64, kbID, path string) error {
+	return r.db.WithContext(ctx).Table("knowledge_folders").Clauses(clause.OnConflict{DoNothing: true}).
+		Create(&explicitKnowledgeFolder{tenantID, kbID, path}).Error
+}
+
+// DeleteEmptyKnowledgeFolder checks the directory and its contents in the same
+// statement. Uploads store their paths independently and are never deleted.
+func (r *knowledgeRepository) DeleteEmptyKnowledgeFolder(
+	ctx context.Context, tenantID uint64, kbID, path string,
+) (bool, error) {
+	if path == "" {
+		return false, errors.New("root folder cannot be deleted")
+	}
+	prefix := path + "/"
+	result := r.db.WithContext(ctx).Exec(`
+ DELETE FROM knowledge_folders
+ WHERE tenant_id = ? AND knowledge_base_id = ? AND folder_path = ?
+ AND NOT EXISTS (
+  SELECT 1 FROM knowledge_folders
+  WHERE tenant_id = ? AND knowledge_base_id = ? AND substr(folder_path, 1, length(?)) = ?
+ )
+ AND NOT EXISTS (
+  SELECT 1 FROM knowledges WHERE tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL
+  AND (folder_path = ? OR substr(folder_path, 1, length(?)) = ?)
+ )`, tenantID, kbID, path, tenantID, kbID, prefix, prefix, tenantID, kbID, path, prefix, prefix)
+	return result.RowsAffected == 1, result.Error
 }
 
 // UpdateKnowledgeFolderPath files the given knowledge entries under folderPath.
@@ -312,30 +356,59 @@ func (r *knowledgeRepository) RenameKnowledgeFolderPath(
 		return 0, errors.New("source folder path is required")
 	}
 
-	// The rewrite is done row by row rather than with SQL string functions so it
-	// behaves identically on PostgreSQL and SQLite.
-	var rows []*types.Knowledge
-	if err := r.db.WithContext(ctx).
-		Select("id", "folder_path").
-		Where("tenant_id = ? AND knowledge_base_id = ? AND (folder_path = ? OR folder_path LIKE ? ESCAPE ?)",
-			tenantID, kbID, from, escapeLikeKeyword(from)+"/%", likeEscapeChar).
-		Find(&rows).Error; err != nil {
-		return 0, err
-	}
-	if len(rows) == 0 {
-		return 0, nil
-	}
-
-	// Group by destination so each distinct rewrite is a single UPDATE.
-	byTarget := map[string][]string{}
-	for _, row := range rows {
-		suffix := strings.TrimPrefix(row.FolderPath, from)
-		byTarget[types.NormalizeKnowledgeFolderPath(to+suffix)] = append(
-			byTarget[types.NormalizeKnowledgeFolderPath(to+suffix)], row.ID)
-	}
-
 	var affected int64
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		scope := func(db *gorm.DB) *gorm.DB {
+			return db.Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+				Where("(folder_path = ? OR folder_path LIKE ? ESCAPE ?)",
+					from, escapeLikeKeyword(from)+"/%", likeEscapeChar)
+		}
+		var explicit []explicitKnowledgeFolder
+		err := scope(tx.Table("knowledge_folders")).
+			Clauses(clause.Locking{Strength: "UPDATE"}).Find(&explicit).Error
+		if err != nil {
+			return err
+		}
+		var destinations []explicitKnowledgeFolder
+		for _, folder := range explicit {
+			if folder.FolderPath != from && !strings.HasPrefix(folder.FolderPath, from+"/") {
+				continue
+			}
+			path := to + strings.TrimPrefix(folder.FolderPath, from)
+			if types.NormalizeKnowledgeFolderPath(path) != path {
+				return errors.New("目标文件夹路径过长")
+			}
+			err := tx.Table("knowledge_folders").
+				Where("tenant_id = ? AND knowledge_base_id = ? AND folder_path = ?", tenantID, kbID, folder.FolderPath).
+				Delete(&explicitKnowledgeFolder{}).Error
+			if err != nil {
+				return err
+			}
+			folder.FolderPath = path
+			destinations = append(destinations, folder)
+		}
+		if len(destinations) > 0 {
+			err := tx.Table("knowledge_folders").Clauses(clause.OnConflict{DoNothing: true}).
+				CreateInBatches(&destinations, 200).Error
+			if err != nil {
+				return err
+			}
+		}
+		var rows []*types.Knowledge
+		if err := scope(tx.Model(&types.Knowledge{})).Select("id", "folder_path").Find(&rows).Error; err != nil {
+			return err
+		}
+		byTarget := map[string][]string{}
+		for _, row := range rows {
+			if row.FolderPath != from && !strings.HasPrefix(row.FolderPath, from+"/") {
+				continue
+			}
+			target := to + strings.TrimPrefix(row.FolderPath, from)
+			if types.NormalizeKnowledgeFolderPath(target) != target {
+				return errors.New("目标文件夹路径过长")
+			}
+			byTarget[target] = append(byTarget[target], row.ID)
+		}
 		for target, targetIDs := range byTarget {
 			result := tx.Model(&types.Knowledge{}).
 				Where("tenant_id = ? AND knowledge_base_id = ? AND id IN (?)", tenantID, kbID, targetIDs).
