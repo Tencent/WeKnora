@@ -32,6 +32,58 @@ const lineEndAt = (value: string, index: number): number => {
   return nextBreak === -1 ? value.length : nextBreak
 }
 
+/** Only a matching, sufficiently long fence with no info string closes a block. */
+function isInsideCodeFence(value: string, lineStart: number): boolean {
+  let fence = ''
+  let fenceIndent = 0
+  const listIndents = [0]
+  // Tabs advance to the next four-column stop in Markdown container prefixes.
+  const expandTabs = (line: string) => {
+    let expanded = ''
+    for (const char of line) expanded += char === '\t' ? ' '.repeat(4 - (expanded.length % 4)) : char
+    return expanded
+  }
+  const indentation = (line: string) => /^ */.exec(line)![0].length
+
+  for (const rawLine of value.slice(0, lineStart).split(/\r?\n/)) {
+    const line = expandTabs(rawLine)
+    if (fence) {
+      if (line.trim() && indentation(line) < fenceIndent) {
+        // An unclosed fence ends when its containing list item ends.
+        fence = ''
+      } else {
+        const closer = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line.slice(fenceIndent))
+        if (closer && closer[1]![0] === fence[0] && closer[1]!.length >= fence.length) {
+          fence = ''
+        }
+        // List markers inside code are literal, never container prefixes.
+        continue
+      }
+    }
+    while (listIndents.length > 1 && line.trim() && indentation(line) < listIndents.at(-1)!) {
+      listIndents.pop()
+    }
+    let offset = listIndents.at(-1)!
+    let content = line.slice(offset)
+    let prefix: RegExpExecArray | null
+    while ((prefix = /^ {0,3}(?:[-*+]|\d{1,9}[.)]) {1,4}(?=\S|$)/.exec(content))) {
+      offset += prefix[0].length
+      listIndents.push(offset)
+      content = line.slice(offset)
+    }
+    const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(content)
+    if (!match) continue
+    const [, delimiter = '', rest = ''] = match
+    if (delimiter[0] !== '`' || !rest.includes('`')) {
+      // Backtick fences cannot have backticks in their info string.
+      fence = delimiter
+      fenceIndent = offset
+    }
+  }
+  const currentLine = expandTabs(value.slice(lineStart, lineEndAt(value, lineStart)))
+  return fence !== '' && (!currentLine.trim() || indentation(currentLine) >= fenceIndent)
+}
+
 /**
  * Enter inside a list item keeps the list going.
  *
@@ -45,6 +97,7 @@ export function continueListOnEnter({ value, start, end }: EditorState): EditorP
   const lineStart = lineStartAt(value, start)
   const match = LIST_LINE_RE.exec(value.slice(lineStart, start))
   if (!match) return null
+  if (isInsideCodeFence(value, lineStart)) return null
 
   const [, indent, marker, checkbox, content] = match
   const remainingContent = value.slice(start, lineEndAt(value, start))
