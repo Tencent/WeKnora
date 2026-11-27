@@ -33020,6 +33020,10 @@
                     "x-agent-max-bytes": "800000",
                     "x-agent-required": true
                 },
+                "custom_metadata": {
+                    "description": "Optional flat user attributes, saved on manual creation.",
+                    "type": "object"
+                },
                 "process_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides"
                 },
