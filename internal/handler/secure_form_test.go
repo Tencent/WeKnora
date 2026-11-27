@@ -23,11 +23,13 @@ type fakeSubmitter struct {
 	owner  credential.Owner
 	result credential.SubmitResult
 	err    error
+	calls  int
 }
 
 func (f *fakeSubmitter) Submit(
 	_ context.Context, owner credential.Owner, req credential.SubmitRequest,
 ) (credential.SubmitResult, error) {
+	f.calls++
 	f.owner, f.got = owner, req
 	if req.Values != nil {
 		f.got.Values = make(map[string]string, len(req.Values))
@@ -107,4 +109,20 @@ func TestSubmitSecureFormErrors(t *testing.T) {
 	h.secureForms = nil
 	w = postJSON(r, "/agent/secure-forms/p1", `{"action":"decline"}`)
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestSubmitSecureFormRejectsTrailingJSON(t *testing.T) {
+	sub := &fakeSubmitter{result: credential.SubmitResult{Resolution: hitl.Resolution{}}}
+	h := &MCPServiceHandler{secureForms: sub}
+	r := secureFormRouter(h)
+
+	w := postJSON(r, "/agent/secure-forms/p1",
+		`{"action":"decline"} {"action":"submit","choice":"save","values":{"password":"sentinel-pw"}}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Zero(t, sub.calls, "nothing is recorded from a body with trailing content")
+	assert.NotContains(t, w.Body.String(), "sentinel")
+
+	w = postJSON(r, "/agent/secure-forms/p1", "{\"action\":\"decline\"}\n")
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String(), "whitespace after the object is still fine")
+	assert.Equal(t, 1, sub.calls)
 }

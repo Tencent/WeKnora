@@ -67,17 +67,24 @@ type ScoreComparable interface {
 // K: the type of key used for deduplication
 func DeduplicateWithScore[T ScoreComparable, K comparable](keyFunc func(T) K, items ...T) []T {
 	seen := make(map[K]T)
+	order := make([]K, 0, len(items))
 	for _, item := range items {
 		key := keyFunc(item)
 		if existing, exists := seen[key]; !exists {
 			seen[key] = item
+			order = append(order, key)
 		} else if item.GetScore() > existing.GetScore() {
 			seen[key] = item
 		}
 	}
-	result := slices.Collect(maps.Values(seen))
-	// Sort by score descending
-	slices.SortFunc(result, func(a, b T) int {
+	// Collect in first-appearance order: ranging over the map would make
+	// the order random, and ties would come out differently on every run.
+	var result []T
+	for _, key := range order {
+		result = append(result, seen[key])
+	}
+	// Sort by score descending, keeping first-appearance order for ties.
+	slices.SortStableFunc(result, func(a, b T) int {
 		scoreA := a.GetScore()
 		scoreB := b.GetScore()
 		if scoreA > scoreB {

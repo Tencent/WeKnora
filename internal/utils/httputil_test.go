@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -99,7 +100,7 @@ func TestDownloadBytesSizeLimit(t *testing.T) {
 			})
 			defaultHTTPClient = &http.Client{Transport: transport}
 
-			data, err := DownloadBytes("https://download.example/image.png")
+			data, err := DownloadBytes(context.Background(), "https://download.example/image.png")
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("error = %v, want %q", err, tt.wantErr)

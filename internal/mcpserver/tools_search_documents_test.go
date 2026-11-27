@@ -128,6 +128,10 @@ func TestMCPSearchKnowledgeDocumentScopeBeforeRetrieval(t *testing.T) {
 	for _, mode := range []string{"hybrid", "semantic", "keyword"} {
 		t.Run(mode, func(t *testing.T) {
 			_, r, kbService, _ := newDocumentSearchFixture(t)
+			kbService.rows[1].KnowledgeFilename = "contract.pdf"
+			kbService.rows[1].SourceLocators = types.SourceLocators{
+				{Type: types.SourceLocatorPDF, Page: 3},
+			}
 			response := rpc(t, r, "tools/call", map[string]any{
 				"name": types.MCPEndpointToolSearchKnowledge,
 				"arguments": map[string]any{
@@ -143,7 +147,9 @@ func TestMCPSearchKnowledgeDocumentScopeBeforeRetrieval(t *testing.T) {
 				Content []struct{ Text string } `json:"content"`
 				Data    struct {
 					Results []struct {
-						KnowledgeID string `json:"knowledge_id"`
+						KnowledgeID       string               `json:"knowledge_id"`
+						KnowledgeFilename string               `json:"knowledge_filename"`
+						SourceLocators    types.SourceLocators `json:"source_locators"`
 					} `json:"results"`
 				} `json:"structuredContent"`
 			}
@@ -151,6 +157,8 @@ func TestMCPSearchKnowledgeDocumentScopeBeforeRetrieval(t *testing.T) {
 			require.False(t, result.IsError, "%s", raw)
 			require.Len(t, result.Data.Results, 1)
 			require.Equal(t, "doc-a", result.Data.Results[0].KnowledgeID)
+			require.Equal(t, "contract.pdf", result.Data.Results[0].KnowledgeFilename)
+			require.Equal(t, kbService.rows[1].SourceLocators, result.Data.Results[0].SourceLocators)
 			require.Contains(t, result.Content[0].Text, `knowledge_id="doc-a"`)
 			require.NotContains(t, result.Content[0].Text, `knowledge_id="doc-b"`)
 			require.Len(t, kbService.calls, 1)
@@ -181,7 +189,10 @@ func TestMCPSearchKnowledgeMultipleDocumentsAndSharedScope(t *testing.T) {
 	require.NotEqual(t, true, result["isError"], "%+v", result)
 	var ids []string
 	for _, raw := range result["structuredContent"].(map[string]any)["results"].([]any) {
-		ids = append(ids, raw.(map[string]any)["knowledge_id"].(string))
+		row := raw.(map[string]any)
+		ids = append(ids, row["knowledge_id"].(string))
+		require.NotContains(t, row, "knowledge_filename")
+		require.NotContains(t, row, "source_locators")
 	}
 	require.ElementsMatch(t, []string{"doc-a", "doc-b", "doc-shared"}, ids)
 	require.Len(t, kbService.calls, 2)

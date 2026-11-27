@@ -14,7 +14,7 @@ func TestKnowledgeProcessOverridesRoundtrip(t *testing.T) {
 	k := &Knowledge{}
 	overrides := &KnowledgeProcessOverrides{
 		EnableMultimodel:      boolPtr(true),
-		ChunkingConfig:        &ChunkingConfig{ChunkSize: 1024},
+		ChunkingConfig:        &ChunkingConfigOverride{ChunkingConfig: ChunkingConfig{ChunkSize: 1024}},
 		ParserEngineOverrides: map[string]string{"pdf_force_scanned": "true"},
 	}
 	require.NoError(t, k.SetProcessOverrides(overrides))

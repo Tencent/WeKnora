@@ -97,7 +97,7 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 			ds.Config = blob
 		}
 	}
-	if err := s.validateDataSourceConfig(ctx, ds); err != nil {
+	if err := s.validateDataSourceConfig(ctx, ds, ds.Status == types.DataSourceStatusPaused); err != nil {
 		return nil, err
 	}
 
@@ -233,8 +233,20 @@ func (s *DataSourceService) updateDataSource(
 		configActuallyChanged = !reflect.DeepEqual(*mergedCfg, *existingParsedCfg)
 	}
 	hasCreds := mergedCfg != nil && mergedCfg.HasConfiguredCredentials(ds.Type)
-	if hasCreds && (ds.Type != existing.Type || configActuallyChanged) {
-		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
+	// A paused DingTalk draft may have passed discovery-only validation.
+	connectorType := ds.Type
+	if connectorType == "" {
+		connectorType = existing.Type
+	}
+	activatingDingTalk := connectorType == types.ConnectorTypeDingTalk &&
+		existing.Status == types.DataSourceStatusPaused && ds.Status == types.DataSourceStatusActive
+	if activatingDingTalk || hasCreds && (ds.Type != existing.Type || configActuallyChanged) {
+		candidate := *ds
+		candidate.Type = connectorType
+		if len(candidate.Config) == 0 {
+			candidate.Config = existing.Config
+		}
+		if err := s.validateDataSourceConfig(ctx, &candidate, false); err != nil {
 			return nil, err
 		}
 	}
@@ -302,7 +314,7 @@ func (s *DataSourceService) UpdateDataSourceCredentials(
 	// Run live validation now that the credentials are in place — surfaces
 	// "wrong token" feedback immediately to the user instead of waiting for
 	// the next scheduled sync.
-	if err := s.validateDataSourceConfig(ctx, existing); err != nil {
+	if err := s.validateDataSourceConfig(ctx, existing, false); err != nil {
 		return nil, err
 	}
 	if err := s.dsRepo.Update(ctx, existing); err != nil {
@@ -523,6 +535,7 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 		ForceFull:    false,
 		Initiator:    types.TaskInitiatorFromContext(ctx),
 		Trigger:      "manual",
+		Language:     types.LanguageFromContextOrDefault(ctx),
 	}
 	langfuse.InjectTracing(ctx, payload)
 
@@ -566,7 +579,7 @@ func (s *DataSourceService) PauseDataSource(ctx context.Context, id string) erro
 	}
 
 	ds.Status = types.DataSourceStatusPaused
-	if err := s.dsRepo.Update(ctx, ds); err != nil {
+	if err := s.dsRepo.UpdateStatus(ctx, id, types.DataSourceStatusPaused); err != nil {
 		logger.Errorf(ctx, "failed to pause data source: %v", err)
 		return err
 	}
@@ -591,7 +604,7 @@ func (s *DataSourceService) ResumeDataSource(ctx context.Context, id string) err
 	}
 
 	ds.Status = types.DataSourceStatusActive
-	if err := s.dsRepo.Update(ctx, ds); err != nil {
+	if err := s.dsRepo.UpdateStatus(ctx, id, types.DataSourceStatusActive); err != nil {
 		logger.Errorf(ctx, "failed to resume data source: %v", err)
 		return err
 	}
@@ -649,6 +662,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return err
 	}
 	ctx = payload.Initiator.Apply(ctx)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
 	taskID, _ := asynq.GetTaskID(ctx)
 	ctx = withKBActivityTask(ctx, taskID, payload.Trigger)
 
@@ -1321,8 +1337,9 @@ func (s *DataSourceService) clearResyncMarker(ctx context.Context, ds *types.Dat
 		logger.Warnf(ctx, "failed to clear resync_required marker, config re-encode failed: ds=%s err=%v", ds.ID, err)
 		return
 	}
+	beforeConfig := fresh.Config
 	fresh.Config = blob
-	if err := s.dsRepo.Update(ctx, fresh); err != nil {
+	if err := s.dsRepo.PatchSyncSettings(ctx, fresh, beforeConfig, []string{"config"}); err != nil {
 		logger.Warnf(ctx, "failed to clear resync_required marker: ds=%s err=%v", ds.ID, err)
 	}
 }
@@ -1768,16 +1785,12 @@ func (s *DataSourceService) ValidateCredentials(ctx context.Context, connectorTy
 		Type:        connectorType,
 		Credentials: credentials,
 	}
-	if err := connector.Validate(ctx, config); err != nil {
-		return err
-	}
-
-	return nil
+	return datasource.ValidateCredentials(ctx, connector, config)
 }
 
 // Helper functions
 
-func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *types.DataSource) error {
+func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *types.DataSource, draft bool) error {
 	connector, err := s.connectorRegistry.Get(ds.Type)
 	if err != nil {
 		return err
@@ -1788,6 +1801,9 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 		return datasource.ErrInvalidConfig
 	}
 
+	if draft && config != nil && len(config.ResourceIDs) == 0 {
+		return datasource.ValidateCredentials(ctx, connector, config)
+	}
 	return connector.Validate(ctx, config)
 }
 
@@ -1843,6 +1859,18 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	}
 	for k, v := range item.Metadata {
 		metadata[k] = v
+	}
+	// Keep durable source links when downloaded content is ingested as a file.
+	// Credentials and temporary download grants must not become citation links.
+	for _, key := range []string{"source_url", "sourceUrl"} {
+		if sourceURL := types.ValidSourceURL(metadata[key]); sourceURL != "" {
+			metadata[key] = sourceURL
+		} else {
+			delete(metadata, key)
+		}
+	}
+	if sourceURL := types.ValidSourceURL(item.URL); sourceURL != "" {
+		metadata["source_url"] = sourceURL
 	}
 
 	// Existing items are replaced through a short DB transaction. Validation and

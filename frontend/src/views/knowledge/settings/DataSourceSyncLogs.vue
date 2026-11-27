@@ -17,24 +17,36 @@ const loadingMore = ref(false)
 const hasMore = ref(false)
 const expandedId = ref('')
 const pageSize = 50
+let requestSeq = 0
 
 async function fetchLogs(reset = true) {
   if (!props.dataSourceId) return
 
+  const dataSourceId = props.dataSourceId
+  const request = ++requestSeq
+  const isCurrent = () => (
+    request === requestSeq
+    && visible.value
+    && props.dataSourceId === dataSourceId
+  )
+
   if (reset) {
     loading.value = true
+    loadingMore.value = false
   } else {
     loadingMore.value = true
   }
 
   try {
     const offset = reset ? 0 : logs.value.length
-    const res = await getSyncLogs(props.dataSourceId, pageSize, offset)
+    const res = await getSyncLogs(dataSourceId, pageSize, offset)
+    if (!isCurrent()) return
     const items = res?.data || res || []
     logs.value = reset ? items : [...logs.value, ...items]
     hasMore.value = items.length === pageSize
   } catch { /* ignore */ }
 
+  if (!isCurrent()) return
   if (reset) {
     loading.value = false
   } else {
@@ -42,11 +54,18 @@ async function fetchLogs(reset = true) {
   }
 }
 
-watch(visible, (v) => {
+watch([visible, () => props.dataSourceId], ([v, dataSourceId], [, previousDataSourceId]) => {
+  requestSeq++
+  loading.value = false
+  loadingMore.value = false
+  if (dataSourceId !== previousDataSourceId) {
+    logs.value = []
+    hasMore.value = false
+  }
   if (!v) return
   expandedId.value = ''
-  fetchLogs(true)
-})
+  void fetchLogs(true)
+}, { flush: 'sync' })
 
 function toggleExpand(id: string) {
   expandedId.value = expandedId.value === id ? '' : id

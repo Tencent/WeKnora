@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -114,6 +116,15 @@ func (h *Handler) TranscribeVoiceInput(c *gin.Context) {
 	}
 	asrModel, err := h.modelService.GetASRModel(runCtx, agent.Config.ASRModelID)
 	if err != nil {
+		if errors.Is(err, service.ErrModelNotFound) {
+			// The selection was saved before it was validated, or the row is
+			// gone: the agent needs a new one, which is not a server fault.
+			logger.Warnf(ctx, "voice input: ASR model %s selected by agent %s no longer exists",
+				secutils.SanitizeForLog(agent.Config.ASRModelID), secutils.SanitizeForLog(agent.ID))
+			_ = c.Error(apperrors.NewBadRequestError(
+				"the ASR model selected for this agent no longer exists; choose another in the agent's audio settings"))
+			return
+		}
 		logger.Errorf(ctx, "voice input: failed to load ASR model %s: %v",
 			secutils.SanitizeForLog(agent.Config.ASRModelID), err)
 		_ = c.Error(apperrors.NewInternalServerError("failed to load ASR model").WithDetails(err.Error()))
@@ -125,7 +136,7 @@ func (h *Handler) TranscribeVoiceInput(c *gin.Context) {
 	result, err := asrModel.Transcribe(runCtx, data, fileHeader.Filename)
 	if err != nil {
 		logger.Errorf(ctx, "voice input: transcription failed: %v", err)
-		_ = c.Error(apperrors.NewServiceUnavailableError("transcription failed").WithDetails(err.Error()))
+		_ = c.Error(voiceTranscriptionError(err))
 		return
 	}
 
@@ -133,6 +144,29 @@ func (h *Handler) TranscribeVoiceInput(c *gin.Context) {
 		Text:     strings.TrimSpace(result.Text),
 		Duration: result.Duration,
 	}})
+}
+
+// voiceTranscriptionError sorts a failed transcription by who can fix it. An
+// upload the vendor has documented it will not take — over its size limit, or
+// in a format it does not read — is refused before it is sent, and a vendor
+// reply that blames the upload says the same after the fact: the audio is the
+// client's to correct, so neither is an outage. Everything else is the
+// recognition service failing or misconfigured, which the client cannot fix.
+func voiceTranscriptionError(err error) *apperrors.AppError {
+	var rejected *api.RejectedError
+	if errors.As(err, &rejected) {
+		return apperrors.NewBadRequestError(rejected.Reason)
+	}
+	var httpErr *api.HTTPError
+	if errors.As(err, &httpErr) {
+		switch httpErr.StatusCode {
+		case http.StatusBadRequest, http.StatusRequestEntityTooLarge,
+			http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
+			return apperrors.NewBadRequestError(
+				"the speech recognition service rejected this audio").WithDetails(httpErr.Body)
+		}
+	}
+	return apperrors.NewServiceUnavailableError("transcription failed").WithDetails(err.Error())
 }
 
 // voiceLanguageHint maps a UI locale (zh-CN, en_US, ja) to the ISO 639-1

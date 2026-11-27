@@ -442,7 +442,11 @@ func TestFeishuExportPollingIsBoundedAndCancellable(t *testing.T) {
 			}
 			// Exercise the same wrapping and metadata path used by the connectors.
 			metadata := FeishuErrorItemMeta(fmt.Errorf("export document: %w", err), nil)
-			if metadata["error_reason_code"] != "feishu_timeout" {
+			expectedCode := "feishu_export_timeout"
+			if cancelWhileWaiting {
+				expectedCode = "feishu_timeout"
+			}
+			if metadata["error_reason_code"] != expectedCode {
 				t.Fatalf("polling lost its timeout classification: %v", metadata)
 			}
 			if strings.Contains(metadata["error_reason"], "ticket=") {

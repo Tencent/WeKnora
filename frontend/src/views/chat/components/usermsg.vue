@@ -161,7 +161,7 @@ const props = defineProps({
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode);
 const canRewind = computed(() => props.canRewind === true && !props.embeddedMode);
-const forkTooltip = '从这里分叉出新会话';
+const forkTooltip = computed(() => t('chat.branchFromHere'));
 const timestamp = computed(() => getConversationTimestampModel(props.createdAt));
 const fullTimestamp = computed(() => formatMessageTimestamp(props.createdAt));
 const handleCopy = () => copyWithToast(props.content, 'common.copySuccess', 'common.copyFailed');

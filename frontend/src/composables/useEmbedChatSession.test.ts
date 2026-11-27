@@ -100,7 +100,7 @@ test('embedded history remains retryable after a transient page failure', async 
     sessionSig: vue.ref('signature'),
     visitorId: vue.ref('visitor'),
     channelId: 'channel',
-    token: 'token',
+    token: vue.ref('token'),
     agentId: 'agent',
     kbIds: [],
   }))!
@@ -189,7 +189,7 @@ test('getUserQuery strips injected host context from the preceding user message'
     sessionSig: vue.ref('signature'),
     visitorId: vue.ref('visitor'),
     channelId: 'channel',
-    token: 'token',
+    token: vue.ref('token'),
     agentId: 'agent',
     kbIds: [],
   }))!

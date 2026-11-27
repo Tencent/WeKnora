@@ -12,7 +12,9 @@ from docreader.parser.registry import registry
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _minimal_mhtml_bytes() -> bytes:
+def _minimal_mhtml_bytes(
+    image_src: str = "cid:tiny-image", image_location: str = "cid:tiny-image"
+) -> bytes:
     root = EmailMessage()
     root["Subject"] = "Tiny MHTML"
     root.make_related()
@@ -24,7 +26,7 @@ def _minimal_mhtml_bytes() -> bytes:
         '<p><a href="chapter03.xhtml#sec2">Chapter 3</a> '
         '<a href="#footnote1">note</a> '
         '<a href="https://example.com">the site</a></p>'
-        '<img alt="tiny" src="cid:tiny-image">'
+        f'<img alt="tiny" src="{image_src}">'
         "<script>window.noise = true</script>"
         "</body></html>",
         subtype="html",
@@ -47,7 +49,7 @@ def _minimal_mhtml_bytes() -> bytes:
         maintype="image",
         subtype="png",
     )
-    image["Content-Location"] = "cid:tiny-image"
+    image["Content-Location"] = image_location
     root.attach(image)
 
     return root.as_bytes()
@@ -141,6 +143,43 @@ def _mhtml_with_8bit_utf8_headers() -> bytes:
 
 
 class MHTMLParserTest(unittest.TestCase):
+    def test_malformed_image_location_keeps_content_id_image(self):
+        archive = email.message_from_bytes(_minimal_mhtml_bytes())
+        image = next(
+            part for part in archive.walk() if part.get_content_type() == "image/png"
+        )
+        image.replace_header("Content-Location", "http://[broken/attachment.png")
+        image["Content-ID"] = "<tiny-image>"
+
+        document = MHTMLParser(file_name="article.mhtml", file_type="mhtml").parse(
+            archive.as_bytes()
+        )
+
+        self.assertIn("Hello MHTML world", document.content)
+        self.assertEqual(len(document.images), 1)
+        image_path, data = next(iter(document.images.items()))
+        self.assertTrue(image_path.endswith(".png"))
+        self.assertIn(f"![tiny]({image_path})", document.content)
+        self.assertEqual(base64.b64decode(data), image.get_payload(decode=True))
+
+    def test_image_content_id_scheme_is_case_insensitive(self):
+        for reference, location in (
+            ("cid", "cid"),
+            ("CID", "cid"),
+            ("CiD", "CID"),
+            ("cid", "CID"),
+        ):
+            with self.subTest(reference=reference, location=location):
+                document = MHTMLParser().parse(
+                    _minimal_mhtml_bytes(
+                        f"{reference}:tiny-image", f"{location}:tiny-image"
+                    )
+                )
+
+                self.assertEqual(len(document.images), 1)
+                image_path = next(iter(document.images))
+                self.assertIn(f"![tiny]({image_path})", document.content)
+
     def test_parse_selects_main_html_and_filters_noise(self):
         document = MHTMLParser(
             file_name="article.mhtml", file_type="mhtml"

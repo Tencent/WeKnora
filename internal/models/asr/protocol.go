@@ -113,7 +113,8 @@ func newASR(config *Config) (ASR, error) {
 }
 
 // protocolASR adapts a protocol client to the ASR interface and refuses an
-// upload the vendor has documented it will not take, before sending it.
+// upload the vendor has documented it will not take, before sending it, as
+// an api.RejectedError.
 type protocolASR struct {
 	inner     api.Transcriber
 	settings  api.TranscriptionsSettings
@@ -131,8 +132,9 @@ func (a *protocolASR) Transcribe(ctx context.Context, audio []byte, fileName str
 		return nil, fmt.Errorf("audio bytes are empty")
 	}
 	if limit := a.settings.MaxFileBytes; limit > 0 && len(audio) > limit {
-		return nil, fmt.Errorf("%s transcription: the audio is %.1f MB; %s accepts at most %d MB per file",
-			a.modelName, float64(len(audio))/(1<<20), a.vendor, limit>>20)
+		return nil, &api.RejectedError{Reason: fmt.Sprintf(
+			"%s transcription: the audio is %.1f MB; %s accepts at most %d MB per file",
+			a.modelName, float64(len(audio))/(1<<20), a.vendor, limit>>20)}
 	}
 	// The server identifies the format from the extension.
 	if fileName == "" {
@@ -141,8 +143,9 @@ func (a *protocolASR) Transcribe(ctx context.Context, audio []byte, fileName str
 	if formats := a.settings.Formats; len(formats) > 0 {
 		ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
 		if !slices.Contains(formats, ext) {
-			return nil, fmt.Errorf("%s transcription: %s accepts %s audio, not %q",
-				a.modelName, a.vendor, strings.Join(formats, "/"), fileName)
+			return nil, &api.RejectedError{Reason: fmt.Sprintf(
+				"%s transcription: %s accepts %s audio, not %q",
+				a.modelName, a.vendor, strings.Join(formats, "/"), fileName)}
 		}
 	}
 	logger.Infof(ctx, "[ASR] transcribing model=%s endpoint=%s size=%d file=%s",
