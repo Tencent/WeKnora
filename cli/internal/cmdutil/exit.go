@@ -117,9 +117,9 @@ func PrintError(w io.Writer, err error) {
 }
 
 func printErrorProse(w io.Writer, err error) {
-	fmt.Fprintln(w, err.Error())
 	var typed *Error
 	if errors.As(err, &typed) {
+		fmt.Fprintln(w, typed.Error())
 		hint := typed.Hint
 		if hint == "" {
 			hint = defaultHint(typed.Code)
@@ -134,7 +134,22 @@ func printErrorProse(w io.Writer, err error) {
 		if len(retry) > 0 {
 			fmt.Fprintf(w, "retry: %s\n", strings.Join(retry, " "))
 		}
+		return
 	}
+	// MapCobraError wraps cobra's flag/argument complaints in *FlagError.
+	// ErrorToDetail already reports those as input.invalid_argument on the
+	// JSON path, but prose used to print the bare cobra sentence, so the
+	// text-mode caller got an unprefixed message with no hint -- exactly the
+	// shape the prose contract says errors never take.
+	var fe *FlagError
+	if errors.As(err, &fe) {
+		fmt.Fprintf(w, "%s: %s\n", CodeInputInvalidArgument, err.Error())
+		if hint := defaultHint(CodeInputInvalidArgument); hint != "" {
+			fmt.Fprintf(w, "hint: %s\n", hint)
+		}
+		return
+	}
+	fmt.Fprintln(w, err.Error())
 }
 
 func printErrorEnvelope(w io.Writer, err error) {
