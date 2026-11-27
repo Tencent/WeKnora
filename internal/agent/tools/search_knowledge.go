@@ -103,6 +103,13 @@ type searchResultWithMeta struct {
 	QueryType         string // retrieval path that produced the row
 	KnowledgeBaseID   string // ID of the knowledge base this result came from
 	KnowledgeBaseType string // Type of the knowledge base (document, faq, etc.)
+
+	// contentExcerpt marks a body shortened for the output budget. The
+	// original text remains in snippetSource so the match snippet can still
+	// locate the actual hit.
+	contentExcerpt bool
+	snippetSource  string
+	matchOverride  *string
 }
 
 // SearchKnowledgeTool searches chunk-indexed knowledge bases in semantic,
@@ -333,7 +340,11 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	if omitted > 0 {
 		result.Data["omitted_for_budget"] = omitted
 	}
-	t.attachContextImages(ctx, result, final[:len(final)-omitted])
+	shown := final
+	if omitted > 0 {
+		shown = final[:len(final)-omitted]
+	}
+	t.attachContextImages(ctx, result, shown)
 	if len(searchFailures) > 0 {
 		result.Data["partial_failures"] = searchFailures
 	}
@@ -402,11 +413,13 @@ func (t *SearchKnowledgeTool) attachContextImages(
 		len(images), strings.Join(ids, ", "))
 }
 
-// formatWithinBudget renders results, dropping the lowest-ranked ones until
-// the rendering fits in four fifths of the tool output budget, and reports
-// how many were dropped. The model reads a view rebuilt from Data, which the
-// registry's output truncation does not reach, so 30 full chunks used to go
-// into the context whatever the budget. The best result is always kept.
+// formatWithinBudget renders results within four fifths of the tool output
+// budget. Dropping whole reranked hits made limit and top_k misleading: one
+// page-sized chunk could consume enough budget that only a few of the best
+// results reached the model. Keep the ranked list and spend the body budget
+// fairly across every row instead. Metadata, snippets and chunk handles stay
+// available; a shortened body says so and points to read_document for the
+// complete chunk. Only rows that cannot fit even a useful excerpt are dropped.
 func (t *SearchKnowledgeTool) formatWithinBudget(
 	ctx context.Context,
 	results []*searchResultWithMeta,
@@ -414,26 +427,169 @@ func (t *SearchKnowledgeTool) formatWithinBudget(
 	query, mode string,
 ) (*types.ToolResult, int) {
 	budget := OutputBudget(ctx) * 4 / 5
-	result := t.formatOutput(ctx, results, kbIDs, query, mode)
-	if len(results) <= 1 || utf8.RuneCountInString(result.Output) <= budget {
+	views := t.fitSearchResultsToBudget(ctx, results, kbIDs, query, mode, budget)
+	result := t.formatOutput(ctx, views, kbIDs, query, mode)
+	if len(views) <= 1 || utf8.RuneCountInString(result.Output) <= budget {
 		return result, 0
 	}
 
-	// Each added row increases the rendered size. Search for the longest
-	// ranked prefix that fits, keeping the first row even if it is oversized.
+	// Only metadata remains. Keep the longest ranked prefix that fits, then
+	// spend the freed budget on the retained rows' snippets and bodies.
 	best := 1
-	result = t.formatOutput(ctx, results[:best], kbIDs, query, mode)
-	for low, high := 2, len(results)-1; low <= high; {
+	for low, high := 2, len(views)-1; low <= high; {
 		mid := low + (high-low)/2
-		candidate := t.formatOutput(ctx, results[:mid], kbIDs, query, mode)
+		candidate := t.formatOutput(ctx, views[:mid], kbIDs, query, mode)
 		if utf8.RuneCountInString(candidate.Output) <= budget {
-			best, result = mid, candidate
+			best = mid
 			low = mid + 1
 		} else {
 			high = mid - 1
 		}
 	}
-	return result, len(results) - best
+	views = t.fitSearchResultsToBudget(ctx, results[:best], kbIDs, query, mode, budget)
+	return t.formatOutput(ctx, views, kbIDs, query, mode), len(results) - best
+}
+
+// fitSearchResultsToBudget returns copies of results whose Content fits the
+// supplied rune budget. The fixed metadata and match snippet are measured
+// first with the body suppressed; the remaining budget is then distributed
+// max-min fairly across the bodies. This keeps every ranked handle visible
+// and shortens only the bodies that need it.
+func (t *SearchKnowledgeTool) fitSearchResultsToBudget(
+	ctx context.Context,
+	results []*searchResultWithMeta,
+	kbIDs []string,
+	query, mode string,
+	budget int,
+) []*searchResultWithMeta {
+	if len(results) == 0 {
+		return nil
+	}
+	fixedViews := make([]*searchResultWithMeta, len(results))
+	sizes := make([]int, len(results))
+	bodyCost := 0
+	for i, result := range results {
+		copyResult := *result
+		copySearchResult := *result.SearchResult
+		copySearchResult.Content = ""
+		copyResult.SearchResult = &copySearchResult
+		copyResult.snippetSource = result.Content
+		fixedViews[i] = &copyResult
+		sizes[i] = utf8.RuneCountInString(result.Content)
+		bodyCost += sizes[i]
+	}
+	fixed := t.formatOutput(ctx, fixedViews, kbIDs, query, mode)
+	if utf8.RuneCountInString(fixed.Output)+bodyCost <= budget {
+		return results
+	}
+
+	// Measure the fixed shape with excerpt markers, and keep the snippets
+	// located against the unabridged text rather than the shortened bodies.
+	rows, _ := fixed.Data["results"].([]map[string]interface{})
+	for i, view := range fixedViews {
+		snippet, _ := rows[i]["match_snippet"].(string)
+		view.matchOverride = &snippet
+		view.contentExcerpt = sizes[i] > 0
+	}
+	shapeCost := utf8.RuneCountInString(t.formatOutput(ctx, fixedViews, kbIDs, query, mode).Output)
+	if shapeCost > budget {
+		shapeCost = t.compactSearchSnippets(ctx, fixedViews, kbIDs, query, mode, budget)
+	}
+	caps := splitBudgetFairly(max(budget-shapeCost, 0), sizes)
+	for i, view := range fixedViews {
+		switch {
+		case caps[i] == sizes[i]:
+			view.Content = view.snippetSource
+			view.contentExcerpt = false
+		case caps[i] > 0:
+			view.Content = string([]rune(view.snippetSource)[:caps[i]-1]) + "\u2026"
+		}
+	}
+	return fixedViews
+}
+
+// compactSearchSnippets shortens snippets only after reserving their escaped
+// tags and the fixed metadata, and returns the resulting rendering cost.
+func (t *SearchKnowledgeTool) compactSearchSnippets(
+	ctx context.Context,
+	results []*searchResultWithMeta,
+	kbIDs []string,
+	query, mode string,
+	budget int,
+) int {
+	snippets := make([]string, len(results))
+	sizes := make([]int, len(results))
+	empty := ""
+	for i, result := range results {
+		snippets[i] = *result.matchOverride
+		sizes[i] = searchSnippetCost(snippets[i])
+		result.matchOverride = &empty
+	}
+	cost := utf8.RuneCountInString(t.formatOutput(ctx, results, kbIDs, query, mode).Output)
+	caps := splitBudgetFairly(max(budget-cost, 0), sizes)
+	for i, result := range results {
+		snippet := snippets[i]
+		if sizes[i] > caps[i] {
+			snippet = clipSearchSnippet(snippet, caps[i])
+		}
+		result.matchOverride = &snippet
+		cost += searchSnippetCost(snippet)
+	}
+	return cost
+}
+
+const searchSnippetTagCost = len("<match_snippet></match_snippet>\n")
+
+func searchSnippetCost(snippet string) int {
+	if snippet == "" {
+		return 0
+	}
+	return searchSnippetTagCost + utf8.RuneCountInString(xmlEscape(snippet))
+}
+
+func clipSearchSnippet(snippet string, budget int) string {
+	if budget <= searchSnippetTagCost {
+		return ""
+	}
+	runes := []rune(snippet)
+	keep := sort.Search(len(runes), func(i int) bool {
+		return searchSnippetCost(string(runes[:i+1])+"\u2026") > budget
+	})
+	if keep == 0 {
+		return ""
+	}
+	return string(runes[:keep]) + "\u2026"
+}
+
+// matchSnippet is the single snippet renderer used by both the full and the
+// budgeted view. It always reads snippetSource, never a shortened body, so a
+// match near the end of a chunk remains locatable.
+func (t *SearchKnowledgeTool) matchSnippet(
+	result *searchResultWithMeta,
+	faqMeta *types.FAQChunkMetadata,
+	queries []string,
+) string {
+	if result == nil || result.SearchResult == nil {
+		return ""
+	}
+	if result.matchOverride != nil {
+		return *result.matchOverride
+	}
+	source := result.Content
+	if result.snippetSource != "" {
+		source = result.snippetSource
+	}
+	snippet := ""
+	if faqMeta != nil {
+		snippet = faqMatchSnippetFromQueries(faqMeta, queries)
+	}
+	if snippet == "" && t.patternFilter != nil {
+		snippet = extractSnippetRegex(source, []*regexp.Regexp{t.patternFilter})
+	}
+	if snippet == "" {
+		snippet = extractSnippetForQueries(source, queries)
+	}
+	return snippet
 }
 
 // emptySearchStatement describes an empty result, including any mode
@@ -1075,16 +1231,7 @@ func (t *SearchKnowledgeTool) formatOutput(
 		}
 		isFAQ := faqMeta != nil
 
-		snippet := ""
-		if isFAQ {
-			snippet = faqMatchSnippetFromQueries(faqMeta, queries)
-		}
-		if snippet == "" && t.patternFilter != nil {
-			snippet = extractSnippetRegex(result.Content, []*regexp.Regexp{t.patternFilter})
-		}
-		if snippet == "" {
-			snippet = extractSnippetForQueries(result.Content, queries)
-		}
+		snippet := t.matchSnippet(result, faqMeta, queries)
 
 		tag := "chunk"
 		idAttr := fmt.Sprintf("chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\"",
@@ -1100,7 +1247,12 @@ func (t *SearchKnowledgeTool) formatOutput(
 		if snippet != "" {
 			fmt.Fprintf(&ob, "<match_snippet>%s</match_snippet>\n", xmlEscape(snippet))
 		}
-		fmt.Fprintf(&ob, "<content>%s</content>\n", result.Content)
+		contentExcerpt := result.contentExcerpt
+		if contentExcerpt {
+			fmt.Fprintf(&ob, "<content excerpt=\"true\">%s</content>\n", result.Content)
+		} else {
+			fmt.Fprintf(&ob, "<content>%s</content>\n", result.Content)
+		}
 		if result.ImageInfo != "" {
 			var imageInfos []types.ImageInfo
 			if err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos); err == nil {
@@ -1127,6 +1279,7 @@ func (t *SearchKnowledgeTool) formatOutput(
 			"knowledge_metadata":  result.KnowledgeCustomMetadata,
 			"match_type":          result.MatchType,
 			"match_snippet":       snippet,
+			"content_excerpt":     contentExcerpt,
 			"score":               result.Score,
 			"source_query":        result.SourceQuery,
 			"query_type":          result.QueryType,
