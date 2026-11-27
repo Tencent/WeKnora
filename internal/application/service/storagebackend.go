@@ -238,6 +238,9 @@ func (s *StorageBackendService) Test(ctx context.Context, backend *types.Storage
 	case "s3":
 		return filesvc.CheckS3ConnectivityWithOptions(ctx, c.Endpoint, c.AccessKeyID, c.SecretAccessKey, c.BucketName, c.Region, c.ForcePathStyle)
 	case "oss":
+		if backend.Source == types.StorageBackendSourceEnv {
+			return filesvc.CheckEnvironmentOssConnectivity(ctx, backend.ToStorageEngineConfig().OSS)
+		}
 		return filesvc.CheckOssConnectivity(ctx, c.Endpoint, c.Region, c.AccessKeyID, c.SecretAccessKey, c.BucketName)
 	case "ks3":
 		return filesvc.CheckKS3Connectivity(ctx, c.Endpoint, c.Region, c.AccessKeyID, c.SecretAccessKey, c.BucketName)
@@ -332,7 +335,7 @@ func (s *StorageBackendService) ResolveFileService(ctx context.Context, tenant *
 		return nil, "", err
 	}
 	if backend != nil {
-		inner, provider, err := filesvc.NewFileServiceFromStorageConfig(backend.Provider, backend.ToStorageEngineConfig(), localBaseDir)
+		inner, provider, err := filesvc.NewFileServiceFromStorageBackend(backend, localBaseDir)
 		if err != nil {
 			return nil, provider, err
 		}
@@ -344,7 +347,11 @@ func (s *StorageBackendService) ResolveFileService(ctx context.Context, tenant *
 		if env := types.StorageBackendFromEnvironment(tenant.ID); env != nil {
 			provider = env.Provider
 			if sec == nil {
-				sec = env.ToStorageEngineConfig()
+				inner, resolvedProvider, err := filesvc.NewFileServiceFromStorageBackend(env, localBaseDir)
+				if err != nil {
+					return nil, resolvedProvider, err
+				}
+				return filesvc.NewResourceCatalogFileService(inner, s.resourceCatalog), resolvedProvider, nil
 			}
 		}
 	}

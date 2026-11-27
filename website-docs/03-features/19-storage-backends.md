@@ -45,6 +45,44 @@
 - **传输超时**：S3、COS、KS3、OBS、OSS 的单次上传/下载不再受 30 秒整体超时限制，改为单次传输最长 30 分钟；建连、TLS 握手和等待响应头仍有各自的超时，对端失联时会较快失败。
 - **KS3 重定向**：跟随重定向时逐跳做 SSRF 校验，不再把请求签名转发到重定向目标主机。
 
+## System OSS with AssumeRole
+
+Deployment-managed OSS backends (`source=env`) can use automatically refreshed STS
+credentials. Set `STORAGE_TYPE=oss`, the usual endpoint/region/bucket variables,
+and the following deployment environment variables:
+
+```dotenv
+OSS_AUTH_TYPE=ram_role_arn
+OSS_ACCESS_KEY=<caller-access-key>
+OSS_SECRET_KEY=<caller-secret-key>
+OSS_ROLE_ARN=acs:ram::1234567890123456:role/weknora
+OSS_ROLE_SESSION_NAME=weknora
+OSS_ROLE_SESSION_EXPIRATION=3600
+# OSS_POLICY={"Version":"1","Statement":[...]}
+# OSS_EXTERNAL_ID=<external-id-required-by-the-role-trust-policy>
+```
+
+The caller needs `sts:AssumeRole` permission, and the role must trust that caller.
+The optional session policy restricts the role's permissions further. Session
+expiration is in seconds (900–43200), subject to the role's configured maximum.
+The role needs OSS access to both the main bucket and any configured temporary
+bucket. The existing bucket check/create behavior is retained; pre-create buckets
+if the role cannot create them.
+
+The credential SDK caches and refreshes temporary credentials before expiration;
+main and temporary bucket clients share the provider, including across storage
+service resolutions. Temporary keys and tokens are never written to storage
+configuration. AssumeRole failures are returned without falling back to the
+caller's key. STS uses HTTPS at `sts.aliyuncs.com` with bounded connection/read
+waits. The credential SDK does not accept a request context, so an in-progress
+STS fetch may finish its bounded network wait before caller cancellation returns.
+
+Workspace-created OSS backends always use their own static keys and cannot select
+this deployment identity. Leaving `OSS_AUTH_TYPE` unset, or setting it to
+`access_key`, preserves existing static-key behavior. Unknown modes are rejected.
+Presigned uploads and downloads include the temporary security token; links stop
+working when that token expires even if the URL's requested lifetime is longer.
+
 ## 与向量存储的区别
 
 文件存储和向量存储分别管理原文件与检索索引：
