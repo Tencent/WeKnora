@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import * as vue from 'vue'
+import * as sortPreference from '../../utils/resourceSortPreference.ts'
 import * as sorting from '../../utils/resourceSorting.ts'
 import { change, fixture, flush } from '../../test-utils/vueFixture.ts'
 
@@ -33,6 +34,7 @@ function setup(t: TestContext, initialScope = 'all') {
     '@/api/agent': {}, '@/api/chat/index': {}, '@/api/organization': { listOrganizationSharedAgents },
     '@/config/contextualGuides': { markContextualGuideDone() {} }, '@/config/settingsRoute': {},
     '@/utils/resourceListSearch': {}, '@/utils/card-list-badge': {}, '@/utils/resourceSorting': sorting,
+    '@/utils/resourceSortPreference': sortPreference,
   })
   return { ...f, ...page, fetchAgentsForList, listOrganizationSharedAgents }
 }

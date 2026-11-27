@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import * as vue from 'vue'
 import { fixture, flush } from '../../test-utils/vueFixture.ts'
+import * as sortPreference from '../../utils/resourceSortPreference.ts'
 
 // The recents/favorites tabs resolve localStorage pin entries against the
 // knowledge bases the page can actually see (own + shared) and silently drop
@@ -81,6 +82,7 @@ async function setup(t: TestContext, kbsByCall: any[][]) {
     '@/utils/index': { formatStringDate: (d: Date) => d.toISOString().slice(0, 10) },
     '@/utils/resourceListSearch': { matchesResourceQuery: () => true },
     '@/utils/resourceSorting': { sortResourcesWithinGroups: (items: any[]) => items },
+    '@/utils/resourceSortPreference': sortPreference,
     '@/utils/card-list-badge': { shouldShowResourceOriginBadge: () => false },
     '@/utils/kbPermission': { permissionCanManageKB: () => true },
     '@/config/contextualGuides': { isContextualGuideDone: () => true, markContextualGuideDone() {} },

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import * as vue from 'vue'
 import { fixture, flush } from '../../test-utils/vueFixture.ts'
+import * as sortPreference from '../../utils/resourceSortPreference.ts'
 
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value))
 
@@ -66,6 +67,7 @@ function commonDeps(scopeRef: vue.Ref<string>) {
     '@/utils/kbPermission': { permissionCanManageKB: () => true },
     '@/utils/agentMcp': { agentUsesMcp: () => false },
     '@/utils/index': { formatStringDate: (d: Date) => d.toISOString() },
+    '@/utils/resourceSortPreference': sortPreference,
     '@/utils/resourceSorting': {
       DEFAULT_RESOURCE_SORT: 'updated_desc',
       sortResourcesWithinGroups: (items: any[]) => items,
