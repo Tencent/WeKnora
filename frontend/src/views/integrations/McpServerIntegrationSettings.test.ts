@@ -56,6 +56,7 @@ async function fixture() {
     'tdesign-vue-next': { MessagePlugin: { error: assert.fail } },
     '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true }) },
     '@/utils/clipboard': { copyWithToast: assert.fail },
+    '@/utils/mcpBaseUrl': { resolveMcpBaseUrl: () => '' },
     '@/composables/useApiBaseUrlDisplay': { useApiBaseUrlDisplay: () => ({ apiBaseUrlDisplay: vue.ref('https://example.com') }) },
     '@/components/settings/SettingDrawer.vue': { default: {} },
     '@/stores/chatResources': { useChatResourcesStore: () => resources },

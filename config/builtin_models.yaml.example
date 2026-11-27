@@ -57,6 +57,7 @@ builtin_models: []
 #   - id: builtin-rerank-default
 #     type: Rerank
 #     source: remote
+#     name: ${RERANK_MODEL_NAME}
 #     parameters:
 #       base_url: ${RERANK_BASE_URL}
 #       api_key: ${RERANK_API_KEY}

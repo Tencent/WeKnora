@@ -263,12 +263,15 @@ func permanentRefreshFailure(err error) (permanent bool, resetClient bool) {
 		case "invalid_client", "unauthorized_client":
 			return true, true
 		}
+		return false, false
 	}
-	lower := strings.ToLower(err.Error())
-	if strings.Contains(lower, "status 400") {
+	// For a non-OAuth response, mcp-go v1.1.1 exposes the refresh endpoint's
+	// HTTP status only in this prefix. Its body may mention unrelated statuses.
+	const statusPrefix = "refresh token request failed with status "
+	if strings.HasPrefix(err.Error(), statusPrefix+"400:") {
 		return true, false
 	}
-	if strings.Contains(lower, "status 401") {
+	if strings.HasPrefix(err.Error(), statusPrefix+"401:") {
 		return true, true
 	}
 	return false, false
