@@ -35,6 +35,18 @@ type RetrievalConfig struct {
 	RRFVectorWeight float64 `json:"rrf_vector_weight,omitempty"`
 	// RRFKeywordWeight is the keyword counterpart. Default: 0.3.
 	RRFKeywordWeight float64 `json:"rrf_keyword_weight,omitempty"`
+
+	// WebSearchBaseScore is the score a web-search result carries into the
+	// merged ranking when no rerank model runs, and the retrieval score it
+	// contributes to the composite when one does. The built-in default makes
+	// freshly converted web hits outrank mediocre knowledge-base hits, which
+	// reads wrong in enterprise deployments; lower it to favor the
+	// workspace's own documents. 0 uses the default.
+	WebSearchBaseScore float64 `json:"web_search_base_score,omitempty"`
+	// WebSearchSourceWeight is the source weight a web result gets inside
+	// the composite score; below 1.0 penalizes web hits relative to
+	// knowledge-base hits. 0 uses the default.
+	WebSearchSourceWeight float64 `json:"web_search_source_weight,omitempty"`
 }
 
 // DefaultRetrievalTopK is the retrieval depth used when a caller supplies no
@@ -42,6 +54,15 @@ type RetrievalConfig struct {
 // at this value, so the fallback and the pool it draws from stay in step by
 // construction rather than by two independently maintained literals.
 const DefaultRetrievalTopK = 50
+
+// DefaultWebSearchBaseScore is the score a web-search result carries when the
+// workspace leaves WebSearchBaseScore unset. Kept beside the other retrieval
+// defaults so the ranking knobs stay discoverable together.
+const DefaultWebSearchBaseScore = 0.6
+
+// DefaultWebSearchSourceWeight is the source weight web hits get inside the
+// composite score when the workspace leaves WebSearchSourceWeight unset.
+const DefaultWebSearchSourceWeight = 0.95
 
 // MaxRequestedResults caps the result counts a retrieval API caller may ask
 // for (knowledge-search match_count, rerank.top_k). knowledge-search runs one
@@ -87,6 +108,24 @@ func (c *RetrievalConfig) GetEffectiveRerankThreshold() float64 {
 		return 0.2
 	}
 	return c.RerankThreshold
+}
+
+// GetEffectiveWebSearchBaseScore returns WebSearchBaseScore with the built-in
+// default; nil-safe like the other GetEffective* methods.
+func (c *RetrievalConfig) GetEffectiveWebSearchBaseScore() float64 {
+	if c == nil || c.WebSearchBaseScore <= 0 {
+		return DefaultWebSearchBaseScore
+	}
+	return c.WebSearchBaseScore
+}
+
+// GetEffectiveWebSearchSourceWeight returns WebSearchSourceWeight with the
+// built-in default; nil-safe like the other GetEffective* methods.
+func (c *RetrievalConfig) GetEffectiveWebSearchSourceWeight() float64 {
+	if c == nil || c.WebSearchSourceWeight <= 0 {
+		return DefaultWebSearchSourceWeight
+	}
+	return c.WebSearchSourceWeight
 }
 
 // GetEffectiveRRFK returns the RRF smoothing constant with a fallback default.
