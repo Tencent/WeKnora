@@ -51,9 +51,15 @@ func (p *PluginWebFetch) OnEvent(
 		topN = 3
 	}
 
-	// Find web search results in reranked results
+	// Follow the same retrieval fallback as merge when reranking was skipped
+	// or failed. Otherwise full-page fetch would silently depend on having a
+	// working rerank model even though web search itself still succeeded.
+	candidates := chatManage.RerankResult
+	if len(candidates) == 0 {
+		candidates = selectFallbackSearchResults(chatManage)
+	}
 	var webResults []*types.SearchResult
-	for _, r := range chatManage.RerankResult {
+	for _, r := range candidates {
 		if strings.ToLower(r.KnowledgeSource) == "web_search" {
 			webResults = append(webResults, r)
 			if len(webResults) >= topN {
