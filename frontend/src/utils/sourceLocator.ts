@@ -204,7 +204,7 @@ export function selectSearchAnchor(content: string, query: string): string {
   const phrase = query.trim()
   const candidates = [phrase, ...phrase.split(/\s+/).sort((a, b) => b.length - a.length)]
   for (const candidate of candidates) {
-    if (normalizeForMatch(candidate).length < 4) continue
+    if (normalizeForMatch(candidate).length < (/\p{Script=Han}/u.test(candidate) ? 2 : 4)) continue
     const match = findInText(source, candidate)
     if (match) return source.slice(match.start, match.end)
   }
