@@ -102,6 +102,14 @@ export function triggerFromScheduleForm(form: ScheduleForm, timezone: string): A
   const tz = timezone || 'UTC'
   const m = form.minute
   const h = form.hour
+  const wholeInRange = (value: number, min: number, max: number) =>
+    Number.isInteger(value) && value >= min && value <= max
+  if (form.kind !== 'once' && form.kind !== 'custom') {
+    if (!wholeInRange(m, 0, 59)) return null
+    if (form.kind !== 'hourly' && !wholeInRange(h, 0, 23)) return null
+    if (form.kind === 'monthly' && !wholeInRange(form.day, 1, 31)) return null
+    if (form.kind === 'weekly' && form.days.some(day => !wholeInRange(day, 0, 6))) return null
+  }
   let expr = ''
   switch (form.kind) {
     case 'hourly':
