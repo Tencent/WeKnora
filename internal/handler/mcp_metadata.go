@@ -83,7 +83,11 @@ func (h *MCPServiceHandler) mcpMetadata(c *gin.Context, refresh bool) {
 				"service_id": secutils.SanitizeForLog(id),
 				"refresh":    true,
 			})
-			_ = c.Error(mcpMetadataAppError(types.ErrMCPServiceNotFound, true))
+			reason := types.ErrMCPServiceNotFound
+			if getErr != nil && !stderrors.Is(getErr, types.ErrMCPServiceNotFound) {
+				reason = types.ErrMCPMetadataStorage
+			}
+			_ = c.Error(mcpMetadataAppError(reason, true))
 			return
 		}
 		if !service.AuthConfig.IsOAuth() && !mayWriteSharedMCPMetadata(ctx) {

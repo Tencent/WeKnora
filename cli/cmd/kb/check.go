@@ -24,6 +24,7 @@ type CheckResult struct {
 	// an unconfigured KB is not reported as silently healthy.
 	RetrievalReady  bool  `json:"retrieval_ready"`
 	KnowledgeCount  int64 `json:"knowledge_count,omitempty"`
+	kbType          string
 	ChunkCount      int64 `json:"chunk_count,omitempty"`
 	IsProcessing    bool  `json:"is_processing,omitempty"`
 	ProcessingCount int64 `json:"processing_count,omitempty"`
@@ -98,6 +99,7 @@ func runCheck(ctx context.Context, svc CheckService, id string) (*CheckResult, e
 		Reachable:       true,
 		RetrievalReady:  kb.EmbeddingModelID != "",
 		KnowledgeCount:  kb.KnowledgeCount,
+		kbType:          kb.Type,
 		ChunkCount:      kb.ChunkCount,
 		IsProcessing:    kb.IsProcessing,
 		ProcessingCount: kb.ProcessingCount,
@@ -151,7 +153,9 @@ func writeCheckText(w io.Writer, res *CheckResult) error {
 	}
 	fmt.Fprintf(w, "Retrieval:    %v%s\n", res.RetrievalReady, retrievalHint(res.RetrievalReady))
 	fmt.Fprintf(w, "Knowledge:    %d\n", res.KnowledgeCount)
-	fmt.Fprintf(w, "Chunks:       %d\n", res.ChunkCount)
+	if err := writeChunkCount(w, res.kbType, res.ChunkCount); err != nil {
+		return err
+	}
 	fmt.Fprintf(w, "Processing:   %v (%d active)\n", res.IsProcessing, res.ProcessingCount)
 	fmt.Fprintf(w, "Failed:       %d\n", res.FailedCount)
 	return nil

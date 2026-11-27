@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestFilterKnowledgeFileTypes(t *testing.T) {
@@ -53,5 +54,27 @@ func TestFilterKnowledgeFileTypes(t *testing.T) {
 				t.Errorf("FilterKnowledge() = %v, %v; want knowledge-1 and has_more", results, hasMore)
 			}
 		})
+	}
+}
+
+func TestListKnowledgeTimePrecision(t *testing.T) {
+	const timestamp = "2026-11-22T07:07:44.891993Z"
+	at, err := time.Parse(time.RFC3339Nano, timestamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, key := range []string{"start_time", "end_time"} {
+			if got := r.URL.Query().Get(key); got != timestamp {
+				t.Errorf("%s = %q, want %q", key, got, timestamp)
+			}
+		}
+		_, _ = w.Write([]byte(`{"data":[],"total":0}`))
+	}))
+	defer server.Close()
+	filter := KnowledgeListFilter{StartTime: at, EndTime: at}
+	_, _, err = NewClient(server.URL).ListKnowledgeWithFilter(context.Background(), "kb", 1, 30, filter)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

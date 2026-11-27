@@ -11,6 +11,11 @@ from pathlib import Path
 
 MCP_SERVER_DIR = Path(__file__).resolve().parent
 
+# Where curl discards the response body. `NUL` is Windows's null device;
+# `/dev/null` is not a path curl can open there -- it prints the headers, then
+# exits 23 ("write error"), which the readiness probe below reads as "not up".
+NULL_SINK = "NUL" if os.name == "nt" else "/dev/null"
+
 
 class TransportRegressionTest(unittest.TestCase):
     def test_http_transport_is_stateless(self):
@@ -66,8 +71,8 @@ class TransportRegressionTest(unittest.TestCase):
 
 
 class StdioToolsListTest(unittest.TestCase):
-    def test_tools_list_returns_31_tools(self):
-        async def _run() -> int:
+    def test_tools_list_includes_wiki_graph(self):
+        async def _run() -> list[str]:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
 
@@ -83,10 +88,11 @@ class StdioToolsListTest(unittest.TestCase):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     tools = await session.list_tools()
-                    return len(tools.tools)
+                    return [tool.name for tool in tools.tools]
 
-        count = asyncio.run(_run())
-        self.assertEqual(count, 31)
+        names = asyncio.run(_run())
+        self.assertEqual(len(names), 32)
+        self.assertIn("wiki_graph", names)
 
 
 class HttpStatelessSmokeTest(unittest.TestCase):
@@ -125,7 +131,7 @@ class HttpStatelessSmokeTest(unittest.TestCase):
                         "-D",
                         "-",
                         "-o",
-                        "/dev/null",
+                        NULL_SINK,
                         "-X",
                         "POST",
                         f"http://127.0.0.1:{port}/mcp",

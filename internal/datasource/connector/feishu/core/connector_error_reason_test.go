@@ -35,7 +35,7 @@ func TestFeishuFailure(t *testing.T) {
 		{
 			name:     "export timeout",
 			err:      errors.New("export 季度报告 (docx): export task timed out after 60s (ticket=abc)"),
-			wantCode: "feishu_timeout",
+			wantCode: "feishu_export_timeout",
 			noLeak:   []string{"ticket=", "abc"},
 		},
 		{
@@ -104,5 +104,28 @@ func TestFeishuFailure(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFeishuFailureOperationReasons(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{ErrDownloadTooLarge, "feishu_file_too_large"},
+		{errExportPollsExhausted, "feishu_export_timeout"},
+		{errors.New("create export task: status=403 no permission"), "feishu_export_forbidden"},
+		{errors.New("download failed: status=403 forbidden"), "feishu_download_forbidden"},
+		{errors.New("download failed: status=403 missing scope drive:file:download"), "feishu_auth_or_permission"},
+		{errors.New("create export task: code=99991672 permission denied"), "feishu_auth_or_permission"},
+		{errors.New("request: context deadline exceeded"), "feishu_timeout"},
+	} {
+		code, _, fallback := feishuFailure(tc.err)
+		if code != tc.code {
+			t.Errorf("%v: got %s, want %s", tc.err, code, tc.code)
+		}
+		if strings.Contains(fallback, "403") || strings.Contains(fallback, "99991672") {
+			t.Errorf("provider detail leaked: %s", fallback)
+		}
 	}
 }

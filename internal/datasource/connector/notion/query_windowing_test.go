@@ -60,6 +60,9 @@ type windowQueryFake struct {
 	alwaysIncomplete bool
 	// omitCompleteMarker answers a complete window without request_status at all.
 	omitCompleteMarker bool
+	// dropCursor answers has_more=true without a next_cursor, the response a
+	// client cannot follow.
+	dropCursor bool
 
 	// searchResults is served from POST /v1/search when set.
 	searchResults []interface{}
@@ -174,6 +177,9 @@ func (f windowQueryFake) answer(request map[string]interface{}) (map[string]inte
 	}
 	if hasMore {
 		response["next_cursor"] = strconv.Itoa(end)
+		if f.dropCursor {
+			response["next_cursor"] = nil
+		}
 	}
 	switch {
 	case capped && (!f.markerFirstPageOnly || offset == 0):

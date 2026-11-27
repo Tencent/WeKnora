@@ -197,3 +197,52 @@ func TestModelHandlesReferenceTheActualExpandedChild(t *testing.T) {
 	require.NotContains(t, messages[1].Content, rendered)
 	require.Contains(t, messages[1].Content, "could not be verified")
 }
+
+func TestPrepareMessagesDropsRewrittenEvidenceWhenAnchorRevisionChanges(t *testing.T) {
+	ctx := context.Background()
+	repo := &expandChunkRepo{chunks: map[string]*types.Chunk{
+		"edited": {
+			ID: "edited", KnowledgeID: "document-a", KnowledgeBaseID: "knowledge-library",
+			Content:   "Replacement passage written after reranking.",
+			ChunkType: types.ChunkTypeText, IsEnabled: true, ContentRevision: 2,
+		},
+		"unchanged": {
+			ID: "unchanged", KnowledgeID: "document-a", KnowledgeBaseID: "knowledge-library",
+			Content:   "Verified original passage.",
+			ChunkType: types.ChunkTypeText, IsEnabled: true, ContentRevision: 1,
+		},
+	}}
+	merge := &PluginMerge{chunkRepo: repo}
+	results := []*types.SearchResult{
+		{
+			ID: "edited", KnowledgeID: "document-a", KnowledgeBaseID: "knowledge-library",
+			Content: "Stale expanded context.", ContentRewritten: true, ContentRevision: 1,
+		},
+		{
+			ID: "unchanged", KnowledgeID: "document-a", KnowledgeBaseID: "knowledge-library",
+			Content: "Larger context around verified passage.", ContentRewritten: true, ContentRevision: 1,
+		},
+		{
+			ID: "plain", KnowledgeID: "other", KnowledgeBaseID: "knowledge-library",
+			Content: "Plain result without a reconstruction lookup.",
+		},
+	}
+	merge.attachCitationSources(ctx, results)
+	const rendered = "Stale expanded context."
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			Query: "question", SummaryConfig: types.SummaryConfig{Prompt: "system"},
+		},
+		PipelineState: types.PipelineState{
+			RenderedContexts: rendered, UserContent: rendered + "\nQuestion: question", MergeResult: results,
+		},
+	}
+	messages, refs := prepareMessagesWithModelContext(ctx, manage)
+	require.Len(t, messages, 2)
+	prompt := messages[1].Content
+	require.NotContains(t, prompt, "Replacement passage written after reranking.")
+	require.NotContains(t, prompt, rendered)
+	require.Contains(t, prompt, "Verified original passage.")
+	require.Contains(t, prompt, "Plain result without a reconstruction lookup.")
+	require.Contains(t, refs.DecodeOutputText(`<ref id="chunk://1"/>`), `chunk_id="unchanged"`)
+}

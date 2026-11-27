@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -36,15 +37,16 @@ type loggerResponseBodyWriter struct {
 	body *bytes.Buffer
 }
 
-// Write 重写Write方法，同时写入buffer和原始writer
-// 限制buffer大小，避免SSE等流式响应导致内存无限增长
-func (r loggerResponseBodyWriter) Write(b []byte) (int, error) {
-	if r.body.Len() < maxBodySize {
-		remaining := maxBodySize - r.body.Len()
-		if len(b) <= remaining {
+// Write 重写Write方法，同时写入buffer和原始writer。
+// 限制buffer大小，避免SSE等流式响应导致内存无限增长。
+// 这里只做字节上限，字符边界留到写日志时统一处理：按块回退会让被丢弃的字节
+// 无法被后续写入补齐，同一份响应会因 Write 的切分方式不同而记录出不同内容。
+func (r *loggerResponseBodyWriter) Write(b []byte) (int, error) {
+	if room := maxBodySize + 1 - r.body.Len(); room > 0 {
+		if len(b) <= room {
 			r.body.Write(b)
 		} else {
-			r.body.Write(b[:remaining])
+			r.body.Write(b[:room])
 		}
 	}
 	return r.ResponseWriter.Write(b)
@@ -145,13 +147,9 @@ func readRequestBody(c *gin.Context) string {
 		return "[读取请求体失败]"
 	}
 
-	// 用于日志的body（限制大小）
+	// 用于日志的body（限制大小，且不把多字节字符切一半）
 	truncated := len(bodyBytes) > maxBodySize
-	if truncated {
-		bodyBytes = bodyBytes[:maxBodySize]
-	}
-
-	bodyStr := string(bodyBytes)
+	bodyStr := common.TruncateUTF8Bytes(string(bodyBytes), maxBodySize)
 	if truncated {
 		bodyStr += bodyTruncatedMarker
 	}
@@ -266,8 +264,8 @@ func Logger() gin.HandlerFunc {
 			} else if strings.Contains(contentType, "application/json") ||
 				strings.Contains(contentType, "text/") {
 				bodyBytes := responseBody.Bytes()
-				if len(bodyBytes) >= maxBodySize {
-					responseBodyStr = string(bodyBytes[:maxBodySize]) + "... [内容过长，已截断]"
+				if len(bodyBytes) > maxBodySize {
+					responseBodyStr = common.TruncateUTF8Bytes(string(bodyBytes), maxBodySize) + bodyTruncatedMarker
 				} else {
 					responseBodyStr = string(bodyBytes)
 				}

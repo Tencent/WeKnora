@@ -87,7 +87,8 @@ metadata := map[string]string{
     "source": "local",
     "type":   "document",
 }
-knowledge, err := apiClient.CreateKnowledgeFromFile(context.Background(), kb.ID, "path/to/file.pdf", metadata)
+// 后 4 个参数均为可选：是否启用多模态、自定义文件名、导入渠道（空为 "web"）、解析配置覆盖；传 nil / "" / nil 即使用默认值
+knowledge, err := apiClient.CreateKnowledgeFromFile(context.Background(), kb.ID, "path/to/file.pdf", metadata, nil, "", "", nil)
 if err != nil {
     // 处理错误
 }
@@ -234,27 +235,9 @@ err = agentSession.Ask(context.Background(), "什么是深度学习?",
 | `AgentResponseTypeReflection` | 自我反思 | Agent评估自己的回答时 |
 | `AgentResponseTypeError` | 错误 | 发生错误时 |
 
-### Agent问答测试工具
-
-我们提供了一个交互式命令行工具用于测试Agent功能：
-
-```bash
-cd client/cmd/agent_test
-go build -o agent_test
-./agent_test -url http://localhost:8080 -kb <knowledge_base_id>
-```
-
-该工具支持：
-- 创建和管理会话
-- 交互式Agent问答
-- 实时显示所有Agent事件
-- 性能统计和调试信息
-
-详细使用说明请参考 `client/cmd/agent_test/README.md`。
-
 ### Agent问答的高级用法
 
-更多高级用法示例，请参考 `agent_example.go` 文件，包括：
+更多高级用法示例，见上文「示例：Agent智能问答」一节与 `agent.go`（`NewAgentSession` / `Ask` / `AskWithRequest`），包括：
 - 基础Agent问答
 - 工具调用跟踪
 - 知识引用捕获
@@ -293,6 +276,9 @@ if err != nil {
 ```
 
 ### 示例：管理知识分块
+
+更新时可将目标分块的 `ContentRevision` 地址传入 `UpdateChunkRequest.ExpectedRevision`，防止覆盖其他用户的新编辑。
+收到 HTTP 409 后，应重新读取并合并编辑内容再重试。此字段为 `nil` 时省略检查，指向 `0` 时检查初始修订号。
 
 ```go
 // 列出知识分块

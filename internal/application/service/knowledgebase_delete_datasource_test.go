@@ -58,6 +58,15 @@ func (r *kbDeleteDSRepo) FindByKnowledgeBase(_ context.Context, kbID string) ([]
 	return active, nil
 }
 func (r *kbDeleteDSRepo) Update(_ context.Context, _ *types.DataSource) error { return nil }
+func (r *kbDeleteDSRepo) UpdateStatus(ctx context.Context, id, status string) error {
+	ds, err := r.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	ds.Status = status
+	return nil
+}
+
 func (r *kbDeleteDSRepo) UpdateSyncState(_ context.Context, _ *types.DataSource) error {
 	return nil
 }

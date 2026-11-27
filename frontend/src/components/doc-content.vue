@@ -16,6 +16,7 @@ import {
 } from "@/api/knowledge-base/index";
 import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
+import { documentSourceUrl } from '@/utils/documentSourceUrl';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
 import { stripDuplicateLeadingH1 } from '@/utils/markdownTitleDedupe';
 import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTilde';
@@ -243,6 +244,7 @@ mermaid.initialize({
   }
 });
 const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "canDownloadKB", "parse_status", "kbId"]);
+const sourceUrl = computed(() => documentSourceUrl(props.details));
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted", "summaryStateChange"]);
 const assistant = useAssistantStore();
 const readingAssistantActions = computed(() => {
@@ -1754,13 +1756,13 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
           </div>
         </section>
 
-        <section v-if="details.type === 'url'" class="setting-drawer__section">
+        <section v-if="sourceUrl" class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('knowledgeBase.urlSource') }}</h4>
           <div class="url_link_box">
-            <a :href="isValidURL(details.source) ? details.source : 'javascript:void(0)'"
-              :target="isValidURL(details.source) ? '_blank' : undefined" class="url_link">
+            <a :href="isValidURL(sourceUrl) ? sourceUrl : 'javascript:void(0)'"
+              :target="isValidURL(sourceUrl) ? '_blank' : undefined" class="url_link" rel="noopener noreferrer">
               <t-icon name="link" size="14px" />
-              <span class="url_text">{{ details.source }}</span>
+              <span class="url_text">{{ sourceUrl }}</span>
               <t-icon name="jump" size="14px" class="jump-icon" />
             </a>
           </div>

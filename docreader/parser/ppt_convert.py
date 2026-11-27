@@ -27,7 +27,7 @@ def is_zip_openxml(content: bytes) -> bool:
 def needs_ppt_to_pptx_conversion(content: bytes, file_type: str | None) -> bool:
     """True when content is legacy .ppt (OLE), not modern .pptx (ZIP)."""
     ext = (file_type or "").lstrip(".").lower()
-    if ext == "pptx" or is_zip_openxml(content):
+    if is_zip_openxml(content):
         return False
     if ext == "ppt" or is_ole_compound(content):
         return is_ole_compound(content) or ext == "ppt"
@@ -104,8 +104,9 @@ def normalize_ppt_bytes(content: bytes, file_type: str | None) -> tuple[bytes, s
         dotted = f".{ext}" if ext else ".pptx"
         return content, dotted
 
-    suffix = ".ppt" if ext in ("", "ppt") else f".{ext}"
-    converted = convert_ppt_to_pptx_bytes(content, suffix=suffix)
+    # Conversion is only reached for legacy content (or a declared .ppt).
+    # A mislabeled .pptx input must not share the converter's output filename.
+    converted = convert_ppt_to_pptx_bytes(content, suffix=".ppt")
     if converted:
         return converted, ".pptx"
 

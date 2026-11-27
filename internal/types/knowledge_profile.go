@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -134,14 +135,59 @@ func NormalizeTopicList(topics []string, limit int) []string {
 }
 
 // TopicKey folds a topic keyword into the key used for counting across
-// documents: lower-cased, whitespace-collapsed, trailing punctuation removed.
-// "Kubernetes " and "kubernetes." count as one topic; "K8s" stays separate and
-// is left for the model to merge when it writes the knowledge-base gist.
+// documents: lower-cased, whitespace-collapsed, punctuation around the term
+// removed. "Kubernetes " and "kubernetes." count as one topic; "K8s" stays
+// separate and is left for the model to merge when it writes the
+// knowledge-base gist.
 func TopicKey(topic string) string {
-	s := strings.ToLower(collapseWhitespace(topic))
-	s = strings.TrimRightFunc(s, func(r rune) bool { return unicode.IsPunct(r) || unicode.IsSpace(r) })
-	s = strings.TrimLeftFunc(s, func(r rune) bool { return unicode.IsPunct(r) || unicode.IsSpace(r) })
+	return trimTopicEdges(strings.ToLower(collapseWhitespace(topic)))
+}
+
+// topicNameMarks are the punctuation characters a topic's name can end or
+// start with. C#, F# and R# are languages, not a letter followed by formatting,
+// so trimming the mark folds them into C, F and R: the two labels would share
+// one key, sharing a count, and NormalizeTopicList would keep only the first.
+// Underscores are deliberately absent: Markdown emphasis around a keyword
+// ("_Kubernetes_") is formatting and must still be trimmed.
+const topicNameMarks = "#@"
+
+// trimTopicEdges removes punctuation that only wraps a term, leaving a mark
+// that is attached to the word it belongs to ("C#", "@handle"). It is the
+// edge-trimming half of TopicKey, kept separate so the rule that a name mark
+// survives is stated and tested in one place.
+func trimTopicEdges(s string) string {
+	s = strings.TrimSpace(s)
+	for s != "" {
+		r, size := utf8.DecodeLastRuneInString(s)
+		if !unicode.IsPunct(r) {
+			break
+		}
+		if strings.ContainsRune(topicNameMarks, r) && endsWithWord(s[:len(s)-size]) {
+			break
+		}
+		s = strings.TrimSpace(s[:len(s)-size])
+	}
+	for s != "" {
+		r, size := utf8.DecodeRuneInString(s)
+		if !unicode.IsPunct(r) {
+			break
+		}
+		if strings.ContainsRune(topicNameMarks, r) && startsWithWord(s[size:]) {
+			break
+		}
+		s = strings.TrimSpace(s[size:])
+	}
 	return s
+}
+
+func endsWithWord(s string) bool {
+	r, _ := utf8.DecodeLastRuneInString(s)
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+func startsWithWord(s string) bool {
+	r, _ := utf8.DecodeRuneInString(s)
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 func collapseWhitespace(s string) string {

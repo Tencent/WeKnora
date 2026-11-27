@@ -67,20 +67,17 @@ func FindCutPoint(
 	if start < 0 {
 		start = 0
 	}
-	var cutPoints []int
-	for i := start; i < len(messages); i++ {
-		if isCutPointMessage(&messages[i]) {
-			cutPoints = append(cutPoints, i)
-		}
+	cutIdx := len(messages) - 1
+	for cutIdx >= start && !isCutPointMessage(&messages[cutIdx]) {
+		cutIdx--
 	}
-	if len(cutPoints) == 0 {
+	if cutIdx < start {
 		return CutPoint{FirstKeptIdx: start, TurnStartIdx: -1}
 	}
 
 	// Worst case, keep only the newest group. A single message larger than the
 	// whole budget cannot be cut any further here — trimming that is the tool
 	// result trimmer's job, not the cut point's.
-	cutIdx := cutPoints[len(cutPoints)-1]
 	accumulated := 0
 	for i := len(messages) - 1; i >= start; i-- {
 		accumulated += estimator.EstimateMessage(&messages[i])

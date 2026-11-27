@@ -23,6 +23,7 @@ type StatusResult struct {
 	// omitempty) so a not-ready KB is visible, not silently green.
 	RetrievalReady  bool  `json:"retrieval_ready"`
 	KnowledgeCount  int64 `json:"knowledge_count,omitempty"`
+	kbType          string
 	ChunkCount      int64 `json:"chunk_count,omitempty"`
 	IsProcessing    bool  `json:"is_processing,omitempty"`
 	ProcessingCount int64 `json:"processing_count,omitempty"`
@@ -95,6 +96,7 @@ func runStatus(ctx context.Context, svc StatusService, id string) (*StatusResult
 		Reachable:       true,
 		RetrievalReady:  kb.EmbeddingModelID != "",
 		KnowledgeCount:  kb.KnowledgeCount,
+		kbType:          kb.Type,
 		ChunkCount:      kb.ChunkCount,
 		IsProcessing:    kb.IsProcessing,
 		ProcessingCount: kb.ProcessingCount,
@@ -122,7 +124,9 @@ func writeStatusText(w io.Writer, res *StatusResult) error {
 	}
 	fmt.Fprintf(w, "Retrieval:    %v%s\n", res.RetrievalReady, retrievalHint(res.RetrievalReady))
 	fmt.Fprintf(w, "Knowledge:    %d\n", res.KnowledgeCount)
-	fmt.Fprintf(w, "Chunks:       %d\n", res.ChunkCount)
+	if err := writeChunkCount(w, res.kbType, res.ChunkCount); err != nil {
+		return err
+	}
 	fmt.Fprintf(w, "Processing:   %v (%d active)\n", res.IsProcessing, res.ProcessingCount)
 	return nil
 }
@@ -137,3 +141,13 @@ func retrievalHint(ready bool) string {
 
 // compile-time check: SDK client satisfies StatusService.
 var _ StatusService = (*sdk.Client)(nil)
+
+func writeChunkCount(w io.Writer, kbType string, count int64) error {
+	// The server counts documents for document KBs and chunks for FAQ KBs.
+	if kbType == "document" && count == 0 {
+		_, err := fmt.Fprintln(w, "Chunks:       not reported for document knowledge bases")
+		return err
+	}
+	_, err := fmt.Fprintf(w, "Chunks:       %d\n", count)
+	return err
+}

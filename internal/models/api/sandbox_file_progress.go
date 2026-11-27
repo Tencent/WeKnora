@@ -28,12 +28,14 @@ func IsSandboxMutationTool(name string) bool {
 // SandboxFileProgress tracks a streamed write/edit tool call and emits
 // throttled progress payloads.
 type SandboxFileProgress struct {
-	toolName  string
-	pathEx    *JSONFieldExtractor
-	contentEx *JSONFieldExtractor
-	path      string
-	content   string
-	buf       string
+	toolName        string
+	pathEx          *JSONFieldExtractor
+	contentEx       *JSONFieldExtractor
+	path            string
+	content         strings.Builder
+	buf             string
+	writeNewlines   int
+	writePreviewEnd int
 
 	added   int
 	removed int
@@ -89,12 +91,26 @@ func (p *SandboxFileProgress) feedWrite(delta string) {
 		p.path += chunk
 	}
 	if chunk := p.contentEx.Feed(delta); chunk != "" {
-		p.content += chunk
+		p.content.WriteString(chunk)
+		p.writeNewlines += strings.Count(chunk, "\n")
 	}
-	p.added = countContentLines(p.content)
+	content := p.content.String()
+	p.added = p.writeNewlines
+	if content != "" && content[len(content)-1] != '\n' {
+		p.added++
+	}
 	p.removed = 0
-	p.bytes = len(p.content)
-	p.preview = sandboxContentPreview(p.content)
+	p.bytes = p.content.Len()
+	if p.writeNewlines < sandboxFilePreviewMaxLines {
+		p.preview = strings.TrimSuffix(content, "\n")
+	} else {
+		// Once the preview is complete, only its stable prefix is needed.
+		// Neither a long first line nor later deltas should rescan the body.
+		if p.writePreviewEnd == 0 {
+			p.writePreviewEnd = len(sandboxContentPreview(content))
+		}
+		p.preview = content[:p.writePreviewEnd]
+	}
 }
 
 func (p *SandboxFileProgress) feedEdit(delta string) {
@@ -182,16 +198,16 @@ func sandboxContentPreview(s string) string {
 	if s == "" {
 		return ""
 	}
-	lines := strings.Split(s, "\n")
-	end := len(lines)
-	if end > 0 && lines[end-1] == "" {
-		end--
+	s = strings.TrimSuffix(s, "\n")
+	start := 0
+	for range sandboxFilePreviewMaxLines {
+		newline := strings.IndexByte(s[start:], '\n')
+		if newline < 0 {
+			return s
+		}
+		start += newline + 1
 	}
-	lines = lines[:end]
-	if len(lines) > sandboxFilePreviewMaxLines {
-		lines = lines[:sandboxFilePreviewMaxLines]
-	}
-	return strings.Join(lines, "\n")
+	return s[:start-1]
 }
 
 func parsePartialJSONObject(s string) map[string]any {

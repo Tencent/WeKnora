@@ -53,6 +53,15 @@ func (r *fakeDataSourceRepo) Update(_ context.Context, ds *types.DataSource) err
 	return nil
 }
 
+func (r *fakeDataSourceRepo) UpdateStatus(_ context.Context, id, status string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ds, ok := r.dataSources[id]; ok {
+		ds.Status = status
+	}
+	return nil
+}
+
 func (r *fakeDataSourceRepo) UpdateSyncState(ctx context.Context, ds *types.DataSource) error {
 	return r.Update(ctx, ds)
 }

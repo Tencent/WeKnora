@@ -432,6 +432,8 @@ export default {
     referenceChunkCount: '{count} chunk(s)',
     fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
     truncatedHint: 'This answer was cut off at the per-response output limit. Above is what the model produced before the cut.',
+    branchFromHere: 'Start a new conversation from here',
+    branchFromReply: 'Branch from this reply',
     rewind: {
       tooltip: 'Rewind to here',
       confirmTitle: 'Rewind to here?',

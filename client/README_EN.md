@@ -87,7 +87,8 @@ metadata := map[string]string{
     "source": "local",
     "type":   "document",
 }
-knowledge, err := apiClient.CreateKnowledgeFromFile(context.Background(), kb.ID, "path/to/file.pdf", metadata)
+// The last 4 parameters are optional: whether to enable multimodal processing, a custom file name, the ingestion channel (empty defaults to "web"), and parse config overrides; pass nil / "" / nil for the defaults
+knowledge, err := apiClient.CreateKnowledgeFromFile(context.Background(), kb.ID, "path/to/file.pdf", metadata, nil, "", "", nil)
 if err != nil {
     // Handle error
 }
@@ -172,6 +173,10 @@ if err != nil {
 ```
 
 ### Example: Managing Knowledge Chunks
+
+Set `UpdateChunkRequest.ExpectedRevision` to a pointer to the target chunk's `ContentRevision`
+to prevent overwriting a newer edit. On HTTP 409, reread and reconcile before retrying.
+A nil pointer omits the check; a pointer to zero checks the initial revision.
 
 ```go
 // List knowledge chunks

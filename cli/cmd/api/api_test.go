@@ -710,6 +710,16 @@ func TestAPI_POST_NotGated(t *testing.T) {
 	}
 }
 
+func TestFieldBodyPreservesUnsignedID(t *testing.T) {
+	body, err := buildFieldBody([]string{"tenant_id=18446744073709551615", "label=NaN"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != `{"label":"NaN","tenant_id":18446744073709551615}` {
+		t.Errorf("unexpected request: %s", body)
+	}
+}
+
 func TestAPI_PaginateNestedTags(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	calls := 0

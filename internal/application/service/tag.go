@@ -301,6 +301,7 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 			TenantID:        tenantID,
 			KnowledgeIDs:    knowledgeIDs,
 			Initiator:       types.TaskInitiatorFromContext(ctx),
+			Language:        types.LanguageFromContextOrDefault(ctx),
 		}
 		langfuse.InjectTracing(ctx, &payload)
 		payloadBytes, err := json.Marshal(payload)

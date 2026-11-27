@@ -150,6 +150,10 @@ python test_module.py
 - `agent_chat` - 调用智能体完成多步检索与工具调用
 
 当对话被主动停止时，`chat` 和 `agent_chat` 返回已收到的回答内容，并附带 `"stopped": true`。
+当智能体等待人工输入或审批时，`agent_chat` 返回已收到的回答内容，
+并通过 `suspended` 对象提供 `pending_id`、`kind` 和可选的 `expires_at`。
+此时可在 WeKnora 界面处理待确认事项，继续原有会话。
+
 
 两种聊天工具均按 SSE 空行边界组装事件，支持一个事件包含多行 `data:`。
 连接结束时尚未遇到空行的事件会被丢弃；单个事件的数据缓冲上限为 8 MiB，

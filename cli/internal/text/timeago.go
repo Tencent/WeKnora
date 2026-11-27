@@ -2,7 +2,6 @@ package text
 
 import (
 	"fmt"
-	"math"
 	"time"
 )
 
@@ -25,14 +24,14 @@ func FuzzyAgo(now, t time.Time) string {
 	case d < time.Minute:
 		return "less than a minute " + suffix
 	case d < time.Hour:
-		return fmt.Sprintf("about %s %s", Pluralize(int(math.Round(d.Minutes())), "minute"), suffix)
+		return fmt.Sprintf("about %s %s", Pluralize(int(d/time.Minute), "minute"), suffix)
 	case d < 24*time.Hour:
-		return fmt.Sprintf("about %s %s", Pluralize(int(math.Round(d.Hours())), "hour"), suffix)
+		return fmt.Sprintf("about %s %s", Pluralize(int(d/time.Hour), "hour"), suffix)
 	case d < 30*24*time.Hour:
-		return fmt.Sprintf("about %s %s", Pluralize(int(math.Round(d.Hours()/24)), "day"), suffix)
+		return fmt.Sprintf("about %s %s", Pluralize(int(d/(24*time.Hour)), "day"), suffix)
 	case d < 365*24*time.Hour:
-		return fmt.Sprintf("about %s %s", Pluralize(int(math.Round(d.Hours()/(24*30))), "month"), suffix)
+		return fmt.Sprintf("about %s %s", Pluralize(int(d/(30*24*time.Hour)), "month"), suffix)
 	default:
-		return fmt.Sprintf("about %s %s", Pluralize(int(math.Round(d.Hours()/(24*365))), "year"), suffix)
+		return fmt.Sprintf("about %s %s", Pluralize(int(d/(365*24*time.Hour)), "year"), suffix)
 	}
 }
