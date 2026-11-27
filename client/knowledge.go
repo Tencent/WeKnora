@@ -870,6 +870,22 @@ type BatchUpdateKnowledgeTagsRequest struct {
 	TagIDs []string `json:"tag_ids"`
 }
 
+// MarshalJSON translates legacy single-tag updates to the server's tag arrays.
+func (r BatchUpdateKnowledgeTagsRequest) MarshalJSON() ([]byte, error) {
+	type requestAlias BatchUpdateKnowledgeTagsRequest
+	updates := make(map[string][]string, len(r.Updates))
+	for id, tag := range r.Updates {
+		updates[id] = []string{}
+		if tag != nil {
+			updates[id] = []string{*tag}
+		}
+	}
+	return json.Marshal(struct {
+		requestAlias
+		Updates map[string][]string `json:"updates,omitempty"`
+	}{requestAlias: requestAlias(r), Updates: updates})
+}
+
 // CreateManualKnowledge creates a knowledge entry from manual Markdown content.
 func (c *Client) CreateManualKnowledge(ctx context.Context, knowledgeBaseID string, request *CreateManualKnowledgeRequest) (*Knowledge, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/manual", knowledgeBaseID)
