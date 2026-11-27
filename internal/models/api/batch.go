@@ -16,6 +16,8 @@ type BatchLimits struct {
 	MaxItemRunes int
 	// MaxTotalRunes caps the whole request, query included.
 	MaxTotalRunes int
+	// RepeatFixedRunes charges fixedRunes per item instead of once per batch.
+	RepeatFixedRunes bool
 }
 
 // Batch is one slice of the input, and where it started.
@@ -25,7 +27,7 @@ type Batch struct {
 }
 
 // SplitBatches divides items into requests that satisfy limits. fixedRunes is
-// charged to every batch (the query, which each request repeats).
+// charged to every batch, or to every item when RepeatFixedRunes is set.
 //
 // A single item that cannot fit on its own is an error rather than a silent
 // truncation: the caller asked for this document to be scored, and scoring a
@@ -67,12 +69,17 @@ func SplitBatches(items []string, fixedRunes int, limits BatchLimits) ([]Batch, 
 	start, total := 0, fixedRunes
 	for i := range items {
 		full := limits.MaxItems > 0 && i-start == limits.MaxItems
-		over := limits.MaxTotalRunes > 0 && total+sizes[i] > limits.MaxTotalRunes
+		itemRunes := sizes[i]
+		if limits.RepeatFixedRunes && i > start {
+			itemRunes += fixedRunes
+		}
+		over := limits.MaxTotalRunes > 0 && total+itemRunes > limits.MaxTotalRunes
 		if i > start && (full || over) {
 			batches = append(batches, Batch{Start: start, Items: items[start:i]})
 			start, total = i, fixedRunes
+			itemRunes = sizes[i]
 		}
-		total += sizes[i]
+		total += itemRunes
 	}
 	batches = append(batches, Batch{Start: start, Items: items[start:]})
 	return batches, nil

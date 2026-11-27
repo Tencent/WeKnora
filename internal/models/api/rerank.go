@@ -29,6 +29,9 @@ const (
 	// RerankTEI is the native Text Embeddings Inference shape: POST /rerank
 	// with {query, texts}, answering a bare array of {index, score}.
 	RerankTEI RerankAPI = "tei-rerank"
+	// RerankPairwise sends parallel queries/documents arrays to a model URL
+	// and receives scores in the original document order.
+	RerankPairwise RerankAPI = "pairwise-rerank"
 	// RerankTencentLKEAP is Tencent Cloud's RunRerank action, reached through
 	// the official SDK because it is TC3-signed rather than key-authenticated.
 	RerankTencentLKEAP RerankAPI = "tencent-lkeap"
@@ -40,7 +43,7 @@ const (
 // Known reports whether the value names a protocol this build implements.
 func (a RerankAPI) Known() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI,
+	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI, RerankPairwise,
 		RerankTencentLKEAP, RerankVolcengineKnowledge:
 		return true
 	}
@@ -52,7 +55,7 @@ func (a RerankAPI) Known() bool {
 // vendor SDKs are imported.
 func (a RerankAPI) HTTPServed() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI:
+	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI, RerankPairwise:
 		return true
 	}
 	return false
@@ -63,12 +66,9 @@ func (a RerankAPI) HTTPServed() bool {
 type ScoreScale string
 
 const (
-	// ScoreProbability is a 0..1 relevance score. Every protocol but NIM
-	// returns one.
+	// ScoreProbability is a 0..1 relevance score.
 	ScoreProbability ScoreScale = "probability"
-	// ScoreLogit is an unbounded log-odds value that may be negative. NIM
-	// returns one, so a threshold tuned for probabilities rejects almost
-	// everything on that vendor.
+	// ScoreLogit is an unbounded log-odds value that may be negative.
 	ScoreLogit ScoreScale = "logit"
 )
 

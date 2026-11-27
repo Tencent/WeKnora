@@ -2183,6 +2183,16 @@
           "off": null
         }
       }
+    ],
+    "deepinfra": [
+      {
+        "id": "Qwen/Qwen3-Reranker-4B",
+        "type": "Rerank",
+        "compat": {
+          "max_documents": 1024,
+          "score_scale": "probability"
+        }
+      }
     ]
   }
 }

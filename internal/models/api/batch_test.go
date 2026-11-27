@@ -72,3 +72,35 @@ func TestSplitBatchesEmptyInput(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, got)
 }
+
+func TestSplitBatchesRepeatedQueryBudget(t *testing.T) {
+	items := []string{strings.Repeat("中", 30), strings.Repeat("文", 30), strings.Repeat("字", 30)}
+	for _, tc := range []struct {
+		name   string
+		limits BatchLimits
+		starts []int
+	}{
+		{"per batch unchanged", BatchLimits{MaxTotalRunes: 100}, []int{0, 2}},
+		{"per pair", BatchLimits{MaxTotalRunes: 100, RepeatFixedRunes: true}, []int{0, 1, 2}},
+		{"exact pair budget", BatchLimits{MaxTotalRunes: 140, RepeatFixedRunes: true}, []int{0, 2}},
+		{"item cap", BatchLimits{MaxItems: 1, MaxTotalRunes: 140, RepeatFixedRunes: true}, []int{0, 1, 2}},
+		{"document cap excludes query", BatchLimits{
+			MaxItemRunes: 30, MaxTotalRunes: 140, RepeatFixedRunes: true,
+		}, []int{0, 2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := SplitBatches(items, 40, tc.limits)
+			require.NoError(t, err)
+			var starts []int
+			var restored []string
+			for _, batch := range got {
+				starts = append(starts, batch.Start)
+				restored = append(restored, batch.Items...)
+			}
+			assert.Equal(t, tc.starts, starts)
+			assert.Equal(t, items, restored)
+		})
+	}
+	_, err := SplitBatches(items[:1], 40, BatchLimits{MaxTotalRunes: 69, RepeatFixedRunes: true})
+	require.ErrorContains(t, err, "does not fit beside")
+}

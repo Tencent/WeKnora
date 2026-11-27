@@ -4946,6 +4946,17 @@
         "context_window": 8192,
         "source": "https://api.runcrate.ai/v1/models"
       }
+    ],
+    "deepinfra": [
+      {
+        "id": "Qwen/Qwen3-Reranker-4B",
+        "name": "Qwen3 Reranker 4B (DeepInfra)",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "source": "https://deepinfra.com/Qwen/Qwen3-Reranker-4B/api"
+      }
     ]
   }
 }
