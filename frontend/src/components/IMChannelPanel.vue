@@ -234,12 +234,16 @@
         <section class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionKnowledge') }}</h4>
           <div class="form-item">
+            <label class="form-label" for="im-save-attachments">{{ $t('agentEditor.im.saveAttachments') }}</label>
+            <t-switch id="im-save-attachments" v-model="formData.save_attachments" :aria-label="$t('agentEditor.im.saveAttachments')" />
+            <p class="form-desc">{{ $t('agentEditor.im.fileKnowledgeBaseHint') }}</p>
+          </div>
+          <div v-if="formData.save_attachments" class="form-item">
             <label class="form-label">{{ $t('agentEditor.im.fileKnowledgeBase') }}</label>
             <t-select v-model="formData.knowledge_base_id"
               :placeholder="$t('agentEditor.im.fileKnowledgeBasePlaceholder')" clearable filterable>
               <t-option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id" :label="kb.name" />
             </t-select>
-            <p class="form-desc">{{ $t('agentEditor.im.fileKnowledgeBaseHint') }}</p>
           </div>
         </section>
       </div>
@@ -708,6 +712,10 @@ const drawerTitle = computed(() => {
 });
 
 function validateWizardStep(step: number): boolean {
+  if (step === 2 && formData.value.save_attachments && !normalizeOptionalString(formData.value.knowledge_base_id)) {
+    MessagePlugin.warning(t('agentEditor.im.fileKnowledgeBasePlaceholder'));
+    return false;
+  }
   if (step === 0 && !formData.value.target_agent_id) {
     MessagePlugin.warning(t('integrations.selectAgentHint'));
     return false;
@@ -749,6 +757,7 @@ const formData = ref({
   mode: 'websocket' as 'webhook' | 'websocket' | 'longpoll',
   output_mode: 'stream' as 'stream' | 'full',
   locale: '' as IMLocale,
+  save_attachments: false,
   session_mode: 'user' as 'user' | 'thread',
   knowledge_base_id: '',
   credentials: defaultCredentials(),
@@ -1005,6 +1014,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     mode: fullChannel.mode,
     output_mode: fullChannel.output_mode,
     locale: fullChannel.locale || '',
+    save_attachments: Boolean(fullChannel.knowledge_base_id),
     session_mode: fullChannel.session_mode || 'user',
     knowledge_base_id: fullChannel.knowledge_base_id || '',
     credentials: { ...fullChannel.credentials },
@@ -1030,6 +1040,7 @@ function resetForm() {
     mode: 'websocket',
     output_mode: 'stream',
     locale: '',
+    save_attachments: false,
     session_mode: 'user',
     knowledge_base_id: '',
     credentials: defaultCredentials(),
@@ -1037,6 +1048,11 @@ function resetForm() {
 }
 
 async function handleSave() {
+  if (!validateWizardStep(2)) {
+    wizardStep.value = 2;
+    return;
+  }
+  if (!formData.value.save_attachments) formData.value.knowledge_base_id = '';
   saving.value = true;
   try {
     // For WeChat, validate that credentials are bound
