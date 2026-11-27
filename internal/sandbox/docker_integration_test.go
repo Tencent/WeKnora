@@ -60,9 +60,6 @@ func newDockerIntegrationManager(t *testing.T, cfg *Config) *SessionBoundManager
 	if err != nil {
 		t.Fatalf("build docker client: %v", err)
 	}
-	// Integration tests clean up their own sessions. Do not reclaim unrelated
-	// idle containers when using a shared developer daemon.
-	client.sweeper = nil
 	probeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := client.Health(probeCtx); err != nil {
@@ -1163,7 +1160,6 @@ func TestDockerUserMachineSharesContainerAndIsolatesDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build docker client: %v", err)
 	}
-	remote.sweeper = nil
 	probeCtx, cancelProbe := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelProbe()
 	if err := remote.Health(probeCtx); err != nil {

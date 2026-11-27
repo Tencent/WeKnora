@@ -2,15 +2,104 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"net"
+	"net/http"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/moby/moby/api/types/container"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSkillMaintenanceReclaimsIdleDockerSandboxes(t *testing.T) {
+	sandbox.ClearDockerBackendEnabledOverride()
+	t.Setenv(sandbox.DockerBackendEnabledEnv, "true")
+	socket := filepath.Join(t.TempDir(), "engine.sock")
+	listener, err := net.Listen("unix", socket)
+	require.NoError(t, err)
+	now := time.Now()
+	const managed = "com.weknora.sandbox.managed"
+	const idleTTL = "com.weknora.sandbox.idle-ttl-seconds"
+	containers := []container.Summary{
+		{
+			ID: "idle-skill", Image: "weknora-skill/example", State: "running",
+			Created: now.Add(-time.Hour).Unix(), Labels: map[string]string{managed: "true", idleTTL: "1800"},
+		},
+		{
+			ID: "idle-legacy", State: "running",
+			Created: now.Add(-time.Hour).Unix(), Labels: map[string]string{managed: "true"},
+		},
+		{
+			ID: "recently-used", State: "running",
+			Created: now.Add(-time.Hour).Unix(), Labels: map[string]string{managed: "true", idleTTL: "1800"},
+		},
+		{
+			ID: "longer-ttl", State: "running",
+			Created: now.Add(-time.Hour).Unix(), Labels: map[string]string{managed: "true", idleTTL: "7200"},
+		},
+	}
+	var mu sync.Mutex
+	var removed []string
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/_ping"):
+			w.Header().Set("API-Version", "1.55")
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			if !strings.Contains(r.URL.Query().Get("filters"), managed+"=true") {
+				t.Error("Docker list is missing the managed-container filter")
+			}
+			if err := json.NewEncoder(w).Encode(containers); err != nil {
+				t.Error(err)
+			}
+		case r.Method == http.MethodHead && strings.HasSuffix(r.URL.Path, "/recently-used/archive"):
+			stat, err := json.Marshal(container.PathStat{Mtime: now.Add(-time.Minute)})
+			if err != nil {
+				t.Error(err)
+			}
+			w.Header().Set("X-Docker-Container-Path-Stat", base64.StdEncoding.EncodeToString(stat))
+		case r.Method == http.MethodHead && strings.HasSuffix(r.URL.Path, "/archive"):
+			w.WriteHeader(http.StatusNotFound)
+		case r.Method == http.MethodDelete:
+			mu.Lock()
+			removed = append(removed, filepath.Base(r.URL.Path))
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	})}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = server.Close() })
+
+	fx := newReaperFixture(t)
+	fx.configs.entity.SandboxType = "docker"
+	fx.configs.entity.Config = &types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker: &types.DockerSandboxConfig{
+			Host: "unix://" + socket, Image: "weknora/sandbox:base", IdleTTLSeconds: 1800,
+		},
+	}
+	// Run the registered maintenance jobs without waiting for the next
+	// five-minute tick. No sandbox request has used this daemon since startup.
+	require.NoError(t, fx.svc.Start(t.Context()))
+	fx.svc.Stop()
+	for _, entry := range fx.svc.cron.Entries() {
+		entry.WrappedJob.Run()
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.ElementsMatch(t, []string{"idle-skill", "idle-legacy"}, removed,
+		"background maintenance should reclaim expired Docker sandboxes without a sandbox request")
+}
 
 func TestReapStuckRunsFailsAbandonedInstalls(t *testing.T) {
 	fx := newReaperFixture(t)

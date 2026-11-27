@@ -169,9 +169,6 @@ func NewTenantSkillService(
 		localLocks:        newKeyedMutex(),
 		runCancels:        map[string]*skillRunCancel{},
 		bundleCache:       newSkillBundleArchiveCache(),
-		cron: cron.New(cron.WithSeconds(), cron.WithChain(
-			cron.Recover(cron.DefaultLogger),
-		)),
 	}
 }
 
