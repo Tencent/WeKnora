@@ -556,6 +556,8 @@ type KnowledgeCheckParams struct {
 	FileType string
 	FileSize int64
 	FileHash string
+	// FolderPath scopes file deduplication to the normalized target folder; empty means root.
+	FolderPath string
 	// When both are set, file deduplication is scoped to this source item.
 	DataSourceID string
 	ExternalID   string
