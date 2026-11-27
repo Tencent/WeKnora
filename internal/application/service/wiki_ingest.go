@@ -279,6 +279,11 @@ return proposed
 	// wikiIngestCleanupTimeout bounds detached tail cleanup after the asynq
 	// task context has been cancelled or hit its timeout.
 	wikiIngestCleanupTimeout = 10 * time.Second
+
+	// Bound one document's map work, the shared taxonomy plan, and each
+	// slug reduction separately, leaving time for other work and settlement
+	// before the queue's one-hour task deadline.
+	wikiIngestStageTimeout = 15 * time.Minute
 )
 
 // wikiFinalizeChange is a doc-level add/remove entry for the index-intro
@@ -367,9 +372,10 @@ type WikiPendingOp struct {
 	PageSlugs  []string `json:"page_slugs,omitempty"`
 	FolderIDs  []string `json:"folder_ids,omitempty"`
 
-	// dbID is set by peekPendingList from task_pending_ops.id. Zero in
-	// constructions made outside the queue (e.g. legacy tests).
-	dbID int64 `json:"-"`
+	// dbID is the canonical task_pending_ops row ID. duplicateDBIDs are
+	// older rows for this document that were claimed with it.
+	dbID           int64   `json:"-"`
+	duplicateDBIDs []int64 `json:"-"`
 }
 
 // wikiIngestService handles the LLM-powered wiki generation pipeline.
@@ -1234,9 +1240,9 @@ func (s *wikiIngestService) decodePendingRows(ctx context.Context, rows []*types
 	// Deduplicate by KnowledgeID, keeping only the *last* operation for
 	// each document. Optimizes out redundant sequences (e.g., upload
 	// then immediate delete: [ingest, retract] → [retract]). The
-	// non-canonical rows still get drained at trim time — their dbIDs
-	// are in peekedIDs.
-	seen := make(map[string]bool)
+	// non-canonical rows are retained for settlement along with the
+	// canonical row.
+	canonical := make(map[string]int)
 	reversedUnique := make([]WikiPendingOp, 0, len(all))
 	for i := len(all) - 1; i >= 0; i-- {
 		op := all[i]
@@ -1246,10 +1252,12 @@ func (s *wikiIngestService) decodePendingRows(ctx context.Context, rows []*types
 			reversedUnique = append(reversedUnique, op)
 			continue
 		}
-		if seen[op.KnowledgeID] {
+		if index, duplicate := canonical[op.KnowledgeID]; duplicate {
+			kept := &reversedUnique[index]
+			kept.duplicateDBIDs = append(kept.duplicateDBIDs, op.dbID)
 			continue
 		}
-		seen[op.KnowledgeID] = true
+		canonical[op.KnowledgeID] = len(reversedUnique)
 		reversedUnique = append(reversedUnique, op)
 	}
 
@@ -1397,16 +1405,14 @@ type docIngestResult struct {
 	// MapStats are the per-doc map-phase metrics captured at the moment
 	// mapOneDocument finishes. Surfaced into the postprocess.wiki span's
 	// output so the trace viewer can show "what the map phase produced"
-	// even though the span itself stays open until the batch's reduce +
-	// cleanup phases complete (so the user-visible duration covers the
-	// whole pipeline for this doc, not just LLM extraction).
+	// The span stays open until this document's reductions and durable
+	// finalize handoff complete.
 	MapStats types.JSONMap
 	// WikiSpan is the postprocess.wiki subspan opened at the start of
 	// mapOneDocument. ProcessWikiIngest holds it open across the reduce
 	// + cleanup phases and closes it once this doc's pages have all
-	// been materialised — see the EndSpan call near the end of
-	// ProcessWikiIngest. nil when no parent attempt was found, in which
-	// case the tracker helpers are all no-ops anyway.
+	// been materialised and handed off. Nil when no parent attempt was
+	// found.
 	WikiSpan *Span
 }
 
@@ -2717,6 +2723,9 @@ func (s *wikiIngestService) generateWithTemplateResult(
 	promptTpl string,
 	data map[string]string,
 ) (wikiTemplateResult, error) {
+	if err := ctx.Err(); err != nil {
+		return wikiTemplateResult{}, err
+	}
 	tmpl, err := template.New("wiki").Parse(promptTpl)
 	if err != nil {
 		return wikiTemplateResult{}, fmt.Errorf("parse template: %w", err)

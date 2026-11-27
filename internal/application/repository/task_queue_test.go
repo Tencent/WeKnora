@@ -1039,6 +1039,61 @@ func TestTaskPendingOps_DrainUnclaimedAndReleaseRollsBackOnReleaseFailure(t *tes
 	assert.Equal(t, int64(1), count)
 }
 
+func TestTaskPendingOps_SettleDocumentOpRollsBackAndReleasesOnlyOnce(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var db *gorm.DB
+			if backend == "postgres" {
+				db, _ = finalizeAttemptPostgresDB(t)
+			} else {
+				db = setupTaskQueueTestDB(t)
+				require.NoError(t, db.AutoMigrate(&types.Knowledge{}, &types.KnowledgeProcessingSpan{}))
+			}
+			require.NoError(t, db.AutoMigrate(&types.TaskPendingOp{}))
+			repo, knowledgeRepo := NewTaskPendingOpsRepository(db), NewKnowledgeRepository(db)
+			settler := repo.(interfaces.TaskPendingOpsDocumentSettler)
+			ctx := context.Background()
+			kid := seedFinalizerKnowledge(t, db)
+			ok, err := knowledgeRepo.SetFinalizing(ctx, kid, 2)
+			require.NoError(t, err)
+			require.True(t, ok)
+			seedFinalizerSpan(t, db, kid, 2)
+
+			duplicate := wikiLane("kb-1", "ingest", kid)
+			source := wikiLane("kb-1", "ingest", kid)
+			stale := wikiLane("kb-1", "ingest", kid)
+			for _, op := range []*types.TaskPendingOp{duplicate, source, stale} {
+				require.NoError(t, repo.Enqueue(ctx, op))
+			}
+
+			require.NoError(t, settler.SettleDocumentOp(ctx, kid, 1, stale.ID, nil))
+			require.NoError(t, db.Exec(
+				"ALTER TABLE knowledges RENAME COLUMN processed_at TO hidden_processed_at",
+			).Error)
+			settle := func() error {
+				return settler.SettleDocumentOp(ctx, kid, 2, source.ID, []int64{duplicate.ID})
+			}
+			require.ErrorContains(t, settle(), "processed_at")
+			count, err := repo.PendingCount(ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1")
+			require.NoError(t, err)
+			require.EqualValues(t, 2, count)
+			require.NoError(t, db.Exec(
+				"ALTER TABLE knowledges RENAME COLUMN hidden_processed_at TO processed_at",
+			).Error)
+			require.NoError(t, settle())
+			require.NoError(t, settle())
+
+			count, err = repo.PendingCount(ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1")
+			require.NoError(t, err)
+			require.Zero(t, count)
+			doc, err := knowledgeRepo.GetKnowledgeByID(ctx, 1, kid)
+			require.NoError(t, err)
+			require.Equal(t, types.ParseStatusFinalizing, doc.ParseStatus)
+			require.Equal(t, 1, doc.PendingSubtasksCount)
+		})
+	}
+}
+
 func TestTaskPendingOps_DiscardUnclaimedPreservesLiveKeys(t *testing.T) {
 	db := setupTaskQueueTestDB(t)
 	repo := NewTaskPendingOpsRepository(db)
