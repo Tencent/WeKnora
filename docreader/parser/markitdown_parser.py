@@ -10,6 +10,7 @@ from docreader.parser.base_parser import BaseParser
 from docreader.parser.chain_parser import PipelineParser
 from docreader.parser.concurrency import parser_worker_limit
 from docreader.parser.csv_converter import EscapedCSVConverter
+from docreader.parser.docx_converter import EscapedDocxConverter
 from docreader.parser.docx_merge import fill_vertical_merged_cells_docx
 from docreader.parser.markdown_parser import MarkdownParser
 from docreader.parser.ppt_convert import normalize_ppt_bytes
@@ -41,6 +42,8 @@ class StdMarkitdownParser(BaseParser):
         ft = self.file_type.lower().lstrip(".")
         if ft == "csv":
             self.markitdown.register_converter(EscapedCSVConverter())
+        elif ft == "docx":
+            self.markitdown.register_converter(EscapedDocxConverter())
         elif ft in ("ppt", "pptx"):
             self.markitdown.register_converter(EscapedPptxConverter())
 
