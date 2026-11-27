@@ -67,16 +67,19 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 		}
 	}
 
-	// GORM substitutes default:true for a zero bool even with Select("*").
-	// A non-nil pointer makes both true and false explicit on insert, while
+	// GORM substitutes default values (such as default:true for a zero bool,
+	// and default:1 for a zero int/flags) even with Select("*").
+	// Non-nil pointers make both true/false and non-default flags explicit on insert, while
 	// embedding the original chunk keeps generated seq_ids and timestamps on it.
 	type chunkInsert struct {
 		*types.Chunk
 		IsEnabled *bool
+		Flags     *types.ChunkFlags
 	}
 	rows := make([]chunkInsert, len(chunks))
 	for i, chunk := range chunks {
-		rows[i] = chunkInsert{Chunk: chunk, IsEnabled: &chunk.IsEnabled}
+		flags := chunk.Flags
+		rows[i] = chunkInsert{Chunk: chunk, IsEnabled: &chunk.IsEnabled, Flags: &flags}
 	}
 
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

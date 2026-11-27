@@ -34,7 +34,7 @@ func TestFAQImportPreservesEnabledStateInStorageAndIndex(t *testing.T) {
 				},
 				{
 					StandardQuestion: "disabled FAQ", Answers: []string{"disabled answer"},
-					TagID: 11, IsEnabled: &disabled,
+					TagID: 11, IsEnabled: &disabled, IsRecommended: &disabled,
 				},
 				{StandardQuestion: "default FAQ", Answers: []string{"default answer"}, TagID: 11},
 			}
@@ -53,14 +53,23 @@ func TestFAQImportPreservesEnabledStateInStorageAndIndex(t *testing.T) {
 				indexedByChunkID[info.ChunkID] = info
 			}
 			require.Len(t, indexedByChunkID, len(saved))
-			for i, wantEnabled := range []bool{true, false, true} {
+			for i, want := range []struct {
+				enabled     bool
+				recommended bool
+			}{
+				{enabled: true, recommended: true},
+				{enabled: false, recommended: false},
+				{enabled: true, recommended: true},
+			} {
 				meta, err := saved[i].FAQMetadata()
 				require.NoError(t, err)
 				require.Equal(t, entries[i].StandardQuestion, meta.StandardQuestion)
-				require.Equal(t, wantEnabled, saved[i].IsEnabled)
+				require.Equal(t, want.enabled, saved[i].IsEnabled)
+				require.Equal(t, want.recommended, saved[i].Flags.HasFlag(types.ChunkFlagRecommended))
 				info, ok := indexedByChunkID[saved[i].ID]
 				require.True(t, ok, "chunk %s must be indexed", saved[i].ID)
-				require.Equal(t, wantEnabled, info.IsEnabled)
+				require.Equal(t, want.enabled, info.IsEnabled)
+				require.Equal(t, want.recommended, info.IsRecommended)
 				require.Equal(t, int(types.ChunkStatusIndexed), saved[i].Status)
 				require.Equal(t, saved[i].SeqID, progress.SuccessEntries[i].SeqID)
 			}
