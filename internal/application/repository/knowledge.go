@@ -362,6 +362,11 @@ func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *ty
 	if knowledge.CustomMetadata == nil {
 		omit = append(append([]string{}, omitFieldsOnUpdate...), "custom_metadata")
 	}
+	// Uploaded filenames are written by rename and source replacement. A
+	// processing save may hold a snapshot from before either operation.
+	if knowledge.Type == "file" {
+		omit = append(append([]string{}, omit...), "FileName")
+	}
 	err := r.db.WithContext(ctx).Omit(omit...).Save(knowledge).Error
 	return err
 }
@@ -631,6 +636,18 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 		}
 	}
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
+}
+
+// UpdateKnowledgeRenameColumns commits a partial update against the source and
+// parse status that were validated for the rename.
+func (r *knowledgeRepository) UpdateKnowledgeRenameColumns(
+	ctx context.Context, current *types.Knowledge, values map[string]interface{},
+) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id = ? AND file_name = ? AND parse_status = ?",
+			current.TenantID, current.KnowledgeBaseID, current.ID, current.FileName, current.ParseStatus).
+		Updates(values)
+	return result.RowsAffected > 0, result.Error
 }
 
 // UpdateActiveDeletingKnowledgeColumns only touches rows that are still visible

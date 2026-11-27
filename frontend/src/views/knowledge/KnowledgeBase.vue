@@ -28,6 +28,7 @@ import {
   updateKnowledgeTagBatch,
   createKnowledgeFromURL,
   reparseKnowledge,
+  renameKnowledgeFile,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
   batchDownloadKnowledge,
@@ -2432,13 +2433,53 @@ const downloadKnowledge = async (item: KnowledgeCard) => {
   }
 };
 
+const renameTarget = ref<{ id: string; kbId: string; originalName: string; extension: string } | null>(null);
+const renameDocumentName = ref('');
+const renamingDocument = ref(false);
+
+function openRenameDocument(item: KnowledgeCard) {
+  const originalName = item.original_file_name;
+  if (!canEdit.value || item.type !== 'file' || !originalName || isParseInFlight(item.parse_status)) return;
+  const dot = originalName.lastIndexOf('.');
+  const extension = dot >= 0 ? originalName.slice(dot) : '';
+  renameTarget.value = { id: item.id, kbId: kbId.value, originalName, extension };
+  renameDocumentName.value = dot >= 0 ? originalName.slice(0, dot) : originalName;
+}
+
+function closeRenameDocument() {
+  if (!renamingDocument.value) renameTarget.value = null;
+}
+
+async function submitRenameDocument() {
+  const target = renameTarget.value;
+  const stem = renameDocumentName.value.trim();
+  if (!target || !stem || renamingDocument.value) return;
+  const fileName = stem + target.extension;
+  if (fileName === target.originalName) {
+    closeRenameDocument();
+    return;
+  }
+  renamingDocument.value = true;
+  try {
+    await renameKnowledgeFile(target.id, fileName);
+    renameTarget.value = null;
+    MessagePlugin.success(t('common.saveSuccess'));
+    if (isCurrentKb(target.kbId)) void loadKnowledgeFiles(target.kbId);
+  } catch {
+    MessagePlugin.error(t('common.saveFailed'));
+  } finally {
+    renamingDocument.value = false;
+  }
+}
+
 // Bridge card-view actions back to existing per-card handlers.
 const handleCardAction = (
-  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'download' | 'rename' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
   if (action === 'download') return downloadKnowledge(item);
+  if (action === 'rename') return openRenameDocument(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') {
     if (isParseInFlight(item.parse_status)) return onReparseMenuClick(idx, item);
@@ -2453,11 +2494,12 @@ const handleCardAction = (
 
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
+  action: 'download' | 'rename' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
   if (action === 'download') return downloadKnowledge(item);
+  if (action === 'rename') return openRenameDocument(item);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
   if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
@@ -2504,6 +2546,18 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 </script>
 
 <template>
+  <t-dialog
+    :visible="renameTarget !== null"
+    :header="t('knowledgeBase.folderTree.rename')"
+    :confirm-btn="{ content: t('common.confirm'), loading: renamingDocument, disabled: !renameDocumentName.trim() }"
+    :cancel-btn="{ content: t('common.cancel'), disabled: renamingDocument }"
+    @confirm="submitRenameDocument"
+    @cancel="closeRenameDocument"
+    @close="closeRenameDocument">
+    <t-input v-model="renameDocumentName" :disabled="renamingDocument"
+      :aria-label="t('knowledgeBase.sort.fileName')" :suffix="renameTarget?.extension"
+      @enter="submitRenameDocument" />
+  </t-dialog>
   <template v-if="!isFAQ">
     <div class="knowledge-layout">
       <div class="document-header">

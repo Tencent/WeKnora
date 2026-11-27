@@ -2361,6 +2361,8 @@ func latestActivity(times ...time.Time) time.Time {
 type UpdateKnowledgeRequest struct {
 	// New title; omit to keep it.
 	Title *string `json:"title" extensions:"x-agent"`
+	// New filename for an uploaded document, including its existing extension.
+	FileName *string `json:"file_name"`
 	// New summary; omit to keep it, empty clears it.
 	Description    *string         `json:"description" extensions:"x-agent"`
 	CustomMetadata json.RawMessage `json:"custom_metadata"`
@@ -2368,7 +2370,7 @@ type UpdateKnowledgeRequest struct {
 
 // UpdateKnowledge godoc
 // @Summary      更新知识
-// @Description  部分更新知识条目（标题/描述/自定义元数据）；未传字段保持不变，显式传空 description 可清空摘要
+// @Description  部分更新知识条目（标题/文件名/描述/自定义元数据）；未传字段保持不变，显式传空 description 可清空摘要
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
@@ -2404,6 +2406,10 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 		return
 	}
 	knowledge := types.Knowledge{ID: id, CustomMetadata: types.JSON(req.CustomMetadata)}
+	if req.FileName != nil {
+		knowledge.FileName = *req.FileName
+		knowledge.FileNameSpecified = true
+	}
 	if req.Title != nil {
 		knowledge.Title = *req.Title
 	}
