@@ -44,6 +44,9 @@ WeKnora-lite
 /build/
 /artifacts/browserskill/
 cmd/desktop/build/bin/
+/third_party/anydoc-go/target/
+/third_party/anydoc-go/lib/
+/third_party/anydoc-go/patched-anydoc/
 
 # 本地数据 / 模型文件
 /models/
