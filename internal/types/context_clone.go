@@ -131,10 +131,6 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// immediately around a single write by a caller that knows the removal is
 	// deliberate, so it means nothing on any other context.
 	WikiShrinkAllowedContextKey: false,
-	// The parser engine resolved from one agent's ChatParserEngineRules for
-	// one attachment's file type. Read by the attachment processor on the same
-	// context that set it, and meaningless for anything else.
-	ChatParserEngineContextKey: false,
 	// The authenticated embed channel. Every reader takes it straight off the
 	// request context inside the embed handler that authenticated it; nothing
 	// downstream of a detach reads it.
