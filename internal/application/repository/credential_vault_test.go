@@ -14,7 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-func newCredentialVaultTestRepo(t *testing.T) interfaces.CredentialVaultRepository {
+func newCredentialVaultTestRepo(t *testing.T) (interfaces.CredentialVaultRepository, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -26,7 +26,7 @@ func newCredentialVaultTestRepo(t *testing.T) interfaces.CredentialVaultReposito
 	// AutoMigrate cannot express the partial unique index; match the migration.
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_credential_vault_items_owner_site_user
 		ON credential_vault_items(tenant_id, user_id, site, username) WHERE deleted_at IS NULL`).Error)
-	return NewCredentialVaultRepository(db)
+	return NewCredentialVaultRepository(db), db
 }
 
 func vaultItem(id, user, site, username string) *types.CredentialVaultItem {
@@ -40,7 +40,7 @@ func vaultItem(id, user, site, username string) *types.CredentialVaultItem {
 
 func TestCredentialVaultRepositoryLifecycle(t *testing.T) {
 	ctx := context.Background()
-	repo := newCredentialVaultTestRepo(t)
+	repo, _ := newCredentialVaultTestRepo(t)
 
 	require.NoError(t, repo.Create(ctx, vaultItem("i1", "web_user:a", "github.com", "alice")))
 	require.NoError(t, repo.Create(ctx, vaultItem("i2", "web_user:a", "gitlab.com", "alice")))
@@ -95,4 +95,35 @@ func TestCredentialVaultRepositoryLifecycle(t *testing.T) {
 	assert.True(t, ok)
 	require.NoError(t, repo.Create(ctx, vaultItem("i5", "web_user:a", "github.com", "alice")),
 		"a deleted row frees its site and username")
+}
+
+func TestCredentialVaultRepositoryDeleteRemovesTheRow(t *testing.T) {
+	ctx := context.Background()
+	repo, db := newCredentialVaultTestRepo(t)
+	require.NoError(t, repo.Create(ctx, vaultItem("i1", "web_user:a", "github.com", "alice")))
+
+	ok, err := repo.Delete(ctx, 1, "web_user:a", "i1")
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	var left int64
+	require.NoError(t, db.Unscoped().Model(&types.CredentialVaultItem{}).Count(&left).Error)
+	assert.Zero(t, left, "the ciphertext must not outlive the saved login")
+	got, err := repo.Get(ctx, 1, "web_user:a", "i1")
+	require.NoError(t, err)
+	assert.Nil(t, got)
+	ok, err = repo.Delete(ctx, 1, "web_user:a", "i1")
+	require.NoError(t, err)
+	assert.False(t, ok, "a second delete is still not found")
+
+	// A row soft-deleted before deletes became physical stays out of reach.
+	require.NoError(t, repo.Create(ctx, vaultItem("i2", "web_user:a", "gitlab.com", "alice")))
+	require.NoError(t, db.Model(&types.CredentialVaultItem{}).Where("id = ?", "i2").
+		Update("deleted_at", time.Now()).Error)
+	got, err = repo.Get(ctx, 1, "web_user:a", "i2")
+	require.NoError(t, err)
+	assert.Nil(t, got)
+	ok, err = repo.Delete(ctx, 1, "web_user:a", "i2")
+	require.NoError(t, err)
+	assert.False(t, ok)
 }
