@@ -51,6 +51,14 @@ curl -X POST $BASE/api/v1/sessions -H "X-API-Key: $API_KEY" \
 | `source` | string | 否 | 来源过滤（web/embed/api/feishu/wechat/slack/...） |
 | `agent_id` | string | 否 | 按 Agent 过滤（IM 会话） |
 
+`source=api` 是空间管理员使用的汇总视图，包含空间级 API Key 及其外部用户创建的会话。平台级 Key 通过 `X-Tenant-ID` 选择空间时仍保有自己的会话归属，它创建的会话不在这个视图中。要列出平台级 Key 自己的会话，使用创建会话时的 Key 和目标空间，并省略 `source`：
+
+```bash
+curl "$BASE/api/v1/sessions?page=1" \
+  -H "X-API-Key: $PLATFORM_API_KEY" \
+  -H "X-Tenant-ID: $TENANT_ID"
+```
+
 响应：200 `{"success":true,"data":[SessionListItem],"total","page","page_size"}`
 
 ```bash
