@@ -27802,6 +27802,10 @@
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AssistantAccessLevel"
                         }
                     ]
+                },
+                "max_iterations": {
+                    "description": "MaxIterations caps the assistant's ReAct rounds. Zero or a negative\nvalue uses DefaultAssistantMaxIterations; values above\nMaxAssistantMaxIterations are bounded to that ceiling.",
+                    "type": "integer"
                 }
             }
         },
