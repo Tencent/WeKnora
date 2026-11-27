@@ -104,7 +104,7 @@ func runDownload(ctx context.Context, opts *DownloadOptions, fopts *cmdutil.Form
 	if err != nil {
 		return err
 	}
-	if dest == "-" {
+	if opts.Output == "-" {
 		// Raw bytes go to stdout — suppress any JSON envelope regardless of
 		// --format json because both can't occupy stdout simultaneously.
 		_, err := io.Copy(iostreams.IO.Out, body)
@@ -119,7 +119,7 @@ func runDownload(ctx context.Context, opts *DownloadOptions, fopts *cmdutil.Form
 	return streamToFile(body, dest, fopts)
 }
 
-// resolveDownloadDest returns the final destination ("-" for stdout, an
+// resolveDownloadDest returns the requested destination (an
 // absolute or relative path otherwise) after applying the --output flag
 // and sanitizing the server-suggested name. A server that returns a path-
 // like filename (..\, /etc/foo) is rejected - only the basename is
