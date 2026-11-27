@@ -392,7 +392,7 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 
 			// Execute knowledge QA pipeline
 			logger.Infof(ctx, "Running knowledge QA for question: %s", qaPair.Question)
-			err = e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag"])
+			err := e.sessionService.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag"])
 			if err != nil {
 				logger.Errorf(ctx, "Failed to process question %d: %v", i, err)
 				return err
@@ -410,12 +410,13 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 			// Update progress metrics
 			mu.Lock()
 			finished += 1
+			completed := finished
 			metricResult := metricHook.MetricResult()
 			mu.Unlock()
 			e.evaluationMemoryStorage.update(detail.Task.ID, func(params *types.EvaluationDetail) {
 				params.Metric = metricResult
-				params.Task.Finished = finished
-				logger.Infof(ctx, "Updated task progress: %d/%d completed", finished, params.Task.Total)
+				params.Task.Finished = completed
+				logger.Infof(ctx, "Updated task progress: %d/%d completed", completed, params.Task.Total)
 			})
 			return nil
 		})
