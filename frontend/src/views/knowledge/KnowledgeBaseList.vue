@@ -1154,30 +1154,43 @@ const fetchList = (force = false) => {
   })
 }
 
+let spaceKbsRequestSeq = 0
+
 // 选中空间时请求该空间内全部知识库（含我共享的）
 watch(spaceSelection, (val) => {
+  const requestSeq = ++spaceKbsRequestSeq
   // Stale URL guard: an older "协作" view used scope=shared; that view
   // was removed, so normalize back to "all" instead of letting the
   // value fall through to the per-space fetch branch (which would 404
   // on the string "shared").
   if (val === 'shared') {
+    spaceKbsList.value = []
+    spaceKbsLoading.value = false
     spaceSelection.value = 'all'
     return
   }
   if (val === 'all' || val === 'mine' || val === 'favorites' || val === 'recents' || !val) {
     spaceKbsList.value = []
+    spaceKbsLoading.value = false
     return
   }
+  spaceKbsList.value = []
   spaceKbsLoading.value = true
   listOrganizationSharedKnowledgeBases(val).then((res) => {
+    if (requestSeq !== spaceKbsRequestSeq) return
     if (res.success && res.data) {
       spaceKbsList.value = res.data
       spaceCountByOrg.value = { ...spaceCountByOrg.value, [val]: res.data.length }
     } else {
       spaceKbsList.value = []
     }
+  }).catch(() => {
+    if (requestSeq !== spaceKbsRequestSeq) return
+    spaceKbsList.value = []
   }).finally(() => {
-    spaceKbsLoading.value = false
+    if (requestSeq === spaceKbsRequestSeq) {
+      spaceKbsLoading.value = false
+    }
   })
 }, { immediate: true })
 
@@ -1217,6 +1230,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  spaceKbsRequestSeq++
   window.removeEventListener('knowledgeFileUploaded', handleUploadFinishedEvent as EventListener)
 
   if (uploadRefreshTimer) {

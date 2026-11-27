@@ -1,9 +1,43 @@
 package notion
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/yuin/goldmark"
 )
+
+func TestBlocksToMarkdownPreservesURLWithUnpairedParenthesis(t *testing.T) {
+	const target = "https://example.com/reports/(draft.pdf"
+	external := map[string]interface{}{
+		"type": "external", "external": map[string]string{"url": target},
+	}
+	blocks := []notionBlock{
+		makeBlock(t, "paragraph", map[string]interface{}{
+			"rich_text": []notionRichText{{Type: "text", PlainText: "Report", Href: target}},
+		}),
+		makeBlock(t, "image", external),
+		makeBlock(t, "file", external),
+		makeBlock(t, "bookmark", map[string]interface{}{"url": target}),
+		makeBlock(t, "embed", map[string]interface{}{"url": target}),
+	}
+	md, attachments := BlocksToMarkdown(blocks)
+	var rendered bytes.Buffer
+	if err := goldmark.Convert([]byte(md), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(rendered.String(), `href="`+target+`"`); got != 4 {
+		t.Errorf("expected four intact links, got %d in %s", got, rendered.String())
+	}
+	if !strings.Contains(rendered.String(), `src="`+target+`"`) {
+		t.Errorf("expected an intact image URL in %s", rendered.String())
+	}
+	if len(attachments) != 2 || attachments[0].URL != target || attachments[1].URL != target {
+		t.Errorf("expected two unchanged attachment URLs, got %+v", attachments)
+	}
+}
 
 func TestRenderRichText(t *testing.T) {
 	tests := []struct {

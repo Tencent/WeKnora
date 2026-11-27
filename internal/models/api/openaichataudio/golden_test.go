@@ -72,7 +72,7 @@ func TestDataURIMediaTypeFollowsTheExtension(t *testing.T) {
 
 	// No audio type can be named for it, and the references show one.
 	_, err = DataURI([]byte("x"), "noext")
-	assert.Error(t, err)
+	require.ErrorAs(t, err, new(*api.RejectedError))
 }
 
 // Both references cap the string as sent, so the data: prefix counts. A file

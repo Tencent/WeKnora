@@ -1,3 +1,4 @@
+import { documentSourceUrl } from './documentSourceUrl'
 import type { SourceLocator } from './sourceLocator'
 
 export type ReferenceItemKind = 'web' | 'document' | 'tool'
@@ -26,6 +27,7 @@ export type ReferenceListItem = {
   kind: ReferenceItemKind
   index: number
   title: string
+  sourceUrl?: string
   fileName?: string
   url?: string
   domain?: string
@@ -172,6 +174,7 @@ function buildWebItem(item: KnowledgeReferenceLike, index: number): ReferenceLis
 function buildDocumentItem(item: KnowledgeReferenceLike, index: number): ReferenceListItem {
   const chunkId = item.id !== item.knowledge_id ? item.id : item.chunk_ids?.[0]
   const title = item.knowledge_title || item.knowledge_filename || item.knowledge_id || 'Document'
+  const sourceUrl = documentSourceUrl(item)
   const documentKey =
     item.knowledge_id ||
     [item.knowledge_base_id, item.knowledge_title || item.knowledge_filename].filter(Boolean).join(':') ||
@@ -187,6 +190,7 @@ function buildDocumentItem(item: KnowledgeReferenceLike, index: number): Referen
     sourceChunkId: item.source_chunk_id,
     knowledgeId: item.knowledge_id,
     knowledgeBaseId: item.knowledge_base_id,
+    ...(sourceUrl ? { sourceUrl } : {}),
     snippet: truncateText(item.content || '', 220) || undefined,
     content: item.content,
   }

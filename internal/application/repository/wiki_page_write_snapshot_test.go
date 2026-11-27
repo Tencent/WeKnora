@@ -69,7 +69,7 @@ func createWikiSnapshotPage(t *testing.T, db *gorm.DB) *types.WikiPage {
 	page.InLinks = types.StringArray{"incoming-original"}
 	page.OutLinks = types.StringArray{"outgoing-original"}
 	page.PageMetadata = types.JSON(`{"tag":"original"}`)
-	require.NoError(t, repo.Create(context.Background(), page))
+	require.NoError(t, db.Create(page).Error)
 	stored, err := repo.GetByID(context.Background(), page.ID)
 	require.NoError(t, err)
 	return stored

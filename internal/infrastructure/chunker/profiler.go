@@ -96,14 +96,13 @@ func ProfileDocument(text string) *DocProfile {
 	p.TotalChars = len([]rune(text))
 	p.FormFeedCount = strings.Count(text, "\f")
 
-	lines := strings.Split(text, "\n")
-	p.TotalLines = len(lines)
-
-	// First pass: per-line markers and length stats
-	var lengths []float64
+	// Welford's online population variance avoids retaining every line length.
+	var lineCount int
+	var squaredDeviations float64
 	var fence markdownFence
 	codeChars := 0
-	for _, line := range lines {
+	for line := range strings.SplitSeq(text, "\n") {
+		p.TotalLines++
 		trimmed := strings.TrimSpace(line)
 
 		if code, delimiter := fence.consume(line); code {
@@ -114,8 +113,11 @@ func ProfileDocument(text string) *DocProfile {
 			continue
 		}
 
-		runeLen := len([]rune(line))
-		lengths = append(lengths, float64(runeLen))
+		length := float64(len([]rune(line)))
+		lineCount++
+		delta := length - p.AvgLineLen
+		p.AvgLineLen += delta / float64(lineCount)
+		squaredDeviations += delta * (length - p.AvgLineLen)
 
 		if matchHeading(line, &p.MdHeadingCounts) {
 			p.MdHeadingTotal++
@@ -147,19 +149,8 @@ func ProfileDocument(text string) *DocProfile {
 		}
 	}
 
-	if len(lengths) > 0 {
-		var sum float64
-		for _, l := range lengths {
-			sum += l
-		}
-		p.AvgLineLen = sum / float64(len(lengths))
-		var variance float64
-		for _, l := range lengths {
-			d := l - p.AvgLineLen
-			variance += d * d
-		}
-		variance /= float64(len(lengths))
-		p.StdLineLen = math.Sqrt(variance)
+	if lineCount > 0 {
+		p.StdLineLen = math.Sqrt(squaredDeviations / float64(lineCount))
 	}
 
 	if p.TotalChars > 0 {

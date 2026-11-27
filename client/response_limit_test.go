@@ -1,12 +1,40 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestListKnowledgeBasesRejectsMalformedResponseSuffix(t *testing.T) {
+	for _, tc := range []struct {
+		name, suffix string
+		wantError    bool
+	}{
+		{"whitespace", " \n\r\t", false},
+		{"garbage", " broken", true},
+		{"second value", ` {"success":false}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"success":true,"data":[{"id":"kb-1"}]}`+tc.suffix)
+			}))
+			defer server.Close()
+			bases, err := NewClient(server.URL).ListKnowledgeBases(context.Background())
+			if (err != nil) != tc.wantError {
+				t.Fatalf("ListKnowledgeBases() error = %v, want error = %t", err, tc.wantError)
+			}
+			if !tc.wantError && (len(bases) != 1 || bases[0].ID != "kb-1") {
+				t.Fatalf("ListKnowledgeBases() = %v, want kb-1", bases)
+			}
+		})
+	}
+}
 
 // fillerReader streams n bytes without allocating them, so a test can hand the
 // SDK a response body far larger than the cap without spending memory itself.

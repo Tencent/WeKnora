@@ -93,3 +93,28 @@ func TestWikiHTTPModelCancellationAndRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestWikiRetriesIncompleteHTTPResponse(t *testing.T) {
+	withSSRFWhitelist(t, "127.0.0.1")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if calls.Add(1) == 1 {
+			_, _ = io.WriteString(w, `{"choices":[`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"recovered"},"finish_reason":"stop"}]}`)
+	}))
+	t.Cleanup(server.Close)
+	model := openaicompletions.New(openaicompletions.Config{
+		Endpoint: api.Endpoint{
+			BaseURL: server.URL, Model: "fixture", ModelID: "fixture", Client: server.Client(),
+		},
+		Settings: api.DefaultOpenAICompletions(),
+	})
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	content, err := (&wikiIngestService{}).generateWithTemplate(ctx, model, "test incomplete response", nil)
+	require.NoError(t, err)
+	require.Equal(t, "recovered", content)
+	require.EqualValues(t, 2, calls.Load())
+}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,7 +32,7 @@ func TestResolveProcessConfig_OverridesChunkSize(t *testing.T) {
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50},
 	}
 	overrides := &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 2048},
+		ChunkingConfig: &types.ChunkingConfigOverride{ChunkingConfig: types.ChunkingConfig{ChunkSize: 2048}},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
 	require.Equal(t, 2048, eff.ChunkingConfig.ChunkSize)
@@ -45,7 +47,9 @@ func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
 	}
 	effOff := ResolveProcessConfig(kbOn, &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 512, EnableParentChild: false},
+		ChunkingConfig: &types.ChunkingConfigOverride{
+			ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: false},
+		},
 	})
 	require.False(t, effOff.ChunkingConfig.EnableParentChild)
 
@@ -54,7 +58,9 @@ func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: false},
 	}
 	effOn := ResolveProcessConfig(kbOff, &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
+		ChunkingConfig: &types.ChunkingConfigOverride{
+			ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
+		},
 	})
 	require.True(t, effOn.ChunkingConfig.EnableParentChild)
 }
@@ -142,7 +148,9 @@ func TestBuildSplitterConfigFromChunking_UsesEffectiveChunkingConfig(t *testing.
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50, Strategy: "token"},
 	}
 	overrides := &types.KnowledgeProcessOverrides{
-		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 1500, ChunkOverlap: 120, Strategy: "character"},
+		ChunkingConfig: &types.ChunkingConfigOverride{
+			ChunkingConfig: types.ChunkingConfig{ChunkSize: 1500, ChunkOverlap: 120, Strategy: "character"},
+		},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
 	cfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
@@ -279,6 +287,70 @@ func TestResolveProcessConfig_ParserEngineRulesReplaced(t *testing.T) {
 	require.Equal(t, "custom", eff.ChunkingConfig.ParserEngineRules[0].Engine)
 }
 
+func TestProcessParserRuleOverridesSurvivePersistence(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{ChunkingConfig: types.ChunkingConfig{
+		ParserEngineRules: []types.ParserEngineRule{
+			{FileTypes: []string{"pdf"}, Engine: "kb-pdf-parser"},
+			{FileTypes: []string{"pptx"}, Engine: "kb-pptx-parser"},
+		},
+	}}
+	for _, tc := range []struct {
+		name     string
+		request  string
+		pdf      string
+		pptx     string
+		ruleJSON string
+	}{
+		{
+			name: "omitted inherits knowledge base", request: `{"summary_enabled":false}`,
+			pdf: "kb-pdf-parser", pptx: "kb-pptx-parser",
+		},
+		{
+			name: "null inherits knowledge base", request: `{"parser_engine_rules":null}`,
+			pdf: "kb-pdf-parser", pptx: "kb-pptx-parser",
+		},
+		{
+			name: "empty clears all knowledge base rules", request: `{"parser_engine_rules":[]}`,
+			pdf: types.DefaultParserEngine("pdf"), pptx: types.DefaultParserEngine("pptx"),
+			ruleJSON: `"parser_engine_rules":[]`,
+		},
+		{
+			name:    "nonempty replaces knowledge base rules",
+			request: `{"parser_engine_rules":[{"file_types":[".PDF"],"engine":"selected"}]}`,
+			pdf:     "selected", pptx: types.DefaultParserEngine("pptx"),
+			ruleJSON: `"parser_engine_rules":[{`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var overrides types.KnowledgeProcessOverrides
+			require.NoError(t, json.Unmarshal([]byte(tc.request), &overrides))
+
+			knowledge := &types.Knowledge{}
+			initial, err := ApplyKnowledgeProcessOverrides(
+				context.Background(), kb, knowledge, &overrides, []string{"pdf", "pptx"}, nil,
+			)
+			require.NoError(t, err)
+			meta := string(knowledge.Metadata)
+			if tc.ruleJSON == "" {
+				assert.NotContains(t, meta, `"parser_engine_rules"`)
+			} else {
+				assert.Contains(t, meta, tc.ruleJSON)
+			}
+
+			stored, err := knowledge.ProcessOverrides()
+			require.NoError(t, err)
+			reloaded := ResolveProcessConfig(kb, stored)
+			for _, config := range []types.EffectiveProcessConfig{initial, reloaded} {
+				assert.Equal(t, tc.pdf, config.ChunkingConfig.ResolveParserEngine("pdf"))
+				assert.Equal(t, tc.pptx, config.ChunkingConfig.ResolveParserEngine("pptx"))
+			}
+			assert.Equal(t, "kb-pdf-parser", kb.ChunkingConfig.ResolveParserEngine("pdf"))
+		})
+	}
+}
+
 func TestResolveProcessConfig_EnableMultimodelOverride(t *testing.T) {
 	t.Parallel()
 
@@ -328,7 +400,7 @@ func TestResolveProcessConfig_PreservesKnowledgeBasePromptInstructions(t *testin
 		ExtractConfig: &types.ExtractConfig{Enabled: true, CustomInstructions: "contract entities"},
 	}
 	overrides := &types.KnowledgeProcessOverrides{
-		ChunkingConfig:           &types.ChunkingConfig{ChunkSize: 256},
+		ChunkingConfig:           &types.ChunkingConfigOverride{ChunkingConfig: types.ChunkingConfig{ChunkSize: 256}},
 		VLMConfig:                &types.VLMConfig{Enabled: true, ModelID: "vlm-2"},
 		QuestionGenerationConfig: &types.QuestionGenerationConfig{Enabled: true, QuestionCount: 5},
 		ExtractConfig:            &types.ExtractConfig{Enabled: true},
@@ -655,4 +727,44 @@ func TestBuildSplitterConfigFromChunking_PreservesWikiOnlyZeroOverlap(t *testing
 
 	require.Equal(t, 2048, cfg.ChunkSize)
 	require.Equal(t, 0, cfg.ChunkOverlap)
+}
+
+func TestDocumentTokenLimitSurvivesProcessConfigRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, TokenLimit: 128},
+	}
+	tests := []struct {
+		name    string
+		request string
+		want    int
+	}{
+		{"omitted", `{"process_config":{"chunking_config":{"chunk_size":640}}}`, 128},
+		{"null", `{"process_config":{"chunking_config":{"chunk_size":640,"token_limit":null}}}`, 128},
+		{"disabled", `{"process_config":{"chunking_config":{"chunk_size":640,"token_limit":0}}}`, 0},
+		{"positive", `{"process_config":{"chunking_config":{"chunk_size":640,"token_limit":64}}}`, 64},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var request types.KnowledgeListReparsePayload
+			require.NoError(t, json.Unmarshal([]byte(tc.request), &request))
+			effective := ResolveProcessConfig(kb, request.ProcessConfig)
+			assert.Equal(t, tc.want, effective.ChunkingConfig.TokenLimit, "decoded request")
+
+			taskJSON, err := json.Marshal(request)
+			require.NoError(t, err)
+			var task types.KnowledgeListReparsePayload
+			require.NoError(t, json.Unmarshal(taskJSON, &task))
+
+			var knowledge types.Knowledge
+			require.NoError(t, knowledge.SetProcessOverrides(task.ProcessConfig))
+			stored, err := knowledge.ProcessOverrides()
+			require.NoError(t, err)
+			effective = ResolveProcessConfig(kb, stored)
+			splitter := buildSplitterConfigFromChunking(effective.ChunkingConfig)
+			assert.Equal(t, tc.want, splitter.TokenLimit, "after queued payload and metadata")
+			assert.Equal(t, 640, splitter.ChunkSize, "other chunking overrides still apply")
+		})
+	}
 }

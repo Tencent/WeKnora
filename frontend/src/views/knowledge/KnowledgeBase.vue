@@ -463,7 +463,8 @@ let knowledgeScroll = ref()
 let page = 1;
 let pageSize = 35;
 let scrollLoading = false;
-const resetPage = () => { page = 1; scrollLoading = false; };
+let documentPageGeneration = 0;
+const resetPage = () => { page = 1; scrollLoading = false; documentPageGeneration++; };
 
 // Move state — inline in card menu
 const moveMenuMode = ref<'normal' | 'targets' | 'confirm'>('normal');
@@ -686,8 +687,23 @@ const tagPage = ref(1);
 const tagHasMore = ref(false);
 const tagLoadingMore = ref(false);
 const tagTotal = ref(0);
+let tagRequestSeq = 0;
+// Set when a KB switch clears the tag search box; the switch already reloads tags.
+let skipTagSearchResetOnKbSwitch = false;
 let tagSearchDebounce: number | null = null;
 let docSearchDebounce: number | null = null;
+const cancelTagSearchDebounce = () => {
+  if (tagSearchDebounce) {
+    window.clearTimeout(tagSearchDebounce);
+    tagSearchDebounce = null;
+  }
+};
+const cancelDocSearchDebounce = () => {
+  if (docSearchDebounce) {
+    window.clearTimeout(docSearchDebounce);
+    docSearchDebounce = null;
+  }
+};
 const docSearchKeyword = ref('');
 const selectedFileType = ref('');
 const fileTypeOptions = computed(() => [
@@ -1065,6 +1081,9 @@ const handleFolderTreeCollapsedChange = (value: boolean) => {
 
 const loadTags = async (kbIdValue: string, reset = false) => {
   if (!kbIdValue) {
+    tagRequestSeq++;
+    tagLoading.value = false;
+    tagLoadingMore.value = false;
     tagList.value = [];
     tagTotal.value = 0;
     tagHasMore.value = false;
@@ -1072,13 +1091,17 @@ const loadTags = async (kbIdValue: string, reset = false) => {
     return;
   }
 
+  if (!reset && (tagLoading.value || tagLoadingMore.value)) {
+    return;
+  }
+
+  const requestSeq = ++tagRequestSeq;
+  const keyword = tagSearchQuery.value || undefined;
   if (reset) {
     tagPage.value = 1;
     tagList.value = [];
     tagTotal.value = 0;
     tagHasMore.value = false;
-  } else if (tagLoading.value || tagLoadingMore.value) {
-    return;
   }
 
   const currentPage = tagPage.value || 1;
@@ -1089,9 +1112,9 @@ const loadTags = async (kbIdValue: string, reset = false) => {
     const res: any = await listKnowledgeTags(kbIdValue, {
       page: currentPage,
       page_size: TAG_PAGE_SIZE,
-      keyword: tagSearchQuery.value || undefined,
+      keyword,
     });
-    if (!isCurrentKb(kbIdValue)) return;
+    if (requestSeq !== tagRequestSeq || !isCurrentKb(kbIdValue)) return;
 
     const pageData = (res?.data || {}) as {
       data?: any[];
@@ -1114,10 +1137,10 @@ const loadTags = async (kbIdValue: string, reset = false) => {
       tagPage.value = currentPage + 1;
     }
   } catch (error) {
-    if (!isCurrentKb(kbIdValue)) return;
+    if (requestSeq !== tagRequestSeq || !isCurrentKb(kbIdValue)) return;
     console.error('Failed to load tags', error);
   } finally {
-    if (isCurrentKb(kbIdValue)) {
+    if (requestSeq === tagRequestSeq && isCurrentKb(kbIdValue)) {
       tagLoading.value = false;
       tagLoadingMore.value = false;
     }
@@ -1227,6 +1250,11 @@ watch(activeKbTab, (tab) => {
 
 watch(() => kbId.value, (newKbId, oldKbId) => {
   if (!newKbId) {
+    tagRequestSeq++;
+    cancelTagSearchDebounce();
+    cancelDocSearchDebounce();
+    tagLoading.value = false;
+    tagLoadingMore.value = false;
     kbInfo.value = null;
     cardList.value = [];
     total.value = 0;
@@ -1235,11 +1263,17 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
   if (newKbId === oldKbId && kbInfo.value) return;
 
   if (newKbId !== oldKbId) {
+    tagRequestSeq++;
+    cancelTagSearchDebounce();
+    cancelDocSearchDebounce();
+    tagLoading.value = false;
+    tagLoadingMore.value = false;
     clearTraceAvailabilityCache();
     cardList.value = [];
     total.value = 0;
     docListLoading.value = true;
     resetPage();
+    skipTagSearchResetOnKbSwitch = tagSearchQuery.value !== '';
     tagSearchQuery.value = '';
     tagPage.value = 1;
     uiStore.clearSelectedTagIds();
@@ -1258,10 +1292,15 @@ watch(selectedTagIds, (newVal, oldVal) => {
 
 watch(tagSearchQuery, (newVal, oldVal) => {
   if (newVal === oldVal) return;
-  if (tagSearchDebounce) {
-    window.clearTimeout(tagSearchDebounce);
-  }
+  const clearedByKbSwitch = skipTagSearchResetOnKbSwitch;
+  skipTagSearchResetOnKbSwitch = false;
+  if (clearedByKbSwitch && newVal === '') return;
+  tagRequestSeq++;
+  tagLoading.value = false;
+  tagLoadingMore.value = false;
+  cancelTagSearchDebounce();
   tagSearchDebounce = window.setTimeout(() => {
+    tagSearchDebounce = null;
     if (kbId.value) {
       loadTags(kbId.value, true);
     }
@@ -1271,10 +1310,9 @@ watch(tagSearchQuery, (newVal, oldVal) => {
 // 监听文档搜索关键词变化
 watch(docSearchKeyword, (newVal, oldVal) => {
   if (newVal === oldVal) return;
-  if (docSearchDebounce) {
-    window.clearTimeout(docSearchDebounce);
-  }
+  cancelDocSearchDebounce();
   docSearchDebounce = window.setTimeout(() => {
+    docSearchDebounce = null;
     if (kbId.value) {
       resetPage();
       loadKnowledgeFiles(kbId.value);
@@ -1434,6 +1472,9 @@ onUnmounted(() => {
   stopMovePoll();
   statusPollingDisposed = true;
   resetStatusPolling();
+  tagRequestSeq++;
+  cancelTagSearchDebounce();
+  cancelDocSearchDebounce();
 });
 watch(() => cardList.value, (newValue) => {
   if (isFAQ.value) return;
@@ -2103,29 +2144,42 @@ const submitReparse = async (id: string, processConfig?: KnowledgeProcessOverrid
   }
 };
 
-const handleScroll = () => {
-  if (isFAQ.value) return;
-  if (docListLoading.value) return;
-  if (scrollLoading) return;
-  const currentKbId = kbId.value;
-  if (!currentKbId) return;
+const fillDocumentViewport = () => {
   const element = knowledgeScroll.value;
-  if (element) {
-    let pageNum = Math.ceil(total.value / pageSize)
-    const { scrollTop, scrollHeight, clientHeight } = element;
-    if (scrollTop + clientHeight >= scrollHeight - 10) {
-      if (cardList.value.length < total.value && page < pageNum) {
-        page++;
-        scrollLoading = true;
-        getKnowled({ page, page_size: pageSize, ...filterParams.value }, currentKbId).finally(() => {
-          if (isCurrentKb(currentKbId)) {
-            scrollLoading = false;
-          }
-        });
-      }
-    }
+  if (element?.clientHeight > 0 && element.scrollHeight <= element.clientHeight) {
+    handleScroll();
   }
 };
+
+const handleScroll = () => {
+  if (isFAQ.value || docListLoading.value || scrollLoading) return;
+  const currentKbId = kbId.value;
+  const element = knowledgeScroll.value;
+  if (!currentKbId || !element || element.clientHeight <= 0) return;
+  const { scrollTop, scrollHeight, clientHeight } = element;
+  if (scrollTop + clientHeight < scrollHeight - 10) return;
+  const previousCount = cardList.value.length;
+  if (previousCount >= total.value || page >= Math.ceil(total.value / pageSize)) return;
+
+  const nextPage = ++page;
+  const generation = documentPageGeneration;
+  scrollLoading = true;
+  getKnowled({ page: nextPage, page_size: pageSize, ...filterParams.value }, currentKbId).finally(async () => {
+    if (!isCurrentKb(currentKbId) || generation !== documentPageGeneration) return;
+    scrollLoading = false;
+    // A failed or empty response must not continuously retry without user input.
+    if (cardList.value.length <= previousCount) {
+      page--;
+      return;
+    }
+    await nextTick();
+    if (generation === documentPageGeneration) fillDocumentViewport();
+  });
+};
+
+// A page that fits entirely in the container cannot emit a scroll event.
+watch([knowledgeScroll, docListLoading, viewMode], fillDocumentViewport, { flush: 'post' });
+
 const getDoc = (page: number) => {
   getfDetails(details.id, page)
 };

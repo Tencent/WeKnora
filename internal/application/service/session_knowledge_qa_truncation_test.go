@@ -50,19 +50,26 @@ func TestConsumeFallbackStreamTruncation(t *testing.T) {
 			ch <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Done: true}
 			close(ch)
 			(&sessionService{}).consumeFallbackStream(context.Background(), cm, ch, modelcontext.NewRegistry(false))
-			require.Len(t, answers, len(tt.chunks)+1, "ignore reasoning and duplicate EOF")
+			// Contract after the usage-trailer deferral: content events carry
+			// the chunks and the closing tail; exactly one Done event closes
+			// the stream last and alone carries the truncation flag.
+			require.GreaterOrEqual(t, len(answers), 1, "ignore reasoning and duplicate EOF")
 			var delivered strings.Builder
-			for i, answer := range answers {
+			for _, answer := range answers[:len(answers)-1] {
 				delivered.WriteString(answer.Content)
 				require.True(t, answer.IsFallback)
-				require.Equal(t, i == len(answers)-1, answer.Done)
-				require.Equal(t, i == len(answers)-1 && tt.truncated, answer.Truncated)
+				require.False(t, answer.Done, "content events must not close the answer")
+				require.False(t, answer.Truncated)
 			}
+			last := answers[len(answers)-1]
+			require.True(t, last.Done, "the closing event carries Done")
+			require.Equal(t, tt.truncated, last.Truncated)
 			require.NotNil(t, cm.ChatResponse)
 			require.Equal(t, delivered.String(), cm.ChatResponse.Content, "store all emitted chunks")
 			original := strings.Join(tt.chunks, "")
 			if tt.truncated && strings.TrimSpace(original) == "" {
-				require.NotEmpty(t, strings.TrimSpace(answers[len(answers)-1].Content))
+				// The fallback text rides the tail event.
+				require.NotEmpty(t, strings.TrimSpace(delivered.String()))
 			} else {
 				require.Equal(t, original, delivered.String(), "partial and natural-stop answers must be preserved")
 			}
@@ -138,4 +145,26 @@ func TestConsumeFallbackStreamPrematureClose(t *testing.T) {
 	require.Equal(t, event.AgentFinalAnswerData{
 		Content: cm.FallbackResponse, Done: true, IsFallback: true,
 	}, answers[1], "a missing Done marker must keep the existing fixed-fallback behavior")
+}
+
+func TestConsumeFallbackStreamStoppedDoesNotAddFixedResponse(t *testing.T) {
+	bus := event.NewEventBus()
+	var answers []event.AgentFinalAnswerData
+	bus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		answers = append(answers, evt.Data.(event.AgentFinalAnswerData))
+		return nil
+	})
+	cm := &types.ChatManage{}
+	cm.EventBus = bus.AsEventBusInterface()
+	cm.FallbackResponse = "configured fallback"
+	ch := make(chan types.StreamResponse, 1)
+	ch <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Content: "partial "}
+	close(ch)
+	// The user pressed stop: the request context is cancelled and the provider
+	// closes its channel without a Done marker.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	(&sessionService{}).consumeFallbackStream(ctx, cm, ch, modelcontext.NewRegistry(false))
+	require.Len(t, answers, 1)
+	require.Equal(t, "partial ", answers[0].Content)
 }

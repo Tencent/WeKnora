@@ -31,6 +31,12 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+// BootstrapSystemAdminEmailEnv names the environment variable identifying the
+// initial system administrator email. When set and no system administrators
+// exist yet, a matching account is promoted at sign-up (or on startup if the
+// account was created before the variable was configured).
+const BootstrapSystemAdminEmailEnv = "WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL"
+
 var (
 	jwtSecretOnce sync.Once
 	jwtSecret     string
@@ -198,6 +204,10 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 		user.TenantID = createdTenant.ID
 	}
 
+	if shouldPromoteBootstrapSystemAdmin(ctx, s.userRepo, req.Email) {
+		user.IsSystemAdmin = true
+	}
+
 	err = s.userRepo.CreateUser(ctx, user)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create user: %v", err)
@@ -223,8 +233,44 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 		}
 	}
 
+	if user.IsSystemAdmin {
+		logger.Infof(ctx,
+			"[bootstrap] promoted user %s (%s) to system admin via %s on registration",
+			user.ID, secutils.SanitizeForLog(user.Email), BootstrapSystemAdminEmailEnv,
+		)
+	}
+
 	logger.Info(ctx, "User registered successfully")
 	return user, nil
+}
+
+// shouldPromoteBootstrapSystemAdmin reports whether a newly registering email
+// matches BootstrapSystemAdminEmailEnv while no system admins exist yet.
+// Errors fail closed and only log a warning so registration itself is never
+// blocked by a best-effort bootstrap check.
+func shouldPromoteBootstrapSystemAdmin(
+	ctx context.Context, userRepo interfaces.UserRepository, email string,
+) bool {
+	bootstrapEmail := strings.TrimSpace(os.Getenv(BootstrapSystemAdminEmailEnv))
+	if bootstrapEmail == "" || !strings.EqualFold(strings.TrimSpace(email), bootstrapEmail) {
+		return false
+	}
+	_, total, err := userRepo.ListSystemAdmins(ctx, 0, 1)
+	if err != nil {
+		logger.Warnf(ctx,
+			"[bootstrap] %s=%s: cannot verify existing system admins, skipping promotion: %v",
+			BootstrapSystemAdminEmailEnv, secutils.SanitizeForLog(bootstrapEmail), err,
+		)
+		return false
+	}
+	if total > 0 {
+		logger.Infof(ctx,
+			"[bootstrap] %s=%s: %d system admin(s) already exist; not promoting on registration",
+			BootstrapSystemAdminEmailEnv, secutils.SanitizeForLog(bootstrapEmail), total,
+		)
+		return false
+	}
+	return true
 }
 
 // Login authenticates a user and returns tokens
@@ -625,12 +671,13 @@ func (s *userService) SetUserActive(ctx context.Context, userID, actorID string,
 }
 
 // ListAllUsers lists every platform user newest-first for the system-admin
-// user-management UI. It fetches limit+1 rows to derive has_more without a
-// separate COUNT. Role gating is the handler's responsibility.
+// user-management UI, optionally filtered by username or email. It fetches
+// limit+1 rows to derive has_more without a separate COUNT. Role gating is the
+// handler's responsibility.
 func (s *userService) ListAllUsers(
-	ctx context.Context, offset, limit int,
+	ctx context.Context, query string, offset, limit int,
 ) ([]*types.User, bool, error) {
-	rows, err := s.userRepo.ListUsers(ctx, offset, limit+1)
+	rows, err := s.userRepo.ListUsers(ctx, strings.TrimSpace(query), offset, limit+1)
 	if err != nil {
 		return nil, false, err
 	}

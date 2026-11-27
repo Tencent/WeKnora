@@ -460,6 +460,17 @@ func (h *EmbedChannelHandler) EmbedStopSession(c *gin.Context) {
 	h.sessionHandler.StopSession(c)
 }
 
+// EmbedDeleteSession applies the normal session deletion lifecycle to a signed
+// embed session. The delegated handler still enforces the session owner.
+func (h *EmbedChannelHandler) EmbedDeleteSession(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	// The normal session route uses :id, while embed routes use :session_id.
+	c.Params = append(c.Params, gin.Param{Key: "id", Value: c.Param("session_id")})
+	h.sessionHandler.DeleteSession(c)
+}
+
 func (h *EmbedChannelHandler) EmbedEnsureMessageSuggestions(c *gin.Context) {
 	if err := h.ensureEmbedSession(c); err != nil {
 		return

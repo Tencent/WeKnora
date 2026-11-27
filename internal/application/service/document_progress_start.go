@@ -52,7 +52,7 @@ func (s *DocumentProgressService) StartWiki(
 		KnowledgeBaseID: request.KnowledgeBaseID, Search: request.Search, Status: "all",
 	}).Joins("JOIN task_pending_ops p ON "+s.pendingSQL()).
 		Where("k.parse_status IN ?", []string{types.ParseStatusCompleted, types.ParseStatusFinalizing}).
-		Where(s.wikiEnabledSQL()).
+		Where(s.wikiAutoGenerateSQL()).
 		Where(`NOT EXISTS(SELECT 1 FROM task_pending_ops held WHERE held.task_type=p.task_type
 			AND held.scope=p.scope AND held.scope_id=p.scope_id AND held.dedup_key=p.dedup_key
 			AND held.claimed_at>=?)`, time.Now().Add(-wikiClaimStaleAfter))
@@ -70,13 +70,24 @@ func (s *DocumentProgressService) StartWiki(
 		Scan(&candidates).Error; err != nil {
 		return nil, err
 	}
+	type kbLangKey struct {
+		tenantID uint64
+		kbID     string
+	}
+	langCache := make(map[kbLangKey]string)
 	for _, candidate := range candidates {
 		if result.Started >= request.Count {
 			break
 		}
+		lk := kbLangKey{tenantID: candidate.TenantID, kbID: candidate.KnowledgeBaseID}
+		lang, cached := langCache[lk]
+		if !cached {
+			lang = WikiPendingLanguage(ctx, s.db, candidate.TenantID, candidate.KnowledgeBaseID)
+			langCache[lk] = lang
+		}
 		payload := WikiIngestPayload{
 			TenantID: candidate.TenantID, KnowledgeBaseID: candidate.KnowledgeBaseID, KnowledgeID: candidate.ID,
-			Language: WikiPendingLanguage(ctx, s.db, candidate.TenantID, candidate.KnowledgeBaseID),
+			Language: lang,
 		}
 		raw, err := json.Marshal(payload)
 		if err != nil {

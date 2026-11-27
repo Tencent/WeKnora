@@ -7,6 +7,10 @@ MCP 用于智能体与外部工具之间的连接。WeKnora 支持接入外部 M
 
 接入外部服务可扩展 WeKnora 智能体的工具；运行 WeKnora MCP Server 可让外部客户端使用知识库检索、问答和管理能力。
 
+**重排模型取决于调用的工具。** 接入外部 MCP 服务本身不需要配置 Rerank。智能推理 Agent 启用知识库范围和内置 `search_knowledge` 时，需在该 Agent 的模型设置里配置 Rerank。默认内置工具包含 `search_knowledge`。如果只使用外部 MCP，可将知识库范围设为「不使用知识库」，或在内置工具中取消勾选 `search_knowledge`。
+
+外部客户端直连 WeKnora 内置 MCP Server 时，端点的 `search_knowledge` 和 `grep_chunks` 无需配置 Rerank。`ask` 调用端点配置的 Agent 或快速问答，沿用相应模式的模型设置。
+
 空间 Admin 在侧边栏「工具箱 → MCP服务」新建服务（旧的「设置 → MCP 服务」链接会自动跳转到这里），填好连接后同步工具并写使用说明，再在智能体中选择所需服务。需要控制写入或外发操作时，可为相应工具开启人工审批，调用前会显示确认卡片。
 
 <Screenshot
@@ -89,7 +93,7 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 
 `ask` 是同步调用，服务端时限默认 4 分钟，可用 `WEKNORA_MCP_ASK_TIMEOUT` 调整（Go duration，如 `10m`，也接受纯秒数，如 `600`）。客户端在请求 `_meta.progressToken` 中提供 token 后，服务端会立即发送进度通知，并在运行期间约每 15 秒发送一次 `notifications/progress`；不提供 token 时不发通知。进度通知是尽力发送，不能替代客户端或反向代理自身的超时配置；超时值只控制 WeKnora 服务端等待本次问答的时长。
 
-使用自定义反向代理时，除 `/api/` 外，还需将 `/mcp/` 原路径转发到 WeKnora 后端，保留 `Authorization` 和 MCP 协议头，并关闭响应缓冲、为长连接设置足够的读写超时。仓库自带的 Nginx、Vite 开发及预览配置已包含该代理，可直接使用网站域名连接，无需另行暴露后端 8080 端口。
+使用自定义反向代理时，除 `/api/` 外，还需将 `/mcp/` 原路径转发到 WeKnora 后端，保留 `Authorization` 和 MCP 协议头，并关闭响应缓冲、为长连接设置足够的读写超时。仓库自带的 Nginx、Vite 开发及预览配置已包含该代理，可直接使用网站域名连接，无需另行暴露后端 8080 端口。若 MCP 对外地址与管理端域名不同（例如管理端位于额外认证之后、MCP 走独立域名），在 frontend 容器设置 `MCP_BASE_URL`，页面展示的地址和客户端配置会改用该地址。
 
 <Screenshot
   src="/screenshots/mcp-server-endpoint.png"
@@ -126,6 +130,8 @@ MCP 管理页支持按服务名称和卡片显示的用途说明搜索。搜索�
 ```
 
 `search_knowledge` 的结构化结果 `results[].chunk_type` 和文本结果的 `chunk_type` 属性保留命中片段的原始类型，例如 `text`、`summary`、`image_ocr`、`image_caption` 或 `image_vector`。空字符串表示类型未知，不能据此认定为原文；客户端可据类型决定是否补读文档正文。
+
+外部客户端可以直接用 `search_knowledge` 的 `structuredContent.results` 生成来源引用。文档分块包含 `knowledge_id`、`knowledge_title` 和 `chunk_id`，有原始文件名或解析定位时还分别返回 `knowledge_filename` 和 `source_locators`（例如 `[{"type":"pdf","page":3}]`）。定位取决于原始格式和解析器，缺少信息时省略相应字段。引用这些结果无需调用 `ask`。
 
 现有 MCP 工具的返回结果会复用 REST/IM 的资源链接转换：正文、Wiki 内容以及结构化数据中的图片引用，都会在权限校验后转换为可直接访问的 HTTP(S) 链接，不需要新增工具或修改端点工具清单。`ask` 的 `references[].images` 保留图片 URL、caption 和 OCR 文本，文本引用列表也包含图片链接，避免正文摘要截断后丢失图片信息。
 
@@ -381,7 +387,7 @@ sequenceDiagram
 - 过期预判带 **30 秒 skew**（`oauthRefreshSkew`）：`ExpiresAt` 在 30 秒内到期即视为需刷新；但**无 refresh_token 的 token 用满真实有效期**，skew 不缩短其寿命。
 - 过期且无 refresh_token → 删除 token 行并返回 `OAuthReauthorizationRequiredError`（需要用户重新授权）。
 - 需要刷新时走 `refreshWithLease`：在 `mcp_oauth_tokens` 行上以 `refresh_lease_id` / `refresh_lease_until` 两列实现**数据库级刷新租约**（默认 45 秒，随 HTTP 超时上浮），`TryAcquireTokenRefreshLease` 用条件 UPDATE 抢占；抢不到的实例每 100ms 轮询，观察到 token 材料已被并发刷新者更新且未临期即直接复用——**多实例部署下同一 refresh_token 只会被消费一次**（refresh token 轮换安全）。
-- 刷新失败分级（`permanentRefreshFailure`）：`invalid_grant` / `invalid_token` / `bad_refresh_token` / `expired_token`（或 HTTP 400）→ 永久失败，删 token 要求重新授权；`invalid_client` / `unauthorized_client`（或 HTTP 401）→ 连同 `mcp_oauth_clients` 的动态注册记录一并删除（下次授权重新注册）；其他（网络抖动等）→ `OAuthRefreshTemporaryError`，**保留 token** 作为运维性失败上抛，不弹新的授权窗。
+- 令牌端点返回 OAuth 错误码时，以错误码判断恢复方式。`invalid_grant`、`invalid_token`、`bad_refresh_token`、`expired_token` 需要重新授权；`invalid_client`、`unauthorized_client` 还会清除动态客户端注册。没有 OAuth 错误码时，令牌端点的 HTTP 400 和 401 分别按上述两种方式处理。临时故障保留令牌和客户端注册，服务恢复后可继续刷新。
 
 `AuthorizationStatus` 把上述状态暴露为三态：`authorized`（当前可用）/ `refreshable`（已过期但有 refresh_token）/ `reauth_required`。
 
@@ -440,6 +446,16 @@ Mention 只是优先选择，不改变 Agent 的 `all / selected / none` 范围�
 `GET /mcp-services/:id/metadata` 只读缓存，未同步时 `data:null`；`POST /mcp-services/:id/metadata/refresh` 显式连接上游同步。静态认证刷新需要 Admin 或对应管理能力，OAuth 用户可刷新自己的授权目录。接口前缀为 `/api/v1`，见[MCP API](../04-api/02-api-agent-mcp.md)。
 
 运行时 `list_tools(refresh=true)` 会重新拉取上游并尝试保存当前主体快照，不只是重读数据库。刷新有超时和目录大小限制，失败保留错误状态；不能把缓存成功解释为当前上游一定可达。升级前没有完整目录的服务，需要首次同步。
+
+服务端重新部署后，已保存的目录还会在以下情况下自动按当前主体重新拉取，无需管理员逐一刷新（OAuth 目录按用户保存，管理员本来也无法代为刷新）：
+
+| 触发 | 时机 |
+| --- | --- |
+| 本次调用所用连接在目录保存之后完成握手，且其 `serverInfo.version` 或说明与目录不同（目录未记录版本时也算一次） | 调用结果照常返回，后台重新拉取 |
+| 调用被服务端以未知工具或参数无效拒绝（JSON-RPC `-32602`/`-32601`，或新版协议的本地「工具不在目录中」） | 在这次失败的调用内同步重新拉取；仅当该工具在新目录中缺失或参数结构不同时，错误信息才提示重新发现工具 |
+| 读取的目录超过最长保存时间（`agent.mcp_directory_max_age_seconds`，默认 1 小时） | 本次使用已保存目录，后台重新拉取，下一次读取生效 |
+
+重新拉取使用一条新连接完成握手和 `tools/list`：已有连接会一直复用，无状态服务端重新部署后旧连接仍保持打开，其握手信息是旧版本的。每个实例上，同一空间、服务和主体 5 分钟内最多拉取一次（失败也计入），并发触发合并为一次。重新拉取不会弹出 OAuth 授权，需要授权时直接放弃并保留原目录，失败也保留原目录；保存时间按开始拉取的时刻记录，与设置页刷新一致，因此较早开始的拉取不会覆盖较晚的结果。
 
 #### 工具人工审批（issue #1173） {#_1-8-工具人工审批-issue-1173}
 

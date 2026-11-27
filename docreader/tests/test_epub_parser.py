@@ -61,6 +61,46 @@ def _minimal_epub_bytes() -> bytes:
             os.unlink(path)
 
 
+def _epub_with_section_headings_bytes(
+    *chapters: int, with_nav: bool = True
+) -> bytes:
+    """A book whose chapters each carry an h2 section of their own."""
+    book = epub.EpubBook()
+    book.set_identifier("section-headings")
+    book.set_title("Sections")
+    book.set_language("en")
+
+    items = []
+    for index in chapters:
+        chapter = epub.EpubHtml(
+            title=f"Chapter {index}", file_name=f"text/chapter_{index}.xhtml", lang="en"
+        )
+        chapter.content = (
+            f"<html><body><h1>Chapter {index}</h1>"
+            f"<p>Intro {index}.</p>"
+            f"<h2>Section {index}</h2><p>Body {index}.</p>"
+            "</body></html>"
+        )
+        book.add_item(chapter)
+        items.append(chapter)
+
+    book.toc = tuple(items)
+    book.spine = (["nav"] if with_nav else []) + items
+    book.add_item(epub.EpubNcx())
+    if with_nav:
+        book.add_item(epub.EpubNav())
+
+    with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as handle:
+        path = handle.name
+    try:
+        epub.write_epub(path, book)
+        with open(path, "rb") as handle:
+            return handle.read()
+    finally:
+        if os.path.exists(path):
+            os.unlink(path)
+
+
 def _epub_with_colliding_image_names(
     image_src: str, *, root_image_first: bool = False
 ) -> tuple[bytes, dict[str, bytes]]:
@@ -197,6 +237,35 @@ def _epub_with_encoded_chapter(encoding: str, *, missing_navigation: bool) -> by
 
 
 class EPUBParserTest(unittest.TestCase):
+    def test_zip_fallback_keeps_chapters_with_mixed_case_extensions(self):
+        for extension in (".XHTML", ".XhTmL", ".HTML", ".HtMl", ".HTM", ".HtM"):
+            with self.subTest(extension=extension):
+                content = BytesIO()
+                with zipfile.ZipFile(content, "w") as archive:
+                    archive.writestr(
+                        f"OPS/Chapter1{extension}",
+                        "<html><body><p>First chapter.</p></body></html>",
+                    )
+                    archive.writestr(
+                        "OPS/Chapter2.xhtml",
+                        "<html><body><p>Second chapter.</p></body></html>",
+                    )
+                with self.assertLogs(
+                    "docreader.parser.epub_parser", level="WARNING"
+                ) as logs:
+                    document = Parser().parse_file(
+                        "mixed.epub", "epub", content.getvalue()
+                    )
+                self.assertTrue(
+                    any("trying ZIP fallback" in line for line in logs.output)
+                )
+                self.assertEqual(document.metadata["chapter_count"], 2)
+                self.assertEqual(
+                    document.content,
+                    "## Chapter 1\n\nFirst chapter.\n\n"
+                    "## Chapter 2\n\nSecond chapter.",
+                )
+
     def test_extracts_designated_cover_referenced_by_chapter(self):
         image = BytesIO()
         Image.new("RGB", (1, 1), "red").save(image, format="JPEG")
@@ -387,6 +456,28 @@ class EPUBParserTest(unittest.TestCase):
         self.assertTrue(image_ref.startswith("images/"))
         self.assertIn(image_ref, document.content)
         self.assertNotIn("../images/pic.png", document.content)
+
+    def test_chapter_count_counts_chapters_not_section_headings(self):
+        # Every chapter is emitted under a "## " heading, but so is every h2 the
+        # chapter body contains, and the navigation page renders like a chapter
+        # too. Counting the "## " lines therefore reported sections as chapters
+        # (#5468); the count has to come from the documents actually rendered.
+        cases = (
+            ((1,), True, 1),
+            ((1,), False, 1),
+            ((1, 2), True, 2),
+            ((1, 2, 3), False, 3),
+        )
+        for chapters, with_nav, expected in cases:
+            with self.subTest(chapters=chapters, with_nav=with_nav):
+                document = EPUBParser(
+                    file_name="sections.epub", file_type="epub"
+                ).parse_into_text(
+                    _epub_with_section_headings_bytes(*chapters, with_nav=with_nav)
+                )
+
+                self.assertEqual(expected, document.metadata["chapter_count"])
+                self.assertIn("Section 1", document.content)
 
     def test_internal_links_are_unwrapped_but_external_links_remain(self):
         document = EPUBParser(

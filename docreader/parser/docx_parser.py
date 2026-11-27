@@ -11,10 +11,22 @@ from io import BytesIO
 from multiprocessing import Manager
 from typing import Any, Dict, List, Optional, Tuple
 
-
 # patch from https://github.com/python-openxml/python-docx/issues/1105#issuecomment-1298075246
 from docx.opc.pkgreader import _SerializedRelationships, _SerializedRelationship
 from docx.opc.oxml import parse_xml
+
+DOCX_TEMP_IMAGE_PREFIX = os.path.join(tempfile.gettempdir(), "docx_img_")
+
+
+def _is_docx_temp_image(path: str) -> bool:
+    """Whether `path` names an image this module wrote for a page under the temp dir.
+
+    The directory `_save_image_to_temp` creates lives under the host's temp root,
+    which is only `/tmp` on Linux: comparing against that literal leaked every
+    image (and one directory each) on Windows and macOS.
+    """
+    return path.startswith(DOCX_TEMP_IMAGE_PREFIX)
+
 
 def load_from_xml_v2(baseURI, rels_item_xml):
     """
@@ -366,45 +378,21 @@ class DocxParser(BaseParser):
             )
             text_parts = []
 
-            # Extract paragraph text
-            para_count = len(doc.paragraphs)
-            logger.info(f"Extracting text from {para_count} paragraphs")
-            para_with_text = 0
-            for i, para in enumerate(doc.paragraphs):
-                if i % 100 == 0:
-                    logger.info(f"Processing paragraph {i + 1}/{para_count}")
-                if para.text.strip():
-                    text_parts.append(para.text.strip())
-                    para_with_text += 1
-
-            logger.info(f"Extracted text from {para_with_text}/{para_count} paragraphs")
-
-            # Extract table text
-            table_count = len(doc.tables)
-            logger.info(f"Extracting text from {table_count} tables")
-            tables_with_content = 0
-            rows_processed = 0
-            for i, table in enumerate(doc.tables):
-                if i % 10 == 0:
-                    logger.info(f"Processing table {i + 1}/{table_count}")
-
-                table_has_content = False
-                for row in table.rows:
-                    rows_processed += 1
-                    row_text = " | ".join(
-                        [cell.text.strip() for cell in row.cells if cell.text.strip()]
-                    )
-                    if row_text:
-                        text_parts.append(row_text)
-                        table_has_content = True
-
-                if table_has_content:
-                    tables_with_content += 1
-
-            logger.info(
-                f"Extracted content from {tables_with_content}/{table_count} tables, "
-                f"processed {rows_processed} rows"
-            )
+            # Walk the body once: separate paragraph/table collections reorder
+            # interleaved content and omit blocks inside content controls.
+            for element, _ in _block_children(doc.element.body):
+                if element.tag == _W_P:
+                    text = _paragraph_text(element).strip()
+                else:
+                    table = Table(element, doc._body)
+                    if not any(
+                        _cell_text(cell).strip()
+                        for row in table.rows for cell in row.cells
+                    ):
+                        continue
+                    text = table_to_gfm_markdown(table).strip()
+                if text:
+                    text_parts.append(text)
 
             # Combine text
             result_text = "\n\n".join(text_parts)
@@ -801,21 +789,22 @@ class Docx:
             )
 
         temp_file_path = self._prepare_document_sharing(binary)
+        try:
+            # Prepare multiprocess processing arguments
+            args_list = self._prepare_multiprocess_args(
+                pages_to_process,
+                from_page,
+                to_page,
+                doc_contains_images,
+                temp_file_path,
+            )
 
-        # Prepare multiprocess processing arguments
-        args_list = self._prepare_multiprocess_args(
-            pages_to_process,
-            from_page,
-            to_page,
-            doc_contains_images,
-            temp_file_path,
-        )
-
-        # Execute multiprocess tasks
-        self._execute_multiprocess_tasks(args_list, max_workers)
-
-        # Clean up temporary file
-        self._cleanup_temp_file(temp_file_path)
+            # Execute multiprocess tasks
+            self._execute_multiprocess_tasks(args_list, max_workers)
+        finally:
+            # A worker that dies takes the run with it; the copy of the whole
+            # document it was reading must not stay on disk after that.
+            self._cleanup_temp_file(temp_file_path)
 
     def _check_document_has_images(self):
         """Check if the document contains images
@@ -965,8 +954,8 @@ class Docx:
                 # Collect temporary image paths for later cleanup
                 for line in page_lines:
                     for image_data in line.images:
-                        if image_data.local_path and image_data.local_path.startswith(
-                            "/tmp/docx_img_"
+                        if image_data.local_path and _is_docx_temp_image(
+                            image_data.local_path
                         ):
                             temp_img_paths.add(image_data.local_path)
 
@@ -1139,9 +1128,7 @@ class Docx:
                     # Delete temporary directory (if empty)
                     try:
                         temp_dir = os.path.dirname(path)
-                        if temp_dir.startswith("/tmp/docx_img_") and os.path.exists(
-                            temp_dir
-                        ):
+                        if _is_docx_temp_image(temp_dir) and os.path.exists(temp_dir):
                             os.rmdir(temp_dir)
                     except OSError:
                         # If directory is not empty, ignore error

@@ -1,6 +1,7 @@
 package notion
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -8,6 +9,36 @@ import (
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
 )
+
+func TestInlineCodePreservesBackticksAndSpaces(t *testing.T) {
+	for _, code := range []string{
+		"ordinary",
+		"a`b",
+		"`a``",
+		" `a` ",
+		" padded ",
+		"   ",
+	} {
+		t.Run(code, func(t *testing.T) {
+			block := makeBlock(t, "paragraph", map[string]interface{}{
+				"rich_text": []notionRichText{
+					{Type: "text", PlainText: "Use "},
+					{Type: "text", PlainText: code, Annotations: notionAnnotations{Code: true}},
+					{Type: "text", PlainText: " here."},
+				},
+			})
+			md, _ := BlocksToMarkdown([]notionBlock{block})
+			var rendered bytes.Buffer
+			if err := goldmark.Convert([]byte(md), &rendered); err != nil {
+				t.Fatal(err)
+			}
+			want := "<p>Use <code>" + code + "</code> here.</p>\n"
+			if rendered.String() != want {
+				t.Errorf("rendered %q, want %q", rendered.String(), want)
+			}
+		})
+	}
+}
 
 func TestCodeBlockKeepsEmbeddedMarkdownFences(t *testing.T) {
 	for _, code := range []string{

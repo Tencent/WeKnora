@@ -31,7 +31,7 @@ def setup_environment():
 def check_dependencies():
     """检查依赖是否已安装"""
     try:
-        import mcp
+        from mcp.server import MCPServer
         import requests
 
         return True
@@ -102,7 +102,7 @@ def parse_arguments():
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.getenv("MCP_PORT", "8000")),
+        default=os.getenv("MCP_PORT", "8000"),
         help="Bind port for network transports (default: 8000)",
     )
 

@@ -435,11 +435,11 @@ flowchart TD
 | `search_conversations` | `query`\*、`limit`（默认 5，上限 8） | 检索当前调用者的历史对话；范围由调用者身份决定，不接受范围参数 |
 | `wiki_search` | `query`\*（大小写不敏感的 POSIX 正则，如 `stardust\|skyvault`；不是合法正则的文本如 `C++` 按字面匹配）、`regex`（`false` 强制字面匹配，`true` 要求合法正则）、`knowledge_base_ids[]`（`bN`）、`limit`（每个 KB 默认 10，上限 50）；旧参数 `queries[]`、`knowledge_base_id` 仍接受 | 在 Wiki 页面（标题/slug/别名/摘要/内容）上搜索，返回带 `bN` 标记的页面 slug 与摘要；之前已返回过的页面仍列出，但省略摘要；作用域限定到文档或标签时先多取（`limit` 的 5 倍，最多 100）再按来源过滤，保留前 `limit` 条，全部被过滤时以 `filtered_out_of_scope` 说明 |
 | `wiki_read_page` | `slugs[]`\* | 按 slug 读取 Wiki 页面全文、元数据、出入链（链接附摘要，已见的省略）；知识库按 slug 自动路由；`index` slug 返回按类型分组的目录概览（每类 top 20） |
-| `wiki_write_page` | `slug`\*、`title`\*、`summary`\*、`content`\*、`page_type`\*、`aliases[]`、`source_refs[]` | 新建或整页覆盖 Wiki 页面；写入前规范化并校验 slug；自动处理出链 |
-| `wiki_replace_text` | `slug`\*、`old_text`\*、`new_text`\*、`source_refs[]` | 精确文本替换，适合小修订 |
-| `wiki_rename_page` | `slug`\*、`new_slug`\* | 重命名 slug 并级联更新所有引用它的页面链接 |
-| `wiki_delete_page` | `slug`\* | 删除页面并自动清理其他页面上的入链，防止死链 |
-| `wiki_flag_issue` | `slug`\*、`issue_type`\*（mixed_entities/contradictory_facts/out_of_date/other）、`description`\*、`suspected_knowledge_ids[]` | 标记页面事实错误/实体混淆等问题，记录 issue 供人工或自动维护 |
+| `wiki_write_page` | `slug`\*、`title`\*、`summary`\*、`content`\*、`page_type`\*、`aliases[]`、`source_refs[]`、`knowledge_base_id` | 新建或整页覆盖 Wiki 页面；写入前规范化并校验 slug；自动处理出链 |
+| `wiki_replace_text` | `slug`\*、`old_text`\*、`new_text`\*、`source_refs[]`、`knowledge_base_id` | 精确文本替换，适合小修订 |
+| `wiki_rename_page` | `slug`\*、`new_slug`\*、`knowledge_base_id` | 重命名 slug 并级联更新所有引用它的页面链接 |
+| `wiki_delete_page` | `slug`\*、`knowledge_base_id` | 删除页面并自动清理其他页面上的入链，防止死链 |
+| `wiki_flag_issue` | `slug`\*、`issue_type`\*（mixed_entities/contradictory_facts/out_of_date/other）、`description`\*、`suspected_knowledge_ids[]`、`knowledge_base_id` | 标记页面事实错误/实体混淆等问题，记录 issue 供人工或自动维护 |
 | `wiki_read_issue` | `issue_id` / `slug` | 查看某条 issue 详情或列出某页面的 pending issue |
 | `wiki_update_issue` | `issue_id`\*、`status`\*（resolved/ignored/pending） | 更新 issue 状态 |
 | `discover_mcp_tools` / `call_mcp_tool` | 发现：`mode`\*（`list_servers`/`list_tools`/`describe`/`search`）、`server_id`、`tool_name`、`query`、`cursor`、`limit`（1–50）、`refresh`；调用：`tool_ref`\*、`arguments`\* | 查询目录、读取完整定义并按需调用，见 [MCP 工具目录](08-mcp.md#mcp-tool-directory) |

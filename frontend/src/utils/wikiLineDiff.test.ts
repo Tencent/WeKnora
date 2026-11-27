@@ -46,3 +46,8 @@ test('coarse fallback beyond the LCS limit loses no lines', () => {
   assert.equal(out.filter((l) => l.type === 'del').length, 2000)
   assert.equal(out.filter((l) => l.type === 'add').length, 2000)
 })
+
+test('editing a Windows-authored page highlights only changed content', () => {
+  const rows = diffWikiLines('Plan\r\nOld date\r\nOwner', 'Plan\nNew date\nOwner')
+  assert.equal(render(rows), '  Plan\n- Old date\n+ New date\n  Owner')
+})

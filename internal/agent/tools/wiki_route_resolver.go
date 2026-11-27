@@ -108,6 +108,21 @@ func scopesOutsideKBs(scopes []WikiScope, excluded []WikiScope) []WikiScope {
 	return remaining
 }
 
+// wikiMutationKBs narrows a mutation to an explicitly selected writable KB.
+// Omitting the selector preserves automatic routing across the allowed scope.
+func wikiMutationKBs(kbIDs []string, requestedKBID string) ([]string, error) {
+	requestedKBID = strings.TrimSpace(requestedKBID)
+	if requestedKBID == "" {
+		return kbIDs, nil
+	}
+	for _, kbID := range kbIDs {
+		if kbID == requestedKBID {
+			return []string{kbID}, nil
+		}
+	}
+	return nil, fmt.Errorf("knowledge base %s is not within the current writable wiki scope", requestedKBID)
+}
+
 // resolveUniqueWikiPage is the shared mutation/issue routing boundary. It
 // checks every allowed KB (cached provenance only affects order) and refuses
 // ambiguous slugs instead of silently mutating the first KB.
@@ -164,7 +179,10 @@ func resolveUniqueWikiPage(
 		for _, item := range hits {
 			owners = append(owners, item.kbID)
 		}
-		return nil, "", fmt.Errorf("%w: slug %s belongs to %s", errWikiPageAmbiguous, slug, strings.Join(owners, ", "))
+		return nil, "", fmt.Errorf(
+			"%w: slug %s belongs to %s; specify knowledge_base_id to select the target",
+			errWikiPageAmbiguous, slug, strings.Join(owners, ", "),
+		)
 	}
 }
 

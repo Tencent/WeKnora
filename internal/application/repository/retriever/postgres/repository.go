@@ -507,6 +507,7 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 	}
 
 	var embeddingDBList []pgVectorWithScore
+	var retryWithoutHNSWSettings bool
 
 	err := g.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(fmt.Sprintf("SET LOCAL hnsw.ef_search = %d", efSearch)).Error; err != nil {
@@ -515,6 +516,7 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 			// with default recall). We must rollback first because a failed
 			// statement aborts the transaction in PostgreSQL.
 			logger.GetLogger(ctx).Warnf("[Postgres] Failed to set hnsw.ef_search=%d: %v", efSearch, err)
+			retryWithoutHNSWSettings = strings.Contains(err.Error(), "hnsw.ef_search")
 			return err
 		}
 		// pgvector >= 0.8 supports iterative scan, which keeps pulling more
@@ -525,6 +527,7 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 		// Best-effort: ignore failure on older pgvector versions.
 		if err := tx.Exec("SET LOCAL hnsw.iterative_scan = strict_order").Error; err != nil {
 			logger.GetLogger(ctx).Debugf("[Postgres] hnsw.iterative_scan not available: %v", err)
+			retryWithoutHNSWSettings = strings.Contains(err.Error(), "hnsw.iterative_scan")
 			// abort transaction and let the fallback path below handle it.
 			return err
 		}
@@ -533,10 +536,10 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 
 	// Fallback: if the transaction failed because of an unsupported GUC (e.g.
 	// older pgvector that doesn't have hnsw.ef_search or hnsw.iterative_scan),
-	// retry the query without the SETs so we still return results.
-	if err != nil && len(embeddingDBList) == 0 &&
-		(strings.Contains(err.Error(), "hnsw.ef_search") ||
-			strings.Contains(err.Error(), "hnsw.iterative_scan")) {
+	// retry the query without the SETs after Transaction has rolled back.
+	// Begin, query, and commit failures must not select this compatibility
+	// fallback, even when their diagnostics mention an HNSW setting.
+	if err != nil && len(embeddingDBList) == 0 && retryWithoutHNSWSettings {
 		logger.GetLogger(ctx).Warnf("[Postgres] Retrying vector query without HNSW GUC overrides: %v", err)
 		err = g.db.WithContext(ctx).Raw(querySQL, allVars...).Scan(&embeddingDBList).Error
 	}
@@ -818,11 +821,14 @@ func generatedQuestionExclusionClause(kbIDs []string) clause.Expression {
 		placeholders[i] = "?"
 		vars[i] = id
 	}
+	// ParadeDB can reject score-ordered BM25 queries with column comparisons
+	// in the filter. Use a prefix test for generated-question source IDs.
 	return clause.Expr{
 		SQL: fmt.Sprintf(
-			"NOT (knowledge_base_id IN (%s) AND %s)",
+			"NOT (knowledge_base_id IN (%s) AND source_type = %d AND chunk_id <> '' "+
+				"AND starts_with(source_id, chunk_id || '-'))",
 			strings.Join(placeholders, ", "),
-			types.GeneratedQuestionRowPredicate(""),
+			types.ChunkSourceType,
 		),
 		Vars: vars,
 	}

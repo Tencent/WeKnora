@@ -2,7 +2,7 @@
   <section class="user-management" :aria-label="t('system.globalSettings.userList.rowLabel')">
     <Teleport to="#system-users-actions">
       <div v-show="active">
-        <CreateUserDialog v-model:visible="createVisible" :active="active" @created="fetchPage(0)" @announced="announce">
+        <CreateUserDialog v-model:visible="createVisible" :active="active" @created="onUserCreated" @announced="announce">
           <t-button variant="text" size="small" class="user-management__create"
             :disabled="loading || busyId !== null || resetVisibleId !== null">
             <template #icon><t-icon name="add" size="16px" /></template>
@@ -15,12 +15,13 @@
       <div v-show="active" class="user-management__tools">
         <t-input v-model="search" :disabled="locked" class="user-management__search" clearable
           :placeholder="t('system.globalSettings.userList.searchPlaceholder')"
-          :aria-label="t('system.globalSettings.userList.searchPlaceholder')">
+          :aria-label="t('system.globalSettings.userList.searchPlaceholder')"
+          @enter="applySearchNow">
           <template #prefix-icon><t-icon name="search" size="16px" /></template>
         </t-input>
         <t-button variant="text" shape="square" :loading="loading" :disabled="locked"
           :title="t('system.globalSettings.userList.refresh')" :aria-label="t('system.globalSettings.userList.refresh')"
-          @click="fetchPage(offset)">
+          @click="refreshUsers">
           <template #icon><t-icon name="refresh" size="16px" /></template>
         </t-button>
       </div>
@@ -28,7 +29,7 @@
     <t-alert v-if="loadError" theme="error" :message="loadError" />
     <div class="user-management__table">
       <div class="user-management__scroll">
-        <t-table :aria-label="t('system.globalSettings.userList.title')" row-key="id" :data="filteredUsers" :columns="columns" :loading="loading" size="medium" hover>
+        <t-table :aria-label="t('system.globalSettings.userList.title')" row-key="id" :data="users" :columns="columns" :loading="loading" size="medium" hover>
           <template #user="{ row }">
             <div class="user-management__identity">
               <span class="user-management__name">{{ row.username }}
@@ -92,14 +93,14 @@
         </t-table>
       </div>
       <div class="user-management__pager">
-        <span class="user-management__count">{{ t('system.globalSettings.userList.pageCount', { shown: filteredUsers.length, total: users.length }) }}</span>
-        <t-button variant="text" shape="square" size="small" :disabled="offset === 0 || loading || locked"
-          :aria-label="t('system.globalSettings.userList.prev')" :title="t('system.globalSettings.userList.prev')" @click="fetchPage(offset - limit)">
+        <span class="user-management__count">{{ t('system.globalSettings.userList.pageCount', { total: users.length }) }}</span>
+        <t-button variant="text" shape="square" size="small" :disabled="offset === 0 || loading || locked || hasPendingSearch"
+          :aria-label="t('system.globalSettings.userList.prev')" :title="t('system.globalSettings.userList.prev')" @click="fetchPage(offset - limit, appliedQuery)">
           <template #icon><t-icon name="chevron-left" /></template>
         </t-button>
         <span class="user-management__page">{{ Math.floor(offset / limit) + 1 }}</span>
-        <t-button variant="text" shape="square" size="small" :disabled="!hasMore || loading || locked"
-          :aria-label="t('system.globalSettings.userList.next')" :title="t('system.globalSettings.userList.next')" @click="fetchPage(offset + limit)">
+        <t-button variant="text" shape="square" size="small" :disabled="!hasMore || loading || locked || hasPendingSearch"
+          :aria-label="t('system.globalSettings.userList.next')" :title="t('system.globalSettings.userList.next')" @click="fetchPage(offset + limit, appliedQuery)">
           <template #icon><t-icon name="chevron-right" /></template>
         </t-button>
       </div>
@@ -108,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { listAllUsers, setUserStatus, promoteUserToSystemAdmin, revokeSystemAdmin, type SystemAdminUser } from '@/api/system'
@@ -116,6 +117,7 @@ import { useAuthStore } from '@/stores/auth'
 import CreateUserDialog from './CreateUserDialog.vue'
 import ResetPasswordDialog from './ResetPasswordDialog.vue'
 
+const SEARCH_DEBOUNCE_MS = 250
 const props = defineProps<{ active: boolean }>()
 const emit = defineEmits<{ announced: [string] }>()
 const { t, locale } = useI18n()
@@ -127,13 +129,21 @@ const offset = ref(0)
 const limit = 20
 const hasMore = ref(false)
 const search = ref('')
+const appliedQuery = ref('')
 const busyId = ref<string | null>(null)
 const pendingRole = ref<SystemAdminUser | null>(null)
 const statusVisibleId = ref<string | null>(null)
 const resetVisibleId = ref<string | null>(null)
 const resetBusy = ref(false)
 const createVisible = ref(false)
+let requestSeq = 0
+let inFlightQuery: string | null = null
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let unmounted = false
+
+const rowActionBlocked = computed(() => busyId.value !== null || resetVisibleId.value !== null || resetBusy.value)
 const locked = computed(() => busyId.value !== null || resetVisibleId.value !== null || createVisible.value)
+const hasPendingSearch = computed(() => search.value.trim() !== appliedQuery.value)
 const roleOptions = computed(() => [
   { value: 'user', label: t('system.globalSettings.userList.roleUser') },
   { value: 'admin', label: t('system.globalSettings.userList.roleAdmin') },
@@ -145,10 +155,12 @@ const columns = computed(() => [
   { colKey: 'created', title: t('system.globalSettings.userList.colCreated'), width: 130 },
   { colKey: 'actions', title: t('system.globalSettings.userList.colAction'), width: 170 },
 ])
-const filteredUsers = computed(() => {
-  const query = search.value.trim().toLowerCase()
-  return users.value.filter(user => !query || `${user.username} ${user.email}`.toLowerCase().includes(query))
-})
+function clearSearchTimer() {
+  if (searchTimer !== undefined) {
+    clearTimeout(searchTimer)
+    searchTimer = undefined
+  }
+}
 function formatDate(value: string) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(locale.value)
@@ -157,20 +169,51 @@ function errorMessage(error: any, key: string): string {
   return error?.response?.data?.error || error?.message || t(key)
 }
 function announce(message: string) { emit('announced', message) }
-async function fetchPage(nextOffset: number) {
-  if (loading.value || resetBusy.value) return
+async function fetchPage(nextOffset: number, query = search.value.trim()) {
+  if (unmounted || rowActionBlocked.value) return
+  clearSearchTimer()
+  const normalizedQuery = query.trim()
+  const safeOffset = Math.max(0, nextOffset)
+  const seq = ++requestSeq
+  inFlightQuery = normalizedQuery
   loading.value = true
   loadError.value = ''
   pendingRole.value = null
   statusVisibleId.value = null
   try {
-    const response = await listAllUsers({ offset: nextOffset, limit })
+    const response = await listAllUsers({
+      offset: safeOffset,
+      limit,
+      q: normalizedQuery || undefined,
+    })
+    if (unmounted || seq !== requestSeq || rowActionBlocked.value) return
+    if (safeOffset > 0 && response.users.length === 0) {
+      await fetchPage(Math.max(0, safeOffset - limit), normalizedQuery)
+      return
+    }
     users.value = response.users
     hasMore.value = response.has_more
     offset.value = response.offset
+    appliedQuery.value = normalizedQuery
   } catch (error) {
+    if (unmounted || seq !== requestSeq) return
     loadError.value = errorMessage(error, 'system.globalSettings.userList.loadFailed')
-  } finally { loading.value = false }
+  } finally {
+    if (!unmounted && seq === requestSeq) {
+      inFlightQuery = null
+      loading.value = false
+    }
+  }
+}
+function applySearchNow() {
+  void fetchPage(0, search.value.trim())
+}
+function refreshUsers() {
+  const nextQuery = search.value.trim()
+  void fetchPage(nextQuery !== appliedQuery.value ? 0 : offset.value, nextQuery)
+}
+function onUserCreated() {
+  void fetchPage(0, search.value.trim())
 }
 async function changeStatus(row: SystemAdminUser) {
   if (busyId.value || row.id === authStore.currentUserId) return
@@ -196,10 +239,46 @@ async function changeRole(row: SystemAdminUser) {
   } catch (error) { MessagePlugin.error(errorMessage(error, 'system.globalSettings.userList.roleFailed')) }
   finally { busyId.value = null; pendingRole.value = null }
 }
+watch(search, value => {
+  clearSearchTimer()
+  const nextQuery = value.trim()
+  const effectiveQuery = inFlightQuery ?? appliedQuery.value
+  if (nextQuery === effectiveQuery && !loadError.value) return
+  if (inFlightQuery !== null) {
+    requestSeq++
+    inFlightQuery = null
+    loading.value = false
+  }
+  if (!props.active) return
+  if (nextQuery === '') {
+    void fetchPage(0, '')
+    return
+  }
+  searchTimer = setTimeout(() => {
+    searchTimer = undefined
+    if (!props.active) return
+    void fetchPage(0, search.value.trim())
+  }, SEARCH_DEBOUNCE_MS)
+})
+watch(() => locked.value || resetBusy.value, blocked => {
+  if (!blocked && props.active && hasPendingSearch.value && searchTimer === undefined && !loading.value && !loadError.value) {
+    void fetchPage(0, search.value.trim())
+  }
+})
 watch(() => props.active, active => {
-  if (active && !locked.value) fetchPage(offset.value)
-  if (!active) { pendingRole.value = null; statusVisibleId.value = null }
+  if (active && !locked.value && !resetBusy.value) refreshUsers()
+  if (!active) {
+    clearSearchTimer()
+    pendingRole.value = null
+    statusVisibleId.value = null
+  }
 }, { immediate: true })
+onBeforeUnmount(() => {
+  unmounted = true
+  requestSeq++
+  inFlightQuery = null
+  clearSearchTimer()
+})
 </script>
 
 <style scoped lang="less" src="./userManagement.less"></style>

@@ -1,9 +1,14 @@
-"""HTTP errors must not become URL knowledge; browser/network are fakes."""
+"""Web import failures must not become indexable knowledge."""
+import os
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import grpc
+
 from docreader.parser.web_parser import WebParseError, WebParser
+from docreader.utils.ssrf import reset_ssrf_whitelist_cache_for_test
 
 ERROR_TEXT = "This page could not be found. " * 8
 OK_TEXT = "This is a useful documentation page with a detailed explanation. " * 4
@@ -105,6 +110,57 @@ class NavigationStatusTest(unittest.TestCase):
 
 class RPCFailurePropagationTest(unittest.TestCase):
     run_parser = NavigationStatusTest.run_parser
+
+    def test_ssrf_failure_explains_docreader_allowlist(self):
+        from docreader.main import DocReaderServicer
+        from docreader.parser.parser import Parser
+        from docreader.proto import docreader_pb2 as pb, docreader_pb2_grpc as rpc
+
+        env_patch = patch.dict(os.environ, {
+            "SSRF_WHITELIST": "",
+            "SSRF_WHITELIST_EXTRA": "",
+            "SSRF_DNS_WHITELIST_ONLY": "false",
+        })
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        reset_ssrf_whitelist_cache_for_test()
+        self.addCleanup(reset_ssrf_whitelist_cache_for_test)
+
+        servicer = DocReaderServicer.__new__(DocReaderServicer)
+        servicer.parser = Parser()
+        pool = ThreadPoolExecutor(max_workers=2)
+        self.addCleanup(pool.shutdown)
+        server = grpc.server(pool)
+        rpc.add_DocReaderServicer_to_server(servicer, server)
+        port = server.add_insecure_port("127.0.0.1:0")
+        server.start()
+        self.addCleanup(lambda: server.stop(0).wait())
+
+        with grpc.insecure_channel(f"127.0.0.1:{port}") as channel, patch(
+            "docreader.parser.web_parser.async_playwright"
+        ) as playwright:
+            stub = rpc.DocReaderStub(channel)
+            for url, reason in (
+                ("http://10.0.0.10:9603/example", "direct IP address access is not allowed"),
+                ("https://example.internal/page", "hostname suffix .internal is restricted"),
+            ):
+                request = pb.ReadRequest(url=url, title="test")
+                stream = list(stub.ReadStream(request, timeout=5))
+                self.assertEqual(len(stream), 1)
+                self.assertTrue(stream[0].HasField("meta"))
+                for result in (stub.Read(request, timeout=5), stream[0].meta):
+                    with self.subTest(url=url, response=type(result).__name__):
+                        self.assertEqual(result.markdown_content, "")
+                        self.assertIn(reason, result.error)
+                        self.assertIn(
+                            "DocReader uses its own SSRF_WHITELIST and SSRF_WHITELIST_EXTRA",
+                            result.error,
+                        )
+                        self.assertIn(
+                            "The app's ssrf.whitelist setting applies only to the app",
+                            result.error,
+                        )
+            playwright.assert_not_called()
 
     def test_http_failure_is_sent_as_unary_and_stream_error(self):
         from docreader.main import DocReaderServicer
