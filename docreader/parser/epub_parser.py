@@ -205,7 +205,7 @@ class EPUBParser(BaseParser):
 
         if self.extract_images:
             for item in book.get_items():
-                if item.get_type() == ebooklib.ITEM_IMAGE:
+                if item.get_type() in (ebooklib.ITEM_IMAGE, ebooklib.ITEM_COVER):
                     img_data = item.get_content()
                     ext = os.path.splitext(item.get_name())[1]
                     img_path = f"images/{uuid.uuid4().hex}{ext}"
