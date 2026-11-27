@@ -306,6 +306,7 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	if customAgent.Config.WebSearchMaxResults > 0 {
 		cm.WebSearchMaxResults = customAgent.Config.WebSearchMaxResults
 	}
+	cm.RetrievalPolicy = customAgent.Config.RetrievalPolicy
 
 	// Override history turns
 	if customAgent.Config.HistoryTurns > 0 {
