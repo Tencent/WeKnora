@@ -29046,7 +29046,7 @@
                     "x-agent": true
                 },
                 "chunk_overlap": {
-                    "description": "Chunk overlap in characters.",
+                    "description": "ChunkOverlap inherits the knowledge base overlap when nil and disables it when zero.",
                     "type": "integer",
                     "maximum": 5000,
                     "minimum": 0,

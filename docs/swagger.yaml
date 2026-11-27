@@ -2684,7 +2684,8 @@ definitions:
         type: integer
         x-agent: true
       chunk_overlap:
-        description: Chunk overlap in characters.
+        description: ChunkOverlap inherits the knowledge base overlap when nil and
+          disables it when zero.
         maximum: 5000
         minimum: 0
         type: integer
