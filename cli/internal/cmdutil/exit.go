@@ -119,20 +119,20 @@ func PrintError(w io.Writer, err error) {
 func printErrorProse(w io.Writer, err error) {
 	var typed *Error
 	if errors.As(err, &typed) {
-		fmt.Fprintln(w, typed.Error())
+		_, _ = fmt.Fprintln(w, typed.Error())
 		hint := typed.Hint
 		if hint == "" {
 			hint = defaultHint(typed.Code)
 		}
 		if hint != "" {
-			fmt.Fprintf(w, "hint: %s\n", hint)
+			_, _ = fmt.Fprintf(w, "hint: %s\n", hint)
 		}
 		retry := typed.RetryArgv
 		if len(retry) == 0 {
 			retry = defaultRetryArgv(typed.Code)
 		}
 		if len(retry) > 0 {
-			fmt.Fprintf(w, "retry: %s\n", strings.Join(retry, " "))
+			_, _ = fmt.Fprintf(w, "retry: %s\n", strings.Join(retry, " "))
 		}
 		return
 	}
@@ -143,13 +143,13 @@ func printErrorProse(w io.Writer, err error) {
 	// shape the prose contract says errors never take.
 	var fe *FlagError
 	if errors.As(err, &fe) {
-		fmt.Fprintf(w, "%s: %s\n", CodeInputInvalidArgument, err.Error())
+		_, _ = fmt.Fprintf(w, "%s: %s\n", CodeInputInvalidArgument, err.Error())
 		if hint := defaultHint(CodeInputInvalidArgument); hint != "" {
-			fmt.Fprintf(w, "hint: %s\n", hint)
+			_, _ = fmt.Fprintf(w, "hint: %s\n", hint)
 		}
 		return
 	}
-	fmt.Fprintln(w, err.Error())
+	_, _ = fmt.Fprintln(w, err.Error())
 }
 
 func printErrorEnvelope(w io.Writer, err error) {
