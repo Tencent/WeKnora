@@ -4,6 +4,7 @@ import * as vue from 'vue'
 import * as marked from 'marked'
 import * as literalTilde from '../../utils/markedLiteralTilde.ts'
 import * as sorting from '../../utils/resourceSorting.ts'
+import * as resourceSearch from '../../utils/resourceListSearch.ts'
 import { change, fixture, flush } from '../../test-utils/vueFixture.ts'
 
 test('refreshes data source controls after assistant changes and stops on unmount', async t => {
@@ -132,7 +133,7 @@ test('refreshes the mounted KB list with force for knowledge_base changes only',
     '@/composables/useResourcePins': { useResourcePins: () => ({ favorites: vue.ref([]), recents: vue.ref([]) }) },
     '@/api/knowledge-base': {}, '@/api/organization': {}, '@/config/contextualGuides': {},
     '@/utils/index': {}, '@/utils/kbPermission': {},
-    '@/utils/resourceListSearch': {}, '@/utils/card-list-badge': {}, '@/utils/resourceSorting': sorting,
+    '@/utils/resourceListSearch': resourceSearch, '@/utils/card-list-badge': {}, '@/utils/resourceSorting': sorting,
   })
   await flush()
   fetchKnowledgeBasesForList.mock.resetCalls()

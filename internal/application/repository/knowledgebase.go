@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -72,6 +73,70 @@ func (r *knowledgeBaseRepository) ListKnowledgeBases(ctx context.Context) ([]*ty
 	return kbs, nil
 }
 
+// FillKnowledgeBaseListCounts groups the same counts used by the legacy list
+// by KB ID. Bound the bind parameters for large workspaces and SQLite.
+func (r *knowledgeBaseRepository) FillKnowledgeBaseListCounts(
+	ctx context.Context, tenantID uint64, kbs []*types.KnowledgeBase,
+) error {
+	var countErr error
+	for batch := range slices.Chunk(kbs, 500) {
+		byID := make(map[string]*types.KnowledgeBase, len(batch))
+		ids := make([]string, 0, len(batch))
+		var faqIDs []string
+		for _, kb := range batch {
+			byID[kb.ID] = kb
+			ids = append(ids, kb.ID)
+			if kb.Type == types.KnowledgeBaseTypeFAQ {
+				faqIDs = append(faqIDs, kb.ID)
+			}
+		}
+
+		var documents []struct {
+			KnowledgeBaseID string
+			DocumentCount   int64
+			ProcessingCount int64
+		}
+		err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+			Select("knowledge_base_id, COUNT(*) AS document_count, "+
+				"SUM(CASE WHEN parse_status IN (?, ?) THEN 1 ELSE 0 END) AS processing_count", "pending", "processing").
+			Where("tenant_id = ? AND knowledge_base_id IN ?", tenantID, ids).
+			Where("parse_status <> ?", types.ParseStatusDeleting).
+			Group("knowledge_base_id").Scan(&documents).Error
+		if err != nil {
+			countErr = errors.Join(countErr, err)
+		} else {
+			for _, row := range documents {
+				kb := byID[row.KnowledgeBaseID]
+				if kb.Type == types.KnowledgeBaseTypeDocument {
+					kb.KnowledgeCount = row.DocumentCount
+				}
+				kb.ProcessingCount = row.ProcessingCount
+				kb.IsProcessing = row.ProcessingCount > 0
+			}
+		}
+
+		if len(faqIDs) == 0 {
+			continue
+		}
+		var chunks []struct {
+			KnowledgeBaseID string
+			ChunkCount      int64
+		}
+		err = r.db.WithContext(ctx).Model(&types.Chunk{}).
+			Select("knowledge_base_id, COUNT(*) AS chunk_count").
+			Where("tenant_id = ? AND knowledge_base_id IN ?", tenantID, faqIDs).
+			Group("knowledge_base_id").Scan(&chunks).Error
+		if err != nil {
+			countErr = errors.Join(countErr, err)
+			continue
+		}
+		for _, row := range chunks {
+			byID[row.KnowledgeBaseID].ChunkCount = row.ChunkCount
+		}
+	}
+	return countErr
+}
+
 // ListKnowledgeBasesByTenantID lists all knowledge bases by tenant id.
 //
 // Ordering used to also include `is_pinned DESC, pinned_at DESC` so the
@@ -85,7 +150,7 @@ func (r *knowledgeBaseRepository) ListKnowledgeBasesByTenantID(
 ) ([]*types.KnowledgeBase, error) {
 	var kbs []*types.KnowledgeBase
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND is_temporary = ?", tenantID, false).
-		Order("created_at DESC").Find(&kbs).Error; err != nil {
+		Order("created_at DESC, id DESC").Find(&kbs).Error; err != nil {
 		return nil, err
 	}
 	return kbs, nil
