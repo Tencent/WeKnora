@@ -5,8 +5,10 @@
 // generating and billing tokens), this tells the server to stop.
 //
 // This is the symmetric counterpart to `session resume`: both key on
-// (session_id, message_id). The message_id comes from the init event of the
-// original chat / session ask / resume stream.
+// (session_id, message_id). The init line of the original chat / session ask
+// stream carries the session id; the message id arrives as
+// assistant_message_id on its first agent_query event, or from
+// `weknora message list --session <id>` once the message has persisted.
 package sessioncmd
 
 import (
@@ -76,13 +78,13 @@ Symmetric with 'session resume': both key on (session_id, message_id).`,
 		},
 	}
 	cmd.Flags().StringVarP(&opts.MessageID, "message", "m", "",
-		"Assistant message id to stop (from the init event of the stream you're stopping)")
+		"Assistant message id to stop (the stream's assistant_message_id from its first agent_query event, or `weknora message list --session <id>`)")
 	_ = cmd.MarkFlagRequired("message")
 	cmdutil.AddFormatFlag(cmd, stopFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "Stop server-side generation for an in-flight assistant message (counterpart to resume). The message_id comes from the init event of the chat / session ask / resume stream you're stopping.",
-		RequiredFlags: []string{"<session-id> (positional)", "--message (message_id from the init event of the stream you're stopping)"},
+		UsedFor:       "Stop server-side generation for an in-flight assistant message (counterpart to resume). The message_id is the stream's assistant_message_id from its first agent_query event.",
+		RequiredFlags: []string{"<session-id> (positional)", "--message (assistant_message_id from the stream's first agent_query event, or `weknora message list --session <id>`)"},
 		Examples:      []string{"weknora session stop sess_xyz --message msg_abc"},
 		Output:        "envelope {session_id, message_id, stopped:true}",
 	})
