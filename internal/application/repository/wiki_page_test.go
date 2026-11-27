@@ -285,6 +285,53 @@ func TestList_QuerySearchesSQLiteTextFieldsAndEscapesWildcards(t *testing.T) {
 	}
 }
 
+func TestList_QuerySearchesPostgresTextFieldsAndEscapesWildcards(t *testing.T) {
+	db := setupWikiSnapshotPostgresDB(t)
+	repo := NewWikiPageRepository(db)
+	const kbID = "kb-search"
+	makePage := func(kb, slug, title, content string, aliases ...string) *types.WikiPage {
+		page := makeWikiPage(kb, slug, types.WikiPageTypeEntity, types.WikiPageStatusPublished)
+		page.Title, page.Content, page.Aliases = title, content, aliases
+		return page
+	}
+	for _, page := range []*types.WikiPage{
+		makePage(kbID, "title", "北京大学研究指南", ""),
+		makePage(kbID, "content", "Content page", "欢迎阅读数据库入门。"),
+		makePage(kbID, "english", "PostgreSQL Search Guide", ""),
+		makePage(kbID, "alias", "Alias page", "", "LegacyAlias"),
+		makePage(kbID, "literal", "Usage is 100%_done!", ""),
+		makePage(kbID, "wildcard-decoy", "Usage is 100XYdone!", ""),
+		makePage("other-kb", "other-title", "北京大学研究指南", ""),
+	} {
+		require.NoError(t, db.Create(page).Error)
+	}
+
+	for _, tc := range []struct {
+		query string
+		slug  string
+	}{
+		{query: "北京大学", slug: "title"},
+		{query: "数据库", slug: "content"},
+		{query: "search guide", slug: "english"},
+		{query: "legacyalias", slug: "alias"},
+		{query: "100%_done!", slug: "literal"},
+	} {
+		t.Run(tc.slug, func(t *testing.T) {
+			pages, total, err := repo.List(context.Background(), &types.WikiPageListRequest{
+				KnowledgeBaseID: kbID,
+				Query:           tc.query,
+				Page:            1,
+				PageSize:        10,
+			})
+			require.NoError(t, err)
+			require.Equal(t, int64(1), total,
+				"keyword %q should match one page in the requested knowledge base", tc.query)
+			require.Len(t, pages, 1)
+			assert.Equal(t, tc.slug, pages[0].Slug)
+		})
+	}
+}
+
 // TestFolderTree_CRUDAndChildListing exercises the wiki_folders repository:
 // child listing ordered by sort_order/name, find-by-name, page counting under
 // a folder, and that ListDistinctCategoryPaths reflects the folder paths.

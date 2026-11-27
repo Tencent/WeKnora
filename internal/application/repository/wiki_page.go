@@ -466,12 +466,11 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 				pattern, likeEscapeChar, pattern, likeEscapeChar, pattern, likeEscapeChar,
 			)
 		} else {
-			// Use PostgreSQL full-text search + ILIKE for aliases.
 			query = query.Where(
-				"(to_tsvector('simple', coalesce(title, '') || ' ' || "+
-					"coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR "+
+				"(title ILIKE ? ESCAPE ? OR "+
+					"content ILIKE ? ESCAPE ? OR "+
 					"aliases::text ILIKE ? ESCAPE ?)",
-				req.Query, pattern, likeEscapeChar,
+				pattern, likeEscapeChar, pattern, likeEscapeChar, pattern, likeEscapeChar,
 			)
 		}
 	}
@@ -642,10 +641,6 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 // "knowledgeID" and "knowledgeID|title"), but projected down to a single
 // column so the wiki ingest pipeline doesn't have to load full rows when
 // it only needs a "before" set of slugs.
-//
-// Backed by idx_wiki_pages_source_refs (GIN jsonb_path_ops) for the
-// containment branch and idx_wiki_pages_source_refs_text for the legacy
-// text-LIKE branch — both added in migration 000041.
 func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]string, error) {
 	needle, err := json.Marshal([]string{sourceKnowledgeID})
 	if err != nil {
@@ -937,10 +932,6 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		return nil, nil
 	}
 
-	// Build a JSONB containment-OR with one needle per knowledge id,
-	// plus a single text-LIKE OR over the legacy prefix forms. The
-	// containment branches each get their own GIN index probe; the
-	// LIKE branch falls back to the text fulltext GIN.
 	type row struct {
 		Content    string            `gorm:"column:content"`
 		SourceRefs types.StringArray `gorm:"column:source_refs"`
