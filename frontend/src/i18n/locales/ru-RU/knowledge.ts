@@ -1304,6 +1304,7 @@ export default {
     }
   },
   uploadConfirm: {
+    deferParsing: 'Сохранить файлы и обработать позже',
     imageEmbeddingModel: 'Модель эмбеддингов для индексации изображений',
     imageIndexInherited: 'Индексация изображений использует модель эмбеддингов базы знаний. Изменить её можно в настройках базы знаний.',
     imageVectorIndex: 'Индексация изображений для этого импорта',
@@ -1646,6 +1647,11 @@ export default {
     batchTagFailed: 'Ошибка пакетного назначения меток',
     confirmBatchReparseDocument: 'Пересобрать {count} выбранных документов? Существующее содержимое будет удалено, и каждый документ будет обработан заново.',
     confirmBatchReparse: 'Подтвердить и обработать заново',
+    statusDeferred: 'Сохранён, ожидает обработки',
+    startParse: 'Начать обработку',
+    startParseSubmitted: 'Задача обработки отправлена',
+    startParseFailed: 'Не удалось начать обработку',
+    batchReparseSkippedDeferred: 'Запустите обработку сохранённых файлов из меню каждого документа.',
     batchReparseSuccess: 'Отправлено задач пересборки: {count}',
     batchReparseFailed: 'Ошибка пакетной пересборки',
     batchReparseSkippedInFlight: 'Пропущено документов, которые ещё обрабатываются: {count}',

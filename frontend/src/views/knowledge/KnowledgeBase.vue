@@ -33,6 +33,7 @@ import {
   batchDownloadKnowledge,
   delKnowledgeDetails,
   batchReparseKnowledge,
+  startDeferredKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
   listKnowledgeFolders,
@@ -633,7 +634,11 @@ const resetStatusPolling = () => {
 
 const confirmBatchReparse = async () => {
   if (batchReparsing.value || batchDeleting.value || batchDownloading.value || selectedIds.value.size === 0) return;
-  const allIds = Array.from(selectedIds.value);
+  const selection = Array.from(selectedIds.value);
+  const deferredIds = new Set(cardList.value.filter(item => item.parse_status === 'deferred').map(item => item.id));
+  const allIds = selection.filter(id => !deferredIds.has(id));
+  if (allIds.length !== selection.length) MessagePlugin.info(t('knowledgeBase.batchReparseSkippedDeferred'));
+  if (allIds.length === 0) return;
   const ids = allIds.filter((id) => {
     const item = cardList.value.find((c) => c.id === id);
     return !item || !isParseInFlight(item.parse_status);
@@ -735,6 +740,7 @@ const parseStatusOptions = computed(() => [
   { label: t('knowledgeBase.parseStatusCancelled'), value: 'cancelled' },
   { label: t('knowledgeBase.parseStatusFinalizing'), value: 'finalizing' },
   { label: t('knowledgeBase.parseStatusDraft'), value: 'draft' },
+  { label: t('knowledgeBase.statusDeferred'), value: 'deferred' },
 ]);
 const selectedSource = ref('');
 // Source filter combines ingestion channels and the "manual"/"url" virtual
@@ -1893,6 +1899,7 @@ const enqueueUploads = (
   files: File[],
   options: {
     processConfig?: KnowledgeProcessOverrides;
+    deferParsing?: boolean;
     tagIds?: string[];
     /** Destination folder confirmed in the upload dialog; '' is the root. */
     targetFolder?: string;
@@ -1907,6 +1914,7 @@ const enqueueUploads = (
     targetFolder,
     tagIds: options.tagIds,
     processConfig: options.processConfig,
+    deferParsing: options.deferParsing,
     uploads: files.map(file => ({ file, fileName: buildUploadFileName(file, targetFolder) })),
   });
 };
@@ -1969,6 +1977,7 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   if (files.length > 0) {
     enqueueUploads(files, {
       processConfig,
+      deferParsing: result.deferParsing,
       tagIds,
       targetFolder: result.targetFolder || ROOT_FOLDER_PATH,
     });
@@ -2081,6 +2090,8 @@ const handleViewTrace = (index: number, item: KnowledgeCard) => {
   });
 };
 
+const startingDeferred = new Set<string>();
+
 const confirmRebuildKnowledge = async (index: number, item: KnowledgeCard) => {
   if (isFAQ.value) return;
   if (!canEdit.value) return;
@@ -2093,6 +2104,26 @@ const confirmRebuildKnowledge = async (index: number, item: KnowledgeCard) => {
     return;
   }
   closeCardMoreMenu(index);
+
+  if (item.parse_status === 'deferred') {
+    if (startingDeferred.has(item.id)) return;
+    const id = kbId.value;
+    startingDeferred.add(item.id);
+    try {
+      await startDeferredKnowledge(item.id);
+      MessagePlugin.success(t('knowledgeBase.startParseSubmitted'));
+      if (kbId.value === id) {
+        resetPage();
+        loadKnowledgeFiles(id);
+        scheduleWikiStatusProbes();
+      }
+    } catch (error: any) {
+      MessagePlugin.error(error?.message || t('knowledgeBase.startParseFailed'));
+    } finally {
+      startingDeferred.delete(item.id);
+    }
+    return;
+  }
 
   // No KB context to seed the dialog defaults — fall back to a direct reparse
   // that reuses the overrides stored at upload time.

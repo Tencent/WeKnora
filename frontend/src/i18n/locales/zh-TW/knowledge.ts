@@ -1304,6 +1304,7 @@ export default {
     }
   },
   uploadConfirm: {
+    deferParsing: '暫存檔案，稍後解析',
     imageEmbeddingModel: '圖像索引 Embedding 模型',
     imageIndexInherited: '圖像索引使用知識庫綁定的 Embedding 模型；如需更換，請前往知識庫設定。',
     imageVectorIndex: '本次圖片向量索引',
@@ -1646,6 +1647,11 @@ export default {
     batchTagFailed: '批次打標籤失敗',
     confirmBatchReparseDocument: '確認重建選中的 {count} 個文件？現有內容將被清除並重新解析。',
     confirmBatchReparse: '確認並重新解析',
+    statusDeferred: '已暫存，待解析',
+    startParse: '開始解析',
+    startParseSubmitted: '已提交解析任務',
+    startParseFailed: '提交解析任務失敗',
+    batchReparseSkippedDeferred: '已暫存的檔案請透過各自的文件選單開始解析。',
     batchReparseSuccess: '已提交 {count} 個重建任務',
     batchReparseFailed: '批次重建失敗',
     batchReparseSkippedInFlight: '已跳過 {count} 個正在解析中的文件',

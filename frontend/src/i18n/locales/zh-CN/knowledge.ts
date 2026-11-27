@@ -1304,6 +1304,7 @@ export default {
     }
   },
   uploadConfirm: {
+    deferParsing: '暂存文件，稍后解析',
     imageEmbeddingModel: '图像索引 Embedding 模型',
     imageIndexInherited: '图像索引使用知识库绑定的 Embedding 模型；如需更换，请前往知识库设置。',
     imageVectorIndex: '本次图片向量索引',
@@ -1646,6 +1647,11 @@ export default {
     batchTagFailed: '批量打标签失败',
     confirmBatchReparseDocument: '确认重建选中的 {count} 个文档？现有内容将被清除并重新解析。',
     confirmBatchReparse: '确认并重新解析',
+    statusDeferred: '已暂存，待解析',
+    startParse: '开始解析',
+    startParseSubmitted: '已提交解析任务',
+    startParseFailed: '提交解析任务失败',
+    batchReparseSkippedDeferred: '已暂存的文件请通过各自的文档菜单开始解析。',
     batchReparseSuccess: '已提交 {count} 个重建任务',
     batchReparseFailed: '批量重建失败',
     batchReparseSkippedInFlight: '已跳过 {count} 个正在解析中的文档',

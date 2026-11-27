@@ -24,6 +24,7 @@ export interface UploadBatch {
   targetFolder: string
   tagIds?: string[]
   processConfig?: KnowledgeProcessOverrides
+  deferParsing?: boolean
 }
 
 export interface UploadPayload {

@@ -649,6 +649,9 @@
                 </div>
 
               <footer class="modal-footer">
+                <t-checkbox v-if="mode === 'file' && localFiles.length" v-model="deferParsing" class="defer-parsing">
+                  {{ t('uploadConfirm.deferParsing') }}
+                </t-checkbox>
                 <t-button theme="default" variant="outline" @click="handleCancel">
                   {{ t('uploadConfirm.cancel') }}
                 </t-button>
@@ -788,6 +791,8 @@ const props = withDefaults(defineProps<{
   targetFolder: '',
   folderOptions: () => [],
 })
+
+const deferParsing = ref(false)
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
@@ -953,6 +958,7 @@ const dialogTitle = computed(() => {
 const confirmButtonText = computed(() => {
   if (props.mode === 'manual') return t('uploadConfirm.confirmManual')
   if (props.mode === 'reparse') return t('uploadConfirm.confirmReparse')
+  if (props.mode === 'file' && deferParsing.value) return t('uploadConfirm.deferParsing')
   return t('uploadConfirm.confirm')
 })
 
@@ -1517,6 +1523,7 @@ watch(
   () => props.visible,
   (visible) => {
     if (!visible) return
+    deferParsing.value = false
     localFiles.value = props.mode === 'file' ? [...(props.files || [])] : []
     localUrls.value = props.mode === 'file' ? [...(props.urls || [])] : []
     selectedTagIds.value = props.mode === 'reparse' ? [] : [...(props.tagIds || [])]
@@ -1670,6 +1677,7 @@ const handleConfirm = () => {
       mode: 'file',
       tagIds: [...selectedTagIds.value],
       files: [...localFiles.value],
+      deferParsing: localFiles.value.length > 0 && deferParsing.value,
       urls: [...localUrls.value],
       targetFolder: localTargetFolder.value,
     })
@@ -2507,8 +2515,14 @@ const handleConfirm = () => {
   width: 100%;
 }
 
+.defer-parsing {
+  align-self: center;
+  margin-inline-end: auto;
+}
+
 .modal-footer {
   display: flex;
+  flex-wrap: wrap;
   flex-shrink: 0;
   justify-content: flex-end;
   gap: 12px;

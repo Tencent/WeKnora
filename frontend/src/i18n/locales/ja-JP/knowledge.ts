@@ -366,6 +366,11 @@ export default {
     batchTagFailed: '一括タグ付けに失敗しました',
     confirmBatchReparseDocument: '選択した{count}件のドキュメントを再構築しますか？既存の内容は削除され、各ドキュメントが再解析されます。',
     confirmBatchReparse: '確定して再解析',
+    statusDeferred: '保存済み・解析待ち',
+    startParse: '解析を開始',
+    startParseSubmitted: '解析タスクを登録しました',
+    startParseFailed: '解析を開始できませんでした',
+    batchReparseSkippedDeferred: '保存済みのファイルは各ドキュメントのメニューから解析を開始してください。',
     batchReparseSuccess: '{count}件の再構築タスクを登録しました',
     batchReparseFailed: '一括再構築に失敗しました',
     batchReparseSkippedInFlight: '解析中の{count}件のドキュメントをスキップしました',
@@ -417,6 +422,7 @@ export default {
     chunkLoadFailed: 'チャンクの読み込みに失敗しました'
   },
   uploadConfirm: {
+    deferParsing: 'ファイルを保存して後で解析',
     imageEmbeddingModel: '画像インデックス用 Embedding モデル',
     imageIndexInherited: '画像インデックスにはナレッジベースの Embedding モデルを使用します。変更はナレッジベース設定で行ってください。',
     imageVectorIndex: '今回の画像ベクトル索引',

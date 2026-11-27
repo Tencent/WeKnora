@@ -37,6 +37,7 @@ export interface EnqueueUploadsInput {
   targetFolder?: string
   tagIds?: string[]
   processConfig?: KnowledgeProcessOverrides
+  deferParsing?: boolean
   uploads: UploadPayload[]
 }
 
@@ -90,6 +91,7 @@ export function createUploadTasks(deps: UploadTasksDeps) {
       targetFolder: input.targetFolder || '',
       tagIds: input.tagIds && input.tagIds.length > 0 ? [...input.tagIds] : undefined,
       processConfig: input.processConfig,
+      deferParsing: input.deferParsing,
     }, input.uploads)
     visible.value = true
     collapsed.value = false

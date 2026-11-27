@@ -633,6 +633,16 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
 }
 
+func (r *knowledgeRepository) TransitionDeferredKnowledge(
+	ctx context.Context, knowledge *types.Knowledge, from, to string,
+) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND id = ? AND type = ? AND parse_status = ?",
+			knowledge.TenantID, knowledge.KnowledgeBaseID, knowledge.ID, "file", from).
+		Update("parse_status", to)
+	return result.RowsAffected == 1, result.Error
+}
+
 // UpdateActiveDeletingKnowledgeColumns only touches rows that are still visible
 // to normal queries and have not moved out of the transient deleting state.
 func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(

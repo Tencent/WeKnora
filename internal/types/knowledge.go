@@ -70,6 +70,8 @@ const (
 	// queued downstream tasks, but the knowledge row and any already-written
 	// chunks/index are kept so the user can re-trigger parsing via reparse.
 	ParseStatusCancelled = "cancelled"
+	// ParseStatusDeferred is a stored upload waiting for an explicit start.
+	ParseStatusDeferred = "deferred"
 )
 
 // Summary status constants for async summary generation

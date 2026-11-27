@@ -140,8 +140,10 @@ const overallPercent = computed(() => {
 
 const legend = computed(() => {
   const s = summary.value
+  const deferred = items.value.filter(item => item.transfer === 'uploaded' && item.parseStatus === 'deferred').length
   return [
-    { key: 'ready', label: t('uploadTasks.legend.ready'), count: s.ready },
+    { key: 'ready', label: t('uploadTasks.legend.ready'), count: s.ready - deferred },
+    { key: 'deferred', label: t('knowledgeBase.statusDeferred'), count: deferred },
     { key: 'active', label: t('uploadTasks.legend.active'), count: s.uploading + s.parsing },
     { key: 'waiting', label: t('uploadTasks.legend.waiting'), count: s.waiting },
     { key: 'failed', label: t('uploadTasks.legend.failed'), count: s.failed },

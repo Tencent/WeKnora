@@ -1304,6 +1304,7 @@ export default {
     }
   },
   uploadConfirm: {
+    deferParsing: '파일을 저장하고 나중에 분석',
     imageEmbeddingModel: '이미지 인덱싱 Embedding 모델',
     imageIndexInherited: '이미지 인덱싱에는 지식 베이스에 연결된 Embedding 모델을 사용합니다. 변경하려면 지식 베이스 설정으로 이동하세요.',
     imageVectorIndex: '이번 가져오기의 이미지 벡터 인덱싱',
@@ -1646,6 +1647,11 @@ export default {
     batchTagFailed: '일괄 태그 실패',
     confirmBatchReparseDocument: '선택한 {count}개 문서를 재구축하시겠습니까? 기존 내용이 삭제되고 각 문서가 다시 파싱됩니다.',
     confirmBatchReparse: '확인 후 재파싱',
+    statusDeferred: '저장됨, 분석 대기 중',
+    startParse: '분석 시작',
+    startParseSubmitted: '분석 작업을 제출했습니다',
+    startParseFailed: '분석을 시작하지 못했습니다',
+    batchReparseSkippedDeferred: '저장된 파일은 각 문서 메뉴에서 분석을 시작하세요.',
     batchReparseSuccess: '재구축 작업 {count}개가 제출되었습니다',
     batchReparseFailed: '일괄 재구축 실패',
     batchReparseSkippedInFlight: '파싱 중인 문서 {count}개를 건너뛰었습니다',

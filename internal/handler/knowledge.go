@@ -306,6 +306,7 @@ func (h *KnowledgeHandler) enqueueKnowledgeListReparse(
 // @Param        metadata          formData  string  false  "元数据JSON"
 // @Param        enable_multimodel formData  bool    false  "启用多模态处理"
 // @Param        tag_ids       formData  string  false  "分类ID列表，逗号分隔"
+// @Param        defer_parsing     formData  bool    false  "仅保存文件，稍后启动解析"
 // @Param        process_config    formData  string  false  "处理配置JSON（KnowledgeProcessOverrides）"
 // @Success      200               {object}  handler.DataResponse{data=types.Knowledge}  "创建的知识"
 // @Failure      400               {object}  errors.AppError         "请求参数错误"
@@ -438,8 +439,20 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
-	// Create knowledge entry from the file
-	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
+	create := h.kgService.CreateKnowledgeFromFile
+	if raw := c.PostForm("defer_parsing"); raw != "" {
+		deferParsing, err := strconv.ParseBool(raw)
+		if err != nil {
+			_ = c.Error(errors.NewBadRequestError("Invalid defer_parsing format"))
+			return
+		}
+		if deferParsing {
+			create = h.kgService.CreateDeferredKnowledgeFromFile
+		}
+	}
+	knowledge, err := create(
+		ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides,
+	)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
@@ -2622,6 +2635,35 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 	})
 }
 
+// StartDeferredKnowledge godoc
+// @Summary      开始解析暂存的文件
+// @Tags         知识管理
+// @Produce      json
+// @Param        id path string true "知识ID"
+// @Success      200 {object} handler.DataResponse{data=types.Knowledge}
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/{id}/start-parse [post]
+func (h *KnowledgeHandler) StartDeferredKnowledge(c *gin.Context) {
+	id := c.Param("id")
+	_, ctx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	knowledge, err := h.kgService.StartDeferredKnowledge(ctx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+		} else {
+			logger.Errorf(ctx, "failed to start deferred knowledge: %v", err)
+			_ = c.Error(errors.NewInternalServerError("failed to submit processing task"))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": knowledge})
+}
+
 // CancelKnowledgeParse godoc
 // @Summary      取消知识解析
 // @Description  取消进行中的知识解析任务。当前已写入的 chunk / 索引保留，可通过 reparse 接口重新触发解析。已完成 / 已失败 / 删除中的知识不支持取消。
@@ -3506,7 +3548,7 @@ func (h *KnowledgeHandler) RebuildKnowledgeBaseIndex(c *gin.Context) {
 	}
 	ids := make([]string, 0, len(knowledges))
 	for _, k := range knowledges {
-		if k == nil || strings.TrimSpace(k.ID) == "" {
+		if k == nil || strings.TrimSpace(k.ID) == "" || k.ParseStatus == types.ParseStatusDeferred {
 			continue
 		}
 		// Same admission rule as /knowledge/batch-reparse: fail visibly

@@ -63,6 +63,7 @@ const meta = computed(() => {
     case 'parsing':
       return t(item.parseStatus === 'processing' ? 'uploadTasks.phaseParsing' : 'uploadTasks.phasePending')
     case 'ready':
+      if (item.parseStatus === 'deferred') return t('knowledgeBase.statusDeferred')
       return t(item.parseStatus === 'finalizing' ? 'uploadTasks.phaseFinalizing' : 'uploadTasks.phaseReady')
     case 'failed': {
       const label = t(item.transfer === 'failed' ? 'uploadTasks.phaseUploadFailed' : 'uploadTasks.phaseParseFailed')
