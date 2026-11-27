@@ -298,7 +298,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 
 ## 内置厂商
 
-内置 31 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 32 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -325,6 +325,7 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 | OpenRouter | `openrouter` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | LiteLLM | `litellm` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Requesty | `requesty` | ✓ | ✓ | | ✓ | ✓ |
+| LLMTR | `llmtr` | ✓ | ✓ | | ✓ | |
 | Runcrate | `runcrate` | ✓ | ✓ | | ✓ | |
 | Jina | `jina` | | ✓ | ✓ | | |
 | NVIDIA | `nvidia` | ✓ | ✓ | ✓ | ✓ | |
@@ -363,6 +364,33 @@ WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_toke
 [Cohere API 建议](https://docs.cohere.com/v2/reference/rerank)，将超过 1000 篇的候选集
 拆成多个请求；1000 是采用的推荐批次大小。省略 `top_n` 以获取全部候选的分数，
 超长文档沿用服务端默认截断行为。本接入仅提供 Cohere 文本重排。
+
+### LLMTR
+
+LLMTR 是提供 OpenAI 兼容推理 API 的预付费网关，默认地址为 `https://llmtr.com/v1`，
+对话、向量和视觉模型共用该地址，模型 ID 带厂商前缀（如 `qwen/qwen3.8-flash`）。
+API Key 在 [LLMTR 控制台](https://llmtr.com/dashboard/keys)创建。公开模型列表见
+`GET https://llmtr.com/v1/models`。
+
+通过 `POST /api/v1/models` 创建对话模型时，请求体示例：
+
+```json
+{
+  "name": "qwen/qwen3.8-flash",
+  "type": "KnowledgeQA",
+  "source": "remote",
+  "parameters": {
+    "provider": "llmtr",
+    "base_url": "https://llmtr.com/v1",
+    "api_key": "your-llmtr-api-key"
+  }
+}
+```
+
+输出上限通过 `max_tokens` 发送。目录中的思考参数并不统一（部分模型声明
+`reasoning`，部分声明 `reasoning_effort`，部分两者都没有），因此本接入不在
+厂商级声明思考格式。公开目录未给出向量维度，本接入也不预置向量模型条目；
+需要向量模型时可按公开列表中的 ID 自行添加。
 
 ### Runcrate
 
