@@ -678,8 +678,9 @@ export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agent
 
 export const KNOWLEDGE_CHUNK_PAGE_SIZE = 25;
 
-export function getKnowledgeDetailsCon(id: string, page: number) {
-  return get(`/api/v1/chunks/${id}?page=${page}&page_size=${KNOWLEDGE_CHUNK_PAGE_SIZE}`);
+export function getKnowledgeDetailsCon(id: string, page: number, chunkType?: 'image_ocr' | 'image_caption') {
+  const filter = chunkType ? `&chunk_type=${chunkType}` : '';
+  return get(`/api/v1/chunks/${id}?page=${page}&page_size=${KNOWLEDGE_CHUNK_PAGE_SIZE}${filter}`);
 }
 
 export interface ChunkEditPayload {
