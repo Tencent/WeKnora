@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/projectlink"
+	sdk "github.com/Tencent/WeKnora/client"
 )
 
 // linkFields enumerates the fields surfaced for `--format json` discovery on
@@ -224,10 +225,28 @@ func promptForKB(ctx context.Context, svc cmdutil.KBLister, f *cmdutil.Factory) 
 	if err != nil {
 		return "", "", cmdutil.Wrapf(cmdutil.CodeInputMissingFlag, err, "kb prompt")
 	}
+	// An exact id always wins: it is unambiguous even when a name collides.
+	var nameMatches []sdk.KnowledgeBase
 	for _, kb := range kbs {
-		if kb.ID == answer || kb.Name == answer {
+		if kb.ID == answer {
 			return kb.ID, kb.Name, nil
 		}
+		if kb.Name == answer {
+			nameMatches = append(nameMatches, kb)
+		}
 	}
-	return "", "", cmdutil.NewError(cmdutil.CodeKBNotFound, fmt.Sprintf("knowledge base not found: %s", answer))
+	switch len(nameMatches) {
+	case 1:
+		return nameMatches[0].ID, nameMatches[0].Name, nil
+	case 0:
+		return "", "", cmdutil.NewError(cmdutil.CodeKBNotFound,
+			fmt.Sprintf("knowledge base not found: %s", answer))
+	default:
+		// Names are not unique, so choosing the first would bind the project
+		// link to an arbitrary knowledge base. Same rule as `--kb` (#6037).
+		return "", "", cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+			fmt.Sprintf("knowledge base name %q matches %d knowledge bases — enter the id instead",
+				answer, len(nameMatches))).
+			WithHint("the list above shows each knowledge base id")
+	}
 }
