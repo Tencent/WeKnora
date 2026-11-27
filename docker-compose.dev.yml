@@ -253,7 +253,7 @@ services:
       # ========== 基础 ==========
       - TZ=${TZ:-Asia/Shanghai}
       - LOG_LEVEL=${LOG_LEVEL:-}
-      - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
+      - DOCREADER_IMAGE_OUTPUT_DIR=${DOCREADER_IMAGE_OUTPUT_DIR:-/tmp/docreader}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
       # docreader 对外 HTTP 抓取的 SSRF 白名单（逗号分隔；与 app 共用同名变量）
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
