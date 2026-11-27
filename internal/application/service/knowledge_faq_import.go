@@ -2237,6 +2237,38 @@ func (s *knowledgeService) recordFAQImportKBActivity(
 		"faq_entry", payload.KnowledgeID, outcome, faqImportActivityDetails(payload, progress, totalEntries))
 }
 
+// failFAQImportOnTimeout publishes the terminal failed state and releases
+// the KB running lock when the execution segment hit its deadline (issue
+// #4827). It mirrors the last-retry failure path, but runs on a detached
+// cleanup context because the execution context is already expired. It
+// returns a SkipRetry error so asynq ends the task instead of retrying
+// into the same hang.
+func (s *knowledgeService) failFAQImportOnTimeout(
+	ctx context.Context, payload *types.FAQImportPayload,
+	total, processed, maxRetry int, err error,
+) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	progress, _ := s.GetFAQImportProgress(cleanupCtx, payload.TaskID)
+	if progress == nil {
+		progress = &types.FAQImportProgress{
+			TaskID: payload.TaskID, KBID: payload.KBID, KnowledgeID: payload.KnowledgeID,
+		}
+	}
+	if updateErr := s.updateFAQImportProgressStatus(cleanupCtx, payload.TaskID,
+		payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusFailed,
+		0, total, processed, "导入超时", err.Error()); updateErr != nil {
+		logger.Errorf(cleanupCtx, "Failed to update task status to failed after FAQ import timeout: %v", updateErr)
+	}
+	s.recordFAQImportKBActivity(cleanupCtx, payload, progress, total,
+		types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
+	// The timeout ends the task, so this is the final failure: drop the
+	// staged entries file instead of leaving it for a retry that will
+	// never come.
+	s.cleanupFAQEntriesFileOnFinalFailure(cleanupCtx, payload.EntriesURL, maxRetry, maxRetry)
+	return fmt.Errorf("FAQ import timed out: %w: %w", err, asynq.SkipRetry)
+}
+
 // ProcessFAQImport handles Asynq FAQ import tasks (including dry run mode)
 func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) error {
 	var payload types.FAQImportPayload
@@ -2304,26 +2336,49 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
 
+	// Bound the execution segment: without this, a worker stuck mid-import
+	// holds the KB running lock until the 3h progress TTL expires (issue
+	// #4827). The timeout matches the asynq task timeout set at enqueue.
+	execCtx, cancel := context.WithTimeout(ctx, faqImportExecTimeout)
+	defer cancel()
+	ctx = execCtx
+
 	// 如果 entries 存储在对象存储中，先下载
 	if payload.EntriesURL != "" && len(payload.Entries) == 0 {
 		logger.Infof(ctx, "Downloading FAQ entries from object storage: %s", payload.EntriesURL)
-		reader, err := s.fileSvc.GetFile(ctx, payload.EntriesURL)
+		entries, err := s.loadFAQImportEntries(ctx, payload.EntriesURL)
 		if err != nil {
-			logger.Errorf(ctx, "Failed to download FAQ entries from object storage: %v", err)
-			return fmt.Errorf("failed to download entries: %w", err)
-		}
-		defer reader.Close()
-
-		entriesData, err := io.ReadAll(reader)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to read FAQ entries data: %v", err)
-			return fmt.Errorf("failed to read entries data: %w", err)
-		}
-
-		var entries []types.FAQEntryPayload
-		if err := json.Unmarshal(entriesData, &entries); err != nil {
-			logger.Errorf(ctx, "Failed to unmarshal FAQ entries: %v", err)
-			return fmt.Errorf("failed to unmarshal entries: %w", err)
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return s.failFAQImportOnTimeout(ctx, &payload, payload.EntryCount, 0, maxRetry, err)
+			}
+			if isLastRetry {
+				// A timed-out load must still publish its terminal state and release the KB.
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				running, lookupErr := s.getRunningFAQImportInfo(cleanupCtx, payload.KBID)
+				if lookupErr != nil {
+					logger.Errorf(cleanupCtx, "Failed to check FAQ import instance before cleanup: %v", lookupErr)
+					return err
+				}
+				// A reused task ID may now belong to a newer import, including its progress and file.
+				if running != nil && !runningFAQImportInfoMatches(
+					running, payload.TaskID, payload.InstanceID, payload.EnqueuedAt) {
+					return err
+				}
+				progress, progressErr := s.GetFAQImportProgress(cleanupCtx, payload.TaskID)
+				if progressErr != nil {
+					progress = &types.FAQImportProgress{Total: payload.EntryCount}
+				}
+				if updateErr := s.updateFAQImportProgressStatus(cleanupCtx, payload.TaskID, payload.InstanceID,
+					payload.EnqueuedAt, types.FAQImportStatusFailed, progress.Progress, progress.Total,
+					progress.Processed, "读取导入数据失败", err.Error()); updateErr != nil {
+					logger.Errorf(cleanupCtx, "Failed to update task status to failed: %v", updateErr)
+				}
+				s.recordFAQImportKBActivity(cleanupCtx, &payload, progress, progress.Total,
+					types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
+				s.cleanupFAQEntriesFileOnFinalFailure(cleanupCtx, payload.EntriesURL, retryCount, maxRetry)
+			}
+			return err
 		}
 
 		payload.Entries = entries
@@ -2333,6 +2388,9 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	logger.Infof(ctx, "Processing FAQ import task: task_id=%s, kb_id=%s, total_entries=%d, dry_run=%v, retry=%d/%d",
 		payload.TaskID, payload.KBID, len(payload.Entries), payload.DryRun, retryCount, maxRetry)
 	if err := s.validateFAQImportTags(ctx, kb, payload.Entries); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return s.failFAQImportOnTimeout(ctx, &payload, len(payload.Entries), 0, maxRetry, err)
+		}
 		return err
 	}
 
@@ -2431,6 +2489,9 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	chunksDeleted, err := s.chunkRepo.DeleteUnindexedChunks(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to delete unindexed chunks: %v", err)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return s.failFAQImportOnTimeout(ctx, &payload, originalTotalEntries, progress.Processed, maxRetry, err)
+		}
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
 			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "清理未索引数据失败", err.Error()); updateErr != nil {
@@ -2488,6 +2549,9 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	// 执行FAQ导入（传入已处理的偏移量，用于进度计算）
 	if err := s.executeFAQImport(ctx, payload.TaskID, payload.KBID, faqPayload, payload.TenantID, progress.FailedCount+processedCount, progress); err != nil {
 		logger.Errorf(ctx, "FAQ import task failed: %s, error: %v", payload.TaskID, err)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return s.failFAQImportOnTimeout(ctx, &payload, originalTotalEntries, progress.Processed, maxRetry, err)
+		}
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
 			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusFailed, 0, originalTotalEntries, len(validEntries), "导入失败", err.Error()); updateErr != nil {
@@ -2505,6 +2569,30 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 
 	// 最终完成处理（生成失败条目 CSV 等）
 	return s.finalizeFAQValidation(ctx, &payload, progress, originalTotalEntries)
+}
+
+func (s *knowledgeService) loadFAQImportEntries(
+	ctx context.Context, entriesURL string,
+) ([]types.FAQEntryPayload, error) {
+	reader, err := s.fileSvc.GetFile(ctx, entriesURL)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to download FAQ entries from object storage: %v", err)
+		return nil, fmt.Errorf("failed to download entries: %w", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	entriesData, err := io.ReadAll(reader)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to read FAQ entries data: %v", err)
+		return nil, fmt.Errorf("failed to read entries data: %w", err)
+	}
+
+	var entries []types.FAQEntryPayload
+	if err := json.Unmarshal(entriesData, &entries); err != nil {
+		logger.Errorf(ctx, "Failed to unmarshal FAQ entries: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal entries: %w", err)
+	}
+	return entries, nil
 }
 
 // finalizeFAQValidation 完成 FAQ 验证/导入任务，生成失败条目 CSV（如果有）
@@ -2807,6 +2895,13 @@ const (
 	faqImportRunningKeyPrefix  = "faq_import_running:"
 	faqImportProgressTTL       = 3 * time.Hour
 )
+
+// faqImportExecTimeout bounds the FAQ import execution segment (entries
+// download, validation and import). It matches the asynq.Timeout(2h) set
+// when the task is enqueued, so a worker stuck in a ctx-aware call fails
+// here with a terminal state instead of holding the KB running lock until
+// the 3h progress TTL expires (issue #4827). Overridable in tests.
+var faqImportExecTimeout = 2 * time.Hour
 
 // getFAQImportProgressKey returns the Redis key for storing FAQ import progress
 func getFAQImportProgressKey(taskID string) string {
