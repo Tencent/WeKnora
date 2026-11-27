@@ -429,7 +429,9 @@ curl -N -X POST $BASE/api/v1/knowledge-chat/s-1 -H "X-API-Key: $API_KEY" \
 
 - 工具执行失败以 `tool_result` 事件返回（`data.success: false`，`data.error` 为原因），智能体会继续处理；`error` 事件只表示整轮执行失败。
 - 智能体中途接收追加消息时发出 `user_message_injected`；命令执行过程中以 `command_output` 更新工具卡片输出。
-- 同一会话已有智能推理回答在生成时返回 409，此时应改用 [steer 接口](#steer)追加消息。
+- 同一会话已有智能推理回答在生成时返回 409。普通轮次可用 [steer 接口](#steer)追加消息；下述文档限定轮次仅支持停止，不接受追加。
+
+**限库 API Key 的文档限定轮次：** 使用有 `chat` 能力的限库 Key 调用同工作空间的智能推理 Agent 时，可以只传 `knowledge_ids`（1–100 个已启用、已完成解析的文档 ID）。服务端检查每份文档可读且真实所属库在 Key 的授权范围内；任一项不满足时整轮返回 403。空数组、同时传入整库、标签、@提及或附件等扩展来源时返回 400。检索、列表和读取只使用该轮文档；模型不读取旧轮次、记忆或其他数据源。该范围只作用于本轮；省略 `knowledge_ids` 时沿用现有 Agent 行为。
 
 ```bash
 curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \

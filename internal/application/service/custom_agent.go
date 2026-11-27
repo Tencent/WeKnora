@@ -570,14 +570,24 @@ func (s *customAgentService) getSuggestedQuestions(
 		limit = suggestionMaxLimit
 	}
 
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
+	documentTargets := followUpDocumentTargets(ctx)
+	strict := !includeCurated && len(documentTargets) > 0
+	if strict {
+		kbIDs, tagScopes = nil, nil
+		knowledgeIDs = nil
+		for _, target := range documentTargets {
+			knowledgeIDs = append(knowledgeIDs, target.KnowledgeIDs...)
+		}
+	} else if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
 		return nil, err
 	}
 	scopeTagIDs := flattenTagScopeIDs(tagScopes)
 	if err := types.AuthorizeTenantAPIKeyOptionalTagIDs(ctx, scopeTagIDs); err != nil {
 		return nil, err
 	}
-	knowledgeIDs = s.readableSuggestionKnowledgeIDs(ctx, knowledgeIDs)
+	if !strict {
+		knowledgeIDs = s.readableSuggestionKnowledgeIDs(ctx, knowledgeIDs)
+	}
 
 	// Get tenant ID from context
 	tenantID, ok := types.TenantIDFromContext(ctx)
@@ -732,10 +742,31 @@ func (s *customAgentService) getSuggestedQuestions(
 	// rows back — the symptom is "suggested questions never appear for shared KBs".
 	scopeKBIDs := mergeUniqueStrings(queryKBIDs, resolvedTags.KnowledgeBaseIDs)
 	kbGroups := s.groupKBIDsByEffectiveTenant(ctx, scopeKBIDs)
+	documentIDsByTenant := make(map[uint64][]string)
+	var documentBases map[string]string
 	// Always keep the caller's tenant in the iteration so knowledge_ids-only
 	// requests (no kbIDs) still execute one query under the caller's tenant.
-	if len(scopeKBIDs) == 0 {
+	if strict {
+		documentBases = followUpDocumentBases(documentTargets)
+		for _, target := range documentTargets {
+			kbGroups[target.TenantID] = nil
+			documentIDsByTenant[target.TenantID] = append(documentIDsByTenant[target.TenantID], target.KnowledgeIDs...)
+		}
+	} else if len(scopeKBIDs) == 0 {
 		kbGroups[tenantID] = nil
+	}
+	documentsInGroup := func(tenantID uint64) []string {
+		if strict {
+			return documentIDsByTenant[tenantID]
+		}
+		return queryKnowledgeIDs
+	}
+	allowsChunk := func(chunk *types.Chunk) bool {
+		if !strict {
+			return true
+		}
+		kbID, allowed := documentBases[chunk.KnowledgeID]
+		return allowed && chunk.KnowledgeBaseID == kbID
 	}
 
 	// Collect FAQ recommended chunks
@@ -743,7 +774,7 @@ func (s *customAgentService) getSuggestedQuestions(
 		explicitGroupKBIDs := intersectSuggestionStrings(groupKBIDs, queryKBIDs)
 		groupTagIDs := resolvedTags.TagIDsByTenant[groupTenantID]
 		faqChunks, err := s.chunkRepo.ListRecommendedFAQChunks(
-			ctx, groupTenantID, explicitGroupKBIDs, queryKnowledgeIDs, groupTagIDs, fetchLimit,
+			ctx, groupTenantID, explicitGroupKBIDs, documentsInGroup(groupTenantID), groupTagIDs, fetchLimit,
 		)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -753,6 +784,9 @@ func (s *customAgentService) getSuggestedQuestions(
 			continue
 		}
 		for _, chunk := range faqChunks {
+			if !allowsChunk(chunk) {
+				continue
+			}
 			meta, err := chunk.FAQMetadata()
 			if err != nil || meta == nil || meta.StandardQuestion == "" {
 				continue
@@ -773,7 +807,9 @@ func (s *customAgentService) getSuggestedQuestions(
 	// Collect Document chunks with generated questions
 	for groupTenantID, groupKBIDs := range kbGroups {
 		explicitGroupKBIDs := intersectSuggestionStrings(groupKBIDs, queryKBIDs)
-		docChunks, err := s.chunkRepo.ListRecentDocumentChunksWithQuestions(ctx, groupTenantID, explicitGroupKBIDs, queryKnowledgeIDs, fetchLimit)
+		docChunks, err := s.chunkRepo.ListRecentDocumentChunksWithQuestions(
+			ctx, groupTenantID, explicitGroupKBIDs, documentsInGroup(groupTenantID), fetchLimit,
+		)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"agent_id":  agentID,
@@ -782,6 +818,9 @@ func (s *customAgentService) getSuggestedQuestions(
 			continue
 		}
 		for _, chunk := range docChunks {
+			if !allowsChunk(chunk) {
+				continue
+			}
 			meta, err := chunk.DocumentMetadata()
 			if err != nil || meta == nil || len(meta.GeneratedQuestions) == 0 {
 				continue
@@ -813,7 +852,7 @@ func (s *customAgentService) getSuggestedQuestions(
 	// retrieve a wiki page, so surfacing wiki-derived suggestions would lure
 	// the user into asking questions the agent will then answer with empty
 	// context. Smart-reasoning agents that opt in to wiki tools keep this.
-	if agent.Config.AgentMode != types.AgentModeQuickAnswer && s.wikiPageRepo != nil {
+	if !strict && agent.Config.AgentMode != types.AgentModeQuickAnswer && s.wikiPageRepo != nil {
 		for groupTenantID, groupKBIDs := range kbGroups {
 			explicitGroupKBIDs := intersectSuggestionStrings(groupKBIDs, queryKBIDs)
 			if len(explicitGroupKBIDs) == 0 {

@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -363,6 +364,9 @@ func (h *Handler) liveAgentRun(ctx context.Context, sessionID string) (string, e
 		}
 		return "", nil
 	}
+	if msg.ExecutionContext.DocumentScopeAPIKeyID != 0 {
+		return "", errors.NewForbiddenError("A document-scoped Agent turn cannot be steered")
+	}
 	return assistantID, nil
 }
 
@@ -372,6 +376,11 @@ func (h *Handler) liveAgentRun(ctx context.Context, sessionID string) (string, e
 func (h *Handler) resolveLiveAgentRun(ctx context.Context, c *gin.Context, sessionID string) (string, bool) {
 	assistantID, err := h.liveAgentRun(ctx, sessionID)
 	if err != nil {
+		var appErr *errors.AppError
+		if stderrors.As(err, &appErr) {
+			_ = c.Error(appErr)
+			return "", false
+		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
 		_ = c.Error(errors.NewServiceUnavailableError("Failed to look up running turn"))
 		return "", false
@@ -902,6 +911,9 @@ func (h *Handler) kickNextRunFromSteerBacklog(
 	prevReqCtx *qaRequestContext,
 	prevStreamCtx *sseStreamContext,
 ) bool {
+	if prevStreamCtx.assistantMessage.ExecutionContext.DocumentScopeAPIKeyID != 0 {
+		return false
+	}
 	followUp, ok := h.claimNextSteerFollowUp(ctx, prevReqCtx, prevStreamCtx)
 	if !ok {
 		followUp, ok = h.claimNextSteerFollowUp(ctx, prevReqCtx, prevStreamCtx)

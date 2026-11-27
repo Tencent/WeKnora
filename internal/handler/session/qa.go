@@ -168,6 +168,8 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		Suspendable: interactive,
 		Mode:        mode,
 		Resume:      rc.resume,
+
+		DocumentScopeAPIKeyID: rc.assistantMessage.ExecutionContext.DocumentScopeAPIKeyID,
 	}
 	if rc.steerSink != nil {
 		req.SteerSink = rc.steerSink
@@ -195,7 +197,11 @@ func uploadOnlyQuery(ctx context.Context, req *CreateKnowledgeQARequest) string 
 }
 
 // parseQARequest parses and validates a QA request, returns the request context
-func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestContext, *CreateKnowledgeQARequest, error) {
+func (h *Handler) parseQARequest(c *gin.Context, mode qaMode) (*qaRequestContext, *CreateKnowledgeQARequest, error) {
+	logPrefix := "KnowledgeQA"
+	if mode == qaModeAgent {
+		logPrefix = "AgentQA"
+	}
 	receivedAt := time.Now()
 	ctx := logger.CloneContext(c.Request.Context())
 	requestID := secutils.SanitizeForLog(c.GetString(types.RequestIDContextKey.String()))
@@ -299,7 +305,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 
 	// Merge @mentioned items into knowledge_base_ids and knowledge_ids
 	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIDs, request.MentionedItems)
-	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
+	scope, _ := types.TenantAPIKeyScopeFromContext(ctx)
+	var documentScopeKeyID uint64
+	if scope.IsKnowledgeBaseRestricted() && mode == qaModeAgent && request.KnowledgeIDs != nil {
+		if err := h.authorizeDocumentScopedAgent(ctx, session, customAgent, &request); err != nil {
+			return nil, nil, err
+		}
+		documentScopeKeyID = scope.KeyID
+	} else if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
 		return nil, nil, err
 	}
 
@@ -492,6 +505,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	)
 
 	executionContext.LocalBrowserEnabled = request.LocalBrowserEnabled
+	executionContext.DocumentScopeAPIKeyID = documentScopeKeyID
 
 	// Build request context
 	reqCtx := &qaRequestContext{
@@ -543,6 +557,27 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	}
 
 	return reqCtx, &request, nil
+}
+
+func (h *Handler) authorizeDocumentScopedAgent(
+	ctx context.Context, session *types.Session, agent *types.CustomAgent, request *CreateKnowledgeQARequest,
+) error {
+	if agent == nil || !agent.IsAgentMode() || agent.TenantID != session.TenantID {
+		return errors.NewForbiddenError("Document scope requires an Agent in the current workspace")
+	}
+	if len(request.KnowledgeBaseIDs) > 0 || len(request.TagIDs) > 0 ||
+		len(request.MCPServiceIDs) > 0 || len(request.SkillNames) > 0 ||
+		request.WebSearchEnabled || request.LocalBrowserEnabled ||
+		len(request.Images)+len(request.AttachmentIDs)+len(request.AttachmentUploads)+len(request.MentionedItems) > 0 ||
+		request.PageContext != nil || request.QuestionOrigin != nil || request.SuggestionAttribution != nil {
+		return errors.NewBadRequestError("A document-scoped Agent request accepts only explicit document targets")
+	}
+	for _, id := range request.KnowledgeIDs {
+		if id == "" || id != secutils.SanitizeForLog(id) {
+			return errors.NewBadRequestError("Invalid knowledge_ids")
+		}
+	}
+	return h.sessionService.AuthorizeRestrictedAgentDocuments(ctx, session.TenantID, request.KnowledgeIDs)
 }
 
 func decodeAndValidateAttachmentUploads(
@@ -853,11 +888,13 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 	// has started cannot change the status, and the client would sit on a
 	// stream nobody will write to.
 	if mode == qaModeAgent && reqCtx.customAgent != nil {
-		streamCtx.steerSink = newSteerSink(
-			asyncCtx, reqCtx.sessionID, reqCtx.requestID, reqCtx.assistantMessage,
-			h.messageService, h.streamManager,
-		)
-		reqCtx.steerSink = streamCtx.steerSink
+		if reqCtx.assistantMessage.ExecutionContext.DocumentScopeAPIKeyID == 0 {
+			streamCtx.steerSink = newSteerSink(
+				asyncCtx, reqCtx.sessionID, reqCtx.requestID, reqCtx.assistantMessage,
+				h.messageService, h.streamManager,
+			)
+			reqCtx.steerSink = streamCtx.steerSink
+		}
 
 		if err := h.streamManager.SetLiveRun(
 			logger.CloneContext(baseCtx), reqCtx.sessionID,
@@ -1158,7 +1195,7 @@ func knowledgeSearchOptions(request *SearchKnowledgeRequest) (*types.KnowledgeSe
 // @Router       /knowledge-chat/{session_id} [post]
 func (h *Handler) KnowledgeQA(c *gin.Context) {
 	// Parse and validate request
-	reqCtx, request, err := h.parseQARequest(c, "KnowledgeQA")
+	reqCtx, request, err := h.parseQARequest(c, qaModeNormal)
 	if err != nil {
 		c.Error(err)
 		return
@@ -1188,7 +1225,7 @@ func (h *Handler) KnowledgeQA(c *gin.Context) {
 // @Router       /agent-chat/{session_id} [post]
 func (h *Handler) AgentQA(c *gin.Context) {
 	// Parse and validate request
-	reqCtx, request, err := h.parseQARequest(c, "AgentQA")
+	reqCtx, request, err := h.parseQARequest(c, qaModeAgent)
 	if err != nil {
 		c.Error(err)
 		return
@@ -1224,7 +1261,8 @@ func (h *Handler) AgentQA(c *gin.Context) {
 
 	// Route to appropriate handler based on agent mode
 	if agentModeEnabled {
-		h.executeQA(reqCtx, qaModeAgent, true)
+		generateTitle := reqCtx.assistantMessage.ExecutionContext.DocumentScopeAPIKeyID == 0 || !request.DisableTitle
+		h.executeQA(reqCtx, qaModeAgent, generateTitle)
 	} else {
 		logger.Infof(reqCtx.ctx, "Agent mode disabled, delegating to normal mode for session: %s", reqCtx.sessionID)
 		h.executeQA(reqCtx, qaModeNormal, !request.DisableTitle)
@@ -1365,6 +1403,9 @@ func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (con
 	configID := ""
 	if reqCtx.customAgent != nil {
 		configID = reqCtx.customAgent.Config.SandboxConfigID
+	}
+	if reqCtx.assistantMessage != nil && reqCtx.assistantMessage.ExecutionContext.DocumentScopeAPIKeyID != 0 {
+		configID = ""
 	}
 	turnCtx, release, err := holder.HoldSandboxTurn(ctx, reqCtx.sessionID, configID)
 	if err == nil {
@@ -2315,9 +2356,14 @@ func (h *Handler) completeAssistantMessage(
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
 	bgCtx := context.WithoutCancel(ctx)
-	if indexCtx, ok := h.sessionTenantInfoContext(bgCtx); ok {
-		go h.messageService.IndexMessageToKB(
-			indexCtx, userQuery, assistantMessage.Content, assistantMessage.ID, assistantMessage.SessionID)
+	if assistantMessage.ExecutionContext.DocumentScopeAPIKeyID == 0 {
+		if indexCtx, ok := h.sessionTenantInfoContext(bgCtx); ok {
+			go h.messageService.IndexMessageToKB(
+				indexCtx, userQuery, assistantMessage.Content, assistantMessage.ID, assistantMessage.SessionID)
+		}
+		if userQuery != "" {
+			go h.recordTurnMemory(bgCtx, assistantMessage, userQuery, userMessageID)
+		}
 	}
 	if userQuery != "" && h.suggestionService != nil {
 		go func() {
@@ -2327,9 +2373,6 @@ func (h *Handler) completeAssistantMessage(
 				logger.Warnf(bgCtx, "follow-up suggestion generation failed for message %s: %v", assistantMessage.ID, err)
 			}
 		}()
-	}
-	if userQuery != "" {
-		go h.recordTurnMemory(bgCtx, assistantMessage, userQuery, userMessageID)
 	}
 	return nil
 }

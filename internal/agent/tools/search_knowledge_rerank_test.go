@@ -208,6 +208,73 @@ func TestExecuteReportsSearchFailure(t *testing.T) {
 	}
 }
 
+type scopedSearchKBService struct {
+	stubKnowledgeBaseService
+	requests []types.SearchParams
+}
+
+func (s *scopedSearchKBService) HybridSearch(
+	_ context.Context, _ string, params types.SearchParams,
+) ([]*types.SearchResult, error) {
+	s.requests = append(s.requests, params)
+	return s.results, nil
+}
+
+func TestSearchKnowledgeRejectsOutOfScopeResultsBeforeReranking(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		documentID string
+		baseID     string
+		wantDenied bool
+	}{
+		{name: "approved document", documentID: "allowed", baseID: "kb-1"},
+		{name: "same library sibling", documentID: "sibling", baseID: "kb-1", wantDenied: true},
+		{name: "different library", documentID: "allowed", baseID: "kb-2", wantDenied: true},
+		{name: "missing provenance", documentID: "allowed", wantDenied: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := &stubReranker{scores: []float64{0.95}}
+			svc := &scopedSearchKBService{stubKnowledgeBaseService: stubKnowledgeBaseService{
+				results: []*types.SearchResult{{
+					ID: "chunk-1", Content: "retrieved policy text", Score: 0.8,
+					KnowledgeID: tc.documentID, KnowledgeBaseID: tc.baseID,
+				}},
+			}}
+			tool := NewSearchKnowledgeTool(svc, nil, nil, types.SearchTargets{{
+				Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-1", TenantID: 1,
+				KnowledgeIDs: []string{"allowed"},
+			}}, model, &config.Config{Conversation: &config.ConversationConfig{}})
+			res, err := tool.Execute(t.Context(), json.RawMessage(`{"query":"policy","mode":"keyword"}`))
+			if len(svc.requests) != 1 || len(svc.requests[0].KnowledgeIDs) != 1 ||
+				svc.requests[0].KnowledgeIDs[0] != "allowed" || !svc.requests[0].SkipContextEnrichment {
+				t.Fatalf("retrieval requests escaped document scope: %+v", svc.requests)
+			}
+			if tc.wantDenied {
+				if !errors.Is(err, errSearchDocumentScope) || res == nil || res.Success ||
+					res.Data != nil || model.calls != 0 {
+					t.Fatalf("out-of-scope row reached tool output or reranker: res=%+v err=%v reranks=%d",
+						res, err, model.calls)
+				}
+				return
+			}
+			if err != nil || res == nil || !res.Success || model.calls != 1 {
+				t.Fatalf("approved row did not reach reranker: res=%+v err=%v reranks=%d", res, err, model.calls)
+			}
+		})
+	}
+}
+
+func TestSearchKnowledgeEmptyDocumentScopeDoesNotSearchLibrary(t *testing.T) {
+	svc := &scopedSearchKBService{}
+	tool := NewSearchKnowledgeTool(svc, nil, nil, types.SearchTargets{{
+		Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-1", TenantID: 1,
+	}}, nil, &config.Config{Conversation: &config.ConversationConfig{}})
+	res, err := tool.Execute(t.Context(), json.RawMessage(`{"query":"policy","mode":"keyword"}`))
+	if !errors.Is(err, errSearchDocumentScope) || res == nil || res.Success || len(svc.requests) != 0 {
+		t.Fatalf("empty scope must fail before retrieval: res=%+v err=%v requests=%+v", res, err, svc.requests)
+	}
+}
+
 // In keyword mode the rerank model orders exact-term hits but does not reject
 // them: identifiers score low with rerank models.
 func TestRerankResults_keywordModeOrdersWithoutFiltering(t *testing.T) {
