@@ -1026,6 +1026,8 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_im.IMChannel:
     properties:
+      admin_digest:
+        type: object
       agent_id:
         type: string
       bot_identity:

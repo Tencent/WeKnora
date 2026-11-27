@@ -68,6 +68,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		Locale          string     `json:"locale"`
 		SessionMode     string     `json:"session_mode"`
 		KnowledgeBaseID string     `json:"knowledge_base_id"`
+		AdminDigest     types.JSON `json:"admin_digest"`
 		Credentials     types.JSON `json:"credentials"`
 		Enabled         *bool      `json:"enabled"`
 	}
@@ -95,6 +96,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		OutputMode:  req.OutputMode,
 		Locale:      locale,
 		SessionMode: req.SessionMode,
+		AdminDigest: req.AdminDigest,
 		Credentials: req.Credentials,
 		Enabled:     true,
 	}
@@ -126,6 +128,9 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		if channel.OutputMode == "" {
 			channel.OutputMode = "stream"
 		}
+	}
+	if channel.AdminDigest == nil {
+		channel.AdminDigest = types.JSON("{}")
 	}
 	if channel.Credentials == nil {
 		channel.Credentials = types.JSON("{}")
@@ -228,6 +233,7 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 		Locale          *string    `json:"locale"`
 		SessionMode     *string    `json:"session_mode"`
 		KnowledgeBaseID *string    `json:"knowledge_base_id"`
+		AdminDigest     types.JSON `json:"admin_digest"`
 		Credentials     types.JSON `json:"credentials"`
 		Enabled         *bool      `json:"enabled"`
 		AgentID         *string    `json:"agent_id"`
@@ -263,6 +269,9 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "knowledge base not found"})
 			return
 		}
+	}
+	if req.AdminDigest != nil {
+		channel.AdminDigest = req.AdminDigest
 	}
 	if req.Credentials != nil {
 		channel.Credentials = req.Credentials

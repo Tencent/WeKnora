@@ -181,11 +181,14 @@ func TestHandleMessageFullOutputShowsPlaceholderWithoutIntermediateUpdates(t *te
 	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"}
 	session := &types.Session{ID: "session-1"}
 
-	err := service.handleMessageFullOutput(
+	answer, err := service.handleMessageFullOutput(
 		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
 	)
 	if err != nil {
 		t.Fatalf("handleMessageFullOutput() error = %v", err)
+	}
+	if answer != "最终答案" {
+		t.Fatalf("handleMessageFullOutput() answer = %q, want %q", answer, "最终答案")
 	}
 
 	wantOrder := []string{"start", "qa", "finalize", "end"}
@@ -213,9 +216,10 @@ func TestHandleMessageFullOutputReplacesPlaceholderAfterCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- service.handleMessageFullOutput(
+		_, err := service.handleMessageFullOutput(
 			ctx, msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
 		)
+		done <- err
 	}()
 
 	select {
@@ -252,7 +256,7 @@ func TestHandleMessageFullOutputStartStreamErrorFallsBackToPlainReply(t *testing
 	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"}
 	session := &types.Session{ID: "session-1"}
 
-	err := service.handleMessageFullOutput(
+	_, err := service.handleMessageFullOutput(
 		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
 	)
 	if err != nil {
@@ -280,7 +284,7 @@ func TestHandleMessageFullOutputFinalizeFailureSendsPlainReply(t *testing.T) {
 	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"}
 	session := &types.Session{ID: "session-1"}
 
-	err := service.handleMessageFullOutput(
+	_, err := service.handleMessageFullOutput(
 		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
 	)
 	if err != nil {
@@ -304,7 +308,7 @@ func TestHandleMessageFullOutputThinkOnlyReplacesWithNoAnswerFallback(t *testing
 	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"}
 	session := &types.Session{ID: "session-1"}
 
-	err := service.handleMessageFullOutput(
+	_, err := service.handleMessageFullOutput(
 		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
 	)
 	if err != nil {

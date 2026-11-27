@@ -287,7 +287,7 @@ func TestIMStreamUpdatesUseResourceStorageBeforeCompletion(t *testing.T) {
 	s.sessionService = &resourceStreamingSession{answer: f.answer, updated: adapter.updated}
 	ctx, cancel := context.WithTimeout(f.context(), 5*time.Second)
 	defer cancel()
-	err := s.handleMessageStream(ctx,
+	_, err := s.handleMessageStream(ctx,
 		&IncomingMessage{Platform: PlatformWeCom, UserID: "test-user", Content: "Show the images"},
 		&types.Session{ID: "test-session"}, nil, nil, nil, nil, adapter, adapter, "test-user", f.tenant)
 	require.NoError(t, err)

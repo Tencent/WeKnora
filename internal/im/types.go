@@ -28,6 +28,7 @@ type IMChannel struct {
 	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);default:''"`
 	BotIdentity     string         `json:"bot_identity"      gorm:"type:varchar(255);not null;default:'';uniqueIndex:idx_im_channels_bot_identity,where:deleted_at IS NULL AND bot_identity != ''"`
 	SessionMode     string         `json:"session_mode"      gorm:"type:varchar(20);not null;default:'user'"`
+	AdminDigest     types.JSON     `json:"admin_digest"      gorm:"type:jsonb;not null;default:'{}'"`
 	Credentials     types.JSON     `json:"credentials"       gorm:"type:jsonb;not null;default:'{}'"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
@@ -42,21 +43,22 @@ func (IMChannel) TableName() string {
 // are never included — use Admin+ Create/Update responses to read back
 // values immediately after a mutation.
 type IMChannelSummary struct {
-	ID                    string    `json:"id"`
-	TenantID              uint64    `json:"tenant_id"`
-	AgentID               string    `json:"agent_id"`
-	Platform              string    `json:"platform"`
-	Name                  string    `json:"name"`
-	Enabled               bool      `json:"enabled"`
-	Mode                  string    `json:"mode"`
-	OutputMode            string    `json:"output_mode"`
-	Locale                string    `json:"locale"`
-	KnowledgeBaseID       string    `json:"knowledge_base_id"`
-	BotIdentity           string    `json:"bot_identity"`
-	SessionMode           string    `json:"session_mode"`
-	CredentialsConfigured bool      `json:"credentials_configured"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	ID                    string     `json:"id"`
+	TenantID              uint64     `json:"tenant_id"`
+	AgentID               string     `json:"agent_id"`
+	Platform              string     `json:"platform"`
+	Name                  string     `json:"name"`
+	Enabled               bool       `json:"enabled"`
+	Mode                  string     `json:"mode"`
+	OutputMode            string     `json:"output_mode"`
+	Locale                string     `json:"locale"`
+	KnowledgeBaseID       string     `json:"knowledge_base_id"`
+	BotIdentity           string     `json:"bot_identity"`
+	SessionMode           string     `json:"session_mode"`
+	AdminDigest           types.JSON `json:"admin_digest"`
+	CredentialsConfigured bool       `json:"credentials_configured"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
 // SummarizeIMChannel converts a stored channel into its list response shape.
@@ -74,6 +76,7 @@ func SummarizeIMChannel(ch IMChannel) IMChannelSummary {
 		KnowledgeBaseID:       ch.KnowledgeBaseID,
 		BotIdentity:           ch.BotIdentity,
 		SessionMode:           ch.SessionMode,
+		AdminDigest:           ch.AdminDigest,
 		CredentialsConfigured: imCredentialsConfigured(ch.Credentials),
 		CreatedAt:             ch.CreatedAt,
 		UpdatedAt:             ch.UpdatedAt,
