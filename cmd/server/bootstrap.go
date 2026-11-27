@@ -83,7 +83,9 @@ func runStartupBootstrap(c *dig.Container) {
 func bootstrapSystemAdmin(ctx context.Context, userSvc interfaces.UserService, email string) {
 	user, err := userSvc.GetUserByEmail(ctx, email)
 	if password := os.Getenv(bootstrapPasswordEnvVar); password != "" && errors.Is(err, repository.ErrUserNotFound) {
-		if len(email) > 255 || binding.Validator.ValidateStruct(&types.LoginRequest{Email: email, Password: password}) != nil {
+		if len(email) > 255 || binding.Validator.ValidateStruct(
+			&types.LoginRequest{Email: email, Password: password},
+		) != nil {
 			logger.Warn(ctx, "[bootstrap] invalid initial system admin login credentials")
 			return
 		}

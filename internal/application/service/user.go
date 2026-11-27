@@ -158,7 +158,9 @@ func (s *userService) CreateBootstrapSystemAdmin(ctx context.Context, email, pas
 	return err
 }
 
-func (s *userService) register(ctx context.Context, req *types.RegisterRequest, requireBootstrapAdmin bool) (*types.User, error) {
+func (s *userService) register(
+	ctx context.Context, req *types.RegisterRequest, requireBootstrapAdmin bool,
+) (*types.User, error) {
 	logger.Info(ctx, "Start user registration")
 
 	// Validate input
