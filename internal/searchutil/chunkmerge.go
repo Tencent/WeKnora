@@ -3,6 +3,7 @@ package searchutil
 import (
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -26,19 +27,35 @@ func JoinChunkContent(acc, next, separator string) string {
 		return next
 	}
 
-	accRunes := []rune(acc)
-	nextRunes := []rune(next)
-	maxOverlap := minInt(len(accRunes), len(nextRunes))
-	// Editable chunks may be much larger than parser-produced chunks. Bound
-	// suffix matching so an adversarial 200 KB edit cannot turn retrieval into
-	// quadratic work. Parser overlap windows are normally far below this cap;
-	// larger unmatched overlap is safely retained as duplication.
-	if maxOverlap > defaultSearchSpan {
-		maxOverlap = defaultSearchSpan
+	// Matching only examines a bounded suffix and prefix. Decode those windows
+	// instead of allocating rune copies of entire, potentially edited bodies.
+	accStart, nextEnd := len(acc), 0
+	for n := 0; n < defaultSearchSpan && (accStart > 0 || nextEnd < len(next)); n++ {
+		if accStart > 0 {
+			_, size := utf8.DecodeLastRuneInString(acc[:accStart])
+			accStart -= size
+		}
+		if nextEnd < len(next) {
+			_, size := utf8.DecodeRuneInString(next[nextEnd:])
+			nextEnd += size
+		}
 	}
+	accRunes := []rune(acc[accStart:])
+	nextRunes := []rune(next[:nextEnd])
+	maxOverlap := minInt(len(accRunes), len(nextRunes))
 	for overlap := maxOverlap; overlap >= minOverlapRunes; overlap-- {
 		if runeSlicesEqual(accRunes[len(accRunes)-overlap:], nextRunes[:overlap]) {
-			return acc + string(nextRunes[overlap:])
+			tail := next
+			for range overlap {
+				_, size := utf8.DecodeRuneInString(tail)
+				tail = tail[size:]
+			}
+			// Preserve the previous rune conversion's replacement of malformed
+			// UTF-8 when overlap was removed, including beyond the match window.
+			if !utf8.ValidString(tail) {
+				tail = string([]rune(tail))
+			}
+			return acc + tail
 		}
 	}
 	return acc + separator + next

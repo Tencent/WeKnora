@@ -40,6 +40,14 @@ const (
 	// vector DB write failed (quota, connectivity, schema mismatch).
 	ErrCodeVectorStoreWriteFailed = "VECTORSTORE_WRITE_FAILED"
 
+	// ErrCodeStorageQuotaExceeded — the tenant's storage quota cannot
+	// absorb the index this document would add. Not a failure of the
+	// embedding provider or the vector store: the write was never
+	// attempted. Retrying cannot help until the quota is raised or
+	// other documents are removed, so the UI must say so instead of
+	// offering a plain "retry".
+	ErrCodeStorageQuotaExceeded = "STORAGE_QUOTA_EXCEEDED"
+
 	// ErrCodeMultimodalVLMFailed — a single image's OCR or caption call
 	// failed. Note: per-image failures don't fail the whole parent;
 	// see image_multimodal.go finalize-on-last-attempt.

@@ -464,7 +464,11 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	if !gotSlot {
 		exitStatus = "inflight_cap"
 		logger.Infof(ctx, "wiki ingest: KB %s at in-flight cap (%d), rescheduling", payload.KnowledgeBaseID, maxInflight)
-		s.scheduleCappedRetry(ctx, payload)
+		// Keep the shared per-KB capped-retry task KB-scoped rather than
+		// pinning it to one operator-selected document.
+		retryPayload := payload
+		retryPayload.KnowledgeID = ""
+		s.scheduleCappedRetry(ctx, retryPayload)
 		return nil
 	}
 	defer releaseSlot()
@@ -511,7 +515,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// re-triggered afterwards — stranding the KB indefinitely. Schedule a
 		// coalesced recheck timed past the stale threshold so those rows are
 		// reclaimed automatically once eligible.
-		followUpScheduled = s.scheduleStaleClaimRecheck(ctx, payload)
+		recheckPayload := payload
+		recheckPayload.KnowledgeID = ""
+		followUpScheduled = s.scheduleStaleClaimRecheck(ctx, recheckPayload)
 		return nil
 	}
 
@@ -2154,12 +2160,18 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 			_, writeErr := s.wikiService.UpdatePage(ctx, page)
 			updateDeferred, err = classifyWikiPageWrite(writeErr)
 		} else {
-			_, err = s.wikiService.CreatePage(ctx, page)
+			updateDeferred, err = s.createWikiPageOrUpdate(ctx, ctx, page)
 		}
 		return changed, affectedType, false, updateDeferred, err
 	}
 
 	var remainingSourcesContent strings.Builder
+	// remainingSourceCount separates "the page lost every source" (the only
+	// case where collapsing to the empty-page notice is correct) from "its
+	// source is still attached but shrank". The builder cannot answer that:
+	// inside the retract branch it receives a sentinel line when nothing
+	// remains, so Len() is always non-zero there.
+	var remainingSourceCount int
 	var deletedContent strings.Builder
 	var relatedSlugs strings.Builder
 	var newContentBuilder strings.Builder
@@ -2198,6 +2210,7 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 			} else {
 				fmt.Fprintf(&remainingSourcesContent, "<document>\n<title>%s</title>\n<content>\n(summary not available)\n</content>\n</document>\n\n", refTitle)
 			}
+			remainingSourceCount++
 		}
 		if remainingSourcesContent.Len() == 0 {
 			remainingSourcesContent.WriteString("(no remaining sources)")
@@ -2323,6 +2336,10 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 		if len(retracts) > 0 {
 			hasRetractionsStr = "1"
 		}
+		hasRemainingSourcesStr := ""
+		if remainingSourceCount > 0 {
+			hasRemainingSourcesStr = "1"
+		}
 
 		// Fall back gracefully if title/type are still unset (shouldn't happen
 		// for well-formed updates — both get populated from `additions` above,
@@ -2342,6 +2359,7 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyUserPrompt, map[string]string{
 			"HasAdditions":            hasAdditionsStr,
 			"HasRetractions":          hasRetractionsStr,
+			"HasRemainingSources":     hasRemainingSourcesStr,
 			"PageSlug":                slug,
 			"PageTitle":               pageTitle,
 			"PageType":                pageType,
@@ -2435,12 +2453,41 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 			_, updateErr := s.wikiService.UpdatePage(writeCtx, page)
 			updateDeferred, err = classifyWikiPageWrite(updateErr)
 		} else {
-			_, err = s.wikiService.CreatePage(ctx, page)
+			writeCtx := ctx
+			if len(retracts) > 0 {
+				writeCtx = types.WithWikiShrinkAllowed(ctx)
+			}
+			updateDeferred, err = s.createWikiPageOrUpdate(ctx, writeCtx, page)
 		}
 		return true, affectedType, additionFailed, updateDeferred, err
 	}
 
 	return false, "", additionFailed, false, err
+}
+
+// createWikiPageOrUpdate persists a page the exists snapshot said was
+// missing. When a concurrent batch created the same slug after the
+// snapshot, GetOrCreatePage reports created=false and the content is
+// applied through the normal versioned UpdatePage instead of failing
+// the batch on the unique-key conflict (Tencent/WeKnora#5656).
+func (s *wikiIngestService) createWikiPageOrUpdate(
+	ctx, writeCtx context.Context, page *types.WikiPage,
+) (updateDeferred bool, err error) {
+	existing, created, err := s.wikiService.GetOrCreatePage(ctx, page)
+	if err != nil {
+		return false, err
+	}
+	if created {
+		return false, nil
+	}
+	// Lost the slug race: adopt the winner's identity so the versioned
+	// update below targets the stored row, and snapshot it so the
+	// conflict check in UpdatePage compares against the row just read.
+	page.ID = existing.ID
+	page.Version = existing.Version
+	writeCtx = types.WithWikiPageWriteSnapshot(writeCtx, existing)
+	_, writeErr := s.wikiService.UpdatePage(writeCtx, page)
+	return classifyWikiPageWrite(writeErr)
 }
 
 // classifyWikiPageWrite turns the result of one guarded UpdatePage call into

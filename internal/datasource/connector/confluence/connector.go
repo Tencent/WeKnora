@@ -462,6 +462,12 @@ func (c *Connector) fetchStream(
 				}
 				return nil, err
 			}
+			// The page may be edited between listing and the body request.
+			// Acknowledge the version actually ingested, not the older listing,
+			// so the next round does not replace the same body again.
+			if bodyVersion, known := pageVersion(full.page); known {
+				version = bodyVersion
+			}
 			next.SpacePages[resourceID][summary.ID] = version
 			if err := h.Checkpoint(ctx, next.syncCursor()); err != nil {
 				return nil, err
@@ -638,7 +644,7 @@ func markdownItem(
 	// docparser image pipeline can persist them and rewrite to resource:// URLs.
 	// Best-effort: a failed image keeps its original src and never fails the page.
 	html = newAssetResolver(client).Resolve(ctx, html)
-	markdown, err := convertPageHTML(html)
+	markdown, err := convertPageWithTasks(html)
 	if err != nil {
 		return types.FetchedItem{}, err
 	}

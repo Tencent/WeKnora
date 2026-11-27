@@ -15,6 +15,8 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
+const maxMessagesPerPage = 200
+
 // messageListFields enumerates the projectable scalar fields of sdk.Message
 // (nested knowledge_references / agent_steps are intentionally excluded).
 var messageListFields = []string{
@@ -64,7 +66,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Session id to load messages from")
 	_ = cmd.MarkFlagRequired("session")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum messages to return — server-side page size (1..1000)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum messages to return — server-side page size (1..200)")
 	cmd.Flags().StringVar(&opts.Before, "before", "", "Only messages created before this RFC3339 timestamp (time-cursor pagination)")
 	cmdutil.AddFormatFlag(cmd, messageListFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
@@ -83,10 +85,10 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 // (so a bad value surfaces as exit 5, not an auth error) and at runList's top
 // for direct callers; idempotent.
 func validateListOpts(opts *ListOptions) error {
-	if opts.Limit < 1 || opts.Limit > 1000 {
+	if opts.Limit < 1 || opts.Limit > maxMessagesPerPage {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: fmt.Sprintf("--limit must be in 1..1000, got %d", opts.Limit),
+			Message: fmt.Sprintf("--limit must be in 1..200, got %d", opts.Limit),
 		}
 	}
 	return nil

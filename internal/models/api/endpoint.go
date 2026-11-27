@@ -228,6 +228,17 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("API request failed with status %d: %s", e.StatusCode, e.Body)
 }
 
+// RejectedError is a request refused without being sent, because the vendor
+// has documented it will not take it: an audio file over its size limit, or
+// in a format it does not read. Nothing reached the vendor, so it is the
+// request that is wrong and not the service; the type is what lets a caller
+// tell the two apart without matching on the message.
+type RejectedError struct {
+	Reason string
+}
+
+func (e *RejectedError) Error() string { return e.Reason }
+
 // RetryAfter is how long the vendor asked the caller to wait before trying
 // again, from the Retry-After header in either of its two forms (delay in
 // seconds or an HTTP date). It is zero when the header is absent, malformed

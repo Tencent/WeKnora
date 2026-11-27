@@ -153,6 +153,7 @@
     var panelOpen = false;
     var iframeReady = false;
     var iframeOrigin = '';
+    var iframeStarted = false;
 
     var launcher = document.createElement('button');
     launcher.type = 'button';
@@ -192,7 +193,6 @@
     ].join(';');
 
     var iframe = document.createElement('iframe');
-    iframe.src = embedUrl;
     iframe.style.cssText = 'width:100%;height:100%;border:none';
     iframe.setAttribute('allow', 'clipboard-write');
     var hostOrigin = '';
@@ -332,6 +332,10 @@
 
     function setOpen(next) {
       panelOpen = !!next;
+      if (panelOpen && !iframeStarted) {
+        iframeStarted = true;
+        iframe.src = embedUrl;
+      }
       panel.style.display = panelOpen ? 'block' : 'none';
       launcher.textContent = panelOpen ? '✕' : '💬';
       if (panelOpen) {
@@ -358,6 +362,9 @@
 
     launcher.addEventListener('click', toggle);
     iframe.addEventListener('load', function () {
+      // Appending an iframe without src may still dispatch an about:blank load
+      // event. Do not fetch or provide credentials until the user opens it.
+      if (!iframeStarted) return;
       // The embed page lives at embedOrigin; we cannot (and need not) read the
       // cross-origin contentWindow.location. Just (re)provide the token.
       iframeOrigin = embedOrigin;

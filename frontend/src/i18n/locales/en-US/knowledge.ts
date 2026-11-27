@@ -589,6 +589,8 @@ export default {
       DOCREADER_PARSE_FAILED_SUGGESTION: 'Check the file format and ask an administrator to inspect the DocReader logs for this attempt.',
       TASK_STALLED: 'Stopped after no progress',
       TASK_STALLED_SUGGESTION: 'Processing made no progress past the time limit and had no task left in the queue, so it was marked as failed. Click Retry; if this keeps happening, check the service this stage depends on (document parsing, model, or vector store).',
+      STORAGE_QUOTA_EXCEEDED: 'Storage quota exceeded',
+      STORAGE_QUOTA_EXCEEDED_SUGGESTION: 'The document parsed fine, but writing its index would exceed your workspace storage quota, so nothing was stored. Delete documents you no longer need, or ask an administrator to raise the quota, then retry.',
       UNKNOWN_SUGGESTION: 'Check the application logs for details.'
     }
   },

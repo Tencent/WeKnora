@@ -17,7 +17,9 @@ workbook is read exactly as before.
 import datetime
 import io
 import os
+import re
 import unittest
+import zipfile
 from unittest.mock import patch
 
 import openpyxl
@@ -111,12 +113,27 @@ def _read_cells(content: bytes, *coordinates: str):
     return [ws[c].value for c in coordinates]
 
 
-def _upstream_fill_merged_cells_xlsx(content: bytes) -> bytes:
-    """Frozen copy of the pre-change implementation, for byte-identity checks.
+def _xlsx_members(content: bytes) -> list[tuple[str, bytes]]:
+    """Read the archive members without save-time timestamps."""
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        members = []
+        for entry in archive.infolist():
+            payload = archive.read(entry)
+            if entry.filename == "docProps/core.xml":
+                # Keep the surrounding XML bytes, including the tag attributes.
+                payload = re.sub(
+                    rb"(<dcterms:modified\b[^>]*>)[^<]*(</dcterms:modified>)",
+                    rb"\g<1>\g<2>",
+                    payload,
+                )
+            members.append((entry.filename, payload))
+        return members
 
-    Kept verbatim (docreader/parser/xlsx_merge.py before the percentage switch)
-    so the default path of the new function can be compared byte for byte with
-    the behavior existing deployments have today.
+
+def _upstream_fill_merged_cells_xlsx(content: bytes) -> bytes:
+    """Frozen copy of the implementation before the percentage switch.
+
+    Kept verbatim for comparison with the default and switch-off paths.
     """
     import zipfile
     from io import BytesIO
@@ -158,13 +175,14 @@ def _upstream_fill_merged_cells_xlsx(content: bytes) -> bytes:
 
 
 class PercentMaterializationOffTests(unittest.TestCase):
-    """Default behavior: unchanged, and byte-identical to the old function."""
+    """Default and switch-off behavior match the pre-switch implementation."""
 
     def test_default_keeps_the_raw_fraction(self):
         content = _workbook_with_percentages()
 
         self.assertEqual(
-            fill_merged_cells_xlsx(content), _upstream_fill_merged_cells_xlsx(content)
+            _xlsx_members(fill_merged_cells_xlsx(content)),
+            _xlsx_members(_upstream_fill_merged_cells_xlsx(content)),
         )
 
         values = _read_cells(fill_merged_cells_xlsx(content), "B2", "C2", "B3", "B4")
@@ -177,20 +195,23 @@ class PercentMaterializationOffTests(unittest.TestCase):
         self.assertNotIn("61.12%", document.content)
 
     def test_switch_off_is_byte_identical_to_the_upstream_implementation(self):
-        for build in (
-            _workbook_with_percentages,
-            _workbook_without_merges,
-            _workbook_with_unformatted_cell_in_percentage_row,
+        for build, rewrites in (
+            (_workbook_with_percentages, True),
+            (_workbook_without_merges, False),
+            (_workbook_with_unformatted_cell_in_percentage_row, False),
         ):
             content = build()
             with self.subTest(fixture=build.__name__):
                 # Explicitly off, so a stray env var in the calling shell
                 # cannot turn this into an accidental behavior test.
                 with patch.dict(os.environ, {PERCENT_ENV: "0"}):
-                    self.assertEqual(
-                        fill_merged_cells_xlsx(content),
-                        _upstream_fill_merged_cells_xlsx(content),
-                    )
+                    actual = fill_merged_cells_xlsx(content)
+                    expected = _upstream_fill_merged_cells_xlsx(content)
+                if rewrites:
+                    self.assertEqual(_xlsx_members(actual), _xlsx_members(expected))
+                else:
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(actual, content)
 
     def test_env_var_off_forms_keep_the_raw_fraction(self):
         content = _workbook_with_percentages()

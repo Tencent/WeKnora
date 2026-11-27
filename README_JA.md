@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://weknora.weixin.qq.com"><img alt="公式サイト" src="https://img.shields.io/badge/website-weknora.weixin.qq.com-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://weknora.weixin.qq.com/docs/"><img alt="ドキュメント" src="https://img.shields.io/badge/docs-中国語-b8863b?style=flat-square&labelColor=101f38"></a>
-  <a href="./CHANGELOG.md"><img alt="リリース" src="https://img.shields.io/badge/release-v0.9.0-b8863b?style=flat-square&labelColor=101f38"></a>
+  <a href="./CHANGELOG.md"><img alt="リリース" src="https://img.shields.io/badge/release-v0.9.1-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="./LICENSE"><img alt="ライセンス" src="https://img.shields.io/badge/license-MIT-b8863b?style=flat-square&labelColor=101f38"></a>
   <a href="https://github.com/Tencent/WeKnora/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Tencent/WeKnora?style=flat-square&labelColor=101f38&color=b8863b"></a>
   <br/>
@@ -60,7 +60,7 @@ https://github.com/user-attachments/assets/de0e490a-e738-405e-bb3a-64b63edd7278
 - **メモリとナレッジ整理**：クロスセッション長期メモリが、ユーザーが確認したプロフィール・好み・事実を保持します。フォルダーアップロードは元のディレクトリ構造を保ち、検索チャンクは編集・差分比較・ロールバックできます。
 - **データソースとフォーマット**：Feishu ナレッジベース / Feishu クラウドドライブ / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / Seafile / RSS の自動同期（順次拡充中）。PDF、Word、画像、Excel、XMind など 10 以上のフォーマットに対応し、Office 文書は anydoc でプロセス内解析します。
 - **チャネルと連携**：WeChat Work、Feishu、Slack、Telegram などの IM で直接 Q&A、ウェブサイト埋め込み Widget で外部サイトにエージェントを公開、組み込み MCP Server で Cursor や Claude などの AI ツールと接続、スコープ付き API キーと Principal モデルでプログラム連携。
-- **モデル**：30 の組み込みベンダーと自動生成のモデルカタログ。OpenAI、DeepSeek、Qwen（Alibaba Cloud）、Zhipu、Hunyuan、Gemini、MiniMax、NVIDIA、LiteLLM、Ollama などに対応。
+- **モデル**：31 の組み込みベンダーと自動生成のモデルカタログ。OpenAI、DeepSeek、Qwen（Alibaba Cloud）、Zhipu、Hunyuan、Gemini、MiniMax、NVIDIA、LiteLLM、Ollama などに対応。
 - **権限と運用**：マルチワークスペース RBAC（4 階層ロール、リソース所有権、ワークスペース監査ログ）、ワークスペースごとの複数ストレージインスタンス、ランタイムタスクキューダッシュボードと Worker プール統治、Langfuse による Agent ステップ・トークン消費・パイプラインのトレーシング。
 - **デプロイ**：LLM、ベクトルデータベース、ストレージバックエンドはすべて差し替え可能。ローカルまたはプライベートクラウドにデプロイし、データを自社環境に置けます。
 
@@ -138,13 +138,13 @@ docker compose down     # サービスを停止
 既存のデプロイがあり、新しい release をダウンロードした場合：
 
 ```bash
-# .env の WEKNORA_VERSION を対象バージョン（例: 0.9.0）に設定、または latest のまま
+# .env の WEKNORA_VERSION を対象バージョン（例: v0.9.1）に設定、または latest のまま
 docker compose pull     # WEKNORA_VERSION に一致するイメージを取得
 docker compose up -d    # 新しいイメージでコンテナを再作成
 ```
 
 > [!NOTE]
-> `docker compose up -d` のみではローカルキャッシュのイメージが再利用され、Web UI の表示バージョンがダウンロードした release と一致しない場合があります。アップグレードする前に[アップグレードの注意事項](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0#upgrade-notes)を確認してください。
+> `docker compose up -d` のみではローカルキャッシュのイメージが再利用され、Web UI の表示バージョンがダウンロードした release と一致しない場合があります。アップグレードする前に[アップグレードの注意事項](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)を確認してください。
 
 ### その他のデプロイ方法
 
@@ -165,6 +165,15 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 > - セキュリティパッチと改善のため、定期的に最新バージョンに更新する
 
 ## 最新アップデート
+
+### v0.9.1 <sub>· [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1)</sub>
+
+- **[チャットの音声入力](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#voice)** エージェントで音声アップロードを有効にし、音声認識モデルを選択します。マイクを押しながら話し、離すと入力欄に文字が入ります。送信前に編集できます。
+- **[サンドボックスのブラウザー](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#sandbox)** セッションのデスクトップでサイトにログインすると、エージェントが同じページで作業を続けられます。
+- **[認証情報の保管庫](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#vault)** サイトのログイン情報は一度だけ使うことも、個人の保管庫に保存することもできます。次回は保存したアカウントを選び、ドメインを確認して入力します。
+- **[画像検索と原文への移動](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#images)** 検索 API に画像を渡して類似画像を探せます。グローバル検索ではヒットした箇所を原文で直接開けます。回答の引用には出典のナレッジベース名が表示されます。
+- **[資料の取り込みと Wiki の進捗](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#document-progress)** システム管理者は資料ごとに取り込みと Wiki 処理の状況や過去のエラーを確認し、保留中の Wiki 処理を個別または一括で開始できます。
+- **[アップグレード手順](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1#upgrade-notes)** 更新前にデータベース、ファイルストレージ、暗号化キーをバックアップしてください。
 
 ### v0.9.0 <sub>· 2026-10-29 · [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0)</sub>
 
@@ -333,7 +342,7 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 
 | コンポーネント | 選択肢 |
 |----------------|--------|
-| [大規模モデル](https://weknora.weixin.qq.com/docs/03-features/06-models) | 30 の組み込みベンダー。OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen（Alibaba Cloud）/ Zhipu / Hunyuan / Doubao（Volcengine）/ Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama など |
+| [大規模モデル](https://weknora.weixin.qq.com/docs/03-features/06-models) | 31 の組み込みベンダー。OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen（Alibaba Cloud）/ Zhipu / Hunyuan / Doubao（Volcengine）/ Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama など |
 | Embedding | Ollama / BGE / GTE / Zhipu / OpenAI 互換 API |
 | ベクトル DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
 | [オブジェクトストレージ](https://weknora.weixin.qq.com/docs/03-features/19-storage-backends) | ローカル / Tencent Cloud COS / MinIO / AWS S3 / 火山引擎 TOS / Alibaba Cloud OSS / 金山雲 KS3 / 華為雲 OBS |
@@ -353,7 +362,7 @@ docker compose up -d    # 新しいイメージでコンテナを再作成
 | <img src="./website-docs/homepage/public/docs/_home/brands/chrome.svg" width="22" height="22" alt=""> | [**Chrome 拡張機能**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd) | テキスト、画像、ページ全体を選択してワンクリックでナレッジエントリとして保存。コピペやファイルアップロードは不要 |
 | <img src="./docs/images/readme/icons/phone.svg" width="22" height="22" alt=""> | [**WeChat ミニプログラム**](./miniprogram/README.md) | 軽量なモバイルクライアント。API の設定、ナレッジベースの選択、URL のインポート、WeChat からのナレッジ Q&A |
 | <img src="./docs/images/readme/icons/skills.svg" width="22" height="22" alt=""> | [**ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) | ClawHub で公開された WeKnora スキル。REST API でドキュメントのインポート、ハイブリッド検索、ナレッジ管理 |
-| <img src="./website-docs/homepage/public/docs/_home/brands/deepseek-color.svg" width="22" height="22" alt=""> | [**DeepSeek Harness プラグイン**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) | `dsh` のコーディングエージェントに 4 つの読み取り専用ツール（検索、ドキュメント読み取り、質問、ナレッジベース一覧）を提供 |
+| <img src="./website-docs/homepage/public/docs/_home/brands/deepseek-color.svg" width="22" height="22" alt=""> | [**DeepSeek Harness プラグイン**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) | `dsh` エージェントがナレッジベースの一覧表示、検索、ドキュメントの読み取りを行い、WeKnora のチャットセッションで質問できる |
 | <img src="./docs/images/readme/icons/code.svg" width="22" height="22" alt=""> | [**ウェブ埋め込み Widget**](https://weknora.weixin.qq.com/docs/03-features/13-embed-channel) | エージェントを外部サイトに公開 |
 | <img src="./docs/images/readme/icons/braces.svg" width="22" height="22" alt=""> | [**Go SDK**](https://weknora.weixin.qq.com/docs/05-clients/03-go-sdk) | ナレッジベース・ドキュメント・セッションなどの CRUD と SSE ストリーミング Q&A |
 | <img src="./website-docs/homepage/public/docs/_home/brands/wechat-dialog.png" width="22" height="22" alt=""> | [**WeChat 対話オープンプラットフォーム**](https://chatbot.weixin.qq.com) | WeKnora をベースにしたホスティング型 Q&A。ナレッジをアップロードするだけで WeChat 内に Q&A サービスを公開 |
@@ -384,7 +393,7 @@ weknora chat "設計ドキュメントを要約して"
 | [設定](https://weknora.weixin.qq.com/docs/01-getting-started/04-configuration) | 環境変数とモデル設定 |
 | [トラブルシューティング](https://weknora.weixin.qq.com/docs/01-getting-started/05-troubleshooting) | よくある問題と解決方法 |
 | [API ドキュメント](https://weknora.weixin.qq.com/docs/04-api/01-api-overview) | REST API の概要 |
-| [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.9.0) | 各バージョンの変更点 |
+| [リリースノート](https://weknora.weixin.qq.com/docs/07-releases/v0.9.1) | 各バージョンの変更点 |
 
 ## 開発ガイド
 

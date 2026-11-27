@@ -110,11 +110,22 @@ func (h *SystemHandler) StartDocumentWiki(c *gin.Context) {
 	}
 	result, err := h.documentProgress.StartWiki(c.Request.Context(), request)
 	if result != nil && result.Started > 0 {
+		targetID := request.KnowledgeID
+		if targetID == "" {
+			targetID = request.KnowledgeBaseID
+		}
+		meta := map[string]string{
+			"scope": "durable_document", "requested": strconv.Itoa(result.Requested),
+			"accepted": strconv.Itoa(result.Started),
+		}
+		if request.KnowledgeBaseID != "" {
+			meta["knowledge_base_id"] = request.KnowledgeBaseID
+		}
+		if trimmedSearch := strings.TrimSpace(request.Search); trimmedSearch != "" {
+			meta["search"] = trimmedSearch
+		}
 		h.emitQueueTaskAudit(c.Request.Context(), types.AuditActionSystemQueueTaskRunNow,
-			types.QueueWiki, request.KnowledgeID, map[string]string{
-				"scope": "durable_document", "requested": strconv.Itoa(result.Requested),
-				"accepted": strconv.Itoa(result.Started),
-			})
+			types.QueueWiki, targetID, meta)
 	}
 	if err != nil {
 		logger.Errorf(c.Request.Context(), "schedule document Wiki work: %v", err)

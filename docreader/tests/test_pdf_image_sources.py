@@ -26,9 +26,12 @@ def mixed_image_pdf(include_scan=True):
                   for index in range(15)]
     }])))
     figure = PdfReader(io.BytesIO(_build_smask_pdf()))
-    native.pages[0].merge_page(figure.pages[0])
     writer = PdfWriter()
     writer.add_page(native.pages[0])
+    # pypdf 7 refuses to rewrite the contents of a page that no writer owns
+    # (`PageObject.replace_contents()` is gone there), so the figure is merged
+    # onto the copy the writer holds instead of onto the reader's page.
+    writer.pages[0].merge_page(figure.pages[0])
     if include_scan:
         scanned = PdfReader(io.BytesIO(_scanned_pdf(1)))
         writer.add_page(scanned.pages[0])

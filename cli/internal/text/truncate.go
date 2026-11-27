@@ -16,20 +16,5 @@ func Truncate(maxWidth int, s string) string {
 	if maxWidth <= 0 {
 		return ""
 	}
-	if runewidth.StringWidth(s) <= maxWidth {
-		return s
-	}
-	if maxWidth == 1 {
-		return ellipsis
-	}
-	budget := maxWidth - 1 // reserve for ellipsis
-	w := 0
-	for i, r := range s {
-		rw := runewidth.RuneWidth(r)
-		if w+rw > budget {
-			return s[:i] + ellipsis
-		}
-		w += rw
-	}
-	return s + ellipsis
+	return runewidth.Truncate(s, maxWidth, ellipsis)
 }

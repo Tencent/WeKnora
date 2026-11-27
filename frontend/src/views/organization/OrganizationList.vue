@@ -273,7 +273,7 @@
                         <label class="join-form-label">{{ $t('organization.join.searchSpaces') }}</label>
                         <p class="join-form-desc">{{ $t('organization.join.searchSpacesDesc') }}</p>
                         <t-input v-model="searchQuery" :placeholder="$t('organization.join.searchSpacesPlaceholder')"
-                          size="medium" clearable @input="doSearchSearchableDebounced" @keyup.enter="doSearchSearchable">
+                          size="medium" clearable @change="doSearchSearchableDebounced" @keyup.enter="doSearchSearchable">
                           <template #prefix-icon>
                             <t-icon name="search" />
                           </template>
@@ -502,10 +502,13 @@ const invitePreviewError = ref('')
 
 // 加入方式：邀请码 / 搜索空间
 const joinStep = ref<'invite' | 'search'>('invite')
+const isSearchStepActive = computed(() => showInvitePreview.value && joinStep.value === 'search')
 const searchQuery = ref('')
 const searchableList = computed(() => orgStore.searchableOrganizations)
 const searchLoading = ref(false)
+const SEARCH_DEBOUNCE_MS = 300
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let searchRequestSequence = 0
 // 搜索结果缓存：避免重复点击时重复请求导致高度跳动
 const organizationMenuVisibility = reactive<Record<string, boolean>>({})
 
@@ -636,6 +639,10 @@ watch([searchableList, searchLoading], () => {
     })
   }
 })
+
+watch(isSearchStepActive, active => {
+  if (!active) cancelSearch()
+}, { flush: 'sync' })
 
 // 监听菜单快捷操作事件
 const handleOrganizationDialogEvent = ((event: CustomEvent<{ type: 'create' | 'join' }>) => {
@@ -947,23 +954,52 @@ function handleSearchTabClick() {
   void doSearchSearchable()
 }
 
+function cancelSearchDebounce() {
+  if (searchDebounceTimer !== null) {
+    clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = null
+  }
+}
+
+function cancelSearch() {
+  cancelSearchDebounce()
+  searchRequestSequence += 1
+  if (searchLoading.value) {
+    orgStore.cancelSearchableOrganizationRequest()
+    searchLoading.value = false
+  }
+}
+
 // 搜索可加入空间
 async function doSearchSearchable() {
+  cancelSearchDebounce()
+  if (!isSearchStepActive.value) return
+
+  const requestSequence = ++searchRequestSequence
   const currentQuery = searchQuery.value.trim()
 
   searchLoading.value = true
   try {
     await orgStore.fetchSearchableOrganizations(currentQuery, { limit: 20 })
-  } catch (e) {
-    orgStore.clearSearchableOrganizations()
+  } catch {
+    if (requestSequence === searchRequestSequence) {
+      orgStore.clearSearchableOrganizations()
+    }
   } finally {
-    searchLoading.value = false
+    if (requestSequence === searchRequestSequence) {
+      searchLoading.value = false
+    }
   }
 }
 
 function doSearchSearchableDebounced() {
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
-  searchDebounceTimer = setTimeout(() => doSearchSearchable(), 300)
+  if (!isSearchStepActive.value) return
+
+  cancelSearch()
+  searchDebounceTimer = setTimeout(() => {
+    searchDebounceTimer = null
+    void doSearchSearchable()
+  }, SEARCH_DEBOUNCE_MS)
 }
 
 // 空间是否已满（超过成员上限无法加入）
@@ -1070,6 +1106,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  cancelSearch()
   window.removeEventListener('openOrganizationDialog', handleOrganizationDialogEvent)
   teardownInviteBodyResizeObserver()
 })

@@ -1231,6 +1231,8 @@ export default {
       DOCREADER_PARSE_FAILED_SUGGESTION: '파일 형식을 확인하고 관리자에게 이번 DocReader 로그 확인을 요청하세요.',
       TASK_STALLED: '진행이 없어 자동 중단됨',
       TASK_STALLED_SUGGESTION: '임계 시간을 넘도록 진행이 없고 대기열에도 해당 작업이 없어 실패로 표시되었습니다. 「다시 시도」를 누르세요. 반복되면 이 단계가 의존하는 서비스(문서 파싱, 모델, 벡터 저장소)를 확인하세요.',
+      STORAGE_QUOTA_EXCEEDED: '저장 공간이 부족합니다',
+      STORAGE_QUOTA_EXCEEDED_SUGGESTION: '문서 자체는 정상적으로 파싱되었지만 인덱스를 쓰면 워크스페이스 저장 공간 할당량을 초과하므로 아무것도 저장되지 않았습니다. 더 이상 필요 없는 문서를 삭제해 공간을 확보하거나 관리자에게 할당량 상향을 요청한 뒤 다시 시도하세요.',
       UNKNOWN_SUGGESTION: '자세한 내용은 애플리케이션 로그를 확인하세요.'
     },
     status: {

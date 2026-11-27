@@ -40,15 +40,32 @@ func ResolveKBFlag(ctx context.Context, lister KBLister, raw string) (string, er
 // ResolveKBNameToID looks up a knowledge base by name and returns its ID.
 // Used by `link` and `Factory.ResolveKB` - a single lookup so the match
 // policy (currently exact case-sensitive) lives in one place.
+//
+// A name that matches more than one knowledge base is an error, not a
+// first-match pick: nothing keeps KB names unique - the table has no unique
+// index and CreateKnowledgeBase only rejects an empty name - so silently
+// choosing one would send a write to an arbitrary knowledge base. Mirrors
+// ResolveModelRef, which already rejects ambiguous model names.
 func ResolveKBNameToID(ctx context.Context, lister KBLister, name string) (string, error) {
 	kbs, err := lister.ListKnowledgeBases(ctx)
 	if err != nil {
 		return "", WrapHTTP(err, "list knowledge bases")
 	}
+	var matches []string
 	for _, kb := range kbs {
 		if kb.Name == name {
-			return kb.ID, nil
+			matches = append(matches, kb.ID)
 		}
 	}
-	return "", NewError(CodeKBNotFound, fmt.Sprintf("knowledge base not found: %s", name))
+	switch len(matches) {
+	case 1:
+		return matches[0], nil
+	case 0:
+		return "", NewError(CodeKBNotFound, fmt.Sprintf("knowledge base not found: %s", name))
+	default:
+		msg := fmt.Sprintf("knowledge base name %q matches %d knowledge bases — pass the kb id instead",
+			name, len(matches))
+		return "", NewError(CodeInputInvalidArgument, msg).
+			WithHint("`weknora kb list` shows the ids")
+	}
 }

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // MCPClient defines the interface for MCP client implementations
@@ -731,6 +733,9 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 		if err := json.Unmarshal(response.Result, &page); err != nil {
 			return nil, fmt.Errorf("invalid tools/list response: %w", err)
 		}
+		if page.Tools == nil {
+			return nil, fmt.Errorf("invalid tools/list response: expected a tools array")
+		}
 		for _, tool := range page.Tools {
 			if len(tool.InputSchema) > maxToolSchemaBytes {
 				return nil, fmt.Errorf(
@@ -875,10 +880,19 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
 
+	// The SDK also decodes structuredContent into any using float64. Read
+	// the wire JSON so large IDs and precise decimals survive the round trip.
+	var structured any
+	if len(result.RawStructuredContent) > 0 {
+		structured, err = jsonschema.UnmarshalJSON(bytes.NewReader(result.RawStructuredContent))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode MCP structured content: %w", err)
+		}
+	}
 	return &CallToolResult{
 		IsError:           result.IsError,
 		Content:           toolContentItems(result.Content),
-		StructuredContent: result.StructuredContent,
+		StructuredContent: structured,
 	}, nil
 }
 
