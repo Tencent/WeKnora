@@ -135,3 +135,14 @@ test('canonical matching returns exact original UTF-16 spans including combining
     assert.equal(text.slice(hit.start, hit.end), expected)
   }
 })
+
+test('search preview prefers unique query words within the cited chunk', async () => {
+  const locator = await import('./sourceLocator.ts')
+  const source = 'Taxi fares require an itemized receipt. Submit mileage separately.'
+  const anchor = locator.selectSearchAnchor
+  assert.equal(anchor(source, 'itemized receipt'), 'itemized receipt')
+  assert.equal(anchor(source, 'reimburse itemized'), 'itemized')
+  assert.equal(anchor('receipt is repeated: receipt', 'receipt'), '')
+  assert.equal(anchor(source, 'speed'), '')
+  assert.deepEqual(locator.selectQuoteForSentence(source, anchor(source, 'reimburse itemized') || ''), ['itemized'])
+})
