@@ -19,6 +19,75 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDingTalkDraftValidatesCredentialsBeforeSyncScope(t *testing.T) {
+	ctx := context.Background()
+	denied := errors.New("document content access denied")
+	connector := dingTalkDraftTestConnector{contentError: denied}
+	registry := datasource.NewConnectorRegistry()
+	require.NoError(t, registry.Register(connector))
+	repo := &dingTalkDraftTestRepo{}
+	service := &DataSourceService{
+		dsRepo:            repo,
+		kbService:         &processSyncKBService{kb: &types.KnowledgeBase{TenantID: 1}},
+		connectorRegistry: registry,
+	}
+	credentials := map[string]interface{}{
+		"client_id": "app", "client_secret": "secret", "operator_id": "operator",
+	}
+	config, err := (&types.DataSourceConfig{
+		Type: types.ConnectorTypeDingTalk, Credentials: credentials,
+	}).ToJSON()
+	require.NoError(t, err)
+	draft := &types.DataSource{
+		ID: "draft", TenantID: 1, KnowledgeBaseID: "kb", Type: types.ConnectorTypeDingTalk,
+		Status: types.DataSourceStatusPaused, Config: config,
+	}
+
+	require.NoError(t, service.ValidateCredentials(ctx, draft.Type, credentials))
+	_, err = service.CreateDataSource(ctx, draft)
+	require.NoError(t, err)
+
+	active := *draft
+	active.Status = types.DataSourceStatusActive
+	_, err = service.UpdateDataSource(ctx, &active)
+	require.ErrorIs(t, err, denied)
+	require.Equal(t, types.DataSourceStatusPaused, repo.draft.Status)
+
+	active.Config = nil
+	active.Type = ""
+	_, err = service.UpdateDataSource(ctx, &active)
+	require.ErrorIs(t, err, denied)
+}
+
+type dingTalkDraftTestConnector struct {
+	datasource.Connector
+	contentError error
+}
+
+func (dingTalkDraftTestConnector) Type() string { return types.ConnectorTypeDingTalk }
+
+func (c dingTalkDraftTestConnector) Validate(context.Context, *types.DataSourceConfig) error {
+	return c.contentError
+}
+
+func (dingTalkDraftTestConnector) ValidateCredentials(context.Context, *types.DataSourceConfig) error {
+	return nil
+}
+
+type dingTalkDraftTestRepo struct {
+	interfaces.DataSourceRepository
+	draft *types.DataSource
+}
+
+func (r *dingTalkDraftTestRepo) Create(_ context.Context, draft *types.DataSource) error {
+	r.draft = draft
+	return nil
+}
+
+func (r *dingTalkDraftTestRepo) FindByID(context.Context, string) (*types.DataSource, error) {
+	return r.draft, nil
+}
+
 func TestProcessSyncCancelsWhenKnowledgeBaseDeleted(t *testing.T) {
 	ds := &types.DataSource{
 		ID:              "ds-1",

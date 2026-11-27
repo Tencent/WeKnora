@@ -320,10 +320,12 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 			orderClause = "updated_at ASC, id ASC"
 		}
 	} else {
-		// Document: sort by chunk_index
-		orderClause = "chunk_index ASC"
+		// Document: sort by chunk_index, then ID. FAQ entries read through this
+		// branch all have chunk_index 0, so without the ID their pages can
+		// repeat and omit entries.
+		orderClause = "chunk_index ASC, id ASC"
 		if sortOrder == "desc" {
-			orderClause = "chunk_index DESC"
+			orderClause = "chunk_index DESC, id DESC"
 		}
 	}
 
