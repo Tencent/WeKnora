@@ -55,7 +55,7 @@ func TestMemoryClearFencesEveryLateMutation(t *testing.T) {
 			return r.SupersedeItem(t.Context(), s, "fresh", "late")
 		},
 		"edit": func(r interfaces.MemoryRepository, s interfaces.MemoryScope) error {
-			return r.UpdateItemContent(t.Context(), s, "fresh", "old content", "key", 1)
+			return r.UpdateItemContent(t.Context(), s, "fresh", "old content", "key", 1, types.MemoryOriginManual)
 		},
 		"delete": func(r interfaces.MemoryRepository, s interfaces.MemoryScope) error {
 			return r.DeleteItem(t.Context(), s, "fresh")

@@ -177,7 +177,9 @@ done:
 			Count:      output.IntPtr(len(matches)),
 			TotalCount: output.IntPtr(int(serverTotal)),
 			HasMore:    int64(len(matches)) < serverTotal || truncated,
-			Hint:       emptyContentSearchHint(len(matches)),
+		}
+		if len(matches) == 0 {
+			meta.Hint = "No matching title or filename. Search contents with weknora search chunks."
 		}
 		return fopts.Emit(iostreams.IO.Out, matches, meta)
 	}

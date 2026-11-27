@@ -2,7 +2,7 @@ import { fileURLToPath, URL } from 'node:url'
 import { resolve, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import { execSync } from 'node:child_process'
-import { copyPdfJsWasm } from './scripts/copy-pdfjs-wasm.mjs'
+import { copyPdfJsAssets } from './scripts/copy-pdfjs-wasm.mjs'
 import { createRequire } from 'node:module'
 import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -71,19 +71,19 @@ function resolveVueOfficePptxEntry(): string {
   }
 }
 
-function pdfJsWasmAssets(): Plugin {
-  let wasmSource = ''
-  let wasmOutput = ''
+function pdfJsAssets(): Plugin {
+  let packageDir = ''
+  let assetOutput = ''
   return {
-    name: 'pdfjs-wasm-assets',
+    name: 'pdfjs-assets',
     apply: 'build',
     configResolved(config) {
       const pdfjsBuild = require.resolve('pdfjs-dist/legacy/build/pdf.mjs')
-      wasmSource = resolve(dirname(pdfjsBuild), '../../wasm')
-      wasmOutput = resolve(config.root, config.build.outDir, 'pdfjs', 'wasm')
+      packageDir = resolve(dirname(pdfjsBuild), '../..')
+      assetOutput = resolve(config.root, config.build.outDir, 'pdfjs')
     },
     closeBundle() {
-      copyPdfJsWasm(wasmSource, wasmOutput)
+      copyPdfJsAssets(packageDir, assetOutput)
     },
   }
 }
@@ -142,7 +142,7 @@ export default defineConfig({
     vue(),
     vueJsx(),
     embedHtmlDevFallback(),
-    pdfJsWasmAssets(),
+    pdfJsAssets(),
   ],
   resolve: {
     dedupe: ['vue', 'vue-demi'],

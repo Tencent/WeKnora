@@ -54,3 +54,25 @@ class EPUBFallbackOrderTests(unittest.TestCase):
                 document = EPUBParser().parse(output.getvalue())
                 offsets = [document.content.index(f"Text of chapter{n}.") for n in (1, 2, 10)]
                 self.assertEqual(offsets, sorted(offsets))
+
+    def test_manifestless_zip_orders_separated_and_nested_chapter_names(self):
+        for pattern in (
+            "chapter-{}.html",
+            "chapter99/chapter_{}.xhtml",
+            "chapter99/chapter{}.html",
+        ):
+            with self.subTest(pattern=pattern):
+                output = BytesIO()
+                with zipfile.ZipFile(output, "w") as archive:
+                    for number in (10, 2, 1):
+                        archive.writestr(
+                            pattern.format(number), f"<p>Body of chapter {number}.</p>"
+                        )
+
+                document = EPUBParser().parse(output.getvalue())
+
+                offsets = [
+                    document.content.index(f"Body of chapter {number}.")
+                    for number in (1, 2, 10)
+                ]
+                self.assertEqual(offsets, sorted(offsets))

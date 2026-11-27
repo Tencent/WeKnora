@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"math"
 	"sort"
 	"time"
 
@@ -86,7 +87,29 @@ func (s *Service) embedText(
 		logger.Warnf(ctx, "memory: embed failed: %v", err)
 		return nil
 	}
+	if !usableEmbedding(vector) {
+		logger.Warnf(ctx, "memory: embed returned an unusable vector")
+		return nil
+	}
 	return vector
+}
+
+// usableEmbedding rejects values cosine distance cannot compare. Persisting
+// one would either make PostgreSQL's vector-column update fail or leave an
+// unreachable blob behind on stores that use the in-process fallback.
+func usableEmbedding(vector []float32) bool {
+	if len(vector) == 0 {
+		return false
+	}
+	var norm float64
+	for _, value := range vector {
+		value64 := float64(value)
+		if math.IsNaN(value64) || math.IsInf(value64, 0) {
+			return false
+		}
+		norm += value64 * value64
+	}
+	return norm > 0
 }
 
 // storeItemEmbedding records the vector for one memory. Best effort: a memory

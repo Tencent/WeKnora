@@ -291,7 +291,7 @@ const {
   sessionSig: sessionSigRef,
   visitorId: visitorIdRef,
   channelId: props.channelId,
-  token: props.token,
+  token: toRef(props, 'token'),
   agentId: props.agentId,
   kbIds: props.kbIds,
   allowWebSearch: props.allowWebSearch,

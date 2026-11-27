@@ -57,6 +57,8 @@ func TestIsTransientLLMError_TransportSubstrings(t *testing.T) {
 		{"send request: broken pipe", true},
 		{"send request: tls handshake timeout", true},
 		{"send request: unexpected EOF", true},
+		{"decode response: unexpected end of JSON input", true},
+		{"parse model output: unexpected end of JSON input", false},
 		// Not transient: the error is actionable (missing model id,
 		// malformed tool call, etc.) — retry is just wasted budget.
 		{"model not configured for tool use", false},

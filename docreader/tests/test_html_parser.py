@@ -177,16 +177,19 @@ class HTMLMainContentTest(unittest.TestCase):
 
     def test_falls_back_when_extraction_keeps_too_little_of_a_long_page(self):
         full = _parse_uploaded_html("chrome_heavy_page.html", main_content=False)
-        content = _parse_uploaded_html("chrome_heavy_page.html", main_content=True)
 
         # The length floor is passed here: what keeps the full conversion is the
         # ratio guard against "trafilatura kept only a fragment of a long page".
-        html = (MAIN_CONTENT_FIXTURES / "chrome_heavy_page.html").read_text(
-            encoding="utf-8"
-        )
-        extracted = extract_main_content(html)
-        self.assertGreaterEqual(len(extracted), _MIN_EXTRACTED_CHARS)
-        self.assertLess(len(extracted), len(full) * _MIN_KEEP_RATIO)
+        # Drive that guard from a fragment of a known size: how much the
+        # installed extractor keeps from this fixture changes between releases
+        # (trafilatura 2.3.1 returns 162 chars where 2.0.0 returned more), and
+        # the case is about the guard, not about the extractor's yield.
+        fragment = full[: _MIN_EXTRACTED_CHARS + 60]
+        self.assertGreaterEqual(len(fragment), _MIN_EXTRACTED_CHARS)
+        self.assertLess(len(fragment), len(full) * _MIN_KEEP_RATIO)
+
+        with patch.object(html_parser, "extract_main_content", return_value=fragment):
+            content = _parse_uploaded_html("chrome_heavy_page.html", main_content=True)
 
         self.assertEqual(content, full)
         self.assertIn("批量导入任务在遇到空文件时不再中断整个批次", content)

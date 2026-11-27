@@ -42,7 +42,7 @@ for (const mode of ['normal', 'embedded', 'after', 'inject']) {
       allSelectedItems: { value: [] }, selectedModelId: { value: 'model' },
       composerModelId: { value: 'host-model' },
       selectedAgent: { value: { config: {} } },
-      settingsStore: {}, chatResources: { isLoaded: () => true },
+      settingsStore: {}, chatResources: { isLoaded: () => true }, ensureModelSelection() {},
       collectAgentNotReadyReasons: () => ({ keys: [], labels: [] }),
       attachmentUploadRef: { value: null },
       emit: (name, _query, model) => {

@@ -28,6 +28,7 @@ type minerUContentItem struct {
 	TableBody    string          `json:"table_body"`
 	TableCaption json.RawMessage `json:"table_caption"`
 	ImageCaption json.RawMessage `json:"image_caption"`
+	ImagePath    string          `json:"img_path"`
 	ListItems    json.RawMessage `json:"list_items"`
 	CodeBody     string          `json:"code_body"`
 }
@@ -193,10 +194,11 @@ func minerUBBox(b []float64) ([]float64, bool) {
 // MiddleJson 2.0 uses [0,1] normalized boxes (NOT legacy 0..1000).
 // Child annotations keep their own geometry. Inline spans have no geometry.
 type minerUMiddleBlock struct {
-	Type    string          `json:"type"`
-	Index   *int            `json:"index"`
-	BBox    []float64       `json:"bbox"`
-	Content json.RawMessage `json:"content"`
+	Type      string          `json:"type"`
+	Index     *int            `json:"index"`
+	BBox      []float64       `json:"bbox"`
+	Content   json.RawMessage `json:"content"`
+	ImagePath string          `json:"image_path"`
 }
 
 type minerUMiddle struct {
@@ -295,4 +297,81 @@ func normalizedMinerUBox(box []float64) bool {
 		}
 	}
 	return true
+}
+
+// attachMinerUImageLocators uses image asset identity, not text offsets: an
+// image-only page has no searchable text with which to align its position.
+func attachMinerUImageLocators(refs []types.ImageRef, raw []byte, fileType string) {
+	ft := strings.ToLower(strings.TrimPrefix(fileType, "."))
+	if len(refs) == 0 || (ft != "pdf" && !IsImageFormat(ft)) {
+		return
+	}
+	byPath := make(map[string]types.SourceLocators)
+	add := func(path string, loc types.SourceLocator) {
+		if key := normalizeMinerUImagePath(path); key != "" {
+			loc.Mapping = "exact"
+			byPath[key] = sourceloc.MergeLocators(byPath[key], types.SourceLocators{loc})
+		}
+	}
+	raw = bytes.TrimSpace(raw)
+	if len(raw) > 0 && raw[0] == '{' {
+		var doc minerUMiddle
+		if json.Unmarshal(raw, &doc) != nil || doc.Schema != "docvortex.middle" || doc.Version != "2.0" {
+			return
+		}
+		var visit func(minerUMiddleBlock, int, string, []float64)
+		visit = func(block minerUMiddleBlock, page int, ref string, parentBox []float64) {
+			box := block.BBox
+			if len(box) == 0 {
+				box = parentBox
+			}
+			loc := types.SourceLocator{Type: types.SourceLocatorPDF, Page: page, SourceID: ref}
+			if normalizedMinerUBox(box) {
+				loc.BBox = append([]float64(nil), box...)
+			}
+			add(block.ImagePath, loc)
+			switch block.Type {
+			case "list", "index", "table", "image", "chart", "code":
+				var children []minerUMiddleBlock
+				if json.Unmarshal(block.Content, &children) == nil {
+					for i, child := range children {
+						visit(child, page, fmt.Sprintf("%s/%d", ref, i), box)
+					}
+				}
+			}
+		}
+		previousPage := -1
+		for _, page := range doc.Pages {
+			if page.PageIdx == nil || *page.PageIdx <= previousPage {
+				return
+			}
+			previousPage = *page.PageIdx
+			previousBlock := -1
+			for _, block := range page.Blocks {
+				if block.Index == nil || *block.Index <= previousBlock {
+					return
+				}
+				previousBlock = *block.Index
+				visit(block, *page.PageIdx+1, fmt.Sprintf("mineru:2:%d:%d", *page.PageIdx, *block.Index), nil)
+			}
+		}
+	} else {
+		for i, item := range decodeMinerUContentList(raw) {
+			if item.PageIdx == nil || *item.PageIdx < 0 {
+				continue
+			}
+			loc := types.SourceLocator{
+				Type:     types.SourceLocatorPDF,
+				Page:     *item.PageIdx + 1,
+				SourceID: fmt.Sprintf("mineru:legacy:%d:%d", *item.PageIdx, i),
+			}
+			if box, ok := minerUBBox(item.BBox); ok {
+				loc.BBox = box
+			}
+			add(item.ImagePath, loc)
+		}
+	}
+	for i := range refs {
+		refs[i].SourceLocators = byPath[normalizeMinerUImagePath(refs[i].OriginalRef)]
+	}
 }

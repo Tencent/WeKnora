@@ -299,3 +299,12 @@ func TestNewCmdDocs_HonorsKBEnv(t *testing.T) {
 	assert.NotContains(t, err.Error(), "kb is required")
 	assert.Contains(t, err.Error(), "client boom")
 }
+
+func TestFilenameSearchEmptyHint(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	opts := &DocsSearchOptions{Query: "within body", KBID: "kb", PageSize: 10}
+	format := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+	require.NoError(t, runDocsSearch(context.Background(), opts, format, &fakeDocsSearchSvc{}))
+	assert.Contains(t, out.String(), "search chunks")
+	assert.NotContains(t, out.String(), "reparse")
+}
