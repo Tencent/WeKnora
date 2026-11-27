@@ -177,3 +177,17 @@ test('an unavailable timezone does not prevent opening a one-shot schedule', () 
   assert.equal(form.at, '')
   assert.equal(triggerFromScheduleForm(form, trigger.timezone), null)
 })
+
+test('cleared or fractional preset fields do not produce cron expressions', () => {
+  const form = defaultScheduleForm()
+  for (const patch of [
+    { kind: 'hourly', minute: Number.NaN },
+    { kind: 'daily', hour: 3.5 },
+    { kind: 'weekly', days: [7] },
+    { kind: 'monthly', day: 0 },
+  ] as Partial<typeof form>[]) {
+    assert.equal(triggerFromScheduleForm({ ...form, ...patch }, 'UTC'), null)
+  }
+  assert.deepEqual(triggerFromScheduleForm({ ...form, minute: 0, hour: 0 }, 'UTC'),
+    { type: 'cron', expr: '0 0 * * *', timezone: 'UTC' })
+})
