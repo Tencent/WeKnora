@@ -119,7 +119,7 @@ func minerUContentListFromZip(zipData []byte) []byte {
 		return candidates[i].Name < candidates[j].Name
 	})
 	for _, candidate := range candidates {
-		data, err := readZipEntryCapped(candidate, maxZipEntryBytes)
+		data, err := readZipEntryCapped(candidate, minerUMaxZipEntryBytes())
 		if err != nil {
 			continue
 		}
