@@ -109,7 +109,8 @@ silently treated as NDJSON.`,
 		},
 	}
 	cmd.Flags().StringVarP(&opts.MessageID, "message", "m", "",
-		"Assistant message ID to resume (the stream's assistant_message_id from its first agent_query event, or from `weknora message list --session <id>`)")
+		"Assistant message ID to resume (the stream's assistant_message_id from its "+
+			"first agent_query event, or from `weknora message list --session <id>`)")
 	_ = cmd.MarkFlagRequired("message")
 	cmdutil.AddFormatFlag(cmd, resumeFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{

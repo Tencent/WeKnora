@@ -78,15 +78,22 @@ Symmetric with 'session resume': both key on (session_id, message_id).`,
 		},
 	}
 	cmd.Flags().StringVarP(&opts.MessageID, "message", "m", "",
-		"Assistant message id to stop (the stream's assistant_message_id from its first agent_query event, or `weknora message list --session <id>`)")
+		"Assistant message id to stop (the stream's assistant_message_id from its "+
+			"first agent_query event, or `weknora message list --session <id>`)")
 	_ = cmd.MarkFlagRequired("message")
 	cmdutil.AddFormatFlag(cmd, stopFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
-		UsedFor:       "Stop server-side generation for an in-flight assistant message (counterpart to resume). The message_id is the stream's assistant_message_id from its first agent_query event.",
-		RequiredFlags: []string{"<session-id> (positional)", "--message (assistant_message_id from the stream's first agent_query event, or `weknora message list --session <id>`)"},
-		Examples:      []string{"weknora session stop sess_xyz --message msg_abc"},
-		Output:        "envelope {session_id, message_id, stopped:true}",
+		UsedFor: "Stop server-side generation for an in-flight assistant message " +
+			"(counterpart to resume). The message_id is the stream's " +
+			"assistant_message_id from its first agent_query event.",
+		RequiredFlags: []string{
+			"<session-id> (positional)",
+			"--message (assistant_message_id from the stream's first agent_query " +
+				"event, or `weknora message list --session <id>`)",
+		},
+		Examples: []string{"weknora session stop sess_xyz --message msg_abc"},
+		Output:   "envelope {session_id, message_id, stopped:true}",
 	})
 	return cmd
 }
