@@ -1,0 +1,143 @@
+--- a/src/package/limits.rs
++++ b/src/package/limits.rs
+@@ -1,10 +1,11 @@
+-//! Fixed safety limits, applied identically to every conversion.
++//! Conversion resource limits.
+ //!
+ //! These are hard caps against attack/abuse input shapes (decompression
+ //! bombs, pathological nesting, runaway expansion) - crossing one returns
+ //! [`ConvertError::ResourceLimit`](crate::ConvertError::ResourceLimit),
+-//! always. They are deliberately not configurable: real-world documents sit
+-//! orders of magnitude below every value here.
++//! always. The two asset-related limits allow bounded process configuration.
++
++use std::sync::OnceLock;
+
+ /// Maximum decompressed size of a single archive entry: 128 MiB.
+ pub const MAX_ENTRY_BYTES: u64 = 128 * 1024 * 1024;
+@@ -42,3 +43,43 @@
+
+ /// Maximum total binary records visited in one legacy record stream.
+ pub const MAX_RECORDS: u64 = 16_000_000;
++
++const MAX_CONFIGURED_BYTES: u64 = 256 * 1024 * 1024;
++
++pub fn max_entry_bytes() -> u64 {
++    static LIMIT: OnceLock<u64> = OnceLock::new();
++    *LIMIT.get_or_init(|| configured_limit("ANYDOC_MAX_ENTRY_BYTES", MAX_ENTRY_BYTES))
++}
++
++pub fn max_asset_total_bytes() -> usize {
++    static LIMIT: OnceLock<u64> = OnceLock::new();
++    *LIMIT.get_or_init(|| configured_limit("ANYDOC_MAX_ASSET_TOTAL_BYTES", MAX_ASSET_TOTAL_BYTES as u64))
++        as usize
++}
++
++fn configured_limit(name: &str, default: u64) -> u64 {
++    parse_limit(std::env::var(name).ok().as_deref(), default)
++}
++
++fn parse_limit(value: Option<&str>, default: u64) -> u64 {
++    value
++        .and_then(|value| value.parse::<u64>().ok())
++        .filter(|limit| (1..=MAX_CONFIGURED_BYTES).contains(limit))
++        .unwrap_or(default)
++}
++
++#[cfg(test)]
++mod configured_limit_tests {
++    use super::*;
++
++    #[test]
++    fn accepts_explicit_limits_without_disabling_the_cap() {
++        let default = MAX_ENTRY_BYTES;
++        assert_eq!(parse_limit(Some("167772160"), default), 160 * 1024 * 1024);
++        assert_eq!(parse_limit(Some("1"), default), 1);
++        assert_eq!(parse_limit(Some("268435456"), default), MAX_CONFIGURED_BYTES);
++        for invalid in [None, Some("0"), Some("-1"), Some("128 MiB"), Some("268435457")] {
++            assert_eq!(parse_limit(invalid, default), default);
++        }
++    }
++}
+--- a/src/package/archive.rs
++++ b/src/package/archive.rs
+@@ -52,7 +52,8 @@
+                 });
+             }
+         };
+-        if file.size() > limits::MAX_ENTRY_BYTES {
++        let entry_limit = limits::max_entry_bytes();
++        if file.size() > entry_limit {
+             return Err(ConvertError::ResourceLimit {
+                 limit: "max_entry_bytes",
+                 detail: format!("{name} declares {} decompressed bytes", file.size()),
+@@ -62,7 +63,7 @@
+         // cap is whichever budget has less room: the per-entry limit or what
+         // remains of the whole-archive total.
+         let remaining_total = limits::MAX_TOTAL_BYTES.saturating_sub(self.total_read);
+-        let cap = limits::MAX_ENTRY_BYTES.min(remaining_total);
++        let cap = entry_limit.min(remaining_total);
+         let mut bytes = Vec::new();
+         let read = (&mut file).take(cap + 1).read_to_end(&mut bytes).map_err(|e| {
+             ConvertError::Malformed {
+@@ -71,7 +72,7 @@
+             }
+         })? as u64;
+         if read > cap {
+-            return Err(if remaining_total < limits::MAX_ENTRY_BYTES {
++            return Err(if remaining_total < entry_limit {
+                 ConvertError::ResourceLimit {
+                     limit: "max_total_bytes",
+                     detail: format!("{name} exceeds the archive's remaining decompression budget"),
+--- a/src/shared/assets.rs
++++ b/src/shared/assets.rs
+@@ -34,7 +34,7 @@
+             return Ok(id);
+         }
+         self.total += bytes.len();
+-        if self.total > limits::MAX_ASSET_TOTAL_BYTES {
++        if self.total > limits::max_asset_total_bytes() {
+             return Err(ConvertError::ResourceLimit {
+                 limit: "max_asset_total_bytes",
+                 detail: "embedded assets exceed the retained-bytes cap".into(),
+--- a/src/shared/binary.rs
++++ b/src/shared/binary.rs
+@@ -31,13 +31,14 @@
+     let stream =
+         ole.open_stream(name).map_err(|_| ConvertError::MissingPart { part: name.to_string() })?;
+     let mut bytes = Vec::new();
+-    let read = stream.take(limits::MAX_ENTRY_BYTES + 1).read_to_end(&mut bytes).map_err(|e| {
++    let entry_limit = limits::max_entry_bytes();
++    let read = stream.take(entry_limit + 1).read_to_end(&mut bytes).map_err(|e| {
+         ConvertError::Malformed {
+             part: Some(name.to_string()),
+             detail: format!("unreadable stream: {e}"),
+         }
+     })? as u64;
+-    if read > limits::MAX_ENTRY_BYTES {
++    if read > entry_limit {
+         return Err(ConvertError::ResourceLimit {
+             limit: "max_entry_bytes",
+             detail: format!("{name} stream exceeds the read cap"),
+--- a/src/formats/ppt/mod.rs
++++ b/src/formats/ppt/mod.rs
+@@ -70,7 +70,7 @@
+         if index > 100_000 {
+             break;
+         }
+-        let cap = limits::MAX_ENTRY_BYTES as usize;
++        let cap = limits::max_entry_bytes() as usize;
+         let blip = match rec_type {
+             0xF007 => officeart::fbse_blip(body, cap),
+             _ => officeart::decode_blip(ver_inst, rec_type, body, cap),
+--- a/src/formats/doc/mod.rs
++++ b/src/formats/doc/mod.rs
+@@ -962,7 +962,7 @@
+         };
+         let art = &picf[cb_header.min(picf.len())..];
+         let Some(blip) =
+-            crate::shared::officeart::first_blip(art, limits::MAX_ENTRY_BYTES as usize)
++            crate::shared::officeart::first_blip(art, limits::max_entry_bytes() as usize)
+         else {
+             log::debug!("skipping picture with no supported blip payload");
+             return Ok(None);

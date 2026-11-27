@@ -5,7 +5,10 @@ package anydoc
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -88,6 +91,43 @@ func TestConvertDocxWithEmbeddedImage(t *testing.T) {
 	after := strings.Index(result.Markdown, "Closing remarks.")
 	if before < 0 || at < 0 || after < 0 || !(before < at && at < after) {
 		t.Fatalf("image is not between the surrounding paragraphs:\n%s", result.Markdown)
+	}
+}
+
+func TestConvertUsesConfiguredAssetLimits(t *testing.T) {
+	const child = "WEKNORA_TEST_ANYDOC_LIMIT"
+	if expected, inChild := os.LookupEnv(child); inChild {
+		result, err := Convert(buildDocx(t), Options{Format: "docx", WithAssets: true})
+		if expected != "" {
+			if !errors.Is(err, ErrResourceLimit) || !strings.Contains(err.Error(), expected) {
+				t.Fatalf("Convert error = %v, want resource limit %s", err, expected)
+			}
+		} else if err != nil || len(result.Assets) != 1 {
+			t.Fatalf("Convert result = %+v, error = %v; want one asset", result, err)
+		}
+		return
+	}
+
+	// AnyDoc reads the process environment once. Start a new test process
+	// for each configuration so unrelated conversions cannot cache it first.
+	for _, tc := range []struct {
+		name, entry, assets, expected string
+	}{
+		{"entry_limit", "1", "1048576", "max_entry_bytes"},
+		{"asset_limit", "1048576", "1", "max_asset_total_bytes"},
+		{"sufficient_limits", "1048576", "1048576", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestConvertUsesConfiguredAssetLimits$")
+			cmd.Env = append(cmd.Environ(),
+				child+"="+tc.expected,
+				"ANYDOC_MAX_ENTRY_BYTES="+tc.entry,
+				"ANYDOC_MAX_ASSET_TOTAL_BYTES="+tc.assets,
+			)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("conversion subprocess: %v\n%s", err, output)
+			}
+		})
 	}
 }
 

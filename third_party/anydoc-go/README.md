@@ -218,6 +218,22 @@ unmaintained (`RUSTSEC-2026-0192`), pulled in transitively by the PDF stack. It
 is not a vulnerability and nothing here can fix it, so warnings report without
 failing the job.
 
+## Embedded asset limits
+
+Set these in the application process environment (or in the Compose `.env`
+file), then restart the application. Both default to **128 MiB**.
+
+| Variable | What it limits |
+| --- | --- |
+| `ANYDOC_MAX_ENTRY_BYTES` | Decompressed bytes per entry or legacy binary stream |
+| `ANYDOC_MAX_ASSET_TOTAL_BYTES` | Total embedded asset bytes retained per document |
+
+Use decimal byte counts from 1 to 268435456 (256 MiB). Invalid values use
+the default. For example, `ANYDOC_MAX_ASSET_TOTAL_BYTES=167772160` raises the
+retained-asset budget to 160 MiB. Increasing either limit can increase memory
+use for concurrent conversions. The separate 512 MiB archive decompression
+budget and other resource limits still apply.
+
 ## Known upstream limitation
 
 Markdown rendering drops embedded images: `ImageSource::Asset` renders as its

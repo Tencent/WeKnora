@@ -51,7 +51,7 @@ fi
 
 # Include a patch revision so changes to our patches invalidate existing copies
 # even when the upstream anydoc version stays the same.
-anydoc_patch_id="$anydoc_version-zip9-v1"
+anydoc_patch_id="$anydoc_version-zip9-asset-limits-v2"
 
 # Copy the pinned version, expose the official serializer, and upgrade zip to
 # the fixed major version (upstream anydoc 0.2.4 still requires zip ^8.6.0).
@@ -112,6 +112,8 @@ prepare_patched_anydoc() {
     exit 1
   fi
   mv "$dest/Cargo.toml.tmp" "$dest/Cargo.toml"
+  git -C "$repo_root" apply --directory=third_party/anydoc-go/patched-anydoc \
+    "$crate_dir/patches/configurable-asset-limits.patch"
   printf '%s\n' "$anydoc_patch_id" > "$dest/.weknora-patched"
   rm -rf "$crate_dir/.anydoc-unpack" "$crate_dir/.anydoc-$anydoc_version.crate"
 }
