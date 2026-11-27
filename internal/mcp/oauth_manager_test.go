@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -35,6 +36,7 @@ func TestOAuthManagerKeepsTheRegisteredClientSecret(t *testing.T) {
 	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
 
 	var tokenRequestSecret string
+	var tokenResource string
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -55,6 +57,7 @@ func TestOAuthManagerKeepsTheRegisteredClientSecret(t *testing.T) {
 		case "/token":
 			_ = r.ParseForm()
 			tokenRequestSecret = r.PostForm.Get("client_secret")
+			tokenResource = r.PostForm.Get("resource")
 			if tokenRequestSecret != "registered-secret" {
 				w.WriteHeader(http.StatusUnauthorized)
 				_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_client"})
@@ -87,8 +90,11 @@ func TestOAuthManagerKeepsTheRegisteredClientSecret(t *testing.T) {
 	principal := types.Principal{Type: types.PrincipalWebUser, ID: "42"}
 	ctx := context.Background()
 
-	_, state, err := manager.StartAuthorization(ctx, service, 7, principal, "http://localhost:8080/callback", "/")
+	authURL, state, err := manager.StartAuthorization(ctx, service, 7, principal, "http://localhost:8080/callback", "/")
 	require.NoError(t, err)
+	parsed, err := url.Parse(authURL)
+	require.NoError(t, err)
+	require.Equal(t, serviceURL, parsed.Query().Get("resource"))
 	stored, err := repo.GetClient(ctx, 7, "svc-1")
 	require.NoError(t, err)
 	require.NotNil(t, stored)
@@ -98,6 +104,7 @@ func TestOAuthManagerKeepsTheRegisteredClientSecret(t *testing.T) {
 	_, err = manager.CompleteAuthorization(ctx, state, "code")
 	require.NoError(t, err)
 	require.Equal(t, "registered-secret", tokenRequestSecret)
+	require.Equal(t, serviceURL, tokenResource)
 
 	token, err := repo.GetTokenForPrincipal(ctx, 7, principal, "svc-1")
 	require.NoError(t, err)
