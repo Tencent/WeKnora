@@ -71,3 +71,55 @@ func TestPatchModelNeedsAField(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Nil(t, stub.updated)
 }
+
+func TestPatchModelRejectsUnsupportedFields(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		body  string
+		field string
+	}{
+		{
+			name: "parameters with display name",
+			body: `{"display_name":"Updated","parameters":{"base_url":"https://new.example.com/v1",` +
+				`"interface_type":"openai"}}`,
+			field: "parameters",
+		},
+		{
+			name:  "parameters with description",
+			body:  `{"description":"Updated","parameters":{"interface_type":"openai"}}`,
+			field: "parameters",
+		},
+		{
+			name:  "parameters only",
+			body:  `{"parameters":{"base_url":"https://new.example.com/v1"}}`,
+			field: "parameters",
+		},
+		{
+			name:  "null parameters with display name",
+			body:  `{"display_name":"Updated","parameters":null}`,
+			field: "parameters",
+		},
+		{
+			name:  "unknown field with display name",
+			body:  `{"display_name":"Updated","base_url":"https://new.example.com/v1"}`,
+			field: "base_url",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := &stubPatchModelService{model: &types.Model{
+				ID: "m1", DisplayName: "Original", Description: "Original description",
+				Parameters: types.ModelParameters{
+					BaseURL: "https://old.example.com/v1", APIKey: "stored-secret",
+				},
+			}}
+			rec := patchModel(t, stub, tt.body)
+			require.Equal(t, http.StatusBadRequest, rec.Code,
+				"unsupported PATCH fields must not be silently ignored: %s", rec.Body.String())
+			assert.Contains(t, rec.Body.String(), `unknown field \"`+tt.field+`\"`)
+			assert.Nil(t, stub.updated, "invalid requests must not persist partial edits")
+			assert.Equal(t, "Original", stub.model.DisplayName)
+			assert.Equal(t, "https://old.example.com/v1", stub.model.Parameters.BaseURL)
+			assert.NotContains(t, rec.Body.String(), "stored-secret")
+		})
+	}
+}

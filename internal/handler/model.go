@@ -910,8 +910,11 @@ func (h *ModelHandler) PatchModel(c *gin.Context) {
 		return
 	}
 	var req PatchModelRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		_ = c.Error(errors.NewBadRequestError(err.Error()))
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError("PATCH only supports display_name and description; " +
+			"use PUT to update model configuration: " + err.Error()))
 		return
 	}
 	if req.DisplayName == nil && req.Description == nil {
