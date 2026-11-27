@@ -2098,7 +2098,7 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 
 // PreviewKnowledgeFile godoc
 // @Summary      预览知识文件
-// @Description  返回知识条目关联的原始文件，Content-Type 根据文件类型设置，用于浏览器内嵌预览
+// @Description  返回用于浏览器预览的知识文件，TXT 内容统一为 UTF-8，Content-Type 根据文件类型设置
 // @Tags         知识管理
 // @Accept       json
 // @Produce      application/pdf,image/jpeg,image/png,text/plain
@@ -2131,8 +2131,12 @@ func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
 	}
 	if err := filetransport.Serve(c.Writer, c.Request, file, filetransport.Options{
 		Filename: filename, CacheControl: "private, no-store",
+		DecodeText: strings.EqualFold(filepath.Ext(filename), ".txt"),
 	}); err != nil {
-		logger.Errorf(ctx, "Failed to stream preview: %v", err)
+		logger.Errorf(ctx, "Failed to serve preview: %v", err)
+		if !c.Writer.Written() {
+			_ = c.Error(errors.NewInternalServerError("Failed to prepare preview"))
+		}
 	}
 }
 

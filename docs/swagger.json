@@ -10954,7 +10954,7 @@
         },
         "/knowledge/{id}/preview": {
             "get": {
-                "description": "返回知识条目关联的原始文件，Content-Type 根据文件类型设置，用于浏览器内嵌预览",
+                "description": "返回用于浏览器预览的知识文件，TXT 内容统一为 UTF-8，Content-Type 根据文件类型设置",
                 "consumes": [
                     "application/json"
                 ],
