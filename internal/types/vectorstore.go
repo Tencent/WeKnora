@@ -843,6 +843,25 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 				UseDefaultConnection: true,
 			},
 		}
+	case "vastbase":
+		port := 5432
+		if v := envLookup("VASTBASE_PORT"); v != "" {
+			if p, err := strconv.Atoi(v); err == nil {
+				port = p
+			}
+		}
+		return &VectorStore{
+			ID:         "__env_vastbase__",
+			Name:       "Vastbase",
+			EngineType: VastbaseRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				Host:     envLookup("VASTBASE_HOST"),
+				Port:     port,
+				Username: envLookup("VASTBASE_USER"),
+				Password: envLookup("VASTBASE_PASSWORD"),
+				Database: envLookup("VASTBASE_DATABASE"),
+			},
+		}
 	case "sqlite":
 		return &VectorStore{
 			ID:         "__env_sqlite__",
