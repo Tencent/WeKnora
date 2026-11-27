@@ -2820,7 +2820,10 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 		return nil, fmt.Errorf("failed to generate questions: %w", err)
 	}
 
-	return parseGeneratedQuestions(response.Content, questionCount), nil
+	return keepQuestionsGroundedInChunk(
+		parseGeneratedQuestions(response.Content, questionCount),
+		content, prevContent, nextContent,
+	), nil
 }
 
 // generatedQuestionListMarker matches one leading numbered or bullet list
