@@ -165,16 +165,14 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
   // model pick a scope first is worse: knowledge bases are often named too
   // poorly to choose between, and fanning out across them is cheap while they
   // share a vector store.
-  let everyId: Promise<string[]> | undefined
+  let everyId: string[] | undefined
   const allKnowledgeBaseIds = async (signal: AbortSignal): Promise<string[]> => {
-    everyId ??= client.listKnowledgeBases(signal).then(
-      bases => bases.map(kb => typeof kb.id === 'string' ? kb.id : '').filter(id => id !== ''),
-      (error: unknown) => {
-        everyId = undefined
-        throw error
-      },
-    )
-    return await everyId
+    if (everyId !== undefined) return everyId
+    // Cache completed lists so one caller's abort signal cannot cancel a peer's lookup.
+    const bases = await client.listKnowledgeBases(signal)
+    const ids = bases.map(kb => typeof kb.id === 'string' ? kb.id : '').filter(id => id !== '')
+    everyId ??= ids
+    return ids
   }
   const resolveScope = async (requested: string[], knowledgeIds: string[], signal: AbortSignal): Promise<string[]> => {
     if (requested.length > 0) return requested
