@@ -6,7 +6,7 @@
 
 | 类别 | 格式 |
 | --- | --- |
-| 文档 | PDF、Word（doc/docx）、PPT（ppt/pptx）、Excel（xls/xlsx）、EPUB、XMind |
+| 文档 | PDF、Word（doc/docx）、PPT（ppt/pptx）、Excel（xls/xlsx）、EPUB、XMind、AsciiDoc（adoc/asciidoc） |
 | 文本 | txt、Markdown、CSV、JSON |
 | 网页 | 在线 URL 抓取、本地 HTML / MHTML 归档 |
 | 图片 | jpg、png、gif、bmp、tiff、webp（需配置视觉模型才能理解内容） |
@@ -117,7 +117,7 @@ sequenceDiagram
 
 | 引擎 | 文件类型 | 说明 |
 | --- | --- | --- |
-| `builtin` | `docx`(Docx2Parser)、`doc`(DocParser)、`pdf`(PDFParser)、`md`/`markdown`(MarkdownParser)、`xlsx`/`xls`(ExcelParser)、`pptx`/`ppt`(MarkitdownParser)、`epub`(EPUBParser)、`html`/`htm`(HTMLParser)、`mhtml`(MHTMLParser)、`xmind`(XMindParser)、`jpg`/`jpeg`/`png`/`gif`/`bmp`/`tiff`/`webp`(ImageParser) | 内置解析引擎；PPT/PPTX 复用 MarkItDown 解析器 |
+| `builtin` | `docx`(Docx2Parser)、`doc`(DocParser)、`pdf`(PDFParser)、`md`/`markdown`(MarkdownParser)、`xlsx`/`xls`(ExcelParser)、`pptx`/`ppt`(MarkitdownParser)、`epub`(EPUBParser)、`html`/`htm`(HTMLParser)、`mhtml`(MHTMLParser)、`xmind`(XMindParser)、`adoc`/`asciidoc`(AsciiDocParser)、`jpg`/`jpeg`/`png`/`gif`/`bmp`/`tiff`/`webp`(ImageParser) | 内置解析引擎；PPT/PPTX 复用 MarkItDown 解析器 |
 | `markitdown` | `md`、`markdown`、`pdf`、`docx`、`doc`、`pptx`、`ppt`、`xlsx`、`xls`、`csv`（全部 MarkitdownParser） | 微软 MarkItDown 库 |
 | `opendataloader` | `pdf`(OpenDataLoaderParser) | OpenDataLoader PDF 版面分析，需 Java 11+；`check_available` 探测 java、Python 包及 hybrid 服务健康 |
 
