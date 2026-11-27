@@ -231,9 +231,9 @@ func computeForbiddenSpans(s string) ([]span, map[string]struct{}) {
 
 	for i < n {
 		// Fenced code block: line starts with ``` or ~~~
-		if isFenceStart(s, i) {
-			fenceLen, fenceCh := fenceRun(s, i)
-			end := findFenceEnd(s, i+fenceLen, fenceCh, fenceLen)
+		if fence, ok := fenceStart(s, i); ok {
+			fenceLen, fenceCh := fenceRun(s, fence)
+			end := findFenceEnd(s, fence+fenceLen, fenceCh, fenceLen)
 			spans = append(spans, span{start: i, end: end})
 			i = end
 			continue
@@ -298,6 +298,13 @@ func computeForbiddenSpans(s string) ([]span, map[string]struct{}) {
 			i++
 		case '<':
 			if end, ok := matchAutolink(s, i); ok {
+				spans = append(spans, span{start: i, end: end})
+				i = end
+				continue
+			}
+			i++
+		case 'h':
+			if end, ok := matchBareURL(s, i); ok {
 				spans = append(spans, span{start: i, end: end})
 				i = end
 				continue
@@ -416,20 +423,41 @@ func scanReferenceDefinitions(s string) []span {
 	return out
 }
 
-// isFenceStart reports whether index i is at the start of a line and begins a
-// fence run (``` or ~~~, three or more).
-func isFenceStart(s string, i int) bool {
+// fenceStart reports whether a fence (``` or ~~~, three or more) opens on the
+// line starting at i, and where its run begins. A fence may be indented, as
+// it is inside a list item.
+func fenceStart(s string, i int) (int, bool) {
 	if i > 0 && s[i-1] != '\n' {
-		return false
+		return 0, false
 	}
-	if i+2 >= len(s) {
-		return false
+	j := skipIndent(s, i)
+	if j+2 >= len(s) || (s[j] != '`' && s[j] != '~') || s[j+1] != s[j] || s[j+2] != s[j] {
+		return 0, false
 	}
-	c := s[i]
-	if c != '`' && c != '~' {
-		return false
+	return j, true
+}
+
+func skipIndent(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
 	}
-	return s[i+1] == c && s[i+2] == c
+	return i
+}
+
+// matchBareURL returns the end of an http(s) URL written without <> or a
+// Markdown link. A name inside it must not be linked: that breaks the URL.
+func matchBareURL(s string, i int) (int, bool) {
+	if !strings.HasPrefix(s[i:], "http://") && !strings.HasPrefix(s[i:], "https://") {
+		return 0, false
+	}
+	if i > 0 && isASCIIWordRune(rune(s[i-1])) {
+		return 0, false
+	}
+	end := i
+	for end < len(s) && s[end] > ' ' && s[end] < 0x80 && !strings.ContainsRune("<>\"", rune(s[end])) {
+		end++
+	}
+	return end, true
 }
 
 func fenceRun(s string, i int) (int, byte) {
@@ -451,8 +479,8 @@ func findFenceEnd(s string, start int, ch byte, minLen int) int {
 	}
 	pos := start + nl + 1
 	for pos < len(s) {
-		if s[pos] == ch {
-			runLen, _ := fenceRun(s, pos)
+		if run := skipIndent(s, pos); run < len(s) && s[run] == ch {
+			runLen, _ := fenceRun(s, run)
 			if runLen >= minLen {
 				// Close must be at start of line (we're past a newline already).
 				// Skip trailing chars to end of line.
