@@ -369,6 +369,7 @@
   "volcengine/KnowledgeQA/glm-5-3-flash-260828": "ca9bd13d9c86d2463efeb07ad414515a1f0cd7ab8dbe2173e5cc939f034e8577",
   "volcengine/Rerank/base-multilingual-rerank": "fa578e2a39ad622b50452c4d04ae9612ad5279c9abfe1df86143aacbae70820a",
   "volcengine/Rerank/doubao-seed-rerank": "2d26d34faf9c3d7a69302cfdd28c7e7162fe1ceb8060a507582724a5368f493f",
+  "watsonx/Rerank/cross-encoder/ms-marco-minilm-l-12-v2": "61623231f78d0c28d39a7e4f19e391addaa46cf666f3418a6ac0068f18b7e01e",
   "zhipu/ASR/glm-asr-2512": "58e487f13624e4ef38d8258e01664bd609e65d8b1d68c80855d314d8bc541342",
   "zhipu/Embedding/embedding-2": "524e2d23e61229245c2befdd4edd46c7ecd1814368d1afd7acb1ce98125601f4",
   "zhipu/Embedding/embedding-3": "e84ca0362294219a7dc044537d2dacf897d75c531e49699eac85c2c9f9cc4d3c",

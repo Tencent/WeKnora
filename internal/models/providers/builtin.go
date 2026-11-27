@@ -34,6 +34,7 @@ func Builtins() []*Definition {
 		newRuncrateProvider(),
 		newSiliconflowProvider(),
 		newVolcengineProvider(),
+		newWatsonxProvider(),
 		newWeKnoraCloudProvider(),
 		newZhipuProvider(),
 	})

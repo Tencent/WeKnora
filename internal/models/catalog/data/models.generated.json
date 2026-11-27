@@ -5976,6 +5976,18 @@
         "source": "https://www.volcengine.com/docs/84313/1254474"
       }
     ],
+    "watsonx": [
+      {
+        "id": "cross-encoder/ms-marco-minilm-l-12-v2",
+        "name": "MS MARCO MiniLM L-12 v2 (watsonx)",
+        "type": "Rerank",
+        "context_window": 512,
+        "source": "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-api-rerank.html?context=wx&audience=wdp",
+        "compat": {
+          "max_documents": 1000
+        }
+      }
+    ],
     "weknoracloud": [],
     "zhipu": [
       {
