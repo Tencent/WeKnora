@@ -262,32 +262,29 @@ func (c *Client) SubmitJoinRequest(ctx context.Context, inviteCode, message, rol
 	return parseResponse(resp, nil)
 }
 
-// SearchOrganizations searches for discoverable organizations
+// SearchOrganizations searches for discoverable organizations. The server
+// returns the first pageSize matches (20 by default, 100 at most) and has no
+// further pages, so page is not sent.
 func (c *Client) SearchOrganizations(ctx context.Context, keyword string, page, pageSize int) ([]OrganizationResponse, error) {
 	q := url.Values{}
 	if keyword != "" {
-		q.Set("keyword", keyword)
-	}
-	if page > 0 {
-		q.Set("page", fmt.Sprintf("%d", page))
+		q.Set("q", keyword)
 	}
 	if pageSize > 0 {
-		q.Set("page_size", fmt.Sprintf("%d", pageSize))
+		q.Set("limit", fmt.Sprintf("%d", pageSize))
 	}
 	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/organizations/search", nil, q)
 	if err != nil {
 		return nil, err
 	}
 	var result struct {
-		Success bool `json:"success"`
-		Data    struct {
-			Organizations []OrganizationResponse `json:"organizations"`
-		} `json:"data"`
+		Success bool                   `json:"success"`
+		Data    []OrganizationResponse `json:"data"`
 	}
 	if err := parseResponse(resp, &result); err != nil {
 		return nil, err
 	}
-	return result.Data.Organizations, nil
+	return result.Data, nil
 }
 
 // JoinByOrganizationID joins a searchable organization by its ID
@@ -360,24 +357,38 @@ func (c *Client) GenerateInviteCode(ctx context.Context, orgID string) (string, 
 	return result.Data.InviteCode, nil
 }
 
-// SearchUsersForInvite searches users to invite into an organization (admin only)
+// SearchUsersForInvite resolves a workspace to invite into an organization
+// (admin only). keyword must be the exact workspace ID; the server does not
+// search names. Each result is the workspace's representative user.
 func (c *Client) SearchUsersForInvite(ctx context.Context, orgID, keyword string) ([]UserInfo, error) {
 	q := url.Values{}
 	if keyword != "" {
-		q.Set("keyword", keyword)
+		q.Set("q", keyword)
 	}
 	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/organizations/%s/search-users", orgID), nil, q)
 	if err != nil {
 		return nil, err
 	}
 	var result struct {
-		Success bool       `json:"success"`
-		Data    []UserInfo `json:"data"`
+		Success bool `json:"success"`
+		Data    []struct {
+			TenantID uint64 `json:"tenant_id"`
+			UserID   string `json:"representative_user_id"`
+			Username string `json:"representative_username"`
+			Email    string `json:"representative_email"`
+			Avatar   string `json:"representative_avatar"`
+		} `json:"data"`
 	}
 	if err := parseResponse(resp, &result); err != nil {
 		return nil, err
 	}
-	return result.Data, nil
+	users := make([]UserInfo, 0, len(result.Data))
+	for _, d := range result.Data {
+		users = append(users, UserInfo{
+			ID: d.UserID, Username: d.Username, Email: d.Email, Avatar: d.Avatar, TenantID: d.TenantID,
+		})
+	}
+	return users, nil
 }
 
 // InviteMember directly invites a user to an organization (admin only)
