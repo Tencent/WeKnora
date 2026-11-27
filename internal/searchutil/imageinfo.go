@@ -407,6 +407,29 @@ func ClearImageInfoTextMatchingBody(imageInfoJSON, recognized, chunkType string)
 	return marshalImageInfos(infos)
 }
 
+// contentReplacement is one splice located against the original content:
+// [start, end) is the matched Markdown image link, text is its replacement.
+type contentReplacement struct {
+	start, end int
+	text       string
+}
+
+// spliceReplacements applies replacements in one right-to-left pass, so
+// earlier offsets stay valid and an inserted block is never rescanned.
+// That matters here because a replacement quotes the matched text itself —
+// EnrichContentWithImageInfo embeds it in <image_original>, the caption
+// variants keep it verbatim — so strings.Replace on the evolving string
+// would hit the copy inside the first inserted block when the same image
+// link repeats, nesting the second block inside the first. This is the same
+// rule EnrichContentWithImageInfoForChat already follows.
+func spliceReplacements(content string, replacements []contentReplacement) string {
+	sort.Slice(replacements, func(i, j int) bool { return replacements[i].start > replacements[j].start })
+	for _, r := range replacements {
+		content = content[:r.start] + r.text + content[r.end:]
+	}
+	return content
+}
+
 // EnrichContentWithImageInfo embeds image info as XML tags into text content.
 // Inline Markdown image links get wrapped in <image> with <image_caption> / <image_ocr>;
 // images not found in content are appended as <image> blocks.
@@ -429,26 +452,28 @@ func EnrichContentWithImageInfo(content string, imageInfoJSON string) string {
 		}
 	}
 
-	matches := MarkdownImageRegex.FindAllStringSubmatch(content, -1)
+	locs := MarkdownImageRegex.FindAllStringSubmatchIndex(content, -1)
 	processedURLs := make(map[string]bool)
+	var replacements []contentReplacement
 
-	for _, match := range matches {
-		if len(match) < 3 {
+	for _, loc := range locs {
+		if len(loc) < 6 || loc[4] < 0 {
 			continue
 		}
-		imgURL := match[2]
+		imgURL := content[loc[4]:loc[5]]
 		processedURLs[imgURL] = true
 
 		imgInfo, found := imageInfoMap[imgURL]
 		var b strings.Builder
 		b.WriteString(fmt.Sprintf("<image url=\"%s\">\n", imgURL))
-		b.WriteString(fmt.Sprintf("<image_original>%s</image_original>\n", match[0]))
+		fmt.Fprintf(&b, "<image_original>%s</image_original>\n", content[loc[0]:loc[1]])
 		if found && imgInfo != nil {
 			b.WriteString(BuildImageInfoXML(imgInfo))
 		}
 		b.WriteString("</image>")
-		content = strings.Replace(content, match[0], b.String(), 1)
+		replacements = append(replacements, contentReplacement{start: loc[0], end: loc[1], text: b.String()})
 	}
+	content = spliceReplacements(content, replacements)
 
 	var extras []string
 	for _, imgInfo := range imageInfos {
@@ -645,22 +670,25 @@ func EnrichContentCaptionOnly(content string, imageInfoJSON string) string {
 		}
 	}
 
-	matches := MarkdownImageRegex.FindAllStringSubmatch(content, -1)
+	locs := MarkdownImageRegex.FindAllStringSubmatchIndex(content, -1)
 	processedURLs := make(map[string]bool)
+	var replacements []contentReplacement
 
-	for _, match := range matches {
-		if len(match) < 3 {
+	for _, loc := range locs {
+		if len(loc) < 6 || loc[4] < 0 {
 			continue
 		}
-		imgURL := match[2]
+		imgURL := content[loc[4]:loc[5]]
 		processedURLs[imgURL] = true
 
 		imgInfo, found := imageInfoMap[imgURL]
 		if found && imgInfo != nil && imgInfo.Caption != "" {
-			replacement := match[0] + "\n" + fmt.Sprintf("<image_caption>%s</image_caption>", imgInfo.Caption)
-			content = strings.Replace(content, match[0], replacement, 1)
+			replacement := content[loc[0]:loc[1]] + "\n" +
+				fmt.Sprintf("<image_caption>%s</image_caption>", imgInfo.Caption)
+			replacements = append(replacements, contentReplacement{start: loc[0], end: loc[1], text: replacement})
 		}
 	}
+	content = spliceReplacements(content, replacements)
 
 	var extras []string
 	for _, imgInfo := range imageInfos {
@@ -705,14 +733,15 @@ func EnrichContentCaptionAndOCR(content string, imageInfoJSON string) string {
 		}
 	}
 
-	matches := MarkdownImageRegex.FindAllStringSubmatch(content, -1)
+	locs := MarkdownImageRegex.FindAllStringSubmatchIndex(content, -1)
 	processedURLs := make(map[string]bool)
+	var replacements []contentReplacement
 
-	for _, match := range matches {
-		if len(match) < 3 {
+	for _, loc := range locs {
+		if len(loc) < 6 || loc[4] < 0 {
 			continue
 		}
-		imgURL := match[2]
+		imgURL := content[loc[4]:loc[5]]
 		processedURLs[imgURL] = true
 
 		imgInfo, found := imageInfoMap[imgURL]
@@ -723,8 +752,10 @@ func EnrichContentCaptionAndOCR(content string, imageInfoJSON string) string {
 		if appended == "" {
 			continue
 		}
-		content = strings.Replace(content, match[0], match[0]+"\n"+appended, 1)
+		replacement := content[loc[0]:loc[1]] + "\n" + appended
+		replacements = append(replacements, contentReplacement{start: loc[0], end: loc[1], text: replacement})
 	}
+	content = spliceReplacements(content, replacements)
 
 	var extras []string
 	for _, imgInfo := range imageInfos {
