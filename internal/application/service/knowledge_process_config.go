@@ -64,7 +64,7 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	if overrides.ChunkingConfig != nil {
 		eff.ChunkingConfig = mergeChunkingConfig(eff.ChunkingConfig, overrides.ChunkingConfig)
 	}
-	if len(overrides.ParserEngineRules) > 0 {
+	if overrides.ParserEngineRules != nil {
 		eff.ChunkingConfig.ParserEngineRules = overrides.ParserEngineRules
 	}
 	if overrides.EnableMultimodel != nil {
@@ -315,7 +315,7 @@ func derefExtractConfig(cfg *types.ExtractConfig) types.ExtractConfig {
 	return *cfg
 }
 
-func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConfig) types.ChunkingConfig {
+func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConfigOverride) types.ChunkingConfig {
 	if override == nil {
 		return base
 	}
@@ -344,8 +344,8 @@ func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConf
 	if override.Strategy != "" {
 		result.Strategy = override.Strategy
 	}
-	if override.TokenLimit != 0 {
-		result.TokenLimit = override.TokenLimit
+	if override.TokenLimit != nil {
+		result.TokenLimit = *override.TokenLimit
 	}
 	if len(override.Languages) > 0 {
 		result.Languages = override.Languages

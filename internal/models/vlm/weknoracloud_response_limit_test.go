@@ -126,3 +126,23 @@ func TestPredictTrimsPartialUTF8FromFailedResponse(t *testing.T) {
 		t.Fatalf("error is not valid UTF-8: %q", err)
 	}
 }
+
+// A reply cut off by the output budget is incomplete OCR text and must surface
+// as ErrTruncatedCompletion, like the remote and Ollama VLM providers, instead
+// of being returned as a successful result.
+func TestPredictRejectsTruncatedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"partial te"},"finish_reason":"length"}]}`)
+	}))
+	defer server.Close()
+
+	vlm := newTestWeKnoraCloudVLM(server.URL, server.Client())
+	content, err := vlm.Predict(context.Background(), nil, "describe this page")
+	if !errors.Is(err, ErrTruncatedCompletion) {
+		t.Fatalf("Predict() error = %v, want ErrTruncatedCompletion", err)
+	}
+	if content != "" {
+		t.Fatalf("Predict() content = %q, want empty", content)
+	}
+}

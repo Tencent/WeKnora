@@ -102,3 +102,82 @@ func TestIsDataTableFileType(t *testing.T) {
 		}
 	}
 }
+
+// TestFileTypePredicatesAreCaseInsensitive guards IsImageType/IsAudioType/
+// IsVideoType against case-sensitive regressions. getFileType returns the raw
+// extension (e.g. "JPG" for "photo.JPG") without lowercasing, so these
+// predicates must normalize internally. Before this was fixed, IsImageType
+// lacked strings.ToLower while its audio/video siblings had it, so an
+// uppercase image extension silently failed the multi-modal image path in
+// knowledge_process.go (which feeds knowledge.FileType straight into
+// IsImageType).
+func TestFileTypePredicatesAreCaseInsensitive(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		pred  func(string) bool
+		cases map[string]bool
+	}{
+		{
+			name: "IsImageType",
+			pred: IsImageType,
+			cases: map[string]bool{
+				"jpg": true, "JPG": true, "Jpg": true,
+				"jpeg": true, "JPEG": true,
+				"png": true, "PNG": true,
+				"gif": true, "GIF": true,
+				"webp": true, "WEBP": true,
+				"bmp": true, "BMP": true,
+				"svg": true, "SVG": true,
+				"tiff": true, "TIFF": true,
+				"pdf": false, "mp3": false, "": false,
+			},
+		},
+		{
+			name: "IsAudioType",
+			pred: IsAudioType,
+			cases: map[string]bool{
+				"mp3": true, "MP3": true,
+				"wav": true, "WAV": true,
+				"m4a": true, "M4A": true,
+				"flac": true, "FLAC": true,
+				"ogg": true, "OGG": true,
+				"jpg": false, "mp4": false, "": false,
+			},
+		},
+		{
+			name: "IsVideoType",
+			pred: IsVideoType,
+			cases: map[string]bool{
+				"mp4": true, "MP4": true,
+				"mov": true, "MOV": true,
+				"avi": true, "AVI": true,
+				"mkv": true, "MKV": true,
+				"webm": true, "WEBM": true,
+				"wmv": true, "WMV": true,
+				"flv": true, "FLV": true,
+				"jpg": false, "mp3": false, "": false,
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			for in, want := range tt.cases {
+				if got := tt.pred(in); got != want {
+					t.Errorf("%s(%q) = %v, want %v", tt.name, in, got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestGetFileTypeUppercaseImageDrivesFullChain drives the chain that regressed:
+// an uppercase image extension must still be recognized as an image once it
+// reaches the multi-modal gate, mirroring knowledge_process.go which feeds
+// knowledge.FileType (a raw getFileType result) into IsImageType.
+func TestGetFileTypeUppercaseImageDrivesFullChain(t *testing.T) {
+	for _, filename := range []string{"photo.JPG", "photo.PNG", "scan.Jpeg", "x.GIF"} {
+		ft := getFileType(filename)
+		if !IsImageType(ft) {
+			t.Errorf("IsImageType(getFileType(%q)) = IsImageType(%q) = false, want true", filename, ft)
+		}
+	}
+}

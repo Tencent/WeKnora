@@ -51,3 +51,10 @@ test('ordinary and already delimited tables are unchanged', () => {
   ]) assert.equal(normalizeSpuriousTablePrefixes(source), source);
 });
 
+
+test('table repair skips fenced examples and resumes after the closing fence', () => {
+  const example = ['~~~~text', '| a | b |', '| c | d |', '~~~', '| e | f |', '~~~~'].join('\n');
+  const table = '| Name | Size |\n| Demo | 3 |';
+  assert.equal(normalizeSpuriousTablePrefixes(example + '\n' + table),
+    example + '\n| Name | Size |\n| --- | --- |\n| Demo | 3 |');
+});

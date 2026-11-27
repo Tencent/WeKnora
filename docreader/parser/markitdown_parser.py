@@ -9,9 +9,11 @@ from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.chain_parser import PipelineParser
 from docreader.parser.concurrency import parser_worker_limit
+from docreader.parser.csv_converter import EscapedCSVConverter
 from docreader.parser.docx_merge import fill_vertical_merged_cells_docx
 from docreader.parser.markdown_parser import MarkdownParser
 from docreader.parser.ppt_convert import normalize_ppt_bytes
+from docreader.parser.pptx_converter import EscapedPptxConverter
 from docreader.parser.pptx_media import (
     attach_pptx_media_to_markdown,
     markdown_needs_pptx_media_attach,
@@ -36,6 +38,11 @@ class StdMarkitdownParser(BaseParser):
         # 这里的 super() 会调用 BaseParser 的初始化，确保 self.file_type 被正确赋值
         super().__init__(*args, **kwargs)
         self.markitdown = MarkItDown()
+        ft = self.file_type.lower().lstrip(".")
+        if ft == "csv":
+            self.markitdown.register_converter(EscapedCSVConverter())
+        elif ft in ("ppt", "pptx"):
+            self.markitdown.register_converter(EscapedPptxConverter())
 
     def parse_into_text(self, content: bytes) -> Document:
         """

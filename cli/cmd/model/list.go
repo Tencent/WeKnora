@@ -132,7 +132,10 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 				continue
 			}
 			if opts.Source != "" && !strings.EqualFold(string(m.Source), opts.Source) {
-				continue
+				provider, _ := m.Parameters["provider"].(string)
+				if m.Source != sdk.ModelSourceRemote || !strings.EqualFold(provider, opts.Source) {
+					continue
+				}
 			}
 			filtered = append(filtered, m)
 		}

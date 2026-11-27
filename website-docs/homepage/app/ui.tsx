@@ -3,6 +3,7 @@ const paths: Record<string, ReactNode> = {
   arrow: <path d="M4 12h15m-6-6 6 6-6 6" />,
   external: <path d="M8 5H5v14h14v-3M12 5h7v7M10 14 19 5" />,
   play: <path d="m9 5 11 7-11 7Z" />,
+  mic: <><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8" /></>,
   search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5M8 8h5M8 11h3" /></>,
   agent: <><rect x="5" y="7" width="14" height="13" rx="3" /><path d="M12 3v4M2 11v5m20-5v5M9 12v1m6-1v1m-6 4h6" /><circle cx="12" cy="2.5" r=".5" /></>,
   wiki: <><path d="M12 6C9 3 5 3 2 4v15c4-1 7 0 10 2 3-2 6-3 10-2V4c-3-1-7-1-10 2v15" /><path d="M5 8h3m-3 4h3m8-4h3m-3 4h3" /></>,

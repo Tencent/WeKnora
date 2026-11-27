@@ -73,7 +73,7 @@ export const useOrganizationStore = defineStore('organization', () => {
   /** 共享智能体含按请求语言本地化的内置名称；切换 UI 语言后快照随之失效 */
   let sharedAgentsLoadedLocale = ''
   let sharedAgentsInflightLocale = ''
-  let searchableOrganizationsQuery = ''
+  let searchableOrganizationsRequestSequence = 0
   const searchableOrganizationCache = new Map<
     string,
     { data: SearchableOrganizationItem[]; loadedAt: number }
@@ -515,7 +515,13 @@ export const useOrganizationStore = defineStore('organization', () => {
     excludeSearchableOrganizationId?: string
   }
 
+  // 作废在途响应，保留当前列表和已缓存的结果。
+  function cancelSearchableOrganizationRequest() {
+    searchableOrganizationsRequestSequence += 1
+  }
+
   function invalidateSearchableOrganizations(organizationId?: string) {
+    cancelSearchableOrganizationRequest()
     searchableOrganizationCache.clear()
     if (organizationId) {
       searchableOrganizations.value = searchableOrganizations.value.filter(
@@ -546,7 +552,7 @@ export const useOrganizationStore = defineStore('organization', () => {
     options?: { force?: boolean; limit?: number }
   ) {
     const normalizedQuery = query.trim()
-    searchableOrganizationsQuery = normalizedQuery
+    const requestSequence = ++searchableOrganizationsRequestSequence
     const cached = searchableOrganizationCache.get(normalizedQuery)
     if (
       !options?.force &&
@@ -558,22 +564,19 @@ export const useOrganizationStore = defineStore('organization', () => {
     }
 
     const response = await searchSearchableOrganizations(normalizedQuery, options?.limit ?? 20)
-    if (response.success && response.data) {
-      const data = response.data.data.filter(organization => !organization.is_already_member)
-      searchableOrganizationCache.set(normalizedQuery, { data, loadedAt: Date.now() })
-      if (searchableOrganizationsQuery === normalizedQuery) {
-        searchableOrganizations.value = data
+    const page = response.success ? response.data : undefined
+    const data = page ? page.data.filter(organization => !organization.is_already_member) : []
+    if (requestSequence === searchableOrganizationsRequestSequence) {
+      if (page) {
+        searchableOrganizationCache.set(normalizedQuery, { data, loadedAt: Date.now() })
       }
-      return data
+      searchableOrganizations.value = data
     }
-    if (searchableOrganizationsQuery === normalizedQuery) {
-      searchableOrganizations.value = []
-    }
-    return []
+    return data
   }
 
   function clearSearchableOrganizations() {
-    searchableOrganizationsQuery = ''
+    cancelSearchableOrganizationRequest()
     searchableOrganizations.value = []
   }
 
@@ -783,13 +786,12 @@ export const useOrganizationStore = defineStore('organization', () => {
     currentMembers.value = []
     sharedKnowledgeBases.value = []
     sharedAgents.value = []
-    searchableOrganizations.value = []
+    clearSearchableOrganizations()
     resourceCounts.value = null
     previewData.value = null
     error.value = null
     sharedAgentsLoadedLocale = ''
     sharedAgentsInflightLocale = ''
-    searchableOrganizationsQuery = ''
     searchableOrganizationCache.clear()
     organizationsRequest.invalidate()
     sharedKnowledgeBasesRequest.invalidate()
@@ -831,6 +833,7 @@ export const useOrganizationStore = defineStore('organization', () => {
     fetchSharedKnowledgeBases,
     fetchSharedAgents,
     fetchSearchableOrganizations,
+    cancelSearchableOrganizationRequest,
     clearSearchableOrganizations,
     invalidateOrganizationData,
     joinById,

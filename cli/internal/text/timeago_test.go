@@ -15,9 +15,12 @@ func TestFuzzyAgo(t *testing.T) {
 		want string
 	}{
 		{"5 minutes ago", now.Add(-5 * time.Minute), "about 5 minutes ago"},
+		{"59 minutes ago", now.Add(-(59*time.Minute + 31*time.Second)), "about 59 minutes ago"},
 		{"1 hour ago", now.Add(-1 * time.Hour), "about 1 hour ago"},
 		{"3 hours ago", now.Add(-3 * time.Hour), "about 3 hours ago"},
+		{"23 hours ago", now.Add(-(23*time.Hour + 31*time.Minute)), "about 23 hours ago"},
 		{"2 days ago", now.Add(-2 * 24 * time.Hour), "about 2 days ago"},
+		{"29 days ago", now.Add(-(29*24*time.Hour + 13*time.Hour)), "about 29 days ago"},
 		{"30 days ago", now.Add(-30 * 24 * time.Hour), "about 1 month ago"},
 		{"5 minutes from now", now.Add(5 * time.Minute), "about 5 minutes from now"},
 		{"less than 1m ago", now.Add(-30 * time.Second), "less than a minute ago"},

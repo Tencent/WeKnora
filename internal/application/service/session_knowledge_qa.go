@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
 	"time"
@@ -909,6 +910,15 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 
 	results, err := s.runKnowledgeSearchPipeline(ctx, chatManage, len(searchTargets))
 	if err != nil {
+		// A request-level failure wrapped by the pipeline (a KB whose
+		// embedding model has no image side, an unembeddable query image)
+		// keeps its status code: IsAppError is a bare assertion and does not
+		// unwrap, so re-surface the typed error here or it reaches the
+		// client as a 500.
+		var appErr *apperrors.AppError
+		if stderrors.As(err, &appErr) {
+			return nil, appErr
+		}
 		return nil, err
 	}
 
@@ -1346,6 +1356,11 @@ func (s *sessionService) consumeFallbackStream(
 		}
 	}
 	if !streamCompleted {
+		if ctx.Err() != nil {
+			// Stopped by the user: what has streamed so far is the answer.
+			logger.Infof(ctx, "Fallback stream cancelled before completion")
+			return
+		}
 		logger.Warnf(ctx, "Fallback stream closed without completion, emitting final event with fixed response")
 		s.emitFallbackAnswer(ctx, chatManage, chatManage.FallbackResponse)
 	}

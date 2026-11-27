@@ -255,7 +255,7 @@
                         <t-icon name="folder" size="14px" />
                       </div>
                     </t-tooltip>
-                    <t-tooltip v-if="agent.config?.mcp_services?.length || agent.config?.mcp_selection_mode === 'all'"
+                    <t-tooltip v-if="agentUsesMcp(agent.config)"
                       :content="$t('agent.features.mcp')" placement="top">
                       <div class="feature-badge mcp">
                         <t-icon name="extension" size="14px" />
@@ -420,7 +420,7 @@
                         <t-icon name="folder" size="14px" />
                       </div>
                     </t-tooltip>
-                    <t-tooltip v-if="agent.config?.mcp_services?.length || agent.config?.mcp_selection_mode === 'all'"
+                    <t-tooltip v-if="agentUsesMcp(agent.config)"
                       :content="$t('agent.features.mcp')" placement="top">
                       <div class="feature-badge mcp">
                         <t-icon name="extension" size="14px" />
@@ -555,7 +555,7 @@
                       <div class="feature-badge knowledge"><t-icon name="folder" size="14px" /></div>
                     </t-tooltip>
                     <t-tooltip
-                      v-if="shared.agent?.config?.mcp_services?.length || shared.agent?.config?.mcp_selection_mode === 'all'"
+                      v-if="agentUsesMcp(shared.agent?.config)"
                       :content="$t('agent.features.mcp')" placement="top">
                       <div class="feature-badge mcp"><t-icon name="extension" size="14px" /></div>
                     </t-tooltip>
@@ -736,6 +736,7 @@
 
 <script setup lang="ts">
 import { useAssistantDataChange } from '@/utils/assistantDataChange'
+import { agentUsesMcp } from '../../utils/agentMcp'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
@@ -1177,22 +1178,33 @@ const handleOpenAgentEditor = (event: CustomEvent) => {
   }
 }
 
+let spaceAgentsRequestSeq = 0
+
 // 选中空间时请求该空间内全部智能体（含我共享的）
 watch(spaceSelection, (val) => {
+  const requestSeq = ++spaceAgentsRequestSeq
   if (!val || RESERVED_SCOPES.has(val)) {
     spaceAgentsList.value = []
+    spaceAgentsLoading.value = false
     return
   }
+  spaceAgentsList.value = []
   spaceAgentsLoading.value = true
   listOrganizationSharedAgents(val).then((res) => {
+    if (requestSeq !== spaceAgentsRequestSeq) return
     if (res.success && res.data) {
       spaceAgentsList.value = res.data
       spaceAgentCountByOrg.value = { ...spaceAgentCountByOrg.value, [val]: res.data.length }
     } else {
       spaceAgentsList.value = []
     }
+  }).catch(() => {
+    if (requestSeq !== spaceAgentsRequestSeq) return
+    spaceAgentsList.value = []
   }).finally(() => {
-    spaceAgentsLoading.value = false
+    if (requestSeq === spaceAgentsRequestSeq) {
+      spaceAgentsLoading.value = false
+    }
   })
 }, { immediate: true })
 
@@ -1211,6 +1223,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  spaceAgentsRequestSeq++
   window.removeEventListener('openAgentEditor', handleOpenAgentEditor as EventListener)
 })
 

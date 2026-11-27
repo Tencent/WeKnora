@@ -74,3 +74,10 @@ test('ignores non-wiki tools and empty result sets', () => {
   assert.deepEqual(parseWikiToolReferences('web_search', '<page>ignored</page>'), [])
   assert.deepEqual(parseWikiToolReferences('wiki_search', '<search_results count="0" />'), [])
 })
+
+test('opens search references with bracketed text in the display title', () => {
+  const output = '<page><link>[[manual/install|Install [Windows]]]</link><summary>Setup</summary></page>'
+  const [ref] = parseWikiToolReferences('wiki_search', output)
+  assert.equal(ref.slug, 'manual/install')
+  assert.equal(ref.title, 'Install [Windows]')
+})

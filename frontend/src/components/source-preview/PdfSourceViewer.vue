@@ -88,10 +88,14 @@ async function openDocument(data: ArrayBuffer) {
   const lib = await loadPdfJs()
   pdfjs = lib
   if (disposed) return
+  const assetBase = `${import.meta.env.BASE_URL}pdfjs/`
   // pdf.js takes ownership of the buffer; keep the caller's copy intact.
   const task = lib.getDocument({
     data: new Uint8Array(data.slice(0)),
-    wasmUrl: `${import.meta.env.BASE_URL}pdfjs/wasm/`,
+    cMapUrl: `${assetBase}cmaps/`,
+    cMapPacked: true,
+    standardFontDataUrl: `${assetBase}standard_fonts/`,
+    wasmUrl: `${assetBase}wasm/`,
   })
   loadingTask = task
   const doc = await task.promise

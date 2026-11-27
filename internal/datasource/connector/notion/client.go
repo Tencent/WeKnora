@@ -779,7 +779,19 @@ func (c *notionClient) queryDataSourceWindow(
 			}
 		}
 
-		if !resp.HasMore || resp.NextCursor == "" {
+		if resp.HasMore && resp.NextCursor == "" {
+			// has_more promises another page but no cursor can ask for it. Report
+			// the window as incomplete so the caller continues from a later
+			// created_time or surfaces the truncation, instead of reading the
+			// missing rows as deletions.
+			logger.Warnf(ctx, "[Notion] query %s returned has_more=true without a next_cursor after %d rows; "+
+				"treating the window as incomplete", path, len(rows))
+			if incompleteReason == "" {
+				incompleteReason = "has_more without next_cursor"
+			}
+			return rows, lastCreatedTime, incompleteReason, nil
+		}
+		if !resp.HasMore {
 			return rows, lastCreatedTime, incompleteReason, nil
 		}
 		next, cursorErr := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
