@@ -1067,7 +1067,9 @@ func TestTaskPendingOps_SettleDocumentOpRollsBackAndReleasesOnlyOnce(t *testing.
 			}
 
 			require.NoError(t, settler.SettleDocumentOp(ctx, kid, 1, stale.ID, nil))
-			require.NoError(t, db.Exec("ALTER TABLE knowledges RENAME COLUMN processed_at TO hidden_processed_at").Error)
+			require.NoError(t, db.Exec(
+				"ALTER TABLE knowledges RENAME COLUMN processed_at TO hidden_processed_at",
+			).Error)
 			settle := func() error {
 				return settler.SettleDocumentOp(ctx, kid, 2, source.ID, []int64{duplicate.ID})
 			}
@@ -1075,7 +1077,9 @@ func TestTaskPendingOps_SettleDocumentOpRollsBackAndReleasesOnlyOnce(t *testing.
 			count, err := repo.PendingCount(ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1")
 			require.NoError(t, err)
 			require.EqualValues(t, 2, count)
-			require.NoError(t, db.Exec("ALTER TABLE knowledges RENAME COLUMN hidden_processed_at TO processed_at").Error)
+			require.NoError(t, db.Exec(
+				"ALTER TABLE knowledges RENAME COLUMN hidden_processed_at TO processed_at",
+			).Error)
 			require.NoError(t, settle())
 			require.NoError(t, settle())
 

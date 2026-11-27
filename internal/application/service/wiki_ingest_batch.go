@@ -869,7 +869,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// Successful siblings are already durable. Publish remaining writes from
 	// retractions and from documents whose failed slug needs another attempt.
 	s.sanitizeDeadSummaryLinks(tailCtx, payload.KnowledgeBaseID, unsettledDocs, failedAdditionSlugs, batchCtx)
-	finalizeRowsFailed, err = s.handoffWikiIngest(ctx, payload, changedSlugs, titlesBySlug, nil, pendingOps, retractFolderIDs)
+	finalizeRowsFailed, err = s.handoffWikiIngest(
+		ctx, payload, changedSlugs, titlesBySlug, nil, pendingOps, retractFolderIDs,
+	)
 	if err != nil {
 		exitStatus = "finalize_enqueue_failed"
 		for _, r := range unsettledDocs {
@@ -957,7 +959,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// release net.
 	claimsSettled = true
 
-	logger.Infof(ctx, "wiki ingest: batch completed for KB %s, %d ops, %d pages affected", payload.KnowledgeBaseID, len(pendingOps), totalPagesAffected)
+	logger.Infof(ctx, "wiki ingest: batch completed for KB %s, %d ops, %d pages affected",
+		payload.KnowledgeBaseID, len(pendingOps), totalPagesAffected)
 
 	// Pace the follow-up: on a rate-limit trip, back off so the per-minute
 	// window can reset instead of retrying the failed docs immediately.
@@ -1041,11 +1044,15 @@ func (s *wikiIngestService) handoffWikiIngest(
 	return s.enqueueFinalize(ctx, payload, slugs, titlesBySlug, changes, folderIDs)
 }
 
-func (s *wikiIngestService) settleWikiIngestDocument(ctx context.Context, source WikiPendingOp, doc *docIngestResult) error {
+func (s *wikiIngestService) settleWikiIngestDocument(
+	ctx context.Context, source WikiPendingOp, doc *docIngestResult,
+) error {
 	settleCtx, cancel := wikiIngestCleanupContext(ctx)
 	defer cancel()
 	if repo, ok := s.pendingRepo.(interfaces.TaskPendingOpsDocumentSettler); ok {
-		if err := repo.SettleDocumentOp(settleCtx, doc.KnowledgeID, source.Attempt, source.dbID, source.duplicateDBIDs); err != nil {
+		if err := repo.SettleDocumentOp(
+			settleCtx, doc.KnowledgeID, source.Attempt, source.dbID, source.duplicateDBIDs,
+		); err != nil {
 			return err
 		}
 	} else {

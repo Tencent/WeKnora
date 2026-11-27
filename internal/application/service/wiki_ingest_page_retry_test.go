@@ -479,7 +479,9 @@ type wikiBlockingSummaryStore struct {
 	fastWritten chan struct{}
 }
 
-func (s *wikiBlockingSummaryStore) GetOrCreatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, bool, error) {
+func (s *wikiBlockingSummaryStore) GetOrCreatePage(
+	ctx context.Context, page *types.WikiPage,
+) (*types.WikiPage, bool, error) {
 	if page.Slug == "summary/slow" {
 		close(s.started)
 		select {
