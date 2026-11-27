@@ -847,6 +847,7 @@ func (c *Client) UpdateImageInfo(ctx context.Context,
 
 // CreateManualKnowledgeRequest contains the parameters for creating a manual Markdown knowledge entry.
 type CreateManualKnowledgeRequest struct {
+	Status string `json:"status,omitempty"`
 	// TagIDs replaces TagID when nonempty. TagID remains supported for single-tag callers.
 	TagIDs  []string `json:"tag_ids,omitempty"`
 	Title   string   `json:"title"`

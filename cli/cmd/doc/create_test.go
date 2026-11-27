@@ -97,6 +97,7 @@ func TestCreate_Channel_DefaultIsAPI(t *testing.T) {
 	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "doc_ch"}}
 	opts := &CreateOptions{Text: "content"}
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
+	assert.Empty(t, svc.got.req.Status)
 	assert.Equal(t, uploadChannel, svc.got.req.Channel)
 }
 
@@ -181,4 +182,13 @@ func TestCreateDryRunShowsDocumentClassification(t *testing.T) {
 	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope))
 	assert.Equal(t, "ops", envelope.Meta.Plan.Args["tag_id"])
 	assert.Equal(t, "migration", envelope.Meta.Plan.Args["channel"])
+}
+
+func TestCreatePublish(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "doc", ParseStatus: "pending"}}
+	opts := &CreateOptions{Text: "index this note", Publish: true}
+	format := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+	require.NoError(t, runCreate(context.Background(), opts, format, svc, "kb"))
+	assert.Equal(t, "publish", svc.got.req.Status)
 }
