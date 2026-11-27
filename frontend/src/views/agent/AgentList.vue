@@ -772,11 +772,11 @@ import { useListUrlState } from '@/composables/useListUrlState'
 import { useResourcePins } from '@/composables/useResourcePins'
 import { integrationSectionKey } from '@/config/settingsRoute'
 import {
-  DEFAULT_RESOURCE_SORT,
   sortResourcesWithinGroups,
   type ResourceSortAccessors,
   type ResourceSortValue,
 } from '@/utils/resourceSorting'
+import { loadResourceSortPreference, saveResourceSortPreference } from '@/utils/resourceSortPreference'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -788,7 +788,8 @@ const uiStore = useUIStore()
 const orgStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
 const { loaded: modelsReadyLoaded, isReadyForAgent } = useTenantModelReadiness()
-const selectedResourceSort = ref<ResourceSortValue>(DEFAULT_RESOURCE_SORT)
+const selectedResourceSort = ref<ResourceSortValue>(loadResourceSortPreference('agents', authStore.effectiveTenantId))
+watch(selectedResourceSort, value => saveResourceSortPreference('agents', authStore.effectiveTenantId, value))
 
 interface AgentWithUI extends CustomAgent {
   showMore?: boolean

@@ -10,6 +10,7 @@ import * as versionedRequest from '../../stores/versionedRequest.ts'
 import { fixture, flush } from '../../test-utils/vueFixture.ts'
 import { shouldShowOrgRelationTag } from '../../utils/card-list-badge.ts'
 import { matchesResourceQuery } from '../../utils/resourceListSearch.ts'
+import * as sortPreference from '../../utils/resourceSortPreference.ts'
 import * as resourceSorting from '../../utils/resourceSorting.ts'
 
 const SEARCH_DELAY_MS = 300
@@ -55,6 +56,7 @@ function setup(t: TestContext) {
     '@/utils/clipboard': { copyWithToast: async () => undefined },
     '@/utils/resourceListSearch': { matchesResourceQuery },
     '@/utils/resourceSorting': resourceSorting,
+    '@/utils/resourceSortPreference': sortPreference,
     '@/utils/card-list-badge': { shouldShowOrgRelationTag },
     '@/api/organization': api,
   })

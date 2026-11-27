@@ -3,6 +3,7 @@ import test from 'node:test'
 import * as vue from 'vue'
 import * as marked from 'marked'
 import * as literalTilde from '../../utils/markedLiteralTilde.ts'
+import * as sortPreference from '../../utils/resourceSortPreference.ts'
 import * as sorting from '../../utils/resourceSorting.ts'
 import { change, fixture, flush } from '../../test-utils/vueFixture.ts'
 
@@ -133,6 +134,7 @@ test('refreshes the mounted KB list with force for knowledge_base changes only',
     '@/api/knowledge-base': {}, '@/api/organization': {}, '@/config/contextualGuides': {},
     '@/utils/index': {}, '@/utils/kbPermission': {},
     '@/utils/resourceListSearch': {}, '@/utils/card-list-badge': {}, '@/utils/resourceSorting': sorting,
+    '@/utils/resourceSortPreference': sortPreference,
   })
   await flush()
   fetchKnowledgeBasesForList.mock.resetCalls()
