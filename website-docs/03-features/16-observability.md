@@ -112,6 +112,8 @@ OTLP/HTTP exporter，`Authorization: Basic base64(public:secret)`；该 exporter
 
 三种句柄（`tracer.go`）：`Trace`（根，一次请求）、`Span`（非 LLM 的逻辑工作单元）、`Generation`（一次模型调用，含 `TokenUsage` token 统计与流式 time-to-first-token `MarkCompletionStart`）。父子关系通过 OTel span context 自动建立；无 trace 时自动开 auto-trace 防止孤儿 span。
 
+`SpanOptions.Type` / `GenerationOptions.Type` 可把观测标成更具体的 Langfuse 类型（`agent`/`tool`/`chain`/`retriever`/`embedding`/`evaluator`，见 `events.go` 的 `ObsType*` 常量），供 Agent Graph、工具与检索分析使用；未指定或非法值回退为 `span`/`generation`。当前映射：`agent.execute` → `agent`；`agent.tool.*` → `tool`；`agent.round`、`pipeline.*` → `chain`；`retrieve`、`web_search`、`memory.*` → `retriever`；`embedding.*` → `embedding`。轮次等运行期变量放在 input/metadata（如 `agent.round` 的 `round` 字段），不写进名称，便于按名称聚合与筛选。
+
 主要埋点：
 
 | 点位 | 源码 | 产出 |
@@ -121,7 +123,7 @@ OTLP/HTTP exporter，`Authorization: Basic base64(public:secret)`；该 exporter
 | 入队侧注入 | `asynq.go` `InjectTracing` + `internal/types/tracing.go` `TracingContext` | 把 traceparent、user/session 标签以 `lf_*` JSON 字段嵌入任务 payload，跨进程传递 |
 | 模型调用 | `internal/models/{chat,embedding,rerank,vlm,asr}/langfuse_wrapper.go` | 每次调用一个 Generation（模型名、输入、参数、输出、token usage、错误） |
 | 检索/重排摘要 | `retrieval_obs.go` | `SummarizeRetrieveOutput` / `SummarizeSearchResults` 等把召回结果压缩成 top-25 预览（rank/chunk_id/score/160 字符 preview），避免全文进 trace |
-| Agent 执行 | `internal/agent/engine.go`、`act.go` | agent.execute 等 SPAN，经 `logger.CloneContext` 保持与 HTTP 根 trace 同树 |
+| Agent 执行 | `internal/agent/engine.go`、`act.go` | `agent` 类型 SPAN（agent.execute，驱动 Agent Graph）、`chain` 类型 SPAN（agent.round）与 `tool` 类型 SPAN（agent.tool.*），经 `logger.CloneContext` 保持与 HTTP 根 trace 同树 |
 
 上报内容（span 属性，`events.go`）：`langfuse.observation.type/input/output/metadata/model.name/model.parameters/usage_details/completion_start_time`、`langfuse.trace.name/input/output/metadata/tags`、`user.id`（显式 user 或 `tenant:<id>`）、`session.id`、`langfuse.environment/release`。
 

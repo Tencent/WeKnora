@@ -22,6 +22,7 @@ func (l *langfuseEmbedder) Embed(ctx context.Context, text string) ([]float32, e
 	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
 		Name:  "embedding.embed",
 		Model: l.inner.GetModelName(),
+		Type:  langfuse.ObsTypeEmbedding,
 		Input: text,
 		Metadata: map[string]interface{}{
 			"model_id":   l.inner.GetModelID(),
@@ -49,6 +50,7 @@ func (l *langfuseEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]
 	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
 		Name:  "embedding.batch_embed",
 		Model: l.inner.GetModelName(),
+		Type:  langfuse.ObsTypeEmbedding,
 		Input: map[string]interface{}{
 			"count": len(texts),
 			// Avoid sending megabytes of full text — Langfuse truncates but
@@ -97,6 +99,7 @@ func (l *langfuseEmbedder) BatchEmbedImages(ctx context.Context, images []Image)
 	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
 		Name:  "embedding.batch_embed_images",
 		Model: l.inner.GetModelName(),
+		Type:  langfuse.ObsTypeEmbedding,
 		Input: map[string]interface{}{
 			"count":   len(images),
 			"preview": previewTexts(describeImages(images), 5),
