@@ -9,8 +9,9 @@ import (
 
 // unsafeRune reports whether r is a control / formatting character that has no
 // place in a CLI-supplied value: C0 control codes (except the ordinary
-// whitespace \t \n \r), DEL, Unicode Bidi overrides/isolates, and zero-width
-// characters.
+// whitespace \t \n \r), DEL, Unicode Bidi overrides/isolates, zero-width space,
+// and BOM. The Unicode join controls U+200C/U+200D are allowed because they are
+// required for valid Persian/Indic text and joined emoji sequences.
 //
 // These are rejected because CLI arguments are untrusted — in an agent-first
 // CLI they frequently originate from an AI agent or upstream content. A
@@ -28,15 +29,15 @@ func unsafeRune(r rune) bool {
 		return true // LRE RLE PDF LRO RLO — Bidi overrides
 	case r >= 0x2066 && r <= 0x2069:
 		return true // LRI RLI FSI PDI — Bidi isolates
-	case r == 0x200b || r == 0x200c || r == 0x200d || r == 0xfeff:
-		return true // zero-width space / non-joiner / joiner / BOM
+	case r == 0x200b || r == 0xfeff:
+		return true // zero-width space / BOM
 	}
 	return false
 }
 
 // CheckSafeText returns an input.invalid_argument error if value contains a
-// control / Bidi / zero-width character (see unsafeRune). label names the
-// offending input so an agent can fix the right argument. Returns nil for
+// control / Bidi / invisible spacing character (see unsafeRune). label names
+// the offending input so an agent can fix the right argument. Returns nil for
 // ordinary text (including multi-line content with \t \n \r).
 func CheckSafeText(value, label string) error {
 	for i, r := range value {
@@ -44,7 +45,7 @@ func CheckSafeText(value, label string) error {
 			return &Error{
 				Code: CodeInputInvalidArgument,
 				Message: fmt.Sprintf(
-					"%s contains a disallowed control character (U+%04X at byte %d); strip control / ANSI-escape / Bidi / zero-width characters",
+					"%s contains a disallowed control character (U+%04X at byte %d); strip control / ANSI-escape / Bidi / invisible spacing characters",
 					label, r, i,
 				),
 			}
