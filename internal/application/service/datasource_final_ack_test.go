@@ -113,7 +113,8 @@ func TestProcessSyncRetriesFinalPersistenceFailure(t *testing.T) {
 						require.Equal(t, "1 document(s) failed to sync", log.ErrorMessage)
 					}
 					require.NoError(t, h.svc.ProcessSync(ctx, h.task))
-					require.Equal(t, []int{0}, h.connector.starts, "completion retries and redelivery must skip fetching")
+					require.Equal(t, []int{0}, h.connector.starts,
+						"completion retries and redelivery must skip fetching")
 					require.Len(t, h.sink.attempted, 3, "completion retries must skip ingestion")
 				}
 				require.Equal(t, wantStatus, log.Status)

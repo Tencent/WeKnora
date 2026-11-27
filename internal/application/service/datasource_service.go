@@ -1675,12 +1675,14 @@ func pendingSyncLogResult(ds *types.DataSource, log *types.SyncLog) *pendingSync
 func (s *DataSourceService) finishPendingSyncLog(
 	ctx context.Context, ds *types.DataSource, log *types.SyncLog, pending *pendingSyncResult,
 ) error {
-	resultJSON, err := pending.SyncResult.ToJSON()
+	resultJSON, err := pending.ToJSON()
 	if err != nil {
 		return fmt.Errorf("encode pending sync result: %w", err)
 	}
 	log.FinishedAt = ds.LastSyncAt
-	if err := s.writeSyncLogResult(ctx, log, &pending.SyncResult, resultJSON, pending.Status, pending.ErrorMessage); err != nil {
+	if err := s.writeSyncLogResult(
+		ctx, log, &pending.SyncResult, resultJSON, pending.Status, pending.ErrorMessage,
+	); err != nil {
 		return fmt.Errorf("persist sync result: %w", err)
 	}
 	s.recordSyncRunResult(ctx, ds, log, &pending.SyncResult)
@@ -1783,10 +1785,11 @@ func (s *DataSourceService) recordSyncRunResult(
 ) {
 	action := types.AuditActionDataSourceSyncCompleted
 	outcome := types.AuditOutcomeSuccess
-	if syncLog.Status == types.SyncLogStatusFailed {
+	switch syncLog.Status {
+	case types.SyncLogStatusFailed:
 		action = types.AuditActionDataSourceSyncFailed
 		outcome = types.AuditOutcomeFailed
-	} else if syncLog.Status == types.SyncLogStatusPartial {
+	case types.SyncLogStatusPartial:
 		outcome = types.AuditOutcomePartial
 	}
 	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, action,
