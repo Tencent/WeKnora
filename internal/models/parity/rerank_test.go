@@ -75,6 +75,7 @@ func TestRerankProtocolAssignment(t *testing.T) {
 		"novita":          api.RerankCohere,
 		"openrouter":      api.RerankCohere,
 		"litellm":         api.RerankCohere,
+		"contextual":      api.RerankCohere,
 	} {
 		t.Run(id, func(t *testing.T) {
 			resolved, err := modelruntime.Resolve(modelruntime.Ref{
@@ -244,7 +245,9 @@ func TestTruncatePromptTokensOnlyReachesVLLMClassVendors(t *testing.T) {
 		})
 	}
 
-	for _, id := range []string{"jina", "zhipu", "siliconflow", "qianfan", "weknoracloud", "aliyun", "nvidia"} {
+	for _, id := range []string{
+		"jina", "zhipu", "siliconflow", "qianfan", "weknoracloud", "aliyun", "nvidia", "contextual",
+	} {
 		t.Run(id+" rejects it", func(t *testing.T) {
 			_, err := modelruntime.Resolve(modelruntime.Ref{
 				Provider: id, Model: "m", ModelType: types.ModelTypeRerank, Extra: optIn,
