@@ -199,3 +199,15 @@ func TestDownload_JSONEnvelope_SuppressedOnStdout(t *testing.T) {
 	// stdout must contain only the raw bytes, not a JSON envelope.
 	assert.Equal(t, "binary payload", out.String())
 }
+
+func TestDownloadTreatsSuggestedDashAsFilename(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	svc := &fakeDownloadSvc{content: "file content", filename: "-"}
+	require.NoError(t, runDownload(context.Background(), &DownloadOptions{}, textFopts(), svc, "report"))
+	got, err := os.ReadFile(filepath.Join(dir, "-"))
+	require.NoError(t, err)
+	assert.Equal(t, "file content", string(got))
+	assert.Empty(t, out.String())
+}
