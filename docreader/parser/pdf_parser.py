@@ -506,7 +506,7 @@ def _render_page_clip_jpeg(page, bbox, scale: float, quality: int, max_edge: int
     scale_eff = _effective_scale(page, scale, max_edge)
     bitmap = None
     try:
-        bitmap = page.render(scale=scale_eff)
+        bitmap = page.render(scale=scale_eff, may_draw_forms=False)
         pil = bitmap.to_pil().convert("RGB")
     finally:
         _close_pdfium_resource(bitmap)
@@ -1488,10 +1488,29 @@ def _effective_scale(page, scale: float, max_edge: int) -> float:
     return min(scale, max_edge / longest_pt)
 
 
+def _init_signature_forms(pdf) -> None:
+    """Enable rendering of signature widgets before loading any pages."""
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as raw
+
+    if pdf.get_formtype() != raw.FORMTYPE_ACRO_FORM:
+        return
+    try:
+        pdf.init_forms(raw.FPDF_FORMFILLINFO(version=2, xfa_disabled=True))
+    except pdfium.PdfiumError:
+        logger.warning("Could not initialize PDF signature appearances", exc_info=True)
+
+
 def _render_page_to_jpeg(page, scale: float, quality: int, max_edge: int = 0) -> bytes:
+    import pypdfium2.raw as raw
+
+    # Preserve the existing page render unless a signature appearance is present.
+    draw_forms = bool(page.formenv and next(_signature_widget_rects(page, raw), None))
     bitmap = None
     try:
-        bitmap = page.render(scale=_effective_scale(page, scale, max_edge))
+        bitmap = page.render(
+            scale=_effective_scale(page, scale, max_edge), may_draw_forms=draw_forms
+        )
         img_obj = bitmap.to_pil()
         if img_obj.mode != "RGB":
             img_obj = img_obj.convert("RGB")
@@ -1523,6 +1542,7 @@ def _render_pool_init(pdf_path: str) -> None:
     import pypdfium2 as pdfium
 
     _WORKER_RENDER_DOC = pdfium.PdfDocument(pdf_path)
+    _init_signature_forms(_WORKER_RENDER_DOC)
 
 
 def _render_pool_task(args):
@@ -1664,9 +1684,11 @@ def _iter_scanned_pages_serial_batch(
 ) -> Iterator[StreamedImage]:
     import pypdfium2 as pdfium
 
-    with _PDFIUM_LOCK:
-        pdf = pdfium.PdfDocument(pdf_path)
+    pdf = None
     try:
+        with _PDFIUM_LOCK:
+            pdf = pdfium.PdfDocument(pdf_path)
+            _init_signature_forms(pdf)
         yield from _iter_scanned_pages_from_open_pdf(
             pdf, indices, base_name, scale, quality, max_edge
         )
@@ -2029,6 +2051,81 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
     return result
 
 
+def _signature_widget_rects(page, raw):
+    hidden = (
+        raw.FPDF_ANNOT_FLAG_INVISIBLE
+        | raw.FPDF_ANNOT_FLAG_HIDDEN
+        | raw.FPDF_ANNOT_FLAG_NOVIEW
+    )
+    for index in range(raw.FPDFPage_GetAnnotCount(page)):
+        annot = raw.FPDFPage_GetAnnot(page, index)
+        if not annot:
+            continue
+        rect = raw.FS_RECTF()
+        try:
+            if (
+                raw.FPDFAnnot_GetSubtype(annot) != raw.FPDF_ANNOT_WIDGET
+                or raw.FPDFAnnot_GetFlags(annot) & hidden
+                or not raw.FPDFAnnot_HasKey(annot, b"AP")
+                or raw.FPDFAnnot_GetFormFieldType(page.formenv, annot)
+                != raw.FPDF_FORMFIELD_SIGNATURE
+                or not raw.FPDFAnnot_GetRect(annot, rect)
+                or rect.left >= rect.right
+                or rect.bottom >= rect.top
+            ):
+                continue
+        finally:
+            raw.FPDFPage_CloseAnnot(annot)
+        yield index, (rect.left, rect.bottom, rect.right, rect.top)
+
+
+def _add_signature_images(pdf, classes, raw, embedded, base_name, scale, quality):
+    """Add visible signature appearances to the native-page image references."""
+    if not pdf.formenv:
+        return
+    # Keep existing figure selection and use the remaining embedded-image budget.
+    remaining = EMBED_MAX_IMAGES - sum(len(refs) for refs in embedded.values())
+    for i, page_class in enumerate(classes):
+        if remaining <= 0:
+            break
+        if page_class != "text":
+            continue
+        page = pdf[i]
+        try:
+            geometry = PageGeometry(page.get_bbox(), page.get_rotation())
+            width, height = page.get_size()
+            scale_eff = _effective_scale(page, scale, CONFIG.pdf_render_max_edge)
+            for index, rect in _signature_widget_rects(page, raw):
+                left, top, right, bottom = geometry.bbox(rect)
+                if left >= right or top >= bottom:
+                    continue
+                crop = (
+                    left * width,
+                    (1 - bottom) * height,
+                    (1 - right) * width,
+                    top * height,
+                )
+                bitmap = None
+                try:
+                    bitmap = page.render(scale=scale_eff, crop=crop)
+                    with bitmap.to_pil() as image:
+                        jpeg = _pil_to_jpeg_bytes(image, quality)
+                except (ValueError, OSError):
+                    logger.debug("Could not render PDF signature appearance", exc_info=True)
+                    continue
+                finally:
+                    _close_pdfium_resource(bitmap)
+                ref = f"images/{base_name}_p{i + 1}_sig{index + 1}.jpg"
+                embedded.setdefault(i, []).append(
+                    (ref, base64.b64encode(jpeg).decode("ascii"), rect[3])
+                )
+                remaining -= 1
+                if remaining <= 0:
+                    break
+        finally:
+            _close_pdfium_resource(page)
+
+
 def _strip_repeating_lines(texts: list, classes: list) -> list:
     """Remove running headers/footers that repeat across most text pages.
 
@@ -2094,6 +2191,7 @@ class PDFScannedParser(BaseParser):
             ):
                 pdf = pdfium.PdfDocument(content)
                 try:
+                    _init_signature_forms(pdf)
                     page_count = len(pdf)
                     scale = max(1, CONFIG.pdf_render_dpi) / 72
                     quality = _normalize_image_quality(CONFIG.pdf_jpeg_quality)
@@ -2345,6 +2443,7 @@ class PDFParser(BaseParser):
         pdf = pdfium.PdfDocument(content)
         images: dict = {}
         try:
+            _init_signature_forms(pdf)
             page_count = len(pdf)
 
             # Pass 1: cheap text extraction + image-area classification.
@@ -2438,6 +2537,9 @@ class PDFParser(BaseParser):
             if EXTRACT_EMBEDDED_IMAGES:
                 embedded = _extract_embedded_images(
                     pdf, classes, pdfium_r, base_name, quality
+                )
+                _add_signature_images(
+                    pdf, classes, pdfium_r, embedded, base_name, scale, quality
                 )
                 for refs in embedded.values():
                     for ref_path, b64, _y in refs:
