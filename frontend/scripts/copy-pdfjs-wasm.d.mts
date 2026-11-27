@@ -1,1 +1,1 @@
-export declare function copyPdfJsWasm(sourceDir: string, outputDir: string): void
+export declare function copyPdfJsAssets(packageDir: string, outputDir: string): void
