@@ -451,16 +451,25 @@ func writePara(sb *strings.Builder, s string) {
 	sb.WriteString("\n\n")
 }
 
-// plainText concatenates the raw text runs of a text-bearing block (no inline
-// styling — used for table cells, where GFM styling would break the row).
+// plainText concatenates the text of a text-bearing block without inline
+// styling — used for table cells, where GFM styling would break the row.
+// Mentions and equations are kept in a plain form (a document mention as its
+// URL, a user mention as the generic marker) so a cell does not lose them.
 func plainText(bt *BlockText) string {
 	if bt == nil {
 		return ""
 	}
 	var sb strings.Builder
 	for _, e := range bt.Elements {
-		if e.TextRun != nil {
+		switch {
+		case e.TextRun != nil:
 			sb.WriteString(e.TextRun.Content)
+		case e.MentionDoc != nil && e.MentionDoc.URL != "":
+			sb.WriteString(escapeURL(e.MentionDoc.URL))
+		case e.MentionUser != nil:
+			sb.WriteString("@成员")
+		case e.Equation != nil && strings.TrimSpace(e.Equation.Content) != "":
+			sb.WriteString("$" + strings.TrimSpace(e.Equation.Content) + "$")
 		}
 	}
 	return sb.String()
