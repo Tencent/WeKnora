@@ -28,31 +28,30 @@ type agentArtifactFiles struct {
 }
 
 func (s *agentArtifactFiles) Read(ctx context.Context, ref string) ([]byte, error) {
-	unavailable := fmt.Errorf("generated file is unavailable in this conversation")
 	b := s.binding
 	if b.Child == nil {
 		if err := b.Runtime.CheckParent(ctx, b.Scope, b.ParentOwner); err != nil {
-			return nil, unavailable
+			return nil, tools.ErrArtifactUnavailable
 		}
 	} else if err := b.Runtime.CheckOwner(ctx, *b.Child); err != nil {
-		return nil, unavailable
+		return nil, tools.ErrArtifactUnavailable
 	}
 	var parentCount int64
 	if err := s.db.WithContext(ctx).Table("sessions").
 		Where("id = ? AND tenant_id = ? AND user_id = ? AND deleted_at IS NULL",
 			b.Scope.SessionID, b.Scope.TenantID, b.Scope.UserID).
 		Count(&parentCount).Error; err != nil || parentCount != 1 {
-		return nil, unavailable
+		return nil, tools.ErrArtifactUnavailable
 	}
 	var name string
 	if strings.HasPrefix(ref, "sandbox:") {
 		var err error
 		name, err = url.PathUnescape(strings.TrimPrefix(strings.TrimPrefix(ref, "sandbox:"), "//"))
 		if err != nil || name == "" || strings.ContainsAny(name, "/\\") {
-			return nil, unavailable
+			return nil, tools.ErrArtifactUnavailable
 		}
 	} else if _, ok := types.ParseResourcePath(ref); !ok {
-		return nil, unavailable
+		return nil, tools.ErrArtifactUnavailable
 	}
 	// Own-session files remain usable in later turns. Child access is restricted
 	// to completed run messages in this runtime-owned group, not a tenant-wide
@@ -61,7 +60,7 @@ func (s *agentArtifactFiles) Read(ctx context.Context, ref string) ([]byte, erro
 	if b.Child == nil {
 		g, err := b.Runtime.Store.Read(ctx, b.Scope)
 		if err != nil {
-			return nil, unavailable
+			return nil, tools.ErrArtifactUnavailable
 		}
 		for _, child := range g.Members {
 			for _, run := range child.Runs {
@@ -85,7 +84,7 @@ func (s *agentArtifactFiles) Read(ctx context.Context, ref string) ([]byte, erro
 	}
 	var rows []types.MessageArtifactRecord
 	if err := query.Find(&rows).Error; err != nil || len(rows) == 0 {
-		return nil, unavailable
+		return nil, tools.ErrArtifactUnavailable
 	}
 	artifact := rows[0]
 	for _, row := range rows[1:] {
@@ -101,22 +100,22 @@ func (s *agentArtifactFiles) Read(ctx context.Context, ref string) ([]byte, erro
 	if _, ok := types.ParseResourcePath(artifact.URL); ok {
 		resource, err := s.catalog.Resolve(ctx, artifact.URL)
 		if err != nil || resource == nil || resource.TenantID != b.Scope.TenantID {
-			return nil, unavailable
+			return nil, tools.ErrArtifactUnavailable
 		}
 		backend = resource.StorageBackendID
 	}
 	fs, err := s.files(ctx, backend)
 	if err != nil || fs == nil {
-		return nil, unavailable
+		return nil, tools.ErrArtifactUnavailable
 	}
 	reader, err := fs.GetFile(ctx, artifact.URL)
 	if err != nil {
-		return nil, unavailable
+		return nil, tools.ErrArtifactUnavailable
 	}
 	defer func() { _ = reader.Close() }()
 	data, err := io.ReadAll(io.LimitReader(reader, maxArtifactReadBytes+1))
 	if err != nil {
-		return nil, unavailable
+		return nil, tools.ErrArtifactUnavailable
 	}
 	if len(data) > maxArtifactReadBytes {
 		return nil, fmt.Errorf("generated file exceeds the 8 MiB read limit")

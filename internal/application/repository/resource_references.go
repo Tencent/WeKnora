@@ -55,3 +55,24 @@ func (r *resourceRepository) GetMessageFileBindings(
 	}
 	return result, nil
 }
+
+// ListKnowledgeImageOwners proves the resource's document provenance without
+// accepting document IDs or storage paths supplied by a model.
+func (r *resourceRepository) ListKnowledgeImageOwners(
+	ctx context.Context, tenantID uint64, resourceID string,
+) ([]*types.Knowledge, error) {
+	if tenantID == 0 || resourceID == "" {
+		return nil, nil
+	}
+	var owners []*types.Knowledge
+	err := r.db.WithContext(ctx).Table("resource_bindings AS b").
+		Joins("JOIN knowledges AS k ON k.id = b.owner_id AND k.tenant_id = b.tenant_id").
+		Joins("JOIN knowledge_bases AS kb ON kb.id = k.knowledge_base_id "+
+			"AND kb.tenant_id = k.tenant_id AND kb.deleted_at IS NULL").
+		Where("b.resource_id = ? AND b.tenant_id = ? AND b.owner_type = ? AND b.relation = ?",
+			resourceID, tenantID, types.ResourceOwnerKnowledge, types.ResourceRelationExtractedImage).
+		Where("k.deleted_at IS NULL AND k.enable_status = ?", "enabled").
+		Distinct("k.id", "k.tenant_id", "k.knowledge_base_id", "k.title").
+		Order("k.id").Scan(&owners).Error
+	return owners, err
+}
