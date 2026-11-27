@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 
+	"github.com/Tencent/WeKnora/internal/reranking"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -100,6 +101,11 @@ func sortSearchResultsDeterministically(results []*types.SearchResult) {
 		}
 		if left.Score != right.Score {
 			return left.Score > right.Score
+		}
+		// Boosted FAQs capped at 1 tie; keep the order rerank gave them, so
+		// the direct answer is the best match and not the lowest ID.
+		if l, r := reranking.PreBoostScore(left), reranking.PreBoostScore(right); l != r {
+			return l > r
 		}
 		if left.KnowledgeID != right.KnowledgeID {
 			return left.KnowledgeID < right.KnowledgeID

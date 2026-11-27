@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/reranking"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,6 +59,30 @@ func TestPluginFilterTopKUsesDeterministicTieBreakers(t *testing.T) {
 
 	require.Nil(t, err)
 	assert.Equal(t, []string{"chunk-c", "chunk-a", "chunk-b"}, searchResultIDs(chatManage.MergeResult))
+}
+
+// FAQs whose boosted score is capped at 1 tie. The better match must stay
+// first, because the first FAQ over the threshold is the direct answer.
+func TestPluginFilterTopKKeepsCappedFAQsInPreBoostOrder(t *testing.T) {
+	faq := func(id, composite string) *types.SearchResult {
+		return &types.SearchResult{
+			ID: id, KnowledgeID: "faq", ChunkType: string(types.ChunkTypeFAQ), Score: 1,
+			Metadata: map[string]string{reranking.CompositeScoreKey: composite},
+		}
+	}
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 10},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{faq("a-weaker", "0.9200"), faq("b-best", "0.9700")},
+		},
+	}
+
+	err := (&PluginFilterTopK{}).OnEvent(
+		context.Background(), types.FILTER_TOP_K, chatManage, func() *PluginError { return nil },
+	)
+
+	require.Nil(t, err)
+	assert.Equal(t, []string{"b-best", "a-weaker"}, searchResultIDs(chatManage.MergeResult))
 }
 
 // Truncation is the evidence that the prompt context is a subset: it must be
