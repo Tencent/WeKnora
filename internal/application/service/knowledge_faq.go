@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -347,22 +345,9 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// 获取旧的相似问列表，用于增量更新
-	var oldSimilarQuestions []string
-	var oldStandardQuestion string
-	var oldAnswers []string
-	questionIndexMode := types.FAQQuestionIndexModeCombined
-	if kb.FAQConfig != nil && kb.FAQConfig.QuestionIndexMode != "" {
-		questionIndexMode = kb.FAQConfig.QuestionIndexMode
-	}
+	// 保留版本号递增；旧内容不再单独取出来做增量比较（见下方全量重建的说明）。
 	if existing, err := chunk.FAQMetadata(); err == nil && existing != nil {
 		meta.Version = existing.Version + 1
-		// 保存旧的内容用于增量比较
-		if questionIndexMode == types.FAQQuestionIndexModeSeparate {
-			oldSimilarQuestions = existing.SimilarQuestions
-			oldStandardQuestion = existing.StandardQuestion
-			oldAnswers = existing.Answers
-		}
 	}
 	if err := chunk.SetFAQMetadata(meta); err != nil {
 		return nil, err
@@ -415,22 +400,19 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// 增量索引优化：只对变化的内容进行索引操作
-	if questionIndexMode == types.FAQQuestionIndexModeSeparate && len(oldSimilarQuestions) > 0 {
-		// 分别索引模式下的增量更新
-		if err := s.incrementalIndexFAQEntry(ctx, kb, faqKnowledge, chunk, embeddingModel,
-			oldStandardQuestion, oldSimilarQuestions, oldAnswers, meta); err != nil {
-			return nil, err
-		}
-	} else {
-		// Combined 模式或首次创建，使用全量索引。needDelete=true 按 chunk
-		// 删除该条目的全部旧索引（含已移除的相似问），再整体重建。
-		// 同一 SourceID 重建索引并非所有引擎都会覆盖（ES v8、Qdrant 每次写入
-		// 生成新文档 ID），不先删会留下过期内容。
-		err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, true)
-		if err != nil {
-			return nil, err
-		}
+	// 使用全量索引。needDelete=true 按 chunk 删除该条目的全部旧索引（含已移除
+	// 的相似问），再整体重建。
+	// 同一 SourceID 重建索引并非所有引擎都会覆盖（ES v8、Qdrant 每次写入
+	// 生成新文档 ID），不先删会留下过期内容。
+	//
+	// 分别索引模式曾走增量更新（只重算变化的相似问），但那条路径永远对不上
+	// 索引里的行：buildFAQIndexInfoList 按相似问在列表中的位置命名索引行
+	// （<chunk>-0、<chunk>-1…），增量路径按问题内容哈希增删，于是删除的相似问
+	// 留在索引里继续被召回，新增的相似问与位置行并存，只改答案时旧答案也还在。
+	// 位置会随增删平移，无法用位置做增量寻址，所以这里与首次创建走同一条路。
+	err = s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, true)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build tag seq_id map for conversion
@@ -539,7 +521,6 @@ func (s *knowledgeService) AddSimilarQuestions(ctx context.Context,
 	}
 
 	// Update metadata
-	oldSimilarQuestions := meta.SimilarQuestions
 	meta.SimilarQuestions = append(meta.SimilarQuestions, newQuestions...)
 	meta.Version++
 
@@ -570,24 +551,12 @@ func (s *knowledgeService) AddSimilarQuestions(ctx context.Context,
 		return nil, err
 	}
 
-	questionIndexMode := types.FAQQuestionIndexModeCombined
-	if kb.FAQConfig != nil && kb.FAQConfig.QuestionIndexMode != "" {
-		questionIndexMode = kb.FAQConfig.QuestionIndexMode
-	}
-
-	if questionIndexMode == types.FAQQuestionIndexModeSeparate {
-		// Only index the new similar questions
-		if err := s.incrementalIndexFAQEntry(ctx, kb, faqKnowledge, chunk, embeddingModel,
-			meta.StandardQuestion, oldSimilarQuestions, meta.Answers, meta); err != nil {
-			return nil, err
-		}
-	} else {
-		// Combined mode, re-index the whole entry. Delete first: not every
-		// engine overwrites an existing SourceID on re-index.
-		err := s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, true)
-		if err != nil {
-			return nil, err
-		}
+	// Re-index the whole entry, as the update path does: alias rows are named by
+	// position, so an incremental add cannot address the rows it just extended.
+	// Delete first: not every engine overwrites an existing SourceID on re-index.
+	err = s.indexFAQChunks(ctx, kb, faqKnowledge, []*types.Chunk{chunk}, embeddingModel, false, true)
+	if err != nil {
+		return nil, err
 	}
 
 	// Build response
@@ -1799,12 +1768,6 @@ func (s *knowledgeService) buildFAQTagResolver(
 		}
 		return s.resolveTagID(ctx, kbID, e)
 	}
-}
-
-// hashQuestion 计算问题内容的哈希值，用于生成稳定的 sourceID。
-func hashQuestion(question string) string {
-	h := md5.Sum([]byte(question))
-	return hex.EncodeToString(h[:4])
 }
 
 // resolveTagID resolves tag ID (UUID) from payload, prioritizing tag_id (seq_id) over tag_name
