@@ -1472,7 +1472,9 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 		// Same cast as FindFAQChunkWithDuplicateQuestion: `json -> json` and a
 		// `jsonb` fallback cannot be merged by COALESCE.
 		if err := baseQuery.
-			Where("metadata IS NOT NULL AND metadata::text != '{}' AND jsonb_array_length(COALESCE((metadata::jsonb)->'generated_questions', '[]'::jsonb)) > 0").
+			Where("metadata IS NOT NULL AND metadata::text != '{}' AND " +
+				"jsonb_array_length(COALESCE((metadata::jsonb)->'generated_questions', " +
+				"'[]'::jsonb)) > 0").
 			Order(orderClause).
 			Limit(limit).
 			Find(&chunks).Error; err != nil {
