@@ -281,6 +281,12 @@ defineExpose({
   attachments,
   triggerFileSelect,
   addFiles,
+  restore: (files: AttachmentFile[]) => {
+    pollTimers.forEach(timer => clearTimeout(timer));
+    pollTimers.clear();
+    attachments.value = [...files];
+    emitFiles();
+  },
   clear: () => {
     pollTimers.forEach(timer => clearTimeout(timer));
     pollTimers.clear();

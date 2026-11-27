@@ -251,6 +251,7 @@ import { getMessageList, getSession, forkSession, rewindSession } from "@/api/ch
 import { resolveForkAffordance } from './forkPoint';
 import { rewindSkipMessage } from './rewindNotice';
 import { rewindPrefillText, rewindBlockedByOutgoingWork, canReplaceRewindTranscript, shouldApplyRewindLocally, rewindHistoryHasMore, keepMessagesThroughRewindPoint, rewindableMessageIds, rewindHttpConflictCode, rewindConflictI18nKey } from './rewindView';
+import { restoreRejectedFirstMessage } from './firstMessageDraft';
 import { getSuggestedQuestions } from "@/api/agent/index";
 import { questionOriginFromSuggestion } from '@/utils/questionOrigin';
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
@@ -1648,7 +1649,15 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
             await Promise.all(localAttachments
                 .filter(attachment => attachment.documentId)
                 .map(attachment => deleteTemporaryAttachment(session_id.value, attachment.documentId).catch(() => undefined)));
-            MessagePlugin.error(error?.message || t('chat.attachmentParseFailed'));
+            const errorMessage = error?.message || t('chat.attachmentParseFailed');
+            restoreRejectedFirstMessage(
+                inputFieldRef.value,
+                value,
+                imageFiles || [],
+                attachmentFiles || [],
+                errorMessage,
+            );
+            MessagePlugin.error(errorMessage);
             loading.value = false;
             isReplying.value = false;
             return;

@@ -2971,6 +2971,14 @@ defineExpose({
    */
   prefill(text: string) {
     query.value = text;
+  },
+  restoreDraft(text: string, imageFiles: File[] = [], attachmentFiles: AttachmentFile[] = []) {
+    query.value = text;
+    uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
+    uploadedImages.value = imageFiles.map(file => ({ file, preview: URL.createObjectURL(file) }));
+    attachmentUploadRef.value?.restore(attachmentFiles);
+    uploadedAttachments.value = [...attachmentFiles];
+    void focusInput();
   }
 });
 
