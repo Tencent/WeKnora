@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	stderrors "errors"
 	"net/http"
 
@@ -77,23 +76,6 @@ func (h *MCPServiceHandler) mcpMetadata(c *gin.Context, refresh bool) {
 	var snapshot *types.MCPMetadata
 	var err error
 	if refresh {
-		service, getErr := h.mcpServiceService.GetMCPServiceByID(ctx, tenant, id)
-		if getErr != nil || service == nil {
-			logger.ErrorWithFields(ctx, getErr, map[string]interface{}{
-				"service_id": secutils.SanitizeForLog(id),
-				"refresh":    true,
-			})
-			reason := types.ErrMCPServiceNotFound
-			if getErr != nil && !stderrors.Is(getErr, types.ErrMCPServiceNotFound) {
-				reason = types.ErrMCPMetadataStorage
-			}
-			_ = c.Error(mcpMetadataAppError(reason, true))
-			return
-		}
-		if !service.AuthConfig.IsOAuth() && !mayWriteSharedMCPMetadata(ctx) {
-			_ = c.Error(errors.NewForbiddenError("Refreshing a shared MCP directory requires an administrator"))
-			return
-		}
 		snapshot, err = svc.RefreshMCPMetadata(ctx, tenant, id)
 	} else {
 		snapshot, err = svc.GetMCPMetadata(ctx, tenant, id)
@@ -113,26 +95,15 @@ func (h *MCPServiceHandler) mcpMetadata(c *gin.Context, refresh bool) {
 	c.JSON(http.StatusOK, response)
 }
 
-// mayWriteSharedMCPMetadata is the extra gate for static-auth catalogs. The
-// route stays Viewer+ so OAuth users can persist their own snapshot after
-// authorizing in chat. API keys already passed manage-MCP; JWT callers need Admin.
-func mayWriteSharedMCPMetadata(ctx context.Context) bool {
-	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
-		return true
-	}
-	if types.IsSystemAdminFromContext(ctx) {
-		return true
-	}
-	return types.CallerFromContext(ctx).Role.HasPermission(types.TenantRoleAdmin)
-}
-
 func mcpMetadataAppError(err error, refresh bool) *errors.AppError {
 	switch {
+	case stderrors.Is(err, types.ErrMCPSharedRefreshForbidden):
+		return errors.NewForbiddenError("Refreshing a shared MCP directory requires an administrator")
 	case stderrors.Is(err, types.ErrMCPServiceNotFound):
 		return errors.NewNotFoundError("MCP service not found")
 	case stderrors.Is(err, types.ErrMCPOAuthPrincipalRequired):
 		return errors.NewUnauthorizedError("OAuth metadata requires an authenticated user")
-	case stderrors.Is(err, types.ErrMCPMetadataStorage):
+	case stderrors.Is(err, types.ErrMCPMetadataStorage), stderrors.Is(err, types.ErrMCPMetadataConnectionUnverified):
 		return errors.NewServiceUnavailableError("MCP metadata storage is unavailable")
 	case stderrors.Is(err, types.ErrMCPMetadataConnectionChanged):
 		return errors.NewConflictError("MCP connection changed during refresh; save the configuration and sync again")

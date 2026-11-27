@@ -34,7 +34,8 @@ func TestMCPMetadataRefreshInvalidatesLiveHeaderSchemas(t *testing.T) {
 	manager := mcp.NewMCPManager(nil)
 	t.Cleanup(manager.Shutdown)
 	metadata := NewMCPServiceService(repo, manager, nil).(interfaces.MCPMetadataService)
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	ctx := types.WithCaller(context.WithValue(t.Context(), types.TenantIDContextKey, uint64(1)),
+		types.Caller{TenantID: 1, Role: types.TenantRoleAdmin})
 	server := sdkserver.NewMCPServer("Regions", "1")
 	setHeader := func(name string) {
 		server.AddTool(sdkmcp.Tool{Name: "lookup", RawInputSchema: json.RawMessage(
@@ -123,7 +124,8 @@ func TestMCPMetadataRefreshAndOfflineEditing(t *testing.T) {
 	t.Cleanup(manager.Shutdown)
 	svc := NewMCPServiceService(repo, manager, nil)
 	metadata := svc.(interfaces.MCPMetadataService)
-	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	ctx := types.WithCaller(context.WithValue(t.Context(), types.TenantIDContextKey, uint64(1)),
+		types.Caller{TenantID: 1, Role: types.TenantRoleAdmin})
 	server := sdkserver.NewMCPServer(
 		"Orders",
 		"2",
@@ -197,9 +199,11 @@ func TestMCPMetadataRefreshAndOfflineEditing(t *testing.T) {
 	require.True(t, got.Stale)
 	_, err = metadata.GetMCPMetadata(ctx, 2, "svc")
 	require.ErrorIs(t, err, types.ErrMCPServiceNotFound, "another tenant must not access the snapshot")
+	stored, err = svc.GetMCPServiceByID(ctx, 1, "svc")
+	require.NoError(t, err)
 	// A listing that started before the stored refresh does not replace it.
 	require.NoError(t, metadata.PersistMCPMetadata(
-		ctx, 1, "svc", []*types.MCPTool{{Name: "older", InputSchema: schema}}, "older",
+		ctx, 1, stored, []*types.MCPTool{{Name: "older", InputSchema: schema}}, "older",
 		types.MCPServerInfo{}, time.Now().Add(-time.Hour),
 	))
 	got, err = metadata.GetMCPMetadata(ctx, 1, "svc")
@@ -209,7 +213,7 @@ func TestMCPMetadataRefreshAndOfflineEditing(t *testing.T) {
 	require.NoError(t, metadata.PersistMCPMetadata(
 		ctx,
 		1,
-		"svc",
+		stored,
 		[]*types.MCPTool{{Name: "live", Description: "from chat", InputSchema: schema}},
 		"from-chat",
 		types.MCPServerInfo{Name: "orders", Version: "2.1.0", Description: "Order lookups"},
@@ -239,7 +243,8 @@ func TestMCPMetadataRefreshAndOfflineEditing(t *testing.T) {
 	personal := *saved
 	personal.Principal = types.MCPOAuthPrincipalFromContext(userA).StorageID()
 	personal.ConfigFingerprint = types.MCPConfigFingerprint(stored)
-	require.NoError(t, repo.(interfaces.MCPMetadataRepository).SaveMetadata(ctx, &personal))
+	_, err = repo.(interfaces.MCPMetadataRepository).SaveMetadata(ctx, &personal, stored.Enabled)
+	require.NoError(t, err)
 	got, err = metadata.GetMCPMetadata(userA, 1, "svc")
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -249,4 +254,23 @@ func TestMCPMetadataRefreshAndOfflineEditing(t *testing.T) {
 	require.Nil(t, got, "never fall back to another user's or a formerly shared snapshot")
 	_, err = metadata.GetMCPMetadata(ctx, 1, "svc")
 	require.ErrorIs(t, err, types.ErrMCPOAuthPrincipalRequired, "OAuth metadata cannot be read without a principal")
+}
+
+func TestMayWriteSharedMCPMetadata(t *testing.T) {
+	require.False(t, mayWriteSharedMCPMetadata(context.Background()))
+	require.False(t, mayWriteSharedMCPMetadata(types.WithCaller(
+		context.Background(),
+		types.Caller{Role: types.TenantRoleViewer},
+	)))
+	require.True(t, mayWriteSharedMCPMetadata(types.WithCaller(
+		context.Background(),
+		types.Caller{Role: types.TenantRoleAdmin},
+	)))
+	require.True(t, mayWriteSharedMCPMetadata(types.WithTenantAPIKeyScope(
+		context.Background(),
+		types.TenantAPIKeyScope{KeyID: 1, FullAccess: true},
+	)))
+	require.True(t, mayWriteSharedMCPMetadata(
+		context.WithValue(context.Background(), types.SystemAdminContextKey, true),
+	))
 }

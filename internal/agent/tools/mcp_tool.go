@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -676,7 +677,7 @@ func sanitizeName(name string) string {
 // publish a partial tools/list.
 type MCPMetadataIO struct {
 	Get func(context.Context, uint64, string) (*types.MCPMetadata, error)
-	Put func(context.Context, uint64, string, []*types.MCPTool, string, types.MCPServerInfo, time.Time) error
+	Put func(context.Context, uint64, *types.MCPService, []*types.MCPTool, string, types.MCPServerInfo, time.Time) error
 	// Revalidator re-lists saved directories that may be out of date. It needs
 	// Put; without either, saved directories change only on explicit refresh.
 	Revalidator *MCPDirectoryRevalidator
@@ -712,9 +713,13 @@ func loadMCPDirectory(
 			return nil, err
 		}
 		if snapshot != nil && snapshot.Stale {
-			return nil, fmt.Errorf("MCP directory is stale; refresh Tools in Settings > MCP management")
+			return nil, errMCPDirectoryStale
 		}
 		if snapshot != nil {
+			// Get reads the latest configuration independently of the catalog lookup.
+			if snapshot.ConfigFingerprint != "" && snapshot.ConfigFingerprint != types.MCPConfigFingerprint(service) {
+				return nil, types.ErrMCPMetadataConnectionChanged
+			}
 			return &mcpDirectory{
 				tools:        snapshot.Tools,
 				instructions: snapshot.Instructions,
@@ -740,14 +745,32 @@ func loadMCPDirectory(
 	}
 	if metadata.Put != nil {
 		if persistErr := metadata.Put(
-			loadCtx, tenant, service.ID, directory.tools, directory.instructions, directory.server, listedAt,
+			loadCtx, tenant, service, directory.tools, directory.instructions, directory.server, listedAt,
 		); persistErr != nil {
+			// Only a storage outage allows a valid live directory to be used
+			// for this run. Validation and connection checks must succeed.
+			if loadCtx.Err() != nil {
+				return nil, loadCtx.Err()
+			}
+			if !errors.Is(persistErr, types.ErrMCPMetadataStorage) {
+				return nil, persistErr
+			}
 			logger.GetLogger(loadCtx).Warnf(
 				"Failed to persist MCP directory for service %s: %v", service.Name, persistErr,
 			)
 		}
 	}
 	return directory, nil
+}
+
+// A directory from a connection that changed or lost access is unusable even
+// in memory. An ordinary storage failure still allows a live result.
+func mcpDirectoryInvalidated(err error) bool {
+	return errors.Is(err, errMCPDirectoryStale) ||
+		errors.Is(err, types.ErrMCPMetadataConnectionChanged) ||
+		errors.Is(err, types.ErrMCPMetadataConnectionUnverified) ||
+		errors.Is(err, types.ErrMCPServiceNotFound) ||
+		errors.Is(err, types.ErrMCPOAuthPrincipalRequired)
 }
 
 // relistMCPDirectory replaces a saved directory with the server's current one,
@@ -779,7 +802,7 @@ func relistMCPDirectory(
 	// It is dated by when the listing started, so a settings refresh that
 	// started later is never replaced by it, nor it by an earlier one.
 	if err := metadata.Put(
-		ctx, tenant, service.ID, current.Tools, current.Initialize.Instructions, server, listedAt,
+		ctx, tenant, service, current.Tools, current.Initialize.Instructions, server, listedAt,
 	); err != nil {
 		return nil, err
 	}

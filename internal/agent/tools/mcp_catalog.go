@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -103,6 +104,8 @@ const mcpCallArgumentsHint = ` Pass arguments as a JSON object, not a JSON-encod
 	`discover_mcp_tools(mode="describe", server_id=..., tool_name=...).`
 
 const maxMCPDefinitionChars = 256 * 1024
+
+var errMCPDirectoryStale = errors.New("MCP directory is stale; refresh Tools in Settings > MCP management")
 
 // mcpExternalDataNotice keeps the trust boundary that the per-tool
 // "[MCP Service: X (external)]" description prefix used to carry: every tool
@@ -271,9 +274,8 @@ func (c *MCPCatalog) snapshot(ctx context.Context, id string, live bool) ([]*MCP
 	entry.mu.Lock()
 	service, loaded, status := entry.service, entry.tools, entry.status
 	reload := live || status != "ready"
-	// A reload asked for only because a re-list replaced the saved directory
-	// must not take away tools that were working: they stay listed while the
-	// new directory loads, and if loading fails.
+	// Keep the working tools through transient errors reading a replacement
+	// directory. An explicitly stale snapshot invalidates those tools.
 	refreshOnly := !reload && entry.reload
 	entry.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -306,7 +308,7 @@ func (c *MCPCatalog) snapshot(ctx context.Context, id string, live bool) ([]*MCP
 		previous := loaded
 		var err error
 		loaded, err = c.load(ctx, service, live)
-		if err != nil && refreshOnly {
+		if err != nil && refreshOnly && !mcpDirectoryInvalidated(err) {
 			entry.mu.Lock()
 			entry.reload = true
 			entry.mu.Unlock()

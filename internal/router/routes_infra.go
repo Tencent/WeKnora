@@ -174,8 +174,8 @@ func RegisterMCPServiceRoutes(
 		mcpServices.GET("/:id/tools", g.Viewer(), handler.GetMCPServiceTools)
 		mcpServices.GET("/:id/metadata", g.Viewer(), handler.GetMCPMetadata)
 		// Refresh writes a principal-scoped OAuth snapshot for the caller
-		// (Viewer+), or a tenant-wide snapshot for static auth (Admin+ in the
-		// handler). GET /tools remains Viewer+ and does not persist.
+		// (Viewer+), or a tenant-wide snapshot for static auth (Admin+).
+		// GET /tools remains Viewer+ and does not persist.
 		mcpServices.POST("/:id/metadata/refresh", g.Viewer(), handler.RefreshMCPMetadata)
 		mcpServices.POST("/:id/usage-instructions/generate", g.Admin(), handler.GenerateMCPUsageInstructions)
 		// Get MCP service resources — Viewer+
