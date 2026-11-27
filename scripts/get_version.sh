@@ -9,6 +9,9 @@ COMMIT_ID="unknown"
 BUILD_TIME="unknown"
 GO_VERSION="unknown"
 
+# Resolve build metadata against this checkout even when called from another directory.
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+
 # 获取版本号
 if [ -f "VERSION" ]; then
     VERSION=$(cat VERSION | tr -d '\n\r')

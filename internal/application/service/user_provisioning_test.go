@@ -2,16 +2,26 @@ package service
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"testing"
 
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 type provisioningUserRepo struct {
 	interfaces.UserRepository
 	created       *types.User
 	updatedTenant uint64
+	listAdminErr  error
+}
+
+func (r *provisioningUserRepo) ListSystemAdmins(context.Context, int, int) ([]*types.User, int64, error) {
+	return nil, 0, r.listAdminErr
 }
 
 func (r *provisioningUserRepo) GetUserByEmail(context.Context, string) (*types.User, error) {
@@ -209,4 +219,118 @@ func TestBuildLoginMembershipsSynthsWhenMemberServiceMissing(t *testing.T) {
 	if len(got) != 1 || got[0].TenantID != 7 || got[0].TenantName != "Home" {
 		t.Fatalf("fallback memberships = %#v", got)
 	}
+}
+
+func newBootstrapUserRepo(t *testing.T) interfaces.UserRepository {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "users.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("sql db: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&types.User{}); err != nil {
+		t.Fatalf("migrate users: %v", err)
+	}
+	return apprepo.NewUserRepository(db)
+}
+
+func TestUserServiceRegisterPromotesBootstrapSystemAdmin(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("promotes matching email case-insensitively when no system admin exists", func(t *testing.T) {
+		t.Setenv(BootstrapSystemAdminEmailEnv, "  Admin@Example.com ")
+		repo := newBootstrapUserRepo(t)
+		svc := &userService{userRepo: repo, tenantService: &provisioningTenantService{}}
+
+		user, err := svc.Register(ctx, &types.RegisterRequest{
+			Username:           "admin",
+			Email:              "admin@example.com",
+			Password:           "password123",
+			TenantProvisioning: types.TenantProvisioningTenantless,
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+		if !user.IsSystemAdmin {
+			t.Fatal("expected returned user to be promoted to system admin")
+		}
+		stored, err := repo.GetUserByEmail(ctx, "admin@example.com")
+		if err != nil {
+			t.Fatalf("GetUserByEmail: %v", err)
+		}
+		if !stored.IsSystemAdmin {
+			t.Fatal("expected persisted user row to have is_system_admin=true")
+		}
+	})
+
+	t.Run("does not promote non-matching email", func(t *testing.T) {
+		t.Setenv(BootstrapSystemAdminEmailEnv, "admin@example.com")
+		repo := newBootstrapUserRepo(t)
+		svc := &userService{userRepo: repo, tenantService: &provisioningTenantService{}}
+
+		user, err := svc.Register(ctx, &types.RegisterRequest{
+			Username:           "alice",
+			Email:              "alice@example.com",
+			Password:           "password123",
+			TenantProvisioning: types.TenantProvisioningTenantless,
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+		if user.IsSystemAdmin {
+			t.Fatal("non-matching email should not be promoted")
+		}
+	})
+
+	t.Run("does not promote when a system admin already exists", func(t *testing.T) {
+		t.Setenv(BootstrapSystemAdminEmailEnv, "second-admin@example.com")
+		repo := newBootstrapUserRepo(t)
+		if err := repo.CreateUser(ctx, &types.User{
+			ID:            "existing-admin",
+			Username:      "existing",
+			Email:         "existing@example.com",
+			PasswordHash:  "hash",
+			IsActive:      true,
+			IsSystemAdmin: true,
+		}); err != nil {
+			t.Fatalf("seed existing admin: %v", err)
+		}
+		svc := &userService{userRepo: repo, tenantService: &provisioningTenantService{}}
+
+		user, err := svc.Register(ctx, &types.RegisterRequest{
+			Username:           "second",
+			Email:              "second-admin@example.com",
+			Password:           "password123",
+			TenantProvisioning: types.TenantProvisioningTenantless,
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+		if user.IsSystemAdmin {
+			t.Fatal("matching email must not be promoted when an admin already exists")
+		}
+	})
+
+	t.Run("fails closed when ListSystemAdmins returns an error", func(t *testing.T) {
+		t.Setenv(BootstrapSystemAdminEmailEnv, "admin@example.com")
+		repo := &provisioningUserRepo{listAdminErr: errors.New("db unavailable")}
+		svc := &userService{userRepo: repo, tenantService: &provisioningTenantService{}}
+
+		user, err := svc.Register(ctx, &types.RegisterRequest{
+			Username:           "admin",
+			Email:              "admin@example.com",
+			Password:           "password123",
+			TenantProvisioning: types.TenantProvisioningTenantless,
+		})
+		if err != nil {
+			t.Fatalf("Register should still succeed on best-effort bootstrap error: %v", err)
+		}
+		if user.IsSystemAdmin {
+			t.Fatal("bootstrap check error must fail closed without granting admin")
+		}
+	})
 }

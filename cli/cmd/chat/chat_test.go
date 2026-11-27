@@ -20,6 +20,7 @@ type fakeChatService struct {
 	createSessionResp *sdk.Session
 	createSessionErr  error
 	createCalled      bool
+	createdTitle      string
 
 	streamErr      error
 	streamEvents   []*sdk.StreamResponse
@@ -31,6 +32,7 @@ type fakeChatService struct {
 
 func (f *fakeChatService) CreateSession(_ context.Context, req *sdk.CreateSessionRequest) (*sdk.Session, error) {
 	f.createCalled = true
+	f.createdTitle = req.Title
 	if f.createSessionErr != nil {
 		return nil, f.createSessionErr
 	}
@@ -79,7 +81,7 @@ func TestChat_StreamMode(t *testing.T) {
 			{ResponseType: sdk.ResponseTypeComplete, Done: true},
 		},
 	}
-	opts := &Options{Query: "hi", KBID: "kb_1"}
+	opts := &Options{Query: "hi", KBID: "kb_1", ModelID: "selected"}
 	if err := runChat(context.Background(), opts, textOpts(), svc); err != nil {
 		t.Fatalf("runChat: %v", err)
 	}
@@ -94,13 +96,16 @@ func TestChat_StreamMode(t *testing.T) {
 	if !strings.Contains(errBuf.String(), "session: sess_auto") {
 		t.Errorf("expected stderr session hint, got %q", errBuf.String())
 	}
+	if svc.createdTitle != opts.Query {
+		t.Errorf("session title = %q, want %q", svc.createdTitle, opts.Query)
+	}
 	if !svc.createCalled {
 		t.Error("expected CreateSession invocation when SessionID empty")
 	}
 	if svc.gotSessionID != "sess_auto" {
 		t.Errorf("stream sessionID: got %q want sess_auto", svc.gotSessionID)
 	}
-	if svc.gotRequest == nil || svc.gotRequest.Channel != "api" {
+	if svc.gotRequest == nil || svc.gotRequest.Channel != "api" || svc.gotRequest.SummaryModelID != "selected" {
 		t.Errorf("expected Channel=api, got %+v", svc.gotRequest)
 	}
 }

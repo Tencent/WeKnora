@@ -34,7 +34,7 @@ func (rc *qaRequestContext) titleModelID() string {
 // @Failure      400         {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /sessions/{session_id}/title [post]
+// @Router       /sessions/{session_id}/generate_title [post]
 func (h *Handler) GenerateTitle(c *gin.Context) {
 	ctx := c.Request.Context()
 

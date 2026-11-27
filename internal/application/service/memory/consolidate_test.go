@@ -45,6 +45,57 @@ func seedSimilarPreferences(t *testing.T, svc *Service, ctx context.Context, sco
 	seedItem(t, svc, ctx, scope, types.MemoryKindPreference, "回答风格", "回答直接给结论不用铺垫", "k-b")
 }
 
+// Demotion is maintenance, not a user edit: it must lower importance without
+// relabeling the memory as manually authored.
+func TestDemoteStaleTaskPreservesProvenance(t *testing.T) {
+	svc, tenantRepo, _ := newConsolidationHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	scope := scopeFor(t, ctx)
+	_, err := svc.repo.EnsureSubject(ctx, scope)
+	require.NoError(t, err)
+	item := &types.MemoryItem{
+		ID: uuid.New().String(), TenantID: scope.TenantID, SubjectID: scope.SubjectID,
+		Kind: types.MemoryKindTask, Topic: "旅行", Content: "下个月去成都",
+		NormalizedKey: "trip", Status: types.MemoryStatusActive,
+		Origin: types.MemoryOriginExtracted, SourceMessageID: "message-1",
+		Importance: 3, ValidFrom: time.Now().Add(-60 * 24 * time.Hour),
+	}
+	require.NoError(t, svc.repo.CreateItem(ctx, item))
+
+	require.Equal(t, 1, svc.demoteStaleTasks(ctx, scope, []*types.MemoryItem{item}))
+	stored, err := svc.repo.GetItem(ctx, scope, item.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, stored.Importance)
+	require.Equal(t, types.MemoryOriginExtracted, stored.Origin)
+	require.Equal(t, "message-1", stored.SourceMessageID)
+}
+
+// Renaming an interest follows the subject, not the user's own wording. It
+// must not turn an extracted memory into a manual one either.
+func TestAutomaticInterestRenamePreservesProvenance(t *testing.T) {
+	svc, tenantRepo, _ := newConsolidationHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	scope := scopeFor(t, ctx)
+	_, err := svc.repo.EnsureSubject(ctx, scope)
+	require.NoError(t, err)
+	item := &types.MemoryItem{
+		ID: uuid.New().String(), TenantID: scope.TenantID, SubjectID: scope.SubjectID,
+		Kind: types.MemoryKindInterest, Topic: "旧标签", Content: "旧标签",
+		NormalizedKey: types.MemoryItemKey("旧标签", "旧标签"), Status: types.MemoryStatusActive,
+		Origin: types.MemoryOriginExtracted, SourceMessageID: "message-2",
+		Importance: 3, ValidFrom: time.Now(),
+	}
+	require.NoError(t, svc.repo.CreateItem(ctx, item))
+
+	svc.renameInterestItem(ctx, scope, "旧标签", "新标签")
+
+	stored, err := svc.repo.GetItem(ctx, scope, item.ID)
+	require.NoError(t, err)
+	require.Equal(t, "新标签", stored.Content)
+	require.Equal(t, types.MemoryOriginExtracted, stored.Origin)
+	require.Equal(t, "message-2", stored.SourceMessageID)
+}
+
 func TestConsolidateNowMergesNearDuplicatesWithoutWaiting(t *testing.T) {
 	svc, tenantRepo, _ := newConsolidationHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")

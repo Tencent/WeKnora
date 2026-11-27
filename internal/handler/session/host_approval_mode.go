@@ -23,6 +23,12 @@ type hostApprovalModeBody struct {
 	Mode string `json:"mode"`
 }
 
+// hostApprovalModeMaxBodyBytes bounds the mode switch body, which is one enum
+// field. ShouldBindJSON buffers the whole request before decoding, so without
+// a cap an authenticated caller decides how much this handler allocates. The
+// session package's other small JSON routes use the same 4 KiB bound.
+const hostApprovalModeMaxBodyBytes = 4 << 10
+
 // checkHostModeSession answers 404 outside Lite and for sessions the caller
 // cannot read. Reading uses GetSession, which lets a tenant admin see a
 // channel session. Writing uses GetOwnedSession, so that same admin cannot
@@ -80,8 +86,17 @@ func (h *Handler) SetHostApprovalMode(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// Cap the reader before the binder buffers it; the mode body itself is tiny.
+	if c.Request.Body != nil {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, hostApprovalModeMaxBodyBytes)
+	}
 	var body hostApprovalModeBody
 	if err := c.ShouldBindJSON(&body); err != nil {
+		var tooLarge *http.MaxBytesError
+		if stderrors.As(err, &tooLarge) {
+			_ = c.Error(errors.NewBadRequestError("request body is too large"))
+			return
+		}
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}

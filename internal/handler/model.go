@@ -851,8 +851,12 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	)
 	model.Parameters = newParams
 
-	model.Source = req.Source
-	model.Type = req.Type
+	// SDK updates omit source and type. Keep the stored source and persist
+	// the effective type used for parameter validation when they are absent.
+	if req.Source != "" {
+		model.Source = req.Source
+	}
+	model.Type = effectiveType
 
 	logger.Infof(ctx, "Updating model, ID: %s, Name: %s", id, model.Name)
 	if err := h.service.UpdateModel(ctx, model); err != nil {

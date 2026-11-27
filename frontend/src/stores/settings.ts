@@ -118,6 +118,8 @@ export const useSettingsStore = defineStore("settings", {
     // 进入会话时拍下"全局默认"的快照；离开会话时还原。非持久化字段：
     // 刷新页面相当于重新走"进入会话"流程，自然会重新拍快照。
     _defaultsSnapshot: null as Settings | null,
+    // 全局搜索可为下一次新对话显式指定 KB/文件；仅供一次路由跳转使用。
+    _pendingNewChatReferences: null as { kbIds: string[]; fileIds: string[] } | null,
     /** 正在从 session.last_request_state 恢复输入栏，避免 agent 切换 watch 覆盖 KB 选择 */
     _isApplyingSessionState: false,
     // Session-only preference: never written into global settings/localStorage.
@@ -365,6 +367,34 @@ export const useSettingsStore = defineStore("settings", {
       this.settings.selectedFiles = [];
       this.settings.selectedFileKbMap = {};
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    // 新对话从空的 @ 引用开始，避免上一个会话的检索范围成为新会话默认值。
+    clearChatReferences() {
+      this.settings.selectedKnowledgeBases = [];
+      this.settings.selectedFiles = [];
+      this.settings.selectedFileKbMap = {};
+      this.settings.selectedTags = [];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    // 搜索结果发起的新对话有明确范围，覆盖旧引用而非追加到旧引用。
+    setNewChatReferences(kbIds: string[], fileIds: string[]) {
+      this.clearChatReferences();
+      this.settings.selectedKnowledgeBases = [...kbIds];
+      this.settings.selectedFiles = [...fileIds];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    prepareNewChatReferences(kbIds: string[], fileIds: string[]) {
+      this._pendingNewChatReferences = { kbIds: [...kbIds], fileIds: [...fileIds] };
+      this.setNewChatReferences(kbIds, fileIds);
+    },
+
+    consumeNewChatReferences() {
+      const pending = this._pendingNewChatReferences;
+      this._pendingNewChatReferences = null;
+      return pending;
     },
 
     addTag(tag: { id: string; name: string; kbId: string; kbName?: string }) {

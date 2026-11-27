@@ -70,6 +70,42 @@ func TestFallbackHistoryPreservesSmallInputs(t *testing.T) {
 		rawArchive(p.MessagesToSummarize, c.settings.summaryBudget(), c.estimator)), text)
 }
 
+func TestSplitTurnFallbackStaysWithinPrefixBudget(t *testing.T) {
+	settings := testSettings()
+	settings.KeepRecentTokens = 1000
+	estimator := newEstimator(t)
+	model := &stubChat{err: assert.AnError}
+	c := New(model, estimator, settings)
+	const latestResult = "最新检索结果已保存。"
+	messages := []chat.Message{
+		{Role: "user", Content: "Summarize the experiment results."},
+		{Role: "assistant", ToolCalls: []chat.ToolCall{{
+			ID: "call-1", Type: "function", Function: chat.FunctionCall{
+				Name: "search_knowledge", Arguments: `{"query":"experiment"}`,
+			},
+		}}},
+		{
+			Role: "tool", Name: "search_knowledge", ToolCallID: "call-1",
+			Content: strings.Repeat("🧪", 200) + latestResult,
+		},
+		{Role: "assistant", Content: filler(200)},
+	}
+
+	result, err := c.Compact(t.Context(), messages, ReasonThreshold)
+	require.NoError(t, err)
+	require.True(t, result.SplitTurn)
+	require.True(t, result.Degraded)
+	_, prefix, found := strings.Cut(result.Summary, splitTurnSeparator)
+	require.True(t, found)
+	used, budget := estimator.EstimateString(prefix), c.Settings().turnPrefixBudget()
+	t.Logf("fallback prefix uses %d estimated tokens (budget %d)", used, budget)
+	assert.LessOrEqual(t, used, budget)
+	assert.Contains(t, prefix, fallbackOmission)
+	assert.Contains(t, prefix, latestResult)
+	assert.True(t, utf8.ValidString(prefix))
+	assert.Equal(t, messages[len(messages)-1], result.Messages[len(result.Messages)-1])
+}
+
 func TestFallbackCheckpointsStayBoundedAcrossReloads(t *testing.T) {
 	model := &stubChat{err: assert.AnError}
 	c := New(model, newEstimator(t), testSettings())

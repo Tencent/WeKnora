@@ -29,8 +29,9 @@ var sessionListFields = []string{
 }
 
 type ListOptions struct {
-	PageSize int    // Items per server batch (default 50).
-	Since    string // --since: filter to sessions updated within the past duration
+	Assistant bool
+	PageSize  int    // Items per server batch (default 50).
+	Since     string // --since: filter to sessions updated within the past duration
 	// Limit caps the returned items client-side (default 30; 0 = no cap).
 	// Applied after pagination / --all-pages accumulation and --since filter.
 	Limit int
@@ -59,10 +60,9 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
-			// Validate static input before building the client so a bad
-			// --page-size/--limit returns input.invalid_argument (exit 5), not
-			// an auth error (exit 3).
-			if err := validateListOpts(opts); err != nil {
+			// Validate flags before building the client so invalid input
+			// returns input.invalid_argument (exit 5) even without a profile.
+			if _, err := validateListOpts(opts); err != nil {
 				return err
 			}
 			cli, err := f.Client()
@@ -72,6 +72,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 			return runList(c.Context(), opts, fopts, cli)
 		},
 	}
+	cmd.Flags().BoolVar(&opts.Assistant, "assistant", false, "List assistant conversations instead of ordinary chats")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per server batch (1..1000)")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return — client-side cap; meta.has_more/total_count report the full size (1..10000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
@@ -85,36 +86,30 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	return cmd
 }
 
-// validateListOpts checks --page-size / --limit. Called from RunE before the
-// client is built (so a bad value surfaces as exit 5, not an auth error) and at
-// runList's top for direct callers; idempotent.
-func validateListOpts(opts *ListOptions) error {
+// validateListOpts checks the list flags and returns the parsed --since duration.
+func validateListOpts(opts *ListOptions) (time.Duration, error) {
 	if opts.PageSize < 1 || opts.PageSize > maxPageSize {
-		return &cmdutil.Error{
+		return 0, &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
 			Message: fmt.Sprintf("--page-size must be in 1..%d, got %d", maxPageSize, opts.PageSize),
 		}
 	}
 	if opts.Limit < 1 || opts.Limit > 10000 {
-		return &cmdutil.Error{
+		return 0, &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
 			Message: fmt.Sprintf("--limit must be in 1..10000, got %d", opts.Limit),
 		}
 	}
-	return nil
+	if opts.Since == "" {
+		return 0, nil
+	}
+	return parseSinceDuration(opts.Since)
 }
 
 func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
-	if err := validateListOpts(opts); err != nil {
+	since, err := validateListOpts(opts)
+	if err != nil {
 		return err
-	}
-	var since time.Duration
-	if opts.Since != "" {
-		d, err := parseSinceDuration(opts.Since)
-		if err != nil {
-			return err
-		}
-		since = d
 	}
 
 	threshold := time.Now().Add(-since)
@@ -132,13 +127,17 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		return filtered
 	}
 
+	var listOpts []sdk.SessionListOptions
+	if opts.Assistant {
+		listOpts = []sdk.SessionListOptions{{Kind: "assistant"}}
+	}
 	var items []sdk.Session
 	var serverTotal int
 	if opts.AllPages {
 		accum := make([]sdk.Session, 0)
 		scanned := 0
 		for page := 1; ; page++ {
-			chunk, total, err := svc.GetSessionsByTenant(ctx, page, opts.PageSize)
+			chunk, total, err := svc.GetSessionsByTenant(ctx, page, opts.PageSize, listOpts...)
 			if err != nil {
 				return cmdutil.WrapHTTP(err, "list sessions")
 			}
@@ -154,7 +153,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		}
 		items = accum
 	} else {
-		chunk, total, err := svc.GetSessionsByTenant(ctx, 1, opts.PageSize)
+		chunk, total, err := svc.GetSessionsByTenant(ctx, 1, opts.PageSize, listOpts...)
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "list sessions")
 		}

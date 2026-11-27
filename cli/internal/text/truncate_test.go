@@ -17,6 +17,7 @@ func TestTruncate(t *testing.T) {
 		{"truncate ASCII", 5, "hello world", "hell…"},
 		{"no truncate CJK", 8, "中文测试", "中文测试"},
 		{"truncate CJK", 5, "中文测试", "中文…"},
+		{"joined emoji", 3, "👩‍💻abc", "👩‍💻…"},
 		{"empty", 5, "", ""},
 		{"single char fits", 1, "a", "a"},
 		{"truncate to width 1", 1, "abc", "…"},

@@ -34,6 +34,14 @@ _ESCAPE_OR_PIPE = re.compile(r"\\.|\|", re.DOTALL)
 # Looser than ``_SEPARATOR_CELL``: any non-empty run of ``:``/``-`` qualifies.
 _ALIGNMENT_CELL = re.compile(r"^[:-]+$")
 _CODE_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
+_BLOCK_QUOTE_MARKER = re.compile(r" {0,3}>[ \t]?")
+# shortcut: explicit ATX and paragraph-interrupting list markers, use a
+# source-position-aware Markdown parser if broader block handling is needed.
+_INLINE_BLOCK_START = re.compile(
+    r"^ {0,3}(?:>[ \t]{0,4})*"
+    r"(?:(?P<heading>#{1,6}(?=[ \t]|\r?$)[^\n]*)|(?:[-+*]|1[.)])[ \t]+(?=\S))",
+    re.MULTILINE,
+)
 
 
 def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> str:
@@ -41,6 +49,7 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
     out: List[str] = []
     pending: List[str] = []
     fence: Optional[str] = None
+    fence_depth = 0
 
     def flush_pending() -> None:
         if pending:
@@ -48,11 +57,21 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
             pending.clear()
 
     for line in content.split("\n"):
-        marker = _CODE_FENCE.fullmatch(line.removesuffix("\r"))
+        prefix_end = 0
+        quote_depth = 0
+        while quote := _BLOCK_QUOTE_MARKER.match(line, prefix_end):
+            prefix_end = quote.end()
+            quote_depth += 1
+        marker = _CODE_FENCE.fullmatch(line[prefix_end:].removesuffix("\r"))
+
+        # An unclosed fence ends when its block quote ends.
+        if fence is not None and quote_depth < fence_depth:
+            fence = None
         if fence is not None:
             out.append(line)
             if (
-                marker
+                quote_depth == fence_depth
+                and marker
                 and marker[1][0] == fence[0]
                 and len(marker[1]) >= len(fence)
                 and not marker[2].strip(" \t")
@@ -61,11 +80,52 @@ def _transform_outside_fences(content: str, transform: Callable[[str], str]) -> 
         elif marker and (marker[1][0] != "`" or "`" not in marker[2]):
             flush_pending()
             fence = marker[1]
+            fence_depth = quote_depth
             out.append(line)
         else:
             pending.append(line)
     flush_pending()
     return "\n".join(out)
+
+
+def _inline_code_spans(content: str) -> list[tuple[int, int]]:
+    """Find paired backtick runs without rescanning unmatched suffixes."""
+    tokens = list(re.finditer(r"`+|\n[ \t\r]*\n", content))
+    boundaries = []
+    for block in _INLINE_BLOCK_START.finditer(content):
+        boundaries.append(block.start())
+        if block["heading"] is not None:
+            boundaries.append(block.end())  # A heading has its own inline content.
+
+    following: dict[int, int] = {}
+    closers: dict[int, int] = {}
+    for i in range(len(tokens) - 1, -1, -1):
+        token = tokens[i]
+        while boundaries and boundaries[-1] > token.start():
+            following.clear()
+            boundaries.pop()
+        if token[0].startswith("\n"):
+            following.clear()  # Inline code cannot cross a blank paragraph.
+            continue
+        start = token.start()
+        while start > 0 and content[start - 1] == "\\":
+            start -= 1
+        # Outside code, an odd backslash run escapes the first backtick.
+        length = len(token[0]) - (token.start() - start) % 2
+        if length in following:
+            closers[i] = following[length]
+        following[len(token[0])] = i
+
+    spans: list[tuple[int, int]] = []
+    i = 0
+    while i < len(tokens):
+        closing = closers.get(i)
+        if closing is None:
+            i += 1
+        else:
+            spans.append((tokens[i].start(), tokens[closing].end()))
+            i = closing + 1
+    return spans
 
 
 class MarkdownTableUtil:
@@ -311,11 +371,16 @@ class MarkdownImageUtil:
 
     def __init__(self):
         # Pattern to match base64 embedded images
-        # Captures: (1) alt text, (2) image format, (3) base64 data
+        # Captures alt text, image format, base64 data, and an optional title.
         # Alt text uses .*? (non-greedy) to allow literal ] (e.g. Windows paths).
         # MIME subtype uses [^;]+ to handle types with hyphens like x-emf.
+        # Match the base64 run atomically to avoid backtracking on long images.
         self.b64_pattern = re.compile(
-            r"!\[(.*?)\]\(data:image/([^;]+);base64,([^\)]+)\)"
+            r"!\[(.*?)\]\(data:image/([^;]+);base64,"
+            r"(?:(?=(?P<data>[A-Za-z0-9+/= \t\r\n]+))(?P=data)"
+            r"(?:(?<=[ \t\r\n])(?P<title>"
+            r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|\((?:\\.|[^()\\])*\)))?"
+            r"[ \t\r\n]*|(?P<raw>[^)]+))\)"
         )
         # Pattern to match regular image syntax (alt text allows ])
         self.image_pattern = re.compile(r"!\[(.*?)\]\(([^)]+)\)")
@@ -375,7 +440,7 @@ class MarkdownImageUtil:
         path_prefix: Optional[str] = None,
         replace: bool = True,
     ) -> Tuple[str, Dict[str, bytes]]:
-        """Extract and decode base64 embedded images outside fenced code.
+        """Extract and decode base64 images outside fenced and inline code.
 
         This method finds all base64-encoded images in the Markdown content,
         decodes them to binary format, generates unique filenames, and
@@ -405,7 +470,8 @@ class MarkdownImageUtil:
             """Replacement function for each base64 image match."""
             title = match.group(1)  # Alt text
             img_ext = match.group(2)  # Image format (png, jpg, etc.)
-            img_b64 = match.group(3)  # Base64 encoded data
+            img_b64 = match.group("data") or match.group("raw")
+            image_title = match.group("title")
 
             # Decode base64 string to bytes
             image_byte = endecode.encode_image(img_b64, errors="ignore")
@@ -424,11 +490,33 @@ class MarkdownImageUtil:
                 return match.group(0)
 
             # Replace base64 data with file path reference
-            return f"![{title}]({image_path})"
+            suffix = f" {image_title}" if image_title else ""
+            return f"![{title}]({image_path}{suffix})"
 
-        text = _transform_outside_fences(
-            content, lambda prose: self.b64_pattern.sub(repl, prose)
-        )
+        def extract_prose(prose: str) -> str:
+            spans = iter(_inline_code_spans(prose))
+            span = next(spans, None)
+
+            def replace_image(match: Match[str]) -> str:
+                nonlocal span
+                escapes = 0
+                index = match.start() - 1
+                while index >= 0 and match.string[index] == "\\":
+                    escapes += 1
+                    index -= 1
+                if escapes % 2:
+                    # An odd backslash run escapes the marker, so Markdown
+                    # renders text here rather than an image.
+                    return match.group(0)
+                while span is not None and span[1] <= match.start():
+                    span = next(spans, None)
+                if span is not None and span[0] <= match.start() < span[1]:
+                    return match.group(0)
+                return repl(match)
+
+            return self.b64_pattern.sub(replace_image, prose)
+
+        text = _transform_outside_fences(content, extract_prose)
         logger.debug(f"Extracted {len(images)} base64 images from markdown")
         return text, images
 

@@ -256,7 +256,7 @@ func (c *Connector) walk(
 			// Incremental: skip if content hasn't changed.
 			if incremental && prev != nil && prev.BookDocTimes != nil {
 				if prevTimes, ok := prev.BookDocTimes[bookIDStr]; ok {
-					if prevTimes[docIDStr] == d.ContentUpdatedAt {
+					if d.ContentUpdatedAt != "" && prevTimes[docIDStr] == d.ContentUpdatedAt {
 						continue
 					}
 				}
@@ -315,7 +315,7 @@ func (c *Connector) walk(
 			// A blank body is not a document. Never fall through to the URL
 			// path for it: the datasource service would download the Yuque web
 			// page, which is an SPA shell, and index that as content.
-			if strings.TrimSpace(detail.Body) == "" {
+			if trimBodyForClassification(detail.Body) == "" {
 				logger.Warnf(ctx, "[Yuque] skip doc %d (%q): empty document body", d.ID, d.Title)
 				out = append(out, skippedDocItem(docIDStr, bookIDStr, d.Slug, d.Title,
 					"empty document body"))
@@ -389,6 +389,9 @@ func (c *Connector) walk(
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	if !incremental {
 		return out, nil, nil
 	}
@@ -414,17 +417,27 @@ func skippedDocItem(docIDStr, bookIDStr, slug, title, reason string) types.Fetch
 	}
 }
 
+func trimBodyForClassification(body string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(body), "\ufeff"))
+}
+
 // isHTMLPageShell reports a body that is the Yuque web app's HTML shell rather
 // than Markdown. A Markdown document may legitimately contain HTML, but it does
 // not start with a document-type declaration or an <html> root element.
 func isHTMLPageShell(body string) bool {
-	trimmed := strings.TrimPrefix(strings.TrimSpace(body), "\ufeff")
+	trimmed := trimBodyForClassification(body)
 	// Only the opening declarations matter; do not lowercase a whole document.
 	if len(trimmed) > 512 {
 		trimmed = trimmed[:512]
 	}
 	lower := strings.ToLower(trimmed)
-	return strings.HasPrefix(lower, "<!doctype html") || strings.HasPrefix(lower, "<html")
+	for _, prefix := range []string{"<!doctype html", "<html"} {
+		rest, ok := strings.CutPrefix(lower, prefix)
+		if ok && len(rest) > 0 && strings.ContainsRune(" \t\r\n\f/>", rune(rest[0])) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildDocURL constructs a browser URL for a Yuque doc.

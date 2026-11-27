@@ -45,8 +45,8 @@ type request struct {
 
 type response struct {
 	Rankings []struct {
-		Index int     `json:"index"`
-		Logit float64 `json:"logit"`
+		Index *int     `json:"index"`
+		Logit *float64 `json:"logit"`
 	} `json:"rankings"`
 }
 
@@ -134,12 +134,24 @@ func (c *Client) post(ctx context.Context, body map[string]any, count int) ([]ap
 	if err := c.cfg.Endpoint.PostJSON(ctx, url, body, &decoded); err != nil {
 		return nil, err
 	}
+	if decoded.Rankings == nil {
+		return nil, fmt.Errorf("NIM rerank response has no rankings array")
+	}
 	out := make([]api.RerankResult, 0, len(decoded.Rankings))
+	seen := make([]bool, count)
 	for _, item := range decoded.Rankings {
-		if item.Index < 0 || item.Index >= count {
-			return nil, fmt.Errorf("rerank index %d out of range for %d documents", item.Index, count)
+		if item.Index == nil || item.Logit == nil {
+			return nil, fmt.Errorf("NIM rerank result is missing index or logit")
 		}
-		out = append(out, api.RerankResult{Index: item.Index, Score: item.Logit})
+		index := *item.Index
+		if index < 0 || index >= count {
+			return nil, fmt.Errorf("rerank index %d out of range for %d documents", index, count)
+		}
+		if seen[index] {
+			return nil, fmt.Errorf("NIM rerank returned duplicate index %d", index)
+		}
+		seen[index] = true
+		out = append(out, api.RerankResult{Index: index, Score: *item.Logit})
 	}
 	return out, nil
 }

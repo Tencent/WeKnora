@@ -94,6 +94,7 @@ func (c *MinerUCloudReader) readCloudPart(ctx context.Context, req *types.ReadRe
 	if err != nil {
 		return nil, fmt.Errorf("MinerU Cloud poll: %w", err)
 	}
+	attachMinerUImageLocators(refs, contentList, req.FileType)
 	return &types.ReadResult{
 		MarkdownContent: md, ImageRefs: refs,
 		SourceBlocks: minerUSourceBlocks(md, contentList, req.FileType),
@@ -132,6 +133,11 @@ func (c *MinerUCloudReader) readSplitPDF(ctx context.Context, req *types.ReadReq
 		blocks := append([]types.SourceBlock(nil), result.SourceBlocks...)
 		// MinerU parts can reuse image filenames. Namespace references before merging.
 		for _, ref := range result.ImageRefs {
+			ref.SourceLocators = append(types.SourceLocators(nil), ref.SourceLocators...)
+			for j := range ref.SourceLocators {
+				ref.SourceLocators[j].Page += part.first - 1
+				ref.SourceLocators[j].SourceID = fmt.Sprintf("part-%d/%s", i+1, ref.SourceLocators[j].SourceID)
+			}
 			old := ref.OriginalRef
 			ref.Filename = fmt.Sprintf("part-%d-%s", i+1, ref.Filename)
 			ref.OriginalRef = fmt.Sprintf("part-%d/%s", i+1, old)

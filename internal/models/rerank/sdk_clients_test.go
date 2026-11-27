@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
@@ -153,4 +154,28 @@ func TestLKEAPClientFallsBackToTheDefaultModel(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, upstream.requests, 1)
 	assert.Equal(t, LKEAPDefaultRerankModel, upstream.requests[0].body["Model"])
+}
+
+// RunRerank answers a positional score list, so a null entry cannot be read as
+// a zero score: that would push the document to the bottom of the ranking
+// instead of surfacing the malformed reply.
+func TestLKEAPClientRejectsAMissingScore(t *testing.T) {
+	withRerankSSRFWhitelist(t, "127.0.0.1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"Response":{"ScoreList":[0.9,null],"RequestId":"r"}}`))
+	}))
+	defer server.Close()
+	savedEndpoint, savedScheme := lkeapEndpoint, lkeapScheme
+	lkeapEndpoint, lkeapScheme = strings.TrimPrefix(server.URL, "http://"), "HTTP"
+	t.Cleanup(func() { lkeapEndpoint, lkeapScheme = savedEndpoint, savedScheme })
+
+	client, err := newLKEAPClient(
+		&RerankerConfig{APIKey: "AKIDxxx", AppSecret: "sk"},
+		&modelruntime.Resolved{},
+	)
+	require.NoError(t, err)
+
+	_, err = client.Rerank(context.Background(), "q", []string{"d0", "d1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "score is missing for document 1")
 }

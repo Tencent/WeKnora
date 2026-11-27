@@ -6,6 +6,13 @@ case "${DEFAULT_LOCALE:-}" in
   zh-CN|zh-TW|en-US|ru-RU|ko-KR|ja-JP) RUNTIME_DEFAULT_LOCALE="${DEFAULT_LOCALE}" ;;
 esac
 
+# Only emit plain http(s) URLs: the value is interpolated into a JS string literal.
+RUNTIME_MCP_BASE_URL=""
+case "${MCP_BASE_URL:-}" in
+  *[!A-Za-z0-9._~:/%-]*) ;;
+  http://?*|https://?*) RUNTIME_MCP_BASE_URL="${MCP_BASE_URL}" ;;
+esac
+
 # 生成运行时配置文件，注入环境变量到前端
 FILE_MB=${MAX_FILE_SIZE_MB:-50}
 SKILL_MB=${MAX_SKILL_BUNDLE_SIZE_MB:-256}
@@ -20,7 +27,8 @@ cat > /usr/share/nginx/html/config.js << EOF
 window.__RUNTIME_CONFIG__ = {
   MAX_FILE_SIZE_MB: ${FILE_MB},
   MAX_SKILL_BUNDLE_SIZE_MB: ${SKILL_MB},
-  DEFAULT_LOCALE: "${RUNTIME_DEFAULT_LOCALE}"
+  DEFAULT_LOCALE: "${RUNTIME_DEFAULT_LOCALE}",
+  MCP_BASE_URL: "${RUNTIME_MCP_BASE_URL}"
 };
 EOF
 
@@ -28,7 +36,10 @@ EOF
 # 两个上限分开注入：全站保持知识库的 MAX_FILE_SIZE，只有技能 zip 上传的两条
 # 集合路由放宽到 MAX_SKILL_BUNDLE_SIZE（不含 /install、PATCH 等子路径）。
 # 合成一个全站上限会让每个上传端点都能收到技能包那么大的 body。
-export MAX_FILE_SIZE=${FILE_MB}M
+# client_max_body_size 计的是整个请求体（文件 + multipart 分隔符/文件名等），
+# 前端按文件本身大小校验。上限若恰等于 FILE_MB，正好 FILE_MB 的文件会被
+# nginx 以 413 拒绝，所以给 multipart 开销留 1M 余量。
+export MAX_FILE_SIZE=$((FILE_MB + 1))M
 export MAX_SKILL_BUNDLE_SIZE=${SKILL_MB}M
 export APP_HOST=${APP_HOST:-app}
 export APP_PORT=${APP_PORT:-8080}

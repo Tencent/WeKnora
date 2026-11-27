@@ -236,3 +236,18 @@ test('upstream sibling-image rewrite cannot publish after switching documents an
     assert.equal(f.vm.textContent, 'current')
   } finally { f.close() }
 })
+
+test('a late Mermaid source cannot replace the newer diagram', async () => {
+  const ready = deferred<string>()
+  class SlowMermaid extends Blob { override text() { return ready.promise } }
+  const f = fixture()
+  try {
+    f.props.fileName = 'diagram.mmd'; f.props.fileType = 'mmd'; await settle()
+    f.requests[1]!.result.resolve(new SlowMermaid(['old'], { type: 'text/plain' })); await settle()
+    f.props.knowledgeId = 'b'; await settle()
+    f.requests[2]!.result.resolve(text('graph TD; B-->C')); await settle()
+    assert.equal(f.vm.mermaidSource, 'graph TD; B-->C')
+    ready.resolve('graph TD; A-->C'); await settle()
+    assert.equal(f.vm.mermaidSource, 'graph TD; B-->C')
+  } finally { f.close() }
+})
