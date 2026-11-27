@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"net/url"
 	"path"
@@ -182,7 +183,7 @@ func decodeToolResult(content string) any {
 	trimmed := strings.TrimSpace(content)
 	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 		var v any
-		if err := json.Unmarshal([]byte(trimmed), &v); err == nil {
+		if decodeToolJSON(trimmed, &v) {
 			return v
 		}
 	}
@@ -192,14 +193,18 @@ func decodeToolResult(content string) any {
 // parseArgs decodes a tool call's JSON arguments into the object Gemini
 // expects; anything that is not a JSON object becomes an empty object.
 func parseArgs(arguments string) map[string]any {
-	args := map[string]any{}
-	if strings.TrimSpace(arguments) == "" {
-		return args
-	}
-	if err := json.Unmarshal([]byte(arguments), &args); err != nil || args == nil {
+	var args map[string]any
+	if !decodeToolJSON(arguments, &args) || args == nil {
 		return map[string]any{}
 	}
 	return args
+}
+
+func decodeToolJSON(content string, target any) bool {
+	decoder := json.NewDecoder(strings.NewReader(content))
+	// Preserve numeric identifiers when replaying tool history in a new request.
+	decoder.UseNumber()
+	return decoder.Decode(target) == nil && decoder.Decode(&json.RawMessage{}) == io.EOF
 }
 
 func thoughtSignatureFromMetadata(md map[string]json.RawMessage) string {
