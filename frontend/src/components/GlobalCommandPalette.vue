@@ -188,6 +188,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { useCmdkSearch, type CmdkFileGroup, type CmdkChunk, type CmdkMsgGroup } from './GlobalCommandPalette/useSearch'
 import { highlightText } from './GlobalCommandPalette/useHighlight'
+import { selectSearchAnchor } from '@/utils/sourceLocator'
 import { useStartChat } from './GlobalCommandPalette/useStartChat'
 import { buildCommands, filterCommands } from './GlobalCommandPalette/commands'
 import ResultGroup from './GlobalCommandPalette/ResultGroup.vue'
@@ -422,6 +423,7 @@ const primaryActionForSelected = (ev?: { cmd: boolean }) => {
 }
 
 const openChunk = (item: FlatChunkItem) => {
+  const anchorText = selectSearchAnchor(item.chunk.content, query.value)
   commandPaletteStore.pushRecent(query.value)
   commandPaletteStore.closePalette()
   if (!item.file.kbId) return
@@ -431,6 +433,7 @@ const openChunk = (item: FlatChunkItem) => {
     knowledgeBaseId: item.file.kbId,
     title: item.file.title,
     content: item.chunk.content,
+    anchorText,
   }
 }
 

@@ -198,6 +198,19 @@ export function quotedSourceExcerpt(content: string, sentence: string): string |
   return candidates.length === 1 ? candidates[0] : undefined
 }
 
+/** Select a unique phrase or keyword from a search query for the source preview. */
+export function selectSearchAnchor(content: string, query: string): string {
+  const source = sourceQuoteText(content)
+  const phrase = query.trim()
+  const candidates = [phrase, ...phrase.split(/\s+/).sort((a, b) => b.length - a.length)]
+  for (const candidate of candidates) {
+    if (normalizeForMatch(candidate).length < (/\p{Script=Han}/u.test(candidate) ? 2 : 4)) continue
+    const match = findInText(source, candidate)
+    if (match) return source.slice(match.start, match.end)
+  }
+  return ''
+}
+
 /** Narrow only when the answer contains an exact excerpt of the source. */
 export function selectLocatorsForSentence(locators: SourceLocator[], sentence: string): SourceLocator[] {
   const list = Array.isArray(locators) ? locators.filter(Boolean) : []

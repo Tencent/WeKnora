@@ -9,6 +9,7 @@ import {
   parseSourceLocators,
   selectLocatorsForSentence,
   selectQuoteForSentence,
+  selectSearchAnchor,
   textFragmentUrl,
 } from './sourceLocator.ts'
 import { anchorWithContext, lastSentence } from './citationAnchor.ts'
@@ -134,4 +135,15 @@ test('canonical matching returns exact original UTF-16 spans including combining
     assert.ok(hit, text)
     assert.equal(text.slice(hit.start, hit.end), expected)
   }
+})
+
+test('search preview prefers unique query words within the cited chunk', () => {
+  const source = 'Taxi fares require an itemized receipt. Submit mileage separately.'
+  const anchor = selectSearchAnchor
+  assert.equal(anchor(source, 'itemized receipt'), 'itemized receipt')
+  assert.equal(anchor(source, 'reimburse itemized'), 'itemized')
+  assert.equal(anchor('receipt is repeated: receipt', 'receipt'), '')
+  assert.equal(anchor(source, 'speed'), '')
+  assert.equal(anchor("增值税申报需保留发票。", "税务 发票"), "发票")
+  assert.deepEqual(selectQuoteForSentence(source, anchor(source, 'reimburse itemized') || ''), ['itemized'])
 })
