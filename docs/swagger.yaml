@@ -8012,7 +8012,12 @@ definitions:
         x-agent: true
         x-agent-maximum: "20"
       match_count:
-        description: Number of chunks to return; 0 uses the default.
+        description: |-
+          Number of primary chunks (vector and keyword hits) to return after
+          fusion and rerank; 0 uses the default. Context-enrichment rows (the
+          parent, nearby and relation chunks of the hits, match_type 2/4/5) are
+          appended after the primary rows and are NOT counted against this cap,
+          so the response can hold more rows than match_count.
         type: integer
         x-agent: true
         x-agent-maximum: "30"
@@ -8129,7 +8134,13 @@ definitions:
       match_type:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MatchType'
-        description: Match type
+        description: |-
+          MatchType is how this row was found. 0 = vector hit, 1 = keyword hit:
+          the ranked primary results, which match_count counts. 2 = nearby-chunk
+          expansion (previous/next chunk of a hit), 4 = parent chunk, 5 =
+          relation chunk: context rows appended after the primary results,
+          outside match_count; nearby and relation rows carry score 0, a parent
+          row inherits its hit's score.
         x-agent: true
       matched_content:
         description: |-
@@ -20028,11 +20039,20 @@ paths:
         risk: probe
       x-agent-hint: 'Runs the raw vector and keyword recall of one knowledge base,
         without rerank, and returns the chunks it finds in rank order, so you can
-        see why something is or is not found. match_type 0 is a vector hit, 1 a keyword
-        hit; score ranks the merged results and is not a similarity. Each threshold
-        filters its own retriever before merging: leave them out to see every candidate,
-        or set them to an agent''s vector_threshold and keyword_threshold to see what
-        passes. For answering a question, use search_knowledge instead.'
+        see why something is or is not found. match_type 0 is a vector hit and 1 a
+        keyword hit — these are the ranked results match_count counts; 2 is a nearby-chunk
+        expansion, 4 a parent chunk and 5 a relation chunk: context rows appended
+        after the ranked results, outside match_count, with score 0 for nearby and
+        relation rows and the hit''s score inherited by a parent row, so data can
+        hold more rows than match_count. match_count sets the number of ranked results
+        — it is the only count parameter; unknown request fields are ignored, and
+        a misspelled one such as limit neither errors nor takes effect. When rerank
+        is on, meta.rerank.result_count counts the rows rerank kept and data may hold
+        extra context rows beyond it. score ranks the merged results and is not a
+        similarity. Each threshold filters its own retriever before merging: leave
+        them out to see every candidate, or set them to an agent''s vector_threshold
+        and keyword_threshold to see what passes. For answering a question, use search_knowledge
+        instead.'
     post:
       consumes:
       - application/json
@@ -20087,11 +20107,20 @@ paths:
         risk: probe
       x-agent-hint: 'Runs the raw vector and keyword recall of one knowledge base,
         without rerank, and returns the chunks it finds in rank order, so you can
-        see why something is or is not found. match_type 0 is a vector hit, 1 a keyword
-        hit; score ranks the merged results and is not a similarity. Each threshold
-        filters its own retriever before merging: leave them out to see every candidate,
-        or set them to an agent''s vector_threshold and keyword_threshold to see what
-        passes. For answering a question, use search_knowledge instead.'
+        see why something is or is not found. match_type 0 is a vector hit and 1 a
+        keyword hit — these are the ranked results match_count counts; 2 is a nearby-chunk
+        expansion, 4 a parent chunk and 5 a relation chunk: context rows appended
+        after the ranked results, outside match_count, with score 0 for nearby and
+        relation rows and the hit''s score inherited by a parent row, so data can
+        hold more rows than match_count. match_count sets the number of ranked results
+        — it is the only count parameter; unknown request fields are ignored, and
+        a misspelled one such as limit neither errors nor takes effect. When rerank
+        is on, meta.rerank.result_count counts the rows rerank kept and data may hold
+        extra context rows beyond it. score ranks the merged results and is not a
+        similarity. Each threshold filters its own retriever before merging: leave
+        them out to see every candidate, or set them to an agent''s vector_threshold
+        and keyword_threshold to see what passes. For answering a question, use search_knowledge
+        instead.'
   /knowledge-bases/{id}/images:
     get:
       consumes:
