@@ -529,7 +529,7 @@ const e2bPtyPromptOverrideCmd = `. /etc/weknora/pty-prompt.sh 2>/dev/null; ` +
 	`done`
 
 func (c *E2BRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
-	builder := e2b.NewTemplate().FromImage(DefaultDockerImage).RunCmd(e2bPtyPromptOverrideCmd)
+	builder := e2b.NewTemplate().FromImage(StandardDockerImage()).RunCmd(e2bPtyPromptOverrideCmd)
 	build, err := builder.BuildInBackground(ctx, c.client, e2b.BuildConfig{
 		Name: StandardTemplateName,
 		// Creating a sandbox from a plain template name or ID resolves the
@@ -548,7 +548,7 @@ func (c *E2BRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTem
 		ID:       build.TemplateID,
 		Name:     StandardTemplateName,
 		Status:   "building",
-		Image:    DefaultDockerImage,
+		Image:    StandardDockerImage(),
 		Standard: true,
 	}, nil
 }
@@ -577,7 +577,7 @@ const desktopReadyCmd = `while ! python3 -c "import socket,sys;s=socket.socket()
 // is revisited.
 func (c *E2BRemoteClient) buildDesktopTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	builder := e2b.NewTemplate().
-		FromImage(DefaultDesktopDockerImage).
+		FromImage(StandardDesktopDockerImage()).
 		RunCmd(e2bPtyPromptOverrideCmd)
 	build, err := builder.BuildInBackground(ctx, c.client, e2b.BuildConfig{
 		Name: DesktopTemplateName,
@@ -593,7 +593,7 @@ func (c *E2BRemoteClient) buildDesktopTemplate(ctx context.Context) (*RemoteTemp
 		ID:      build.TemplateID,
 		Name:    DesktopTemplateName,
 		Status:  "building",
-		Image:   DefaultDesktopDockerImage,
+		Image:   StandardDesktopDockerImage(),
 		Desktop: true,
 	}, nil
 }
