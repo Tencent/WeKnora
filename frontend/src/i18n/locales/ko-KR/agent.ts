@@ -1758,6 +1758,10 @@ export default {
     copy: '복사',
     addToKnowledgeBase: '지식베이스에 추가',
     artifactDrawer: {
+      saveToKnowledge: '파일 추가',
+      knowledgeDestination: '대상 지식베이스',
+      noWritableKnowledgeBases: '쓰기가 가능한 지식베이스가 없습니다.',
+      knowledgeLoadFailed: '지식베이스를 불러오지 못했습니다. 다시 시도해 주세요.',
       buttonTitle: '이 응답에서 생성된 파일 보기',
       title: '생성된 파일',
       empty: '이번 회차에서 다운로드 가능한 파일이 없습니다.',

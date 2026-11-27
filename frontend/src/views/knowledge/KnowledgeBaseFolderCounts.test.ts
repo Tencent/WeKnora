@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test, { type TestContext } from 'node:test'
 import { createI18n } from 'vue-i18n'
 import * as vue from 'vue'
+import * as fileTypeVerification from '../../utils/fileTypeVerification.ts'
 import * as stall from '../../utils/knowledgeProcessingStall.ts'
 import { fixture, flush } from '../../test-utils/vueFixture.ts'
 import enUS from '../../i18n/locales/en-US'
@@ -80,6 +81,7 @@ async function setup(t: TestContext, tree: unknown) {
     '@/hooks/useMarqueeSelect': { useMarqueeSelect: () => ({}) },
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
     '@/utils/kbPermission': {}, '@/utils/knowledgeDeletion': {}, '@/utils/knowledgeTrace': {},
+    '@/utils/fileTypeVerification': fileTypeVerification,
     '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
     '@/api/knowledge-base/index': { listKnowledgeFolders, listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }) },
   })

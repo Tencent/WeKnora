@@ -13,6 +13,7 @@ import { useUIStore } from '@/stores/ui';
 import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
 import { permissionCanEditKB, permissionCanManageKB } from '@/utils/kbPermission';
+import { supportedKnowledgeUploadTypes } from '@/utils/fileTypeVerification';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
@@ -214,37 +215,10 @@ const missingStorageEngine = computed(() => {
 })
 const parserEngines = computed<ParserEngineInfo[]>(() => editorResources.parserEngines);
 
-const supportedFileTypes = computed<Set<string>>(() => {
-  const engines = parserEngines.value
-  if (!engines.length) return new Set<string>()
-
-  const rules: { file_types: string[]; engine: string }[] =
-    kbInfo.value?.chunking_config?.parser_engine_rules || []
-
-  const ruleMap = new Map<string, string>()
-  for (const r of rules) {
-    for (const ft of r.file_types) ruleMap.set(ft, r.engine)
-  }
-
-  const available = new Set<string>()
-  const availableEngineNames = new Set(
-    engines.filter(e => e.Available !== false).map(e => e.Name)
-  )
-
-  for (const engine of engines) {
-    for (const ft of engine.FileTypes || []) {
-      if (available.has(ft)) continue
-
-      const explicitEngine = ruleMap.get(ft)
-      if (explicitEngine) {
-        if (availableEngineNames.has(explicitEngine)) available.add(ft)
-      } else {
-        if (engine.Available !== false) available.add(ft)
-      }
-    }
-  }
-  return available
-})
+const supportedFileTypes = computed(() => supportedKnowledgeUploadTypes(
+  parserEngines.value,
+  kbInfo.value?.chunking_config?.parser_engine_rules,
+))
 
 const acceptFileTypes = computed(() =>
   [...supportedFileTypes.value].map(t => '.' + t).join(',')
