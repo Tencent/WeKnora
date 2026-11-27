@@ -271,6 +271,9 @@ func (s *AutomationService) closeAbandonedMessage(ctx context.Context, run *type
 	if run.SessionID == "" || run.AssistantMessageID == "" {
 		return
 	}
+	// The scheduler's ctx carries no tenant, and the message service
+	// requires one: act within the run's own tenant.
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, run.TenantID)
 	msg, err := s.messages.GetMessage(ctx, run.SessionID, run.AssistantMessageID)
 	if err != nil || msg == nil || msg.IsCompleted || msg.RunState == types.MessageRunStateAwaitingInput {
 		return
