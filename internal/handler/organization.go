@@ -1904,13 +1904,13 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 	return resp
 }
 
-// SearchTenantsForInvite resolves one exact workspace ID for an organization
-// administrator. Workspace names are never searched across tenants.
-// @Summary Resolve a workspace ID for invitation
+// SearchTenantsForInvite searches member names and resolves exact workspace IDs
+// for an organization administrator. Results are restricted to non-member tenants.
+// @Summary Search organization invite candidates
 // @Tags 组织管理
 // @Produce json
 // @Param id path string true "组织ID"
-// @Param q query string true "Exact workspace ID"
+// @Param q query string true "Member name or exact workspace ID"
 // @Success 200 {object} handler.DataResponse{data=[]types.TenantInviteCandidate}
 // @Security Bearer
 // @Router /organizations/{id}/search-tenants [get]
@@ -1928,7 +1928,8 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 		return
 	}
 
-	if query == "" {
+	query = strings.TrimSpace(query)
+	if query == "" || len(query) > 100 {
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    []types.TenantInviteCandidate{},
@@ -1937,29 +1938,69 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 	}
 
 	candidates := []types.TenantInviteCandidate{}
-	targetID, parseErr := strconv.ParseUint(strings.TrimSpace(query), 10, 64)
-	if parseErr != nil || targetID == 0 {
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": candidates})
-		return
-	}
 	existingMembers, err := h.orgService.ListTenantMembers(ctx, orgID)
 	if err != nil {
 		_ = c.Error(apperrors.NewInternalServerError("Failed to load organization members"))
 		return
 	}
+	memberTenantIDs := make(map[uint64]struct{}, len(existingMembers))
 	for _, member := range existingMembers {
-		if member.TenantID == targetID {
-			c.JSON(http.StatusOK, gin.H{"success": true, "data": candidates})
+		memberTenantIDs[member.TenantID] = struct{}{}
+	}
+	if targetID, parseErr := strconv.ParseUint(query, 10, 64); parseErr == nil && targetID > 0 {
+		if _, exists := memberTenantIDs[targetID]; !exists {
+			tenants, err := h.tenantService.GetTenantsByIDs(ctx, []uint64{targetID})
+			if err != nil {
+				_ = c.Error(apperrors.NewInternalServerError("Failed to resolve workspace"))
+				return
+			}
+			if tenant := tenants[targetID]; tenant != nil {
+				candidates = append(candidates, types.TenantInviteCandidate{TenantID: tenant.ID, TenantName: tenant.Name})
+			}
+		}
+	} else {
+		users, err := h.userService.SearchUsers(ctx, query, 100)
+		if err != nil {
+			_ = c.Error(apperrors.NewInternalServerError("Failed to search workspace members"))
 			return
 		}
-	}
-	tenants, err := h.tenantService.GetTenantsByIDs(ctx, []uint64{targetID})
-	if err != nil {
-		_ = c.Error(apperrors.NewInternalServerError("Failed to resolve workspace"))
-		return
-	}
-	if tenant := tenants[targetID]; tenant != nil {
-		candidates = append(candidates, types.TenantInviteCandidate{TenantID: tenant.ID, TenantName: tenant.Name})
+		seen := make(map[uint64]struct{})
+		for _, user := range users {
+			if user == nil || user.TenantID == 0 {
+				continue
+			}
+			if _, exists := memberTenantIDs[user.TenantID]; exists {
+				continue
+			}
+			if _, exists := seen[user.TenantID]; exists {
+				continue
+			}
+			seen[user.TenantID] = struct{}{}
+			candidates = append(candidates, types.TenantInviteCandidate{
+				TenantID: user.TenantID, RepresentativeUserID: user.ID,
+				RepresentativeUsername: user.Username, RepresentativeEmail: user.Email,
+				RepresentativeAvatar: user.Avatar,
+			})
+			if len(candidates) >= 10 {
+				break
+			}
+		}
+		ids := make([]uint64, 0, len(candidates))
+		for _, candidate := range candidates {
+			ids = append(ids, candidate.TenantID)
+		}
+		if len(ids) > 0 {
+			tenants, err := h.tenantService.GetTenantsByIDs(ctx, ids)
+			if err != nil {
+				_ = c.Error(apperrors.NewInternalServerError("Failed to resolve workspaces"))
+				return
+			}
+			for i := range candidates {
+				if tenant := tenants[candidates[i].TenantID]; tenant != nil {
+					candidates[i].TenantName = tenant.Name
+				}
+			}
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": candidates})
 }
