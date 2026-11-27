@@ -252,6 +252,7 @@ export default {
     referenceSourceNext: '下一處引用',
     referenceSourceFoundPage: '已定位到第 {page} 頁',
     referenceSourceNotFound: '未能精確定位引用內容，已為你打開原文',
+    referenceSourceNumericConflict: '回答寫的是 {answer}，引用片段寫的是 {source}。',
     referenceSourceOpenWeb: '打開原網頁並定位',
     chunkIdLabel: '片段ID:',
     documentIdLabel: '文件ID:',

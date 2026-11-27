@@ -252,6 +252,7 @@ export default {
     referenceSourceNext: 'Следующее место цитирования',
     referenceSourceFoundPage: 'Найдено на странице {page}',
     referenceSourceNotFound: 'Не удалось точно найти фрагмент; открыт оригинал',
+    referenceSourceNumericConflict: 'В ответе указано {answer}. В цитируемом фрагменте указано {source}.',
     referenceSourceOpenWeb: 'Открыть веб-страницу на этом фрагменте',
     chunkIdLabel: 'ID фрагмента:',
     documentIdLabel: 'ID документа:',

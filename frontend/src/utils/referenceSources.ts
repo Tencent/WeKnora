@@ -1,4 +1,5 @@
 import { documentSourceUrl } from './documentSourceUrl'
+import { findCitationNumericConflict, type CitationNumericConflict } from './citationNumericConflict'
 import type { SourceLocator } from './sourceLocator'
 
 export type ReferenceItemKind = 'web' | 'document' | 'tool'
@@ -6,6 +7,8 @@ export type ReferenceItemKind = 'web' | 'document' | 'tool'
 export type KnowledgeReferenceLike = {
   id?: string
   chunk_ids?: string[]
+  /** IDs of chunks included by backend context expansion. */
+  sub_chunk_id?: string[]
   knowledge_id?: string
   knowledge_title?: string
   knowledge_filename?: string
@@ -13,6 +16,8 @@ export type KnowledgeReferenceLike = {
   chunk_index?: number
   chunk_type?: string
   content?: string
+  /** The drawer excerpt combines text from more than one result. */
+  content_is_merged?: boolean
   metadata?: Record<string, string>
   /** Where the knowledge came from: an upload, "manual", or the imported URL. */
   knowledge_source?: string
@@ -254,6 +259,7 @@ export function mergeDocumentReferences(refs: KnowledgeReferenceLike[]): Knowled
     if (content && !existing.content_parts?.includes(content)) {
       existing.content_parts = [...(existing.content_parts || []), content]
     }
+    if (item.content_is_merged) existing.content_is_merged = true
   })
 
   return Array.from(groups.values()).map((item) => {
@@ -261,6 +267,7 @@ export function mergeDocumentReferences(refs: KnowledgeReferenceLike[]): Knowled
     return {
       ...rest,
       content: contentParts?.slice(0, 3).join('\n\n') || rest.content,
+      ...(contentParts && contentParts.length > 1 ? { content_is_merged: true } : {}),
     }
   })
 }
@@ -341,6 +348,8 @@ export type ReferenceHighlightTarget = {
   key?: string
   /** The answer sentence the citation supports. */
   anchorText?: string
+  /** Direct answer text, present only for an exact citation marker. */
+  claimText?: string
   /** Open the cited document at the cited place instead of the list. */
   openSource?: boolean
 }
@@ -359,6 +368,7 @@ export type ReferenceSourceTarget = {
   content?: string
   locators?: SourceLocator[]
   anchorText?: string
+  numericConflict?: CitationNumericConflict | null
 }
 
 /**
@@ -381,6 +391,9 @@ export function resolveReferenceSource(
     if (item?.knowledgeId) ref = list.find((r) => r.knowledge_id === item.knowledgeId)
   }
   if (!ref?.knowledge_id || isWebReference(ref) || isToolReference(ref) || ref.chunk_type === 'faq') return null
+  // A result can keep its first chunk ID while its content covers other chunks.
+  const hasMergedContent = exact?.content_is_merged || exact?.chunk_ids?.some(id => id !== chunkId) ||
+    exact?.sub_chunk_id?.some(id => id !== chunkId)
   return {
     chunkId,
     knowledgeId: ref.knowledge_id,
@@ -393,6 +406,9 @@ export function resolveReferenceSource(
     content: exact ? exact.content : undefined,
     locators: exact ? exact.source_locators : undefined,
     anchorText: target?.anchorText,
+    numericConflict: exact?.content && target?.claimText && !hasMergedContent
+      ? findCitationNumericConflict(target.claimText, exact.content)
+      : undefined,
   }
 }
 

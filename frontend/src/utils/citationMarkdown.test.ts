@@ -47,6 +47,15 @@ test('rendered citation targets the indexed passage, not the first title match',
   const html = preprocessCitationTags('<kb doc="Handbook" chunk_id="DOC-2" kb_id="kb"/>', refs)
   assert.ok(html.includes(`data-chunk-id="${second}"`))
   assert.ok(!html.includes(`data-chunk-id="${first}"`))
+  assert.ok(html.includes('data-citation-source-exact="false"'))
+})
+
+test('marks only an explicit matching chunk id as the exact cited source', () => {
+  const exact = preprocessCitationTags(`<kb doc="Handbook" chunk_id="${second}" kb_id="kb"/>`, refs)
+  assert.ok(exact.includes('data-citation-source-exact="true"'))
+  const recovered = preprocessCitationTags('<kb doc="Handbook" chunk_id="unknown" kb_id="kb"/>', refs)
+  assert.ok(recovered.includes(`data-chunk-id="${first}"`))
+  assert.ok(recovered.includes('data-citation-source-exact="false"'))
 })
 
 test('a conflicting index still recovers the named document', () => {
