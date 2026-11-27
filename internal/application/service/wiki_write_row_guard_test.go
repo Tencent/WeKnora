@@ -141,7 +141,9 @@ func newWikiWriteGuardStore(t *testing.T, content string) (interfaces.WikiPageSe
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+	require.NoError(t, db.AutoMigrate(
+		&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}, &types.WikiPageIssue{},
+	))
 
 	ctx := context.Background()
 	svc := NewWikiPageService(repository.NewWikiPageRepository(db), nil, nil, nil, nil, nil)
