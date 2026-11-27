@@ -1,6 +1,7 @@
 /** Minimal WeKnora REST client: JSON endpoints plus the SSE chat streams. */
 
 import type { ResolvedConfig } from './config.ts'
+import { clip, wellFormed } from './render.ts'
 
 /** One retrieval hit, as returned by WeKnora's `SearchResult`. */
 export interface SearchResult {
@@ -65,7 +66,7 @@ export class WeknoraApiError extends Error {
   readonly status: number | undefined
 
   constructor(message: string, status?: number) {
-    super(message)
+    super(wellFormed(message))
     this.name = 'WeknoraApiError'
     this.status = status
   }
@@ -84,7 +85,7 @@ interface Envelope<T> {
 /** Trim a response body for an error message without leaking a whole page. */
 function snippet(body: string): string {
   const collapsed = body.replace(/\s+/g, ' ').trim()
-  return collapsed.length > 300 ? `${collapsed.slice(0, 300)}…` : collapsed
+  return clip(collapsed, 300).text
 }
 
 /** Extract a human-readable reason from WeKnora's error envelope. */
