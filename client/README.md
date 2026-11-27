@@ -277,6 +277,9 @@ if err != nil {
 
 ### 示例：管理知识分块
 
+更新时可将目标分块的 `ContentRevision` 地址传入 `UpdateChunkRequest.ExpectedRevision`，防止覆盖其他用户的新编辑。
+收到 HTTP 409 后，应重新读取并合并编辑内容再重试。此字段为 `nil` 时省略检查，指向 `0` 时检查初始修订号。
+
 ```go
 // 列出知识分块
 chunks, total, err := apiClient.ListKnowledgeChunks(context.Background(), knowledgeID, 1, 10)

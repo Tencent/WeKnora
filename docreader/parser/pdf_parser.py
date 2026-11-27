@@ -747,9 +747,11 @@ def _page_chars(textpage, page, raw, *, return_filter_info: bool = False) -> tup
     Working at the glyph level (instead of pdfium rect segments) keeps mixed
     CJK + Latin/number lines in their true left-to-right order, which the
     rect-level ``get_text_bounded`` API scrambles. Each glyph keeps its tight
-    horizontal extent (for word-gap inference) but takes its vertical extent
-    from the loose box, which spans the font's ascent to descent, so every
-    glyph of a line shares one height and lines do not split by letter shape.
+    horizontal extent (the ink box, used for bounding and filtering) and the
+    horizontal extent of the loose box (the advance box, used for word-gap
+    inference), while its vertical extent comes from the loose box, which
+    spans the font's ascent to descent, so every glyph of a line shares one
+    height and lines do not split by letter shape.
 
     When ``return_filter_info`` is true, a third value reports whether any
     source glyph was intentionally filtered as hidden or off-page. Callers
@@ -780,11 +782,11 @@ def _page_chars(textpage, page, raw, *, return_filter_info: bool = False) -> tup
         try:
             left, _, right, _ = textpage.get_charbox(i)
             try:
-                _, bottom, _, top = textpage.get_charbox(i, loose=True)
+                adv_left, bottom, adv_right, top = textpage.get_charbox(i, loose=True)
             except TypeError:
                 # Keep compatibility with the small PDFium test doubles and
                 # older pypdfium2 releases that do not expose ``loose``.
-                _, bottom, _, top = textpage.get_charbox(i)
+                adv_left, bottom, adv_right, top = textpage.get_charbox(i)
         except Exception:
             source_count += 1
             continue
@@ -794,6 +796,7 @@ def _page_chars(textpage, page, raw, *, return_filter_info: bool = False) -> tup
         source_count += 1
         x0, x1 = (left, right) if left <= right else (right, left)
         y0, y1 = (bottom, top) if bottom <= top else (top, bottom)
+        ax0, ax1 = (adv_left, adv_right) if adv_left <= adv_right else (adv_right, adv_left)
         if FILTER_HIDDEN_TEXT:
             if x1 < crop_left or x0 > crop_right or y1 < crop_bottom or y0 > crop_top:
                 filtered_count += 1
@@ -801,7 +804,11 @@ def _page_chars(textpage, page, raw, *, return_filter_info: bool = False) -> tup
             if invisible and _point_in_boxes((x0 + x1) / 2, (y0 + y1) / 2, invisible):
                 filtered_count += 1
                 continue  # covered by an invisible text object
-        chars.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "ch": ch, "i": i})
+        chars.append({
+            "x0": x0, "y0": y0, "x1": x1, "y1": y1,
+            "ax0": ax0, "ax1": ax1,
+            "ch": ch, "i": i,
+        })
     if return_filter_info:
         return chars, width, filtered_count > 0
     return chars, width
@@ -1065,11 +1072,28 @@ def _merge_orphan_punctuation_lines(lines: list) -> list:
     return merged
 
 
+def _advance_extent(glyph: dict) -> tuple:
+    """Return the glyph's advance box, falling back to its ink box.
+
+    Word gaps must be measured on the advance box. Ink is narrower than the
+    advance for narrow glyphs ('I', 'l', 'i', '1', ':'), so measuring ink
+    leaves a phantom gap before the next glyph — enough to split "report ID"
+    into "report I D" once the gap passes the threshold. Advance boxes tile a
+    line exactly, so an intra-word gap is 0 and only a real space is positive.
+    Callers that build glyphs without an advance box keep the ink measurement.
+    """
+    return glyph.get("ax0", glyph["x0"]), glyph.get("ax1", glyph["x1"])
+
+
 def _join_line_glyphs(ln_sorted: list) -> str:
     """Join a visual line's glyphs, inferring word spaces from horizontal gaps."""
     if not ln_sorted:
         return ""
-    widths = [c["x1"] - c["x0"] for c in ln_sorted if c["x1"] > c["x0"]]
+    widths = [
+        right - left
+        for left, right in (_advance_extent(c) for c in ln_sorted)
+        if right > left
+    ]
     med_w = statistics.median(widths) if widths else 1.0
     gap_threshold = med_w * WORD_GAP_WIDTH_RATIO
 
@@ -1084,7 +1108,8 @@ def _join_line_glyphs(ln_sorted: list) -> str:
             if not ch.isspace() or (parts and not parts[-1].endswith(" ")):
                 parts.append(ch)
             continue
-        gap = cur["x0"] - prev["x1"]
+        prev_right = _advance_extent(prev)[1]
+        gap = _advance_extent(cur)[0] - prev_right
         # PDF producers frequently position digits with a small kerning gap,
         # especially in right-aligned table cells.  Treating that gap as a
         # word boundary turns ``124`` into ``1 24``.  Keep the normal gap
