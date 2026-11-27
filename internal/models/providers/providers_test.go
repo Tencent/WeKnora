@@ -18,7 +18,7 @@ import (
 // expectedIDs is every built-in vendor this package links.
 var expectedIDs = []string{
 	"generic", "weknoracloud", "huggingface_tei",
-	"aliyun", "zhipu", "volcengine", "hunyuan", "siliconflow", "deepseek",
+	"aliyun", "zhipu", "volcengine", "volcengine-speech", "hunyuan", "siliconflow", "deepseek",
 	"minimax", "moonshot", "mimo", "modelscope", "qianfan", "qiniu", "longcat", "lkeap",
 	"openai", "azure_openai", "anthropic", "gemini",
 	"openrouter", "litellm", "requesty", "pinecone",

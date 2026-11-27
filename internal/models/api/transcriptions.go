@@ -18,11 +18,19 @@ const (
 	// assistant message. Alibaba's qwen3-asr-flash and Xiaomi's mimo-v2.5-asr
 	// take no instruction; the model only transcribes.
 	TranscriptionChatAudio TranscriptionAPI = "openai-chat-audio"
+	// TranscriptionVolcengineAUC is Volcano Engine's one-sentence recognition
+	// HTTP API (https://openspeech.bytedance.com/api/v1/auc): the body is a
+	// JSON header — app credentials, user, request, audio shape — followed by
+	// the raw audio bytes, whose length the header declares as audio_size. The
+	// transcript comes back as {code, message, result: [{text, utterances}]}.
+	TranscriptionVolcengineAUC TranscriptionAPI = "volcengine-auc"
 )
 
 // Known reports whether the value names a protocol this build implements.
 func (a TranscriptionAPI) Known() bool {
-	return a == TranscriptionOpenAI || a == TranscriptionChatAudio
+	return a == TranscriptionOpenAI ||
+		a == TranscriptionChatAudio ||
+		a == TranscriptionVolcengineAUC
 }
 
 // TranscriptionSegment is one timed stretch of a transcript.
