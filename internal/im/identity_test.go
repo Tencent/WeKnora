@@ -77,3 +77,20 @@ func TestWithIMIdentityAppliesChannelLocaleAcrossTransports(t *testing.T) {
 		})
 	}
 }
+
+func TestWithIMIdentityCarriesConversationForEveryPlatform(t *testing.T) {
+	for _, platform := range []string{
+		"wecom", "feishu", "lark", "telegram", "dingtalk", "mattermost", "wechat", "qqbot", "slack", "yunzhijia",
+	} {
+		t.Run(platform, func(t *testing.T) {
+			channel := &IMChannel{ID: "channel", TenantID: 7, Platform: platform}
+			msg := &IncomingMessage{
+				Platform: Platform(platform), ChatType: ChatTypeGroup, ChatID: "ops", UserID: "user",
+			}
+			conversation, ok := types.IMConversationFromContext(withIMIdentity(context.Background(), channel, msg))
+			if !ok || conversation != (types.IMConversation{Platform: platform, ChatType: "group", ChatID: "ops"}) {
+				t.Fatalf("conversation = %#v (present=%v)", conversation, ok)
+			}
+		})
+	}
+}

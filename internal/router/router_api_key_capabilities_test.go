@@ -378,6 +378,15 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 		{http.MethodPost, "/api/v1/evaluation", types.APIKeyCapabilityRunEvaluations},
 		{http.MethodGet, "/api/v1/system/info", types.APIKeyCapabilityManageVectorStores},
 		{http.MethodGet, "/api/v1/mcp-services", types.APIKeyCapabilityManageMCPServices},
+		{http.MethodGet, "/api/v1/mcp-services/:id/tool-session-policies", types.APIKeyCapabilityManageMCPServices},
+		{
+			http.MethodPut, "/api/v1/mcp-services/:id/tool-session-policies/:tool_name",
+			types.APIKeyCapabilityManageMCPServices,
+		},
+		{
+			http.MethodDelete, "/api/v1/mcp-services/:id/tool-session-policies/:tool_name",
+			types.APIKeyCapabilityManageMCPServices,
+		},
 		{
 			http.MethodPost, "/api/v1/mcp-services/:id/usage-instructions/generate",
 			types.APIKeyCapabilityManageMCPServices,
