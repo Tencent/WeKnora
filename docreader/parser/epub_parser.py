@@ -113,19 +113,28 @@ class EPUBParser(BaseParser):
             for html_file in html_files:
                 try:
                     html_content = endecode.decode_bytes(epub_zip.read(html_file))
+                    base = os.path.basename(html_file)
+                    fallback_title = os.path.splitext(base)[0]
+                    fallback_title = re.sub(
+                        r"chapter[_-]?",
+                        "Chapter ",
+                        fallback_title,
+                        flags=re.IGNORECASE,
+                    )
+                    fallback_title = (
+                        fallback_title.replace("_", " ").replace("-", " ").title()
+                    )
+                    title, body_html = self._take_heading(html_content, fallback_title)
                     chapter_md = self._html_to_markdown(
-                        html_content,
+                        body_html,
                         image_aliases=image_aliases,
                         base_path=posixpath.dirname(html_file),
                     )
-                    base = os.path.basename(html_file)
-                    title = os.path.splitext(base)[0]
-                    title = re.sub(
-                        r"chapter[_-]?", "Chapter ", title, flags=re.IGNORECASE
+                    if not chapter_md.strip():
+                        continue
+                    markdown_parts.append(
+                        chapter_md if title is None else f"## {title}\n\n{chapter_md}"
                     )
-                    title = title.replace("_", " ").replace("-", " ").title()
-                    if chapter_md.strip():
-                        markdown_parts.append(f"## {title}\n\n{chapter_md}")
                 except Exception as e:
                     logger.warning("Failed to process %s: %s", html_file, e)
 
@@ -255,6 +264,33 @@ class EPUBParser(BaseParser):
         ordered.extend(item for item in documents if item not in ordered)
         return ordered
 
+    @staticmethod
+    def _take_heading(
+        html_content: str, fallback_title: str
+    ) -> tuple[str | None, str]:
+        """Split a chapter document into its heading and the HTML that follows.
+
+        A document with no heading of its own keeps the name it was stored
+        under. ``None`` means the document carries text before its first
+        heading: lifting that heading to the top would put the text under it,
+        so it is demoted to h2 and the caller emits the body as it is.
+        """
+        soup = BeautifulSoup(html_content, "lxml")
+        title_tag = soup.find(["h1", "h2"])
+        if title_tag is None:
+            body_html = str(soup.body) if soup.body else html_content
+            return fallback_title, body_html
+        if any(
+            text.strip() and not text.find_parent("head")
+            for text in title_tag.find_all_previous(string=True)
+        ):
+            title_tag.name = "h2"
+            return None, str(soup.body)
+        chapter_title = title_tag.get_text().strip()
+        title_tag.decompose()
+        body_html = str(soup.body) if soup.body else html_content
+        return chapter_title, body_html
+
     def _process_chapter(
         self,
         html_item,
@@ -265,33 +301,19 @@ class EPUBParser(BaseParser):
             # EpubHtml's serializer parses its input as UTF-8. Read the original
             # item bytes so BeautifulSoup can honor a Unicode byte order mark.
             html_content = epub.EpubItem.get_content(html_item)
-            soup = BeautifulSoup(html_content, "lxml")
-            title_tag = soup.find(["h1", "h2"])
-            if title_tag and any(
-                text.strip() and not text.find_parent("head")
-                for text in title_tag.find_all_previous(string=True)
-            ):
-                # Text comes before the first heading. Lifting the heading to
-                # the top would put that text under it, so keep the order.
-                title_tag.name = "h2"
-                return self._html_to_markdown(
-                    str(soup.body),
-                    image_aliases=image_aliases,
-                    base_path=posixpath.dirname(html_item.get_name()),
-                )
-            if title_tag:
-                chapter_title = title_tag.get_text().strip()
-                title_tag.decompose()
-            else:
-                chapter_title = html_item.get_name().replace("/", "")
-                chapter_title = chapter_title.replace(".xhtml", "")
-                chapter_title = chapter_title.replace("-", " ").title()
-            body_html = str(soup.body) if soup.body else str(html_content)
+            fallback_title = html_item.get_name().replace("/", "")
+            fallback_title = fallback_title.replace(".xhtml", "")
+            fallback_title = fallback_title.replace("-", " ").title()
+            chapter_title, body_html = self._take_heading(
+                html_content, fallback_title
+            )
             chapter_md = self._html_to_markdown(
                 body_html,
                 image_aliases=image_aliases,
                 base_path=posixpath.dirname(html_item.get_name()),
             )
+            if chapter_title is None:
+                return chapter_md
             return f"## {chapter_title}\n\n{chapter_md}"
         except Exception as e:
             logger.error(
