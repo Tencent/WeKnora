@@ -267,6 +267,18 @@ class EPUBParser(BaseParser):
             html_content = epub.EpubItem.get_content(html_item)
             soup = BeautifulSoup(html_content, "lxml")
             title_tag = soup.find(["h1", "h2"])
+            if title_tag and any(
+                text.strip() and not text.find_parent("head")
+                for text in title_tag.find_all_previous(string=True)
+            ):
+                # Text comes before the first heading. Lifting the heading to
+                # the top would put that text under it, so keep the order.
+                title_tag.name = "h2"
+                return self._html_to_markdown(
+                    str(soup.body),
+                    image_aliases=image_aliases,
+                    base_path=posixpath.dirname(html_item.get_name()),
+                )
             if title_tag:
                 chapter_title = title_tag.get_text().strip()
                 title_tag.decompose()
