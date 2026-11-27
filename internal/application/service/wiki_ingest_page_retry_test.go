@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -16,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -466,6 +468,169 @@ func TestWikiPageRetryBatchKeepsSuccessfulPagesAndSettlesDocument(t *testing.T) 
 					require.Equal(t, types.ParseStatusCompleted, knowledge.ParseStatus)
 				}
 			})
+		}
+	}
+}
+
+type wikiBlockingSummaryStore struct {
+	interfaces.WikiPageService
+	started     chan struct{}
+	released    chan struct{}
+	fastWritten chan struct{}
+}
+
+func (s *wikiBlockingSummaryStore) GetOrCreatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, bool, error) {
+	if page.Slug == "summary/slow" {
+		close(s.started)
+		select {
+		case <-s.released:
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		}
+	}
+	createdPage, created, err := s.WikiPageService.GetOrCreatePage(ctx, page)
+	if err == nil && page.Slug == "summary/fast" {
+		close(s.fastWritten)
+	}
+	return createdPage, created, err
+}
+
+func TestWikiIngestSettlesDocumentWhileSiblingReduceIsBlocked(t *testing.T) {
+	rdb := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	svc, db, store, model, _ := newWikiPageRetryBatch(t, rdb)
+	model.respond = func(_ context.Context, purpose, _ string, _ int) (string, error) {
+		switch purpose {
+		case "wiki_candidate_slug":
+			return `{"entities":[],"concepts":[]}`, nil
+		case "wiki_summary":
+			return "SUMMARY: Document overview\n\nThis document provides source detail for Wiki.", nil
+		default:
+			return "", fmt.Errorf("unexpected model purpose %s", purpose)
+		}
+	}
+	blocked := &wikiBlockingSummaryStore{
+		WikiPageService: store, started: make(chan struct{}), released: make(chan struct{}),
+		fastWritten: make(chan struct{}),
+	}
+	svc.wikiService = blocked
+	tracker, spanDB := setupSpanTrackerTest(t)
+	sqlDB, err := spanDB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	svc.spanTracker = tracker
+
+	ctx := context.Background()
+	task := seedWikiLookupTask(t, svc, db, "kb-1", "fast")
+	seedWikiLookupTask(t, svc, db, "kb-1", "slow")
+	duplicate, err := newWikiIngestPendingOp(ctx, 7, "kb-1", "fast")
+	require.NoError(t, err)
+	require.NoError(t, svc.pendingRepo.Enqueue(ctx, duplicate))
+	for _, kid := range []string{"fast", "slow"} {
+		_, attempt, err := tracker.OpenAttempt(ctx, kid, "")
+		require.NoError(t, err)
+		require.NotNil(t, tracker.BeginStage(ctx, kid, attempt, types.StagePostProcess, nil))
+	}
+
+	checkDocument := func(t require.TestingT, kid, status string, pending int, spanStatus string) {
+		doc, err := svc.knowledgeRepo.GetKnowledgeByIDOnly(ctx, kid)
+		require.NoError(t, err)
+		require.Equal(t, status, doc.ParseStatus, "document %s parse status", kid)
+		require.Equal(t, pending, doc.PendingSubtasksCount)
+		var span types.KnowledgeProcessingSpan
+		require.NoError(t, spanDB.Where("knowledge_id = ? AND name = ?", kid, "postprocess.wiki").First(&span).Error)
+		require.Equal(t, spanStatus, span.Status)
+	}
+
+	done := make(chan struct{})
+	release := sync.OnceFunc(func() { close(blocked.released) })
+	var batchErr error
+	go func() {
+		defer close(done)
+		batchErr = svc.Handle(ctx, task)
+	}()
+	defer func() {
+		release()
+		<-done
+	}()
+	select {
+	case <-blocked.started:
+	case <-done:
+		t.Fatalf("batch returned before reaching the blocked reduce: %v", batchErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("batch never reached the blocked reduce")
+	}
+	select {
+	case <-blocked.fastWritten:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fast summary was never written while slow reduce was blocked")
+	}
+
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		checkDocument(c, "fast", types.ParseStatusCompleted, 0, types.SpanStatusDone)
+	}, 2*time.Second, 10*time.Millisecond, "fast document must settle while the unrelated slow reduce is blocked")
+	checkDocument(t, "slow", types.ParseStatusFinalizing, 1, types.SpanStatusRunning)
+	page, err := store.GetPageBySlug(ctx, "kb-1", "summary/fast")
+	require.NoError(t, err)
+	require.Equal(t, types.WikiPageStatusPublished, page.Status)
+	var pending []types.TaskPendingOp
+	require.NoError(t, db.Where("task_type = ?", wikiTaskType).Find(&pending).Error)
+	require.Len(t, pending, 1)
+	require.Equal(t, "slow", pending[0].DedupKey)
+	require.NotNil(t, pending[0].ClaimedAt)
+	rows, err := svc.pendingRepo.PeekBatch(ctx, wikiFinalizeTaskType, wikiTaskScope, "kb-1", 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, "summary/fast", rows[0].DedupKey)
+	require.Equal(t, wikiFinalizeOpChange, rows[1].Op)
+	release()
+	<-done
+	require.NoError(t, batchErr)
+	checkDocument(t, "slow", types.ParseStatusCompleted, 0, types.SpanStatusDone)
+	require.Zero(t, rdb.ZCard(ctx, wikiInflightPrefix+"kb-1").Val())
+}
+
+func TestWikiIngestTimedOutExtractionUsesDocumentRetryBudget(t *testing.T) {
+	svc, db, _, model, _ := newWikiPageRetryBatch(t, nil)
+	require.NoError(t, db.AutoMigrate(&types.TaskDeadLetter{}))
+	svc.deadLetterRepo = apprepo.NewTaskDeadLetterRepository(db)
+	task := seedWikiLookupTask(t, svc, db, "kb-1", "slow")
+	deadlines := make(chan time.Time, 2*(wikiMaxFailRetries+1))
+	model.respond = func(ctx context.Context, _, _ string, _ int) (string, error) {
+		deadline, _ := ctx.Deadline()
+		deadlines <- deadline
+		return "", errors.New("provider generation deadline exceeded")
+	}
+
+	ctx := context.Background()
+	for failure := 1; failure <= wikiMaxFailRetries+1; failure++ {
+		started := time.Now()
+		require.NoError(t, svc.ProcessWikiIngest(ctx, task))
+		require.Len(t, deadlines, 2, "candidate extraction and its fallback share a bounded map context")
+		first, fallback := <-deadlines, <-deadlines
+		require.True(t, first.After(started))
+		require.LessOrEqual(t, first.Sub(started), 15*time.Minute+time.Second)
+		require.Equal(t, first, fallback)
+		doc, err := svc.knowledgeRepo.GetKnowledgeByIDOnly(ctx, "slow")
+		require.NoError(t, err)
+		if failure <= wikiMaxFailRetries {
+			var pending types.TaskPendingOp
+			require.NoError(t, db.Where("task_type = ?", wikiTaskType).First(&pending).Error)
+			require.Equal(t, failure, pending.FailCount)
+			require.Nil(t, pending.ClaimedAt)
+			require.Equal(t, types.ParseStatusFinalizing, doc.ParseStatus)
+			require.Equal(t, 1, doc.PendingSubtasksCount)
+		} else {
+			count, err := svc.pendingRepo.PendingCount(ctx, wikiTaskType, wikiTaskScope, "kb-1")
+			require.NoError(t, err)
+			require.Zero(t, count)
+			require.Equal(t, types.ParseStatusCompleted, doc.ParseStatus)
+			require.Zero(t, doc.PendingSubtasksCount)
+			var deadLetter types.TaskDeadLetter
+			require.NoError(t, db.First(&deadLetter).Error)
+			require.Equal(t, "slow", deadLetter.RelatedID)
+			require.Equal(t, failure, deadLetter.FailCount)
 		}
 	}
 }

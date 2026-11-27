@@ -684,25 +684,8 @@ func (r *knowledgeRepository) FinalizeSubtask(
 ) (int, bool, error) {
 	var promoted bool
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Take the same write lock as SetFinalizing before reading the latest
-		// attempt. A separate tracker check would race a newer counter seed.
-		// The no-op UPDATE also acquires SQLite's writer lock before any read.
-		if attempt > 0 {
-			if err := tx.Model(&types.Knowledge{}).Where("id = ?", id).
-				UpdateColumn("pending_subtasks_count", gorm.Expr("pending_subtasks_count")).Error; err != nil {
-				return err
-			}
-			var latest int
-			if err := tx.Model(&types.KnowledgeProcessingSpan{}).Where("knowledge_id = ?", id).
-				Select("COALESCE(MAX(attempt), 0)").Scan(&latest).Error; err != nil {
-				return err
-			}
-			if latest > attempt {
-				return nil
-			}
-		}
 		var err error
-		promoted, err = finalizeSubtask(tx, id)
+		promoted, err = finalizeSubtaskForAttempt(tx, id, attempt)
 		return err
 	})
 	if err != nil {
@@ -722,6 +705,23 @@ func (r *knowledgeRepository) FinalizeSubtask(
 		return 0, promoted, nil
 	}
 	return snap.PendingSubtasksCount, promoted, nil
+}
+
+func finalizeSubtaskForAttempt(tx *gorm.DB, id string, attempt int) (bool, error) {
+	if attempt > 0 {
+		// Take the same write lock as SetFinalizing before reading the latest
+		// attempt. A separate tracker check would race a newer counter seed.
+		if err := tx.Model(&types.Knowledge{}).Where("id = ?", id).
+			UpdateColumn("pending_subtasks_count", gorm.Expr("pending_subtasks_count")).Error; err != nil {
+			return false, err
+		}
+		var latest int
+		if err := tx.Model(&types.KnowledgeProcessingSpan{}).Where("knowledge_id = ?", id).
+			Select("COALESCE(MAX(attempt), 0)").Scan(&latest).Error; err != nil || latest > attempt {
+			return false, err
+		}
+	}
+	return finalizeSubtask(tx, id)
 }
 
 // finalizeSubtask releases one finalizing slot on db, which may be a

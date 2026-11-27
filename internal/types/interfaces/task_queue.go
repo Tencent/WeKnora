@@ -120,6 +120,13 @@ type TaskPendingOpsDrainer interface {
 	) ([]string, error)
 }
 
+// TaskPendingOpsDocumentSettler atomically consumes one finished operation
+// (and its deduplicated rows) and releases the document's finalizing slot.
+// A repeated settlement of the same operation does not release another slot.
+type TaskPendingOpsDocumentSettler interface {
+	SettleDocumentOp(ctx context.Context, knowledgeID string, attempt int, id int64, duplicateIDs []int64) error
+}
+
 // TaskPendingOpsDiscarder removes obsolete work that owns no finalizing slot.
 // Like the drainer, it preserves every document held by a live batch. Empty
 // tuple or operation fields must be rejected by the implementation.

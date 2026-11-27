@@ -22,7 +22,7 @@ func (liveKnowledgeStub) GetKnowledgeByIDOnly(context.Context, string) (*types.K
 
 // reduceGuardedEntityPage runs one reduce round for an entity page over a real
 // wiki page store, with modelResponse as the editor's answer. The returned
-// updateDeferred is what ProcessWikiIngest turns into collectUnapplied — the
+// updateDeferred is what ProcessWikiIngest records as an unapplied update — the
 // set of knowledge ids kept out of the trim phase so a later batch retries them.
 func reduceGuardedEntityPage(
 	t *testing.T, svc *wikiIngestService, slug, modelResponse string,

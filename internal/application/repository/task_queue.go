@@ -421,6 +421,24 @@ func (r *taskPendingOpsRepository) DeleteByIDs(ctx context.Context, ids []int64)
 		Delete(&types.TaskPendingOp{}).Error
 }
 
+func (r *taskPendingOpsRepository) SettleDocumentOp(
+	ctx context.Context, knowledgeID string, attempt int, id int64, duplicateIDs []int64,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		deleted := tx.Where("id = ?", id).Delete(&types.TaskPendingOp{})
+		if deleted.Error != nil || deleted.RowsAffected == 0 {
+			return deleted.Error
+		}
+		if len(duplicateIDs) > 0 {
+			if err := tx.Where("id IN ?", duplicateIDs).Delete(&types.TaskPendingOp{}).Error; err != nil {
+				return err
+			}
+		}
+		_, err := finalizeSubtaskForAttempt(tx, knowledgeID, attempt)
+		return err
+	})
+}
+
 // DeleteByScope removes every pending operation owned by a scope, regardless
 // of task type. Both scope fields are required so a malformed lifecycle call
 // can never turn into an unbounded queue deletion.
