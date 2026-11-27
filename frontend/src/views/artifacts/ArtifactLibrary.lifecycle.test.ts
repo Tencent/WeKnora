@@ -180,3 +180,44 @@ test('a second successful deletion invalidates the replacement request too', asy
     assert.equal(f.vm.loading, false)
   } finally { f.close() }
 })
+
+test('category switches keep the current rows instead of flashing the skeleton', async () => {
+  const f = fixture()
+  try {
+    assert.equal(f.vm.hasLoadedOnce, false)
+    assert.equal(f.vm.loading && !f.vm.items.length && !f.vm.hasLoadedOnce, true,
+      'the first load still owns the skeleton')
+    f.requests[0]!.result.resolve({ data: [row(0), row(1)], total: 2 }); await settle()
+    assert.equal(f.vm.hasLoadedOnce, true)
+
+    f.vm.category = 'image'; await settle()
+    assert.equal(f.requests.length, 2)
+    assert.equal(f.vm.loading, true)
+    assert.deepEqual(f.vm.items.map((r: any) => r.message_id), ['m0', 'm1'],
+      'the previous rows stay visible while the new filter loads')
+    assert.equal(f.vm.total, 2)
+    assert.equal(f.vm.loading && !f.vm.items.length && !f.vm.hasLoadedOnce, false,
+      'a filter change must not remount the skeleton')
+
+    f.requests[1]!.result.resolve({ data: [row(7)], total: 1 }); await settle()
+    assert.deepEqual(f.vm.items.map((r: any) => r.message_id), ['m7'])
+    assert.equal(f.vm.total, 1)
+    assert.equal(f.vm.loading, false)
+  } finally { f.close() }
+})
+
+test('a filter switch after an empty first page does not show the skeleton again', async () => {
+  const f = fixture()
+  try {
+    f.requests[0]!.result.resolve({ data: [], total: 0 }); await settle()
+    assert.equal(f.vm.hasLoadedOnce, true)
+
+    f.vm.category = 'document'; await settle()
+    assert.equal(f.vm.loading, true)
+    assert.equal(f.vm.loading && !f.vm.items.length && !f.vm.hasLoadedOnce, false,
+      'an empty first page must not re-arm the skeleton')
+
+    f.requests[1]!.result.resolve({ data: [row(3)], total: 1 }); await settle()
+    assert.equal(f.vm.items.length, 1)
+  } finally { f.close() }
+})
