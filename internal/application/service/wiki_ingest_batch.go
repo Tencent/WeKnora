@@ -2215,6 +2215,20 @@ func (s *wikiIngestService) reduceSlugUpdatesOnce(
 				newRefs = append(newRefs, ref)
 			}
 		}
+		if len(additions) == 0 && len(newRefs) == 0 {
+			// Synchronous cleanup already detached the last source from a
+			// retained page. A replay has no source contribution to rewrite.
+			if len(page.SourceRefs) == 0 {
+				return false, affectedType, false, false, nil
+			}
+			// The task can also discover linked pages before cleanup detached
+			// their sources. Preserve their content while removing stale refs.
+			if hasWikiReferrers(page) {
+				page.SourceRefs = newRefs
+				err := s.wikiService.UpdatePageMeta(ctx, page)
+				return err == nil, affectedType, false, false, err
+			}
+		}
 		page.SourceRefs = newRefs
 	}
 

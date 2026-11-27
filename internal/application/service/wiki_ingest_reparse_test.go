@@ -164,3 +164,38 @@ func TestWikiSourceDeletionStillReconcilesPages(t *testing.T) {
 		})
 	}
 }
+
+func TestWikiRetractPreservesLinkedPageWithStaleLastSource(t *testing.T) {
+	ctx := context.Background()
+	const body = "# Certification\n\nPMP requires project management experience."
+	pageSvc, page := newWikiWriteGuardStore(t, body)
+	page.SourceRefs = types.StringArray{"kn-1|Certification"}
+	require.NoError(t, pageSvc.UpdatePageMeta(ctx, page))
+	referrer, err := pageSvc.CreatePage(ctx, &types.WikiPage{
+		TenantID: page.TenantID, KnowledgeBaseID: page.KnowledgeBaseID,
+		Slug: "concept/credentials", Title: "Credentials", PageType: types.WikiPageTypeConcept,
+		Content: "Credentials include [[entity/pmp|PMP]].", SourceRefs: types.StringArray{"kn-2"},
+	})
+	require.NoError(t, err)
+
+	svc := &wikiIngestService{wikiService: pageSvc}
+	model := &templateCaptureChatModel{
+		response: "SUMMARY: Removed source\nThis page no longer has its original evidence.",
+	}
+	batch := &WikiBatchContext{SlugTitleMany: func(context.Context, []string) map[string]string { return nil }}
+	updates := []SlugUpdate{{Slug: page.Slug, Type: "retract", KnowledgeID: "kn-1"}}
+	changed, _, failed, deferred, err := svc.reduceSlugUpdates(
+		ctx, model, page.KnowledgeBaseID, page.Slug, updates, page.TenantID, batch, nil)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.False(t, failed)
+	require.False(t, deferred)
+	require.Empty(t, model.messages)
+
+	after, err := pageSvc.GetPageBySlug(ctx, page.KnowledgeBaseID, page.Slug)
+	require.NoError(t, err)
+	require.Equal(t, types.StringArray{}, after.SourceRefs)
+	require.Equal(t, types.StringArray{referrer.Slug}, after.InLinks)
+	require.Equal(t, body, after.Content)
+	require.Equal(t, page.Version, after.Version)
+}

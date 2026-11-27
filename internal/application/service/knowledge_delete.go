@@ -190,8 +190,8 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 //   - It writes a tombstone + scrubs pending ingest ops so new pages cannot be
 //     born with a stale source_ref (guards (a) queued ingest and (b) ingest
 //     tasks mid-LLM call — both consult the tombstone before writing).
-//   - It persists a retract task before reconciling existing pages (delete
-//     if only source, or strip the source if shared), preserving retry evidence.
+//   - It persists a retract task before reconciling existing pages (strip
+//     the source, or delete if no sources or referrers remain), preserving retry evidence.
 //     Crucially we DO NOT gate
 //     enqueue on "pages currently exist": in the ingest/delete race the
 //     knowledge may have pages that exist only after this function returns
@@ -297,20 +297,23 @@ func (s *knowledgeService) cleanupWikiReferences(
 
 		remaining := removeSourceRef(page.SourceRefs, knowledgeID)
 
-		if len(remaining) == 0 {
+		if len(remaining) == 0 && !hasWikiReferrers(page) {
 			if err := s.wikiService.DeletePage(ctx, kbID, page.Slug); err != nil {
 				logger.Warnf(ctx, "wiki cleanup: failed to delete page %s: %v", page.Slug, err)
 				cleanupErr = errors.Join(cleanupErr, err)
 			} else {
 				deletedSlugs = append(deletedSlugs, page.Slug)
 			}
-		} else {
-			page.SourceRefs = remaining
-			page.ChunkRefs = removeChunkRefs(page.ChunkRefs, sourceChunkRefs)
-			if err := s.wikiService.UpdatePageMeta(ctx, page); err != nil {
-				logger.Warnf(ctx, "wiki cleanup: failed to update source refs for page %s: %v", page.Slug, err)
-				cleanupErr = errors.Join(cleanupErr, err)
-			}
+			continue
+		}
+		if remaining == nil {
+			remaining = types.StringArray{}
+		}
+		page.SourceRefs = remaining
+		page.ChunkRefs = removeChunkRefs(page.ChunkRefs, sourceChunkRefs)
+		if err := s.wikiService.UpdatePageMeta(ctx, page); err != nil {
+			logger.Warnf(ctx, "wiki cleanup: failed to update source refs for page %s: %v", page.Slug, err)
+			cleanupErr = errors.Join(cleanupErr, err)
 		}
 	}
 
@@ -320,6 +323,15 @@ func (s *knowledgeService) cleanupWikiReferences(
 	}
 
 	return cleanupErr
+}
+
+func hasWikiReferrers(page *types.WikiPage) bool {
+	for _, slug := range page.InLinks {
+		if slug != "" && slug != page.Slug {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *knowledgeService) wikiChunkRefsForKnowledge(ctx context.Context, knowledge *types.Knowledge) map[string]bool {
