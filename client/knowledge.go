@@ -847,10 +847,12 @@ func (c *Client) UpdateImageInfo(ctx context.Context,
 
 // CreateManualKnowledgeRequest contains the parameters for creating a manual Markdown knowledge entry.
 type CreateManualKnowledgeRequest struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	TagID   string `json:"tag_id,omitempty"`
-	Channel string `json:"channel,omitempty"`
+	// TagIDs replaces TagID when nonempty. TagID remains supported for single-tag callers.
+	TagIDs  []string `json:"tag_ids,omitempty"`
+	Title   string   `json:"title"`
+	Content string   `json:"content"`
+	TagID   string   `json:"tag_id,omitempty"`
+	Channel string   `json:"channel,omitempty"`
 }
 
 // UpdateManualKnowledgeRequest contains the parameters for updating a manual Markdown knowledge entry.
@@ -870,9 +872,32 @@ type BatchUpdateKnowledgeTagsRequest struct {
 	TagIDs []string `json:"tag_ids"`
 }
 
+// MarshalJSON translates legacy single-tag updates to the server's tag arrays.
+func (r BatchUpdateKnowledgeTagsRequest) MarshalJSON() ([]byte, error) {
+	type requestAlias BatchUpdateKnowledgeTagsRequest
+	updates := make(map[string][]string, len(r.Updates))
+	for id, tag := range r.Updates {
+		updates[id] = []string{}
+		if tag != nil {
+			updates[id] = []string{*tag}
+		}
+	}
+	return json.Marshal(struct {
+		requestAlias
+		Updates map[string][]string `json:"updates,omitempty"`
+	}{requestAlias: requestAlias(r), Updates: updates})
+}
+
 // CreateManualKnowledge creates a knowledge entry from manual Markdown content.
 func (c *Client) CreateManualKnowledge(ctx context.Context, knowledgeBaseID string, request *CreateManualKnowledgeRequest) (*Knowledge, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/manual", knowledgeBaseID)
+	if request != nil {
+		body := *request
+		if len(body.TagIDs) == 0 && body.TagID != "" {
+			body.TagIDs = []string{body.TagID}
+		}
+		request = &body
+	}
 	resp, err := c.doRequest(ctx, http.MethodPost, path, request, nil)
 	if err != nil {
 		return nil, err

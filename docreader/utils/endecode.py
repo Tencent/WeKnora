@@ -159,7 +159,12 @@ def decode_bytes(
             - utf-8: Universal encoding (tried first)
             - gb18030, gb2312, gbk: Chinese encodings (Simplified)
             - big5: Chinese encoding (Traditional)
-            - ascii, latin-1: Western encodings
+            - ascii: Western encoding
+
+            latin-1 is deliberately not a candidate: it decodes any byte
+            sequence, so it would always win the loop below and the fallback --
+            the only path that reports an undetectable encoding -- would never
+            run.
 
     Returns:
         str: Decoded string content
@@ -196,7 +201,9 @@ def decode_bytes(
             "gbk",
             "big5",
             "ascii",
-            "latin-1",
+            # latin-1 is reserved for the fallback below, which logs that the
+            # encoding could not be detected; as a candidate it would never
+            # fail and would swallow that report.
         ]
     # Try decoding with each encoding format in order
     for encoding in encodings:

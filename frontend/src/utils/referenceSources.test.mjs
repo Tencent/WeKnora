@@ -187,3 +187,9 @@ test('formatReferenceSnippet strips markdown noise from preview text', async () 
 test('getDomainFromUrl strips www prefix', () => {
   assert.equal(getDomainFromUrl('https://www.example.com/x'), 'example.com')
 })
+
+test('document reference carries its stored original URL', () => {
+  const url = 'https://confluence.example.test/wiki/viewpage.action?pageId=127'
+  const refs = [{ id: 'chunk-1', knowledge_id: 'doc-1', knowledge_title: 'Runbook', metadata: { source_url: url } }]
+  assert.equal(buildReferenceList(refs)[0]?.sourceUrl, url)
+})

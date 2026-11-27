@@ -174,6 +174,10 @@ if err != nil {
 
 ### Example: Managing Knowledge Chunks
 
+Set `UpdateChunkRequest.ExpectedRevision` to a pointer to the target chunk's `ContentRevision`
+to prevent overwriting a newer edit. On HTTP 409, reread and reconcile before retrying.
+A nil pointer omits the check; a pointer to zero checks the initial revision.
+
 ```go
 // List knowledge chunks
 chunks, total, err := apiClient.ListKnowledgeChunks(context.Background(), knowledgeID, 1, 10)

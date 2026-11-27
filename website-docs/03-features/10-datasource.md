@@ -217,6 +217,8 @@ Server/DC PAT 适用于 Confluence 7.9 及以上版本，可在个人设置的 P
 
 **可选附件同步**：在数据源配置的 `settings` 中设置 `"sync_attachments": true`（默认关闭；目前通过数据源 API 配置，没有新增 UI 开关）。连接器使用 [Server/DC 附件列表](https://developer.atlassian.com/server/confluence/rest/v951/api-group-attachments/) 或 [Cloud v2 附件列表](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-attachment/#api-pages-id-attachments-get)，将 `.pdf`、`.doc`、`.docx`、`.ppt`、`.pptx`、`.xls`、`.xlsx` 文件分别作为知识条目交给现有文件入库/解析流水线。其它扩展名不在此同步范围；内联图片继续沿用页面图片处理。
 
+**正文增量同步范围**：连接器根据页面自身的版本判断是否重新抓取正文。只更新正文里引用的附件图片，或只编辑被 `include` / `excerpt-include` 引用的其他页面时，如果当前页面的版本号未变，增量同步会跳过正文。这与上面的独立附件同步不同。要刷新受影响的正文，可以在 Confluence 保存该页面的新版本，或在 WeKnora 手动触发一次全量同步。
+
 - 单附件上限为 20 MiB，既检查声明大小，也限制实际读取字节数。文件 metadata 保留来源页面标题/URL、附件 ID/版本与更新时间。下载沿用现有 Confluence 同源及上下文路径边界；跨域下载重定向会明确失败，不放宽凭据转发规则。依赖跨域 CDN 重定向的 Cloud 文件目前不支持下载。
 - 附件独立于页面正文版本检查。页面不变但附件更新时，只重新导入变更附件；稳定子项 ID 保持来源身份，复用已有文件替换逻辑。入库确认不代表异步解析已完成，解析进度仍在文档任务中查看。
 - 下载或入库失败时记录失败并中断本轮，保留该附件的旧文件及已确认的先前进度。修复失败原因后重试；全量同步的重试也会从已确认附件继续。大小超限等持续失败需要先处理源文件。已同步文件被改名为不支持的扩展名时会报告失败并保留旧文件，避免误判为删除。

@@ -387,7 +387,7 @@ sequenceDiagram
 - 过期预判带 **30 秒 skew**（`oauthRefreshSkew`）：`ExpiresAt` 在 30 秒内到期即视为需刷新；但**无 refresh_token 的 token 用满真实有效期**，skew 不缩短其寿命。
 - 过期且无 refresh_token → 删除 token 行并返回 `OAuthReauthorizationRequiredError`（需要用户重新授权）。
 - 需要刷新时走 `refreshWithLease`：在 `mcp_oauth_tokens` 行上以 `refresh_lease_id` / `refresh_lease_until` 两列实现**数据库级刷新租约**（默认 45 秒，随 HTTP 超时上浮），`TryAcquireTokenRefreshLease` 用条件 UPDATE 抢占；抢不到的实例每 100ms 轮询，观察到 token 材料已被并发刷新者更新且未临期即直接复用——**多实例部署下同一 refresh_token 只会被消费一次**（refresh token 轮换安全）。
-- 刷新失败分级（`permanentRefreshFailure`）：`invalid_grant` / `invalid_token` / `bad_refresh_token` / `expired_token`（或 HTTP 400）→ 永久失败，删 token 要求重新授权；`invalid_client` / `unauthorized_client`（或 HTTP 401）→ 连同 `mcp_oauth_clients` 的动态注册记录一并删除（下次授权重新注册）；其他（网络抖动等）→ `OAuthRefreshTemporaryError`，**保留 token** 作为运维性失败上抛，不弹新的授权窗。
+- 令牌端点返回 OAuth 错误码时，以错误码判断恢复方式。`invalid_grant`、`invalid_token`、`bad_refresh_token`、`expired_token` 需要重新授权；`invalid_client`、`unauthorized_client` 还会清除动态客户端注册。没有 OAuth 错误码时，令牌端点的 HTTP 400 和 401 分别按上述两种方式处理。临时故障保留令牌和客户端注册，服务恢复后可继续刷新。
 
 `AuthorizationStatus` 把上述状态暴露为三态：`authorized`（当前可用）/ `refreshable`（已过期但有 refresh_token）/ `reauth_required`。
 
