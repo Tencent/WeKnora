@@ -678,6 +678,9 @@ func (q *qdrantRepository) getBaseFilter(params types.RetrieveParams) *qdrant.Fi
 func (q *qdrantRepository) Retrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
+	if err := params.ValidateScope(); err != nil {
+		return nil, err
+	}
 	log := logger.GetLogger(ctx)
 	log.Debugf("[Qdrant] Processing retrieval request of type: %s", params.RetrieverType)
 
