@@ -1128,13 +1128,10 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 
 		// Run base migrations (all versioned migrations including embeddings)
 		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
-		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
-			// Log warning but don't fail startup - migrations might be handled externally
-			logger.Warnf(context.Background(), "Database migration failed: %v", err)
-			logger.Warnf(
-				context.Background(),
-				"Continuing with application startup. Please run migrations manually if needed.",
-			)
+		if err := runStartupMigrations(func() error {
+			return database.RunMigrationsWithOptions(migrateDSN, migrationOpts)
+		}); err != nil {
+			return nil, err
 		}
 
 		// Post-migration: resolve __pending_env__ storage provider markers for historical KBs.
