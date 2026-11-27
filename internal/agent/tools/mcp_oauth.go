@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
 	mcpclient "github.com/mark3labs/mcp-go/client"
@@ -179,7 +180,11 @@ func waitForMCPOAuthAuthorization(
 		ToolCallID:         toolCallID,
 		WaitTimeout:        oauthWaitTimeout(sess),
 	})
-	if waitErr != nil || !decision.Approved {
+	if waitErr != nil {
+		logger.Warnf(ctx, "MCP OAuth prompt for service %s failed: %v", service.Name, waitErr)
+		return ctx, noop, false
+	}
+	if !decision.Approved {
 		return ctx, noop, false
 	}
 
