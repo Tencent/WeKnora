@@ -9,6 +9,7 @@ import (
 	"github.com/JohannesKaufmann/html-to-markdown/v2/converter"
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/base"
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/commonmark"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/strikethrough"
 	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/table"
 	"github.com/PuerkitoBio/goquery"
 )
@@ -93,7 +94,8 @@ func htmlToMarkdown(source, rawURL string) (string, error) {
 		return "", newFetchError(ErrorHTMLParse, false, "HTML extraction failed: %v", err)
 	}
 	conv := converter.NewConverter(converter.WithPlugins(
-		base.NewBasePlugin(), commonmark.NewCommonmarkPlugin(), table.NewTablePlugin(),
+		base.NewBasePlugin(), commonmark.NewCommonmarkPlugin(),
+		strikethrough.NewStrikethroughPlugin(), table.NewTablePlugin(),
 	))
 	markdown, err := conv.ConvertString(html)
 	if err != nil {

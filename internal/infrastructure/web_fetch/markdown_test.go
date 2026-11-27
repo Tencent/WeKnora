@@ -113,3 +113,12 @@ func TestMarkdownExtractionFixtures(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentMarkdownKeepsStrikethrough(t *testing.T) {
+	source := `<html><body><main><p>Price: <del>$49</del> $39 from today.</p>
+<table><tr><th>Plan</th></tr><tr><td>Pro</td></tr></table></main></body></html>`
+	content, err := htmlToMarkdown(source, "https://example.com/pricing")
+	require.NoError(t, err)
+	assert.Contains(t, content, "Price: ~~$49~~ $39 from today.")
+	assert.Contains(t, content, "| Plan")
+}
