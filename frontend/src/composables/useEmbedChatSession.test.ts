@@ -189,7 +189,7 @@ test('getUserQuery strips injected host context from the preceding user message'
     sessionSig: vue.ref('signature'),
     visitorId: vue.ref('visitor'),
     channelId: 'channel',
-    token: 'token',
+    token: vue.ref('token'),
     agentId: 'agent',
     kbIds: [],
   }))!

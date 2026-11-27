@@ -125,6 +125,14 @@
                           <t-icon name="jump" size="14px" />
                         </a>
                       </div>
+                      <a
+                        v-if="item.sourceUrl && !embeddedMode"
+                        :href="item.sourceUrl"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        @click.stop
+                        @keydown.stop
+                      >{{ t('knowledgeBase.urlSource') }}</a>
                       <p v-if="item.snippet && !expandedKeys.has(item.key)" class="reference-item__snippet">
                         {{ formatReferenceSnippet(item.snippet) }}
                       </p>

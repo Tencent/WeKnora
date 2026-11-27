@@ -1356,6 +1356,11 @@ func (s *sessionService) consumeFallbackStream(
 		}
 	}
 	if !streamCompleted {
+		if ctx.Err() != nil {
+			// Stopped by the user: what has streamed so far is the answer.
+			logger.Infof(ctx, "Fallback stream cancelled before completion")
+			return
+		}
 		logger.Warnf(ctx, "Fallback stream closed without completion, emitting final event with fixed response")
 		s.emitFallbackAnswer(ctx, chatManage, chatManage.FallbackResponse)
 	}
