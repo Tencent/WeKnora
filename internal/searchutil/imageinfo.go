@@ -209,6 +209,11 @@ func collectChildEvidence(
 		for _, info := range agg.byURL {
 			merged = append(merged, info)
 		}
+		// Map iteration order is random; sort so the merged JSON is
+		// byte-identical for the same set of images on every call.
+		sort.Slice(merged, func(i, j int) bool {
+			return imageInfoSortKey(merged[i]) < imageInfoSortKey(merged[j])
+		})
 		data, err := json.Marshal(merged)
 		if err != nil {
 			continue
@@ -331,6 +336,16 @@ func withPageQuotes(locators types.SourceLocators, pages map[int]string) types.S
 	return out
 }
 
+// imageInfoSortKey is the stable identity of an image entry: URL, falling
+// back to OriginalURL. Both merge sites sort by it before marshaling so the
+// output array order does not depend on Go map iteration order.
+func imageInfoSortKey(info types.ImageInfo) string {
+	if info.URL != "" {
+		return info.URL
+	}
+	return info.OriginalURL
+}
+
 // MergeImageInfoJSON combines per-chunk image_info JSON strings (from
 // CollectImageInfoByChunkIDs) into a single JSON array, deduplicating by URL.
 func MergeImageInfoJSON(perChunk map[string]string) string {
@@ -358,6 +373,11 @@ func MergeImageInfoJSON(perChunk map[string]string) string {
 	if len(all) == 0 {
 		return ""
 	}
+	// perChunk is a map, so append order is random; sort so the merged JSON
+	// is byte-identical for the same set of images on every call.
+	sort.Slice(all, func(i, j int) bool {
+		return imageInfoSortKey(all[i]) < imageInfoSortKey(all[j])
+	})
 	data, err := json.Marshal(all)
 	if err != nil {
 		return ""
