@@ -46,8 +46,10 @@ export function bucketHasMore(bucket: SidebarSessionBucket): boolean {
   return bucket.items.length < bucket.total
 }
 
-export function bucketVisible(bucket: SidebarSessionBucket): boolean {
+export function bucketVisible(bucket: SidebarSessionBucket, activeBucketKey?: string): boolean {
   if (!isChannelBucket(bucket)) return true
+  // Keep the selected source reachable after its last session is removed.
+  if (bucket.key === activeBucketKey) return true
   if (!bucket.countKnown) return false
   return bucket.total > 0
 }
