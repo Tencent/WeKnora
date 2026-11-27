@@ -70,3 +70,27 @@ func TestNativeTableNestedCellTextSkipsMediaSubtrees(t *testing.T) {
 		}
 	}
 }
+
+// Mentions and equations are elements of their own, not text runs. A cell
+// must keep them, as a paragraph does.
+func TestNativeTableCellKeepsMentionsAndEquations(t *testing.T) {
+	blocks := []DocxBlock{
+		tableBlk("table", 1, "cell"),
+		{BlockID: "cell", BlockType: BlockTypeTableCell, Children: []string{"text"}},
+		{BlockID: "text", BlockType: BlockTypeText, Text: &BlockText{Elements: []TextElement{
+			{TextRun: &TextRun{Content: "负责人 "}},
+			{MentionUser: &MentionUser{UserID: "ou_1"}},
+			{TextRun: &TextRun{Content: " 见 "}},
+			{MentionDoc: &MentionDoc{URL: "https://x.cn/doc"}},
+			{TextRun: &TextRun{Content: " 公式 "}},
+			{Equation: &Equation{Content: "E=mc^2"}},
+		}}},
+	}
+	md, _, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(md), "| 负责人 @成员 见 https://x.cn/doc 公式 $E=mc^2$ |") {
+		t.Fatalf("cell lost a mention or equation:\n%s", md)
+	}
+}
