@@ -19,6 +19,9 @@ const (
 	defaultTavilySearchURL = "https://api.tavily.com/search"
 )
 
+// tavilyMaxResults is the largest max_results value the Tavily search API accepts.
+const tavilyMaxResults = 20
+
 var (
 	defaultTavilyTimeout = 15 * time.Second
 )
@@ -62,7 +65,7 @@ func (p *TavilyProvider) Search(
 	}
 	logger.Infof(ctx, "[WebSearch][Tavily] query=%q maxResults=%d url=%s", query, maxResults, p.baseURL)
 
-	// Tavily accepts max_results up to 20; a zero or negative value would ask for nothing.
+	// Tavily accepts max_results up to 20; zero or negative asks for none.
 	if maxResults <= 0 {
 		maxResults = 5
 	}
@@ -125,9 +128,6 @@ func (p *TavilyProvider) Search(
 	logger.Infof(ctx, "[WebSearch][Tavily] returned %d results", len(results))
 	return results, nil
 }
-
-// tavilyMaxResults is the largest max_results value the Tavily search API accepts.
-const tavilyMaxResults = 20
 
 // tavilySearchRequest defines the request body for Tavily search API
 type tavilySearchRequest struct {

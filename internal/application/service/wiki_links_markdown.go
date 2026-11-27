@@ -14,37 +14,20 @@ import (
 var markdownWikiLinkRegex = regexp.MustCompile(`\[\[((?:\\.|[^\]\\\r\n])+)\]\]`)
 
 type markdownWikiLink struct {
-	start, end                        int
-	slug, rawSlug, display, separator string
+	start, end               int
+	slug, display, separator string
 }
 
-func (link markdownWikiLink) targetSlug(isLive func(string) bool) string {
-	// An exact link to a page created before slug normalization keeps its identity.
-	if link.rawSlug != link.slug && isLive != nil && isLive(link.rawSlug) {
-		return link.rawSlug
-	}
-	return link.slug
-}
-
-func (link markdownWikiLink) withSlug(slug string) string {
-	replacement := "[[" + slug
-	if link.display != "" {
-		replacement += link.separator + link.display
-	}
-	return replacement + "]]"
-}
-
-func wikiOutLinks(links []markdownWikiLink, isLive func(string) bool) types.StringArray {
+func wikiOutLinks(content string) types.StringArray {
 	seen := make(map[string]bool)
-	var slugs types.StringArray
-	for _, link := range links {
-		slug := link.targetSlug(isLive)
-		if !seen[slug] {
-			seen[slug] = true
-			slugs = append(slugs, slug)
+	var links types.StringArray
+	for _, link := range markdownWikiLinks(content) {
+		if !seen[link.slug] {
+			seen[link.slug] = true
+			links = append(links, link.slug)
 		}
 	}
-	return slugs
+	return links
 }
 
 func rewriteMarkdownWikiLinks(content string, replace func(markdownWikiLink) string) (string, bool) {
@@ -129,11 +112,10 @@ func markdownWikiLinks(content string) []markdownWikiLink {
 			}
 			rawSlug, display, separator = inner[:slugEnd], strings.TrimSpace(inner[pipe+1:]), inner[slugEnd:pipe+1]
 		}
-		rawSlug = strings.TrimSpace(string(util.UnescapePunctuations([]byte(rawSlug))))
-		slug := normalizeSlug(rawSlug)
+		slug := normalizeSlug(string(util.UnescapePunctuations([]byte(rawSlug))))
 		if slug != "" {
 			links = append(links, markdownWikiLink{
-				start: start, end: end, slug: slug, rawSlug: rawSlug, display: display, separator: separator,
+				start: start, end: end, slug: slug, display: display, separator: separator,
 			})
 		}
 	}

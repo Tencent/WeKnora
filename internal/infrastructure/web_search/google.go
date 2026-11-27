@@ -69,7 +69,7 @@ func (p *GoogleProvider) Search(
 	logger.Infof(ctx, "[WebSearch][Google] query=%q maxResults=%d engineID=%s", query, maxResults, p.engineID)
 	cseCall := p.srv.Cse.List().Context(ctx).Cx(p.engineID).Q(query)
 
-	// The Custom Search API accepts num between 1 and 10 and answers 400 otherwise.
+	// The Custom Search API accepts num from 1 to 10 and answers 400 otherwise.
 	if maxResults <= 0 {
 		maxResults = 5
 	}

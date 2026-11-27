@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/customsearch/v1"
 	"google.golang.org/api/option"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 type maxResultsTransport func(*http.Request) (*http.Response, error)
@@ -33,7 +35,7 @@ func TestGoogleSearchClampsNumToTheAPILimit(t *testing.T) {
 		require.NoError(t, err)
 		p := &GoogleProvider{srv: srv, apiKey: "k", engineID: "cx"}
 
-		_, err = p.Search(context.Background(), "query", tc.requested, false)
+		_, err = p.Search(context.Background(), types.WebSearchRequest{Query: "query", MaxResults: tc.requested})
 		require.NoError(t, err)
 		require.Equal(t, strconv.Itoa(tc.num), got, "requested %d", tc.requested)
 	}
@@ -51,7 +53,7 @@ func TestTavilySearchClampsMaxResultsToTheAPILimit(t *testing.T) {
 		})}
 		p := &TavilyProvider{apiKey: "k", client: client, baseURL: defaultTavilySearchURL}
 
-		_, err := p.Search(context.Background(), "query", tc.requested, false)
+		_, err := p.Search(context.Background(), types.WebSearchRequest{Query: "query", MaxResults: tc.requested})
 		require.NoError(t, err)
 		require.Equal(t, tc.sent, got.MaxResults, "requested %d", tc.requested)
 	}

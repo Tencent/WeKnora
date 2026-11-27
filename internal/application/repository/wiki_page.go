@@ -90,7 +90,12 @@ func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
 	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
 		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
 	}
-	return "(in_links IS NULL OR in_links IN ('[]'::JSONB, 'null'::JSONB))"
+	// in_links is a json column (gorm:"type:json") and PostgreSQL defines no
+	// equality operator for json — only for jsonb. Comparing the column against
+	// '[]'::JSONB therefore fails the query with SQLSTATE 42883, so cast the
+	// column. jsonb equality also ignores the whitespace an older or
+	// hand-written row may carry.
+	return "(in_links IS NULL OR in_links::jsonb IN ('[]'::JSONB, 'null'::JSONB))"
 }
 
 // Create inserts a page only while its knowledge base is active.
@@ -350,20 +355,7 @@ func (r *wikiPageRepository) DeleteRevisionsByPage(ctx context.Context, pageID s
 // pages appear as v2 on first view and confuse users who expect `version` to
 // correspond to the number of intentional revisions.
 func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *types.WikiPage) error {
-	db := r.db.WithContext(ctx)
-	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
-		return db.Transaction(func(tx *gorm.DB) error {
-			if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
-				return err
-			}
-			return updateWikiAutoLinkedContent(tx, page)
-		})
-	}
-	return updateWikiAutoLinkedContent(db, page)
-}
-
-func updateWikiAutoLinkedContent(db *gorm.DB, page *types.WikiPage) error {
-	result := db.
+	result := r.db.WithContext(ctx).
 		Model(page).
 		Where("id = ?", page.ID).
 		Updates(map[string]interface{}{

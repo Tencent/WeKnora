@@ -209,8 +209,9 @@ func ExampleUsage() {
 			// Update the first chunk
 			chunkID := chunks[0].ID
 			updateRequest := &UpdateChunkRequest{
-				Content:   "Updated chunk content - " + chunks[0].Content,
-				IsEnabled: true,
+				ExpectedRevision: &chunks[0].ContentRevision,
+				Content:          "Updated chunk content - " + chunks[0].Content,
+				IsEnabled:        true,
 			}
 
 			updatedChunk, err := apiClient.UpdateChunk(context.Background(), knowledgeID, chunkID, updateRequest)
