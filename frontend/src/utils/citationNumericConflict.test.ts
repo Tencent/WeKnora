@@ -59,3 +59,26 @@ test('skips ambiguous measurements and excerpts with no directly comparable pros
     source: '30 天',
   })
 })
+
+test('competing ranges and alternatives make an otherwise matching scalar inconclusive', () => {
+  const english = 'Log retention is 90 days.'
+  const chinese = '操作日志保留 90 天。'
+  const cases: Array<[string, string]> = [
+    [english, 'Log retention is 30 days. Log retention is 90 to 120 days.'],
+    [english, 'Log retention is between 90 and 120 days. Log retention is 30 days.'],
+    [english, 'Log retention is 30 days. Log retention is 90 days or 120 days for archived logs.'],
+    [english, 'Log retention is 30 days. Log retention: 90–120 days.'],
+    [chinese, '操作日志保留 30 天。操作日志保留 90–120 天。'],
+    [chinese, '操作日志保留30天。操作日志保留范围为90至120天。'],
+  ]
+  for (const [claim, excerpt] of cases) {
+    assert.equal(findCitationNumericConflict(claim, excerpt), null, excerpt)
+  }
+})
+
+test('a range for another metric leaves an unambiguous matching scalar comparable', () => {
+  assert.deepEqual(findCitationNumericConflict(
+    'Log retention is 90 days.',
+    'Log retention is 30 days. Backup retention is 90 to 120 days.',
+  ), { answer: '90 days', source: '30 days' })
+})

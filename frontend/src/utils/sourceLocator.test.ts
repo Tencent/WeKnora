@@ -12,7 +12,7 @@ import {
   textFragmentUrl,
 } from './sourceLocator.ts'
 import { anchorWithContext, lastSentence } from './citationAnchor.ts'
-import { resolveReferenceSource } from './referenceSources.ts'
+import { mergeDocumentReferences, resolveReferenceSource } from './referenceSources.ts'
 import { resolveEpubPath } from './epubPreview.ts'
 import { resolvePreviewKind } from './filePreview.ts'
 
@@ -111,7 +111,6 @@ test('resolveReferenceSource picks the cited chunk of a document reference', () 
 test('the reference drawer checks numbers only against the exact recorded chunk', () => {
   const refs = [{
     id: 'c1',
-    chunk_ids: ['c1', 'c2'],
     knowledge_id: 'k1',
     knowledge_title: 'Synthetic log policy',
     content: '操作日志保留 30 天。',
@@ -121,13 +120,49 @@ test('the reference drawer checks numbers only against the exact recorded chunk'
     answer: '90 天',
     source: '30 天',
   })
-  assert.equal(resolveReferenceSource(refs, { chunkId: 'c2', claimText })?.numericConflict, undefined)
   assert.equal(resolveReferenceSource(refs, {
     chunkId: 'c1', anchorText: claimText,
   })?.numericConflict, undefined, 'an alignment anchor can include text outside the cited claim')
   assert.equal(resolveReferenceSource(refs, {
     chunkId: 'c1', claimText: '备份日志保留 90 天。',
   })?.numericConflict, null)
+})
+
+test('the drawer keeps navigation for merged excerpts without treating them as exact evidence', () => {
+  const document = { knowledge_id: 'k1', knowledge_title: 'Synthetic log policy' }
+  const refs = mergeDocumentReferences([
+    { ...document, id: 'c1', content: 'The policy governs log storage.' },
+    { ...document, id: 'c2', content: 'Log retention is 30 days.' },
+  ])
+  const claimText = 'Log retention is 90 days.'
+  const target = resolveReferenceSource(refs, { chunkId: 'c1', claimText })
+  assert.equal(target?.knowledgeId, 'k1')
+  assert.equal(target?.content, 'The policy governs log storage.\n\nLog retention is 30 days.')
+  assert.equal(target?.numericConflict, undefined)
+  assert.equal(resolveReferenceSource(refs, { chunkId: 'c2', claimText })?.numericConflict, undefined)
+})
+
+test('context expanded from other chunks does not count as exact citation evidence', () => {
+  const refs = [{
+    id: 'c1',
+    sub_chunk_id: ['c1', 'c2'],
+    knowledge_id: 'k1',
+    content: 'The policy governs log storage. Log retention is 30 days.',
+  }]
+  const target = resolveReferenceSource(refs, { chunkId: 'c1', claimText: 'Log retention is 90 days.' })
+  assert.equal(target?.knowledgeId, 'k1')
+  assert.equal(target?.numericConflict, undefined)
+})
+
+test('merged text stays ineligible when results repeat the same chunk id', () => {
+  const base = { id: 'c1', knowledge_id: 'k1' }
+  const refs = mergeDocumentReferences([
+    { ...base, content: 'The policy governs log storage.' },
+    { ...base, content: 'Log retention is 30 days.' },
+  ])
+  const target = resolveReferenceSource(refs, { chunkId: 'c1', claimText: 'Log retention is 90 days.' })
+  assert.equal(target?.knowledgeId, 'k1')
+  assert.equal(target?.numericConflict, undefined)
 })
 
 test('EPUB paths resolve against their document and preview as epub', () => {
