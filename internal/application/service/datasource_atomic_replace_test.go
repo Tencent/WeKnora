@@ -41,6 +41,7 @@ func (s *atomicIngestService) ReplaceKnowledgeFromDataSource(
 
 func (s *atomicIngestService) CreateKnowledgeFromURL(
 	context.Context, string, string, string, string, *bool, string, []string, string, *types.KnowledgeProcessOverrides,
+	...types.KnowledgeCreationOptions,
 ) (*types.Knowledge, error) {
 	s.events = append(s.events, "create-url")
 	return nil, s.createErr

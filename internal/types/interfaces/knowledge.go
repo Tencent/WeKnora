@@ -44,6 +44,7 @@ type KnowledgeService interface {
 		tagIDs []string,
 		channel string,
 		processOverrides *types.KnowledgeProcessOverrides,
+		options ...types.KnowledgeCreationOptions,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
 	// channel identifies the ingestion channel; empty defaults to "web".
@@ -57,6 +58,7 @@ type KnowledgeService interface {
 		kbID string,
 		payload *types.ManualKnowledgePayload,
 		channel string,
+		options ...types.KnowledgeCreationOptions,
 	) (*types.Knowledge, error)
 	// GetKnowledgeByID retrieves knowledge by ID (uses tenant from context).
 	GetKnowledgeByID(ctx context.Context, id string) (*types.Knowledge, error)

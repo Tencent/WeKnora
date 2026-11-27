@@ -58,6 +58,7 @@ func (k *sweepFakeKS) GetRepository() interfaces.KnowledgeRepository { return k.
 func (k *sweepFakeKS) CreateKnowledgeFromURL(
 	_ context.Context, _ string, _ string, _ string, _ string, _ *bool,
 	_ string, _ []string, _ string, _ *types.KnowledgeProcessOverrides,
+	_ ...types.KnowledgeCreationOptions,
 ) (*types.Knowledge, error) {
 	return k.createURLKnowledge, nil
 }
