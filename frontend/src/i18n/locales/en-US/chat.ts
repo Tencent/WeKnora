@@ -475,6 +475,7 @@ export default {
     referenceSourceNext: 'Next citation location',
     referenceSourceFoundPage: 'Found on page {page}',
     referenceSourceNotFound: 'Could not pinpoint the cited passage; the original is open',
+    referenceSourceNumericConflict: 'The answer says {answer}. The cited passage says {source}.',
     referenceSourceOpenWeb: 'Open the web page at this passage',
     chunkIdLabel: 'Chunk ID:',
     documentIdLabel: 'Document ID:',

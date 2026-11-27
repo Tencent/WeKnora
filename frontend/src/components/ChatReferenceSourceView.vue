@@ -8,6 +8,9 @@
           <t-icon name="folder" size="14px" />{{ kbName }}
         </p>
         <p v-if="statusText" class="reference-source__status" :class="`is-${status}`">{{ statusText }}</p>
+        <p v-if="target.numericConflict" class="reference-source__status is-numeric-conflict" role="status">
+          {{ t('chat.referenceSourceNumericConflict', target.numericConflict) }}
+        </p>
       </div>
       <div ref="toolbarSlot" class="reference-source__toolbar" />
       <t-button
@@ -416,7 +419,8 @@ watch(
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
 
-  &.is-missing {
+  &.is-missing,
+  &.is-numeric-conflict {
     color: var(--td-warning-color);
   }
 }

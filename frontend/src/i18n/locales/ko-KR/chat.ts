@@ -252,6 +252,7 @@ export default {
     referenceSourceNext: '다음 인용 위치',
     referenceSourceFoundPage: '{page}페이지에서 찾았습니다',
     referenceSourceNotFound: '인용 위치를 정확히 찾지 못해 원문을 열었습니다',
+    referenceSourceNumericConflict: '답변에는 {answer}, 인용한 구절에는 {source}가 표시되어 있습니다.',
     referenceSourceOpenWeb: '원본 웹페이지에서 해당 위치 열기',
     chunkIdLabel: '청크 ID:',
     documentIdLabel: '문서 ID:',

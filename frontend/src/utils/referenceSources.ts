@@ -1,4 +1,5 @@
 import { documentSourceUrl } from './documentSourceUrl'
+import { findCitationNumericConflict, type CitationNumericConflict } from './citationNumericConflict'
 import type { SourceLocator } from './sourceLocator'
 
 export type ReferenceItemKind = 'web' | 'document' | 'tool'
@@ -341,6 +342,8 @@ export type ReferenceHighlightTarget = {
   key?: string
   /** The answer sentence the citation supports. */
   anchorText?: string
+  /** Direct answer text, present only for an exact citation marker. */
+  claimText?: string
   /** Open the cited document at the cited place instead of the list. */
   openSource?: boolean
 }
@@ -359,6 +362,7 @@ export type ReferenceSourceTarget = {
   content?: string
   locators?: SourceLocator[]
   anchorText?: string
+  numericConflict?: CitationNumericConflict | null
 }
 
 /**
@@ -393,6 +397,9 @@ export function resolveReferenceSource(
     content: exact ? exact.content : undefined,
     locators: exact ? exact.source_locators : undefined,
     anchorText: target?.anchorText,
+    numericConflict: exact?.content && target?.claimText
+      ? findCitationNumericConflict(target.claimText, exact.content)
+      : undefined,
   }
 }
 

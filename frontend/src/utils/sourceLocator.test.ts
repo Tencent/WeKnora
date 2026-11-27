@@ -108,6 +108,28 @@ test('resolveReferenceSource picks the cited chunk of a document reference', () 
   assert.equal(resolveReferenceSource(refs, { url: 'https://x' }), null)
 })
 
+test('the reference drawer checks numbers only against the exact recorded chunk', () => {
+  const refs = [{
+    id: 'c1',
+    chunk_ids: ['c1', 'c2'],
+    knowledge_id: 'k1',
+    knowledge_title: 'Synthetic log policy',
+    content: '操作日志保留 30 天。',
+  }]
+  const claimText = '操作日志保留 90 天。'
+  assert.deepEqual(resolveReferenceSource(refs, { chunkId: 'c1', claimText })?.numericConflict, {
+    answer: '90 天',
+    source: '30 天',
+  })
+  assert.equal(resolveReferenceSource(refs, { chunkId: 'c2', claimText })?.numericConflict, undefined)
+  assert.equal(resolveReferenceSource(refs, {
+    chunkId: 'c1', anchorText: claimText,
+  })?.numericConflict, undefined, 'an alignment anchor can include text outside the cited claim')
+  assert.equal(resolveReferenceSource(refs, {
+    chunkId: 'c1', claimText: '备份日志保留 90 天。',
+  })?.numericConflict, null)
+})
+
 test('EPUB paths resolve against their document and preview as epub', () => {
   assert.equal(resolveEpubPath('OEBPS/text/ch1.xhtml', '../images/a%20b.png#x'), 'OEBPS/images/a b.png')
   assert.equal(resolveEpubPath('OEBPS/content.opf', 'ch1.xhtml'), 'OEBPS/ch1.xhtml')

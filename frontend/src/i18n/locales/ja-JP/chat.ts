@@ -475,6 +475,7 @@ export default {
     referenceSourceNext: '次の引用箇所',
     referenceSourceFoundPage: '{page} ページで見つかりました',
     referenceSourceNotFound: '引用箇所を特定できなかったため、原文を開きました',
+    referenceSourceNumericConflict: '回答では {answer}、引用箇所では {source} と記載されています。',
     referenceSourceOpenWeb: '元の Web ページで該当箇所を開く',
     chunkIdLabel: 'チャンクID:',
     documentIdLabel: 'ドキュメントID:',

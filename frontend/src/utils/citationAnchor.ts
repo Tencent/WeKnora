@@ -67,10 +67,10 @@ function previousBlockTexts(block: Element): string[] {
   return out
 }
 
-export function citationAnchorText(marker: Element): string {
+export function citationPassage(marker: Element, chunkId: string): { anchorText: string; claimText?: string } {
   try {
     const block = marker.closest(BLOCK_SELECTOR) || marker.parentElement
-    if (!block) return ''
+    if (!block) return { anchorText: '' }
     const range = marker.ownerDocument.createRange()
     range.setStart(block, 0)
     // A citation covers the preceding passage since the previous citation,
@@ -87,11 +87,18 @@ export function citationAnchorText(marker: Element): string {
         break
       }
     }
-    const own = textWithoutCitations(range.cloneContents())
+    const fragment = range.cloneContents()
+    const own = textWithoutCitations(fragment)
     const enough = letterCount(lastSentence(own)) >= MIN_SENTENCE
-    return enough ? own.replace(/\s+/g, ' ').trim().slice(-300) : anchorWithContext(own, previousBlockTexts(block))
+    const anchorText = enough ? own.replace(/\s+/g, ' ').trim().slice(-300) : anchorWithContext(own, previousBlockTexts(block))
+    // Location may borrow surrounding text; numeric checks need a direct prose claim.
+    const direct = marker.getAttribute('data-citation-source-exact') === 'true' &&
+      marker.getAttribute('data-chunk-id') === chunkId &&
+      block.matches('p, li') && !marker.closest('pre, code, blockquote, table') &&
+      !fragment.querySelector('br, p, li, pre, code, blockquote, table')
+    return { anchorText, claimText: direct ? own.trim() : undefined }
   } catch {
     // Alignment only narrows the highlight; without a sentence the whole chunk is shown.
-    return ''
+    return { anchorText: '' }
   }
 }
