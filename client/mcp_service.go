@@ -58,6 +58,9 @@ type MCPAuthConfig struct {
 	ClientID              string   `json:"client_id,omitempty"`
 	ClientSecret          string   `json:"client_secret,omitempty"`
 
+	// APIKeyHeader selects the non-secret header name for api_key authentication.
+	// Empty uses the server's default X-API-Key header.
+	APIKeyHeader  string            `json:"api_key_header,omitempty"`
 	APIKey        string            `json:"api_key,omitempty"`
 	Token         string            `json:"token,omitempty"`
 	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
