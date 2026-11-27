@@ -34,10 +34,14 @@ const ossScheme = "oss://"
 
 // newOSSClient creates an OSS client using the official Aliyun SDK v2.
 func newOSSClient(endpoint, region, accessKey, secretKey string) (*oss.Client, error) {
+	return newOSSClientWithCredentials(
+		endpoint, region, credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""))
+}
+
+func newOSSClientWithCredentials(endpoint, region string, creds credentials.CredentialsProvider) (*oss.Client, error) {
 	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
 		return nil, fmt.Errorf("unsafe OSS endpoint: %w", err)
 	}
-	creds := credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")
 
 	cfg := oss.LoadDefaultConfig().
 		WithCredentialsProvider(creds).
@@ -83,7 +87,15 @@ func NewOssFileService(endpoint, region, accessKey, secretKey, bucketName, pathP
 
 // NewOssFileServiceWithTempBucket creates an Aliyun OSS file service with optional temp bucket.
 func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, tempBucketName, tempRegion string) (interfaces.FileService, error) {
-	client, err := newOSSClient(endpoint, region, accessKey, secretKey)
+	return newOssFileServiceWithCredentials(endpoint, region, bucketName, pathPrefix, tempBucketName, tempRegion,
+		credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""))
+}
+
+func newOssFileServiceWithCredentials(
+	endpoint, region, bucketName, pathPrefix, tempBucketName, tempRegion string,
+	creds credentials.CredentialsProvider,
+) (interfaces.FileService, error) {
+	client, err := newOSSClientWithCredentials(endpoint, region, creds)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +109,7 @@ func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, buc
 		if tempRegion == "" {
 			tempRegion = region
 		}
-		tempClient, err = newOSSClient(endpoint, tempRegion, accessKey, secretKey)
+		tempClient, err = newOSSClientWithCredentials(endpoint, tempRegion, creds)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize OSS temp client: %w", err)
 		}
@@ -122,7 +134,14 @@ func NewOssFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, buc
 
 // CheckOssConnectivity tests OSS connectivity using the provided credentials.
 func CheckOssConnectivity(ctx context.Context, endpoint, region, accessKey, secretKey, bucketName string) error {
-	client, err := newOSSClient(endpoint, region, accessKey, secretKey)
+	return checkOSSConnectivityWithCredentials(
+		ctx, endpoint, region, bucketName, credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""))
+}
+
+func checkOSSConnectivityWithCredentials(
+	ctx context.Context, endpoint, region, bucketName string, creds credentials.CredentialsProvider,
+) error {
+	client, err := newOSSClientWithCredentials(endpoint, region, creds)
 	if err != nil {
 		return err
 	}

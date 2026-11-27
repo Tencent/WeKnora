@@ -176,3 +176,18 @@ func NewFileServiceFromStorageConfig(
 		return nil, p, fmt.Errorf("unsupported provider %q", p)
 	}
 }
+
+// NewFileServiceFromStorageBackend keeps deployment role credentials out of the
+// tenant-config path. Source is set by the server, not accepted from API input.
+func NewFileServiceFromStorageBackend(
+	backend *types.StorageBackend, localBaseDir string,
+) (interfaces.FileService, string, error) {
+	if backend == nil {
+		return nil, "", fmt.Errorf("missing storage backend")
+	}
+	if backend.Source == types.StorageBackendSourceEnv && backend.Provider == "oss" {
+		svc, err := NewEnvironmentOssFileService(backend.ToStorageEngineConfig().OSS)
+		return svc, backend.Provider, err
+	}
+	return NewFileServiceFromStorageConfig(backend.Provider, backend.ToStorageEngineConfig(), localBaseDir)
+}
