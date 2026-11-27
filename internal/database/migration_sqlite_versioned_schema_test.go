@@ -122,6 +122,8 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 		"SQLite migrations must add the session/created_at index") // 000106
 	require.True(t, sqliteIndexExists(t, db, "idx_messages_live_attachments"),
 		"SQLite migrations must index live user message references")
+	require.True(t, sqliteTableExists(t, db, "model_token_usages"))
+	require.True(t, sqliteIndexExists(t, db, "idx_model_token_usages_tenant_date"))
 	assertSQLiteAgentHistoryQueriesUseTheIndex(t, db)
 
 	var catalogVersion int

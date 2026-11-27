@@ -277,6 +277,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewChunkService))
 	must(container.Provide(service.NewKnowledgeTagService))
 	must(container.Provide(embedding.NewBatchEmbedder))
+	must(container.Provide(repository.NewModelTokenUsageRepository))
 	must(container.Provide(service.NewModelService))
 	must(container.Provide(service.NewDatasetService))
 	must(container.Provide(service.NewEvaluationService))
@@ -699,6 +700,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMessageHandler))
 	must(container.Provide(handler.NewMessageSuggestionHandler))
 	must(container.Provide(handler.NewModelHandler))
+	must(container.Provide(handler.NewModelTokenUsageHandler))
 	must(container.Provide(handler.NewSandboxConfigHandler))
 	must(container.Provide(func(
 		s *service.TenantSkillService, streams interfaces.StreamManager,
