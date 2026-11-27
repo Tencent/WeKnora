@@ -807,6 +807,11 @@ interface KB {
   creator_id?: string;
   // creator_name 由后端 list 接口回填，仅用于卡片右下角来源徽章的 tooltip。
   creator_name?: string;
+  permission?: {
+    read?: boolean;
+    write?: boolean;
+    manage?: boolean;
+  };
 }
 
 const flatKnowledgeBaseSortAccessors: ResourceSortAccessors<any> = {
@@ -982,8 +987,8 @@ const kbRecentsCount = computed(() => recentsList.value.length)
 // 即便我在本空间是 owner 也确实改不动那个 KB；反过来跨空间拿到 editor 的，
 // 哪怕我在本空间是 contributor 也确实能改。
 const EDITABLE_PERMS = new Set(['admin', 'editor'])
-function isSharedKbEditable(perm: string | undefined): boolean {
-  return !!perm && EDITABLE_PERMS.has(perm)
+function isSharedKbEditable(perm: unknown): boolean {
+  return typeof perm === 'string' && EDITABLE_PERMS.has(perm)
 }
 
 // 同空间、非当前用户创建的 KB 分组标题。
@@ -1029,12 +1034,12 @@ const toggleKbSection = (key: KbSectionKey) => {
 // 输入有两种形态：
 //   1. filteredKnowledgeBases 的元素，会显式带 `isMine` 标志（见
 //      filteredKnowledgeBases 里的 spread；跨空间 shared 拆给 isMine=false）。
-//   2. sortedMineKbs 的元素就是原始 KB，无 isMine、也无 permission 字段。
-// 跨空间共享条目一定带 `permission`，本空间条目永远没有，所以"无 permission"
-// 是本空间的安全标识。综合：先看 isMine，再回退到 permission 是否存在。
+//   2. sortedMineKbs 的元素就是原始 KB，无 isMine。
+// 跨空间共享条目的 permission 是字符串角色（viewer/editor/admin）。
+// 本空间列表现在也会带 {read,write,manage} 对象，不能再用「有 permission」当共享标识。
 const kbSectionOf = (kb: any): KbSectionKey => {
   if (kb?.is_pinned) return 'pinned'
-  const isOwnTenant = kb?.isMine === true || (kb?.isMine !== false && kb?.permission == null)
+  const isOwnTenant = kb?.isMine === true || (kb?.isMine !== false && typeof kb?.permission !== 'string')
   if (isOwnTenant) return isMyKb(kb) ? 'mine' : 'tenantOthers'
   return isSharedKbEditable(kb?.permission) ? 'sharedEditable' : 'sharedReadonly'
 }

@@ -83,13 +83,14 @@ var versionedSQLiteColumns = map[string][]string{
 	"tenant_skills": {
 		"envs", "served", "catalog_id", "install_session_id", "install_message_id",
 	}, // 000028
-	"tenant_skill_snapshots": {"planned_name"}, // 000028
+	"tenant_skill_snapshots": {"planned_name"},               // 000028
+	"tenant_api_keys":        {"knowledge_base_permissions"}, // 000138 / sqlite 000054
 	"tenant_user_env_vars": {
 		"principal_type", "principal_id", "sandbox_config_id", "skill_id", "name", "value",
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 53
+const expectedSQLiteMigrationVersion = 54
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

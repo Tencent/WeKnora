@@ -180,6 +180,8 @@ type guardOpts struct {
 	agentID             string                  // ?agent_id query param
 	agentSourceTenantID string                  // ?agent_source_tenant_id query param
 	agentShare          *stubAgentShareForGuard // nil means "no agent-share service"
+	apiKeyScope         *types.TenantAPIKeyScope
+	routePolicy         *APIKeyRoutePolicy
 }
 
 // runGuard fires a single request through the guard and returns the
@@ -214,7 +216,13 @@ func runGuard(
 	}
 	req := httptest.NewRequest("GET", url, nil)
 	ctx := context.WithValue(req.Context(), types.TenantIDContextKey, tenantID)
+	if opts.apiKeyScope != nil {
+		ctx = types.WithTenantAPIKeyScope(ctx, *opts.apiKeyScope)
+	}
 	c.Request = req.WithContext(ctx)
+	if opts.routePolicy != nil {
+		c.Set(APIKeyRoutePolicyContextKey, *opts.routePolicy)
+	}
 
 	kbsvc := &stubKBLookup{kbs: map[string]*types.KnowledgeBase{}}
 	if kb != nil {
@@ -263,6 +271,64 @@ func TestRequireKBAccess_OwnKB(t *testing.T) {
 	got, ok := types.TenantIDFromContext(c.Request.Context())
 	require.True(t, ok)
 	require.Equal(t, uint64(100), got)
+}
+
+func TestRequireKBAccess_APIKeyOwnKB_IngestOverlayForbidden(t *testing.T) {
+	scope := types.TenantAPIKeyScope{
+		KnowledgeBaseIDs: types.StringArray{"kb-1"},
+		Capabilities:     types.StringArray{"retrieve", "ingest"},
+		KnowledgeBasePermissions: types.KnowledgeBasePermissionMap{
+			"kb-1": types.StringArray{"retrieve"},
+		},
+	}
+	_, c := runGuard(t, 100, "kb-1",
+		types.OrgRoleEditor,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 100},
+		nil,
+		guardOpts{apiKeyScope: &scope},
+	)
+	require.True(t, c.IsAborted(), "own KB must not skip a retrieve-only overlay on write routes")
+}
+
+func TestRequireKBAccess_APIKeyOwnKB_EmptyOverlayInheritsIngest(t *testing.T) {
+	scope := types.TenantAPIKeyScope{
+		KnowledgeBaseIDs: types.StringArray{"kb-1"},
+		Capabilities:     types.StringArray{"retrieve", "ingest"},
+	}
+	_, c := runGuard(t, 100, "kb-1",
+		types.OrgRoleEditor,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 100},
+		nil,
+		guardOpts{apiKeyScope: &scope},
+	)
+	require.False(t, c.IsAborted(), "empty overlay should inherit ingest")
+}
+
+func TestRequireKBAccess_APIKeyOwnKB_ManageWithoutIngest(t *testing.T) {
+	scope := types.TenantAPIKeyScope{
+		KnowledgeBaseIDs: types.StringArray{"kb-1"},
+		Capabilities:     types.StringArray{"retrieve", "ingest", "manage_kbs"},
+		KnowledgeBasePermissions: types.KnowledgeBasePermissionMap{
+			"kb-1": types.StringArray{"retrieve", "manage_kbs"},
+		},
+	}
+	ingestPolicy := APIKeyRoutePolicy{}.WithCapability(types.APIKeyCapabilityIngest)
+	_, write := runGuard(t, 100, "kb-1",
+		types.OrgRoleEditor,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 100},
+		nil,
+		guardOpts{apiKeyScope: &scope, routePolicy: &ingestPolicy},
+	)
+	require.True(t, write.IsAborted(), "ingest route must fail when the overlay dropped ingest")
+
+	managePolicy := APIKeyRoutePolicy{}.WithCapability(types.APIKeyCapabilityManageKnowledgeBases)
+	_, manage := runGuard(t, 100, "kb-1",
+		types.OrgRoleEditor,
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 100},
+		nil,
+		guardOpts{apiKeyScope: &scope, routePolicy: &managePolicy},
+	)
+	require.False(t, manage.IsAborted(), "manage_kbs route should pass a manage overlay")
 }
 
 // TestIsResourceNotFound_RecognisesKnowledgeSentinel pins that a missing

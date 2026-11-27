@@ -5197,6 +5197,12 @@ definitions:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig'
         description: Wiki configuration (only for wiki-enabled knowledge bases)
     type: object
+  github_com_Tencent_WeKnora_internal_types.KnowledgeBasePermissionMap:
+    additionalProperties:
+      items:
+        type: string
+      type: array
+    type: object
   github_com_Tencent_WeKnora_internal_types.KnowledgeBaseProfile:
     properties:
       aggregate_hash:
@@ -14521,6 +14527,8 @@ definitions:
         items:
           type: string
         type: array
+      knowledge_base_permissions:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBasePermissionMap'
       last_used_at:
         type: string
       name:
@@ -14550,6 +14558,8 @@ definitions:
         items:
           type: string
         type: array
+      knowledge_base_permissions:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBasePermissionMap'
       last_used_at:
         type: string
       name:
