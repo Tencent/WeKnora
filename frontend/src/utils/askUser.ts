@@ -45,7 +45,11 @@ export function buildAskUserResponse(q: AskUserQuestion, draft: AskUserDraft): R
 /** Whether a response answers the question well enough to send. */
 export function canSubmitAskUser(q: AskUserQuestion, response: Record<string, unknown>): boolean {
   const values = (response.values || {}) as Record<string, unknown>
-  if (q.fields?.some((f) => f.required && isEmpty(values[f.name]))) return false
+  if (q.fields?.some((field) => {
+    const value = values[field.name]
+    if (isEmpty(value)) return field.required
+    return field.type === 'number' && (typeof value !== 'number' || !Number.isFinite(value))
+  })) return false
   if (q.options?.length) return Boolean((response.selected as string[] | undefined)?.length || response.text)
   if (q.fields?.length) return true
   return Boolean(response.text)

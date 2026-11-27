@@ -39,3 +39,12 @@ test('a free-text question needs text', () => {
   assert.equal(canSubmitAskUser(q, buildAskUserResponse(q, { selected: [], values: {}, text: '  ' })), false)
   assert.deepEqual(buildAskUserResponse(q, { selected: [], values: {}, text: ' because ' }), { text: 'because' })
 })
+
+test('numeric form answers must be finite numbers before sending', () => {
+  const q: AskUserQuestion = { question: 'Budget?', fields: [{ name: 'budget', type: 'number', required: true }] }
+  for (const invalid of [Number.NaN, Number.POSITIVE_INFINITY, '200']) {
+    assert.equal(canSubmitAskUser(q, { values: { budget: invalid } }), false)
+  }
+  assert.equal(canSubmitAskUser(q, { values: { budget: 0 } }), true)
+  assert.equal(canSubmitAskUser(q, { values: { budget: 12.5 } }), true)
+})
