@@ -72,6 +72,8 @@
               :embed-token="token"
               :embed-session-sig="sessionSig"
               :embed-visitor-id="visitorId"
+              :show-tool-steps="showToolSteps"
+              :show-sources="showSources"
             />
             <FollowUpSuggestions v-if="!session.suggestionsDismissed"
               :suggestion-set="session.suggestionSet as any"
@@ -162,6 +164,8 @@ const props = defineProps<{
   kbIds: string[]
   welcomeMessage?: string
   showSuggestedQuestions?: boolean
+  showToolSteps?: boolean
+  showSources?: boolean
   allowWebSearch?: boolean
   agentWebSearchEnabled?: boolean
   allowFileUpload?: boolean

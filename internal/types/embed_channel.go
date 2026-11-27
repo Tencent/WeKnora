@@ -25,6 +25,8 @@ type EmbedChannel struct {
 	PageTitle              string         `json:"page_title"           gorm:"type:varchar(255);not null;default:''"`
 	HeaderTitleMode        string         `json:"header_title_mode"         gorm:"type:varchar(32);not null;default:'channel'"`
 	ShowSuggestedQuestions bool           `json:"show_suggested_questions"  gorm:"not null;default:true"`
+	ShowToolSteps          bool           `json:"show_tool_steps"           gorm:"not null;default:true"`
+	ShowSources            bool           `json:"show_sources"               gorm:"not null;default:true"`
 	WidgetPosition         string         `json:"widget_position"           gorm:"type:varchar(32);not null;default:'bottom-right'"`
 	AllowWebSearch         bool           `json:"allow_web_search"          gorm:"not null;default:false"`
 	AllowFileUpload        bool           `json:"allow_file_upload"         gorm:"not null;default:false"`
@@ -115,6 +117,8 @@ type EmbedChannelPublicConfig struct {
 	PageTitle              string   `json:"page_title,omitempty"`
 	HeaderTitleMode        string   `json:"header_title_mode,omitempty"`
 	ShowSuggestedQuestions bool     `json:"show_suggested_questions"`
+	ShowToolSteps          bool     `json:"show_tool_steps"`
+	ShowSources            bool     `json:"show_sources"`
 	AllowedOrigins         []string `json:"allowed_origins,omitempty"`
 	WidgetPosition         string   `json:"widget_position,omitempty"`
 	AllowWebSearch         bool     `json:"allow_web_search"`

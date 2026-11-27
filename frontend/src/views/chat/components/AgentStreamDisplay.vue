@@ -1235,6 +1235,7 @@ const props = defineProps<{
   embedSessionSig?: string;
   embedVisitorId?: string;
   ragMode?: boolean;
+  hideSteps?: boolean;
   followUpLoading?: boolean;
   canFork?: boolean;
   canRewind?: boolean;
@@ -2126,6 +2127,7 @@ const intermediateStepsSummaryHtml = computed(() => {
 // intermediate progress is handled by RagPipelineProgress and disappears once
 // references or the answer arrive.
 const shouldShowCollapsedSteps = computed(() => {
+  if (props.hideSteps) return false
   if (props.ragMode) return false
   const hasSteps = intermediateStepsCount.value > 0;
   return hasSteps && timelineCompleted.value;

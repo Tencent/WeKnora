@@ -81,16 +81,19 @@ func (s *sessionEmbedSvc) ListByTenant(context.Context, uint64) ([]*types.EmbedC
 	return nil, nil
 }
 
-func (s *sessionEmbedSvc) Update(context.Context, uint64, string, *types.EmbedChannel, *bool, *bool, *bool, *bool, *string, *string, *string) (*types.EmbedChannel, error) {
+func (s *sessionEmbedSvc) Update(
+	context.Context, uint64, string, *types.EmbedChannel,
+	*bool, *bool, *bool, *bool, *string, *string, *string, *bool, *bool,
+) (*types.EmbedChannel, error) {
 	return nil, nil
-}
-
-func (s *sessionEmbedSvc) GetOwnedChannel(context.Context, uint64, string) (*types.EmbedChannel, error) {
-	return nil, service.ErrEmbedChannelNotFound
 }
 func (s *sessionEmbedSvc) Delete(context.Context, uint64, string) error { return nil }
 func (s *sessionEmbedSvc) RotateToken(context.Context, uint64, string) (*types.EmbedChannel, string, error) {
 	return nil, "", nil
+}
+
+func (s *sessionEmbedSvc) GetOwnedChannel(context.Context, uint64, string) (*types.EmbedChannel, error) {
+	return nil, service.ErrEmbedChannelNotFound
 }
 
 func (s *sessionEmbedSvc) LookupForEmbed(context.Context, string, string) (*types.EmbedChannel, error) {

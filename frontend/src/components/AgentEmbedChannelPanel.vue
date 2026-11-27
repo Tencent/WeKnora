@@ -176,6 +176,26 @@
 
             <div class="setting-row">
               <div class="setting-info">
+                <label>{{ $t('embedPublish.showToolSteps') }}</label>
+                <p class="desc">{{ $t('embedPublish.showToolStepsDesc') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-switch v-model="form.show_tool_steps" :disabled="!isAdmin" size="small" />
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('embedPublish.showSources') }}</label>
+                <p class="desc">{{ $t('embedPublish.showSourcesDesc') }}</p>
+              </div>
+              <div class="setting-control">
+                <t-switch v-model="form.show_sources" :disabled="!isAdmin" size="small" />
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-info">
                 <label>{{ $t('embedPublish.allowWebSearch') }}</label>
                 <p class="desc">{{ $t('embedPublish.allowWebSearchDesc') }}</p>
                 <p v-if="form.allow_web_search && !agentWebSearchEnabledEffective" class="desc desc--warn">
@@ -510,6 +530,8 @@ const defaultForm = () => ({
   page_title: '',
   header_title_mode: 'channel' as HeaderTitleMode,
   show_suggested_questions: true,
+  show_tool_steps: true,
+  show_sources: true,
   widget_position: 'bottom-right' as WidgetPosition,
   allow_web_search: false,
   allow_file_upload: false,
@@ -826,6 +848,8 @@ const fillFormFromChannel = (ch: EmbedChannel) => {
     page_title: ch.page_title || '',
     header_title_mode: (ch.header_title_mode as HeaderTitleMode) || 'channel',
     show_suggested_questions: ch.show_suggested_questions !== false,
+    show_tool_steps: ch.show_tool_steps !== false,
+    show_sources: ch.show_sources !== false,
     widget_position: (ch.widget_position as WidgetPosition) || 'bottom-right',
     allow_web_search: ch.allow_web_search === true,
     allow_file_upload: ch.allow_file_upload === true,
@@ -921,6 +945,8 @@ const saveForm = async () => {
       page_title: form.value.page_title,
       header_title_mode: form.value.header_title_mode,
       show_suggested_questions: form.value.show_suggested_questions,
+      show_tool_steps: form.value.show_tool_steps,
+      show_sources: form.value.show_sources,
       widget_position: form.value.widget_position,
       allow_web_search: form.value.allow_web_search,
       allow_file_upload: form.value.allow_file_upload,
@@ -1083,6 +1109,8 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
     page_title: ch.page_title,
     header_title_mode: ch.header_title_mode || 'channel',
     show_suggested_questions: ch.show_suggested_questions !== false,
+    show_tool_steps: ch.show_tool_steps !== false,
+    show_sources: ch.show_sources !== false,
     widget_position: ch.widget_position,
     enabled,
   })
