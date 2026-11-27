@@ -132,6 +132,9 @@ type thinkingPlan struct {
 
 func (c *Client) planThinking(opts *api.Options) thinkingPlan {
 	s := c.cfg.Settings
+	if s.ThinkingMode == api.AnthropicThinkingNone {
+		return thinkingPlan{}
+	}
 	levels := c.cfg.ThinkingLevels
 	level, requested := opts.Reasoning()
 	if !requested {

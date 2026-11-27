@@ -382,7 +382,8 @@ export default {
         endpoint: '요청 엔드포인트',
         thinkingFormat: '사고 전환 전달 방식',
         thinkingLevels: '선택 가능한 사고 강도',
-        noThinking: '이 모델은 사고를 지원하지 않습니다'
+        noThinking: '이 모델은 사고를 지원하지 않습니다',
+        defaultThinking: '모델의 기본 추론 설정을 사용합니다'
       },
       advanced: {
         toggle: '고급',

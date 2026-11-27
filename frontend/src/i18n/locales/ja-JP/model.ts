@@ -214,7 +214,8 @@ export default {
         endpoint: 'リクエスト先',
         thinkingFormat: '思考切替の送り方',
         thinkingLevels: '選択できる思考強度',
-        noThinking: 'このモデルは思考できません'
+        noThinking: 'このモデルは思考できません',
+        defaultThinking: 'モデルの既定の推論設定を使用します'
       },
       advanced: {
         toggle: '詳細設定',

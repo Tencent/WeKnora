@@ -194,6 +194,9 @@ func DefaultOpenAIResponses() OpenAIResponsesSettings {
 type AnthropicThinkingMode string
 
 const (
+	// AnthropicThinkingNone leaves thinking controls to the model's default.
+	// It makes no claim that the model cannot emit reasoning.
+	AnthropicThinkingNone AnthropicThinkingMode = "none"
 	// AnthropicThinkingBudget sends {"type":"enabled","budget_tokens":N}.
 	AnthropicThinkingBudget AnthropicThinkingMode = "budget"
 	// AnthropicThinkingAdaptive sends {"type":"adaptive"} and steers the

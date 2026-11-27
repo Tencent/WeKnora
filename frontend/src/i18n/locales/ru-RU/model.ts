@@ -382,7 +382,8 @@ export default {
         endpoint: 'Адрес запроса',
         thinkingFormat: 'Переключатель размышлений',
         thinkingLevels: 'Доступная интенсивность',
-        noThinking: 'Модель не умеет размышлять'
+        noThinking: 'Модель не умеет размышлять',
+        defaultThinking: 'Используются настройки рассуждений модели по умолчанию'
       },
       advanced: {
         toggle: 'Дополнительно',

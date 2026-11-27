@@ -43,6 +43,18 @@ func bodyJSON(t *testing.T, c *Client, msgs []api.Message, opts *api.Options, st
 	return out
 }
 
+func TestUnconfiguredThinkingControlsStayAbsent(t *testing.T) {
+	c := newClient(t, "https://example.test/v1", func(cfg *Config) {
+		cfg.Settings.ThinkingMode = api.AnthropicThinkingNone
+	})
+	body := bodyJSON(t, c, []api.Message{{Role: "user", Content: "hello"}}, &api.Options{
+		ReasoningEffort: api.ReasoningHigh, MaxTokens: 12,
+	}, false)
+	assert.NotContains(t, body, "thinking")
+	assert.NotContains(t, body, "output_config")
+	assert.Equal(t, float64(12), body["max_tokens"])
+}
+
 func TestBuildRequestBody_BudgetThinkingAndTools(t *testing.T) {
 	c := newClient(t, "https://api.anthropic.com/v1", nil)
 	msgs := []api.Message{

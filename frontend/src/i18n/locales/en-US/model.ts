@@ -214,7 +214,8 @@ export default {
         endpoint: 'Request endpoint',
         thinkingFormat: 'Thinking switch sent as',
         thinkingLevels: 'Selectable effort',
-        noThinking: 'This model cannot think'
+        noThinking: 'This model cannot think',
+        defaultThinking: 'Uses the model’s default reasoning settings'
       },
       advanced: {
         toggle: 'Advanced',

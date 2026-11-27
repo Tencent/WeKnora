@@ -17,12 +17,50 @@ import (
 
 // expectedIDs is every built-in vendor this package links.
 var expectedIDs = []string{
-	"generic", "weknoracloud", "huggingface_tei",
+	"generic", "weknoracloud", "huggingface_tei", "acedatacloud",
 	"aliyun", "zhipu", "volcengine", "hunyuan", "siliconflow", "deepseek",
 	"minimax", "moonshot", "mimo", "modelscope", "qianfan", "qiniu", "longcat", "lkeap",
 	"openai", "azure_openai", "anthropic", "gemini",
 	"openrouter", "litellm", "requesty", "pinecone",
 	"jina", "nvidia", "novita", "gpustack", "cohere", "runcrate",
+}
+
+func TestAceDataCloudChatCatalog(t *testing.T) {
+	v, ok := modelruntime.Get(providers.AceDataCloudID)
+	if !ok {
+		t.Fatal("Ace Data Cloud provider missing")
+	}
+	if v.GetDefaultURL(types.ModelTypeKnowledgeQA) != providers.AceDataCloudBaseURL ||
+		v.GetDefaultURL(types.ModelTypeVLLM) != providers.AceDataCloudBaseURL {
+		t.Fatal("chat and vision must use the documented /v1 base URL")
+	}
+	if !v.RequiresAuth || v.Auth != providers.AuthBearer || v.API != api.APIOpenAICompletions {
+		t.Fatal("unexpected Ace Data Cloud authentication or chat protocol")
+	}
+	entries := v.ModelsByType(types.ModelTypeKnowledgeQA)
+	if len(entries) < 103 {
+		t.Fatalf("want the complete published chat catalog, got %d", len(entries))
+	}
+	for _, m := range entries {
+		switch m.ID {
+		case "deepseek-r1", "deepseek-v3", "kimi-k2.5":
+			t.Errorf("retired model %q must not be suggested", m.ID)
+		}
+		if m.ContextWindow != 0 || m.MaxOutputTokens != 0 || m.Cost != nil {
+			t.Errorf("unknown host metadata must remain unknown: %s", m.ID)
+		}
+	}
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
+		Provider: providers.AceDataCloudID, Model: "gpt-4.1-mini",
+		ModelType: types.ModelTypeKnowledgeQA,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.BaseURL != providers.AceDataCloudBaseURL ||
+		resolved.OpenAICompletions.MaxTokensField != "max_tokens" {
+		t.Fatalf("unexpected Ace Data Cloud request contract: %+v", resolved)
+	}
 }
 
 func TestMinimaxOfficialDefaultURLs(t *testing.T) {
@@ -85,8 +123,8 @@ func TestBuiltinDefaultURLsAcrossModelTypes(t *testing.T) {
 }
 
 func TestAllVendorsRegistered(t *testing.T) {
-	if len(expectedIDs) != 31 {
-		t.Fatalf("expected 31 vendor ids in the spec, got %d", len(expectedIDs))
+	if len(expectedIDs) != 32 {
+		t.Fatalf("expected 32 vendor ids in the spec, got %d", len(expectedIDs))
 	}
 	for _, id := range expectedIDs {
 		v, ok := modelruntime.Get(id)

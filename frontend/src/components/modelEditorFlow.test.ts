@@ -1297,3 +1297,17 @@ test('opening the model editor refreshes its catalog candidates', async () => {
     assert.equal(f.catalogEvents[0], 'refresh')
   } finally { f.close() }
 })
+
+test('a reasoning model without configured controls is not described as unable to think', async () => {
+  const f = await fixture()
+  try {
+    f.vm.resolved = { capabilities: { reasoning: true, thinking_levels: [] } }
+    await nextTick()
+    assert.equal(f.vm.resolvedThinkingHintKey, 'model.editor.resolved.defaultThinking')
+    f.vm.resolved = { capabilities: { reasoning: false, thinking_levels: [] } }
+    await nextTick()
+    assert.equal(f.vm.resolvedThinkingHintKey, 'model.editor.resolved.noThinking')
+  } finally {
+    f.close()
+  }
+})
