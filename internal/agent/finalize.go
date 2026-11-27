@@ -11,6 +11,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelcontext"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -47,6 +49,16 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		"remaining work and explain any missing evidence. Use the user's requested " +
 		"language and format. Do not claim that an unperformed action " +
 		"succeeded.\"}</runtime_event>"
+	documentScoped := e.config.DocumentScoped
+	var reasoningEffort chat.ReasoningEffort
+	if documentScoped {
+		reasoningEffort = api.ReasoningOff
+		runtimeNotice += "\nWrite the final answer directly in the language of the question. " +
+			"Use the permitted evidence above. Omit the search process. Include readable prose " +
+			"before any citation. When citations are enabled, cite supporting retrieved evidence " +
+			"using its provided citation handles. Address every part of the question. Explicitly " +
+			"say when the permitted evidence does not specify a requested detail."
+	}
 	if e.finalAnswerNeedsCompaction(messages, runtimeNotice) {
 		messages, _ = e.compactFinalAnswerContext(ctx, messages, state.CurrentRound+1,
 			runtimeNotice, compaction.ReasonThreshold)
@@ -59,6 +71,9 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	providerDone := false
 	terminalContent := ""
 	splitter := agenttools.NewThinkStreamSplitter()
+	var scopedAnswer strings.Builder
+	var scopedPrefix string
+	var scopedStreamErr error
 
 	var llmResult *streamLLMResult
 	var err error
@@ -84,21 +99,32 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 				PromptCacheKey:      sessionID,
 				ToolChoice:          "none",
 				Thinking:            new(false), // A nil preference can enable the provider's default thinking mode.
+				ReasoningEffort:     reasoningEffort,
 			},
 			func(chunk *types.StreamResponse, _ string) {
 				// Defensive filter: only emit answer content, skip thinking chunks
 				if chunk.ResponseType == types.ResponseTypeThinking {
 					return
 				}
+				if documentScoped && (chunk.ResponseType != types.ResponseTypeAnswer ||
+					ctx.Err() != nil || scopedStreamErr != nil ||
+					len(chunk.ToolCalls) > 0 || chunk.FinishReason == "content_filter") {
+					return
+				}
 				_, answerContent := splitter.Feed(chunk.Content)
 				if splitter.TakeAnswerReset() {
-					_ = e.eventBus.Emit(
-						ctx,
-						event.Event{
+					if documentScoped {
+						if answerStreamed {
+							scopedStreamErr = fmt.Errorf("final answer synthesis changed an already streamed prefix")
+							return
+						}
+						scopedPrefix = ""
+					} else {
+						_ = e.eventBus.Emit(ctx, event.Event{
 							ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
 							Data: event.AgentFinalAnswerData{Replace: true},
-						},
-					)
+						})
+					}
 				}
 				if chunk.Done {
 					_, tail := splitter.Flush()
@@ -111,6 +137,14 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 					terminalContent += answerContent
 					return
 				}
+				if documentScoped && !answerStreamed {
+					// Keep a citation-only attempt off append-only API clients.
+					scopedPrefix += answerContent
+					if !modelcontext.HasReadableAnswer(scopedPrefix) {
+						return
+					}
+					answerContent, scopedPrefix = scopedPrefix, ""
+				}
 				if answerContent != "" {
 					logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(answerContent))
 					_ = e.eventBus.Emit(ctx, event.Event{
@@ -122,6 +156,10 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 						},
 					})
 					answerStreamed = true
+					if documentScoped {
+						scopedAnswer.WriteString(answerContent)
+						state.FinalAnswer = scopedAnswer.String()
+					}
 				}
 			},
 		)
@@ -142,7 +180,28 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
-		if err == nil || attempt == 1 || !overflow {
+		if documentScoped {
+			if scopedStreamErr != nil {
+				err = scopedStreamErr
+			} else if err == nil {
+				switch {
+				case len(llmResult.ToolCalls) > 0:
+					err = fmt.Errorf("final answer synthesis requested a tool")
+				case llmResult.FinishReason == "content_filter":
+					err = fmt.Errorf("final answer synthesis was blocked by the content filter")
+				case !modelcontext.HasReadableAnswer(agenttools.StripThinkBlocks(llmResult.Content)):
+					err = fmt.Errorf("final answer synthesis returned no readable text")
+					if attempt == 0 && !answerStreamed {
+						runtimeNotice += "\nThe previous reply contained no readable answer. " +
+							"Return complete sentences rather than only citation tags."
+						scopedPrefix, terminalContent, providerDone = "", "", false
+						splitter = agenttools.NewThinkStreamSplitter()
+						continue
+					}
+				}
+			}
+		}
+		if err == nil || attempt == 1 || !overflow || (documentScoped && answerStreamed) {
 			break
 		}
 		logger.Warnf(ctx, "[Agent][FinalAnswer] Context overflow; compacting before one retry: %v", err)
@@ -162,6 +221,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			})
 		}
 		answerStreamed, providerDone, terminalContent = false, false, ""
+		scopedPrefix, scopedStreamErr = "", nil
 		splitter = agenttools.NewThinkStreamSplitter()
 	}
 	if err != nil {
@@ -178,10 +238,15 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		return fmt.Errorf("final answer synthesis returned no visible content")
 	}
 	_, tail := splitter.Flush()
+	content := terminalContent + tail
+	if documentScoped {
+		content = scopedPrefix + content
+		fullAnswer = scopedAnswer.String() + content
+	}
 	truncated := isLengthFinishReason(llmResult.FinishReason)
 	_ = e.eventBus.Emit(ctx, event.Event{
 		ID: answerID, Type: event.EventAgentFinalAnswer, SessionID: sessionID,
-		Data: event.AgentFinalAnswerData{Content: terminalContent + tail, Done: true, Truncated: truncated},
+		Data: event.AgentFinalAnswerData{Content: content, Done: true, Truncated: truncated},
 	})
 
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))
@@ -268,7 +333,9 @@ func (e *AgentEngine) handleMaxIterations(
 		common.PipelineError(ctx, "Agent", "final_answer_failed", map[string]interface{}{
 			"error": err.Error(),
 		})
-		state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
+		if !e.config.DocumentScoped {
+			state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
+		}
 		state.IsComplete = true
 		return fmt.Errorf("failed to synthesize final answer after max iterations: %w", err)
 	}

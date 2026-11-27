@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -712,6 +713,54 @@ func TestGeminiCredentialFollowsTheProtocol(t *testing.T) {
 
 			assert.NotEmpty(t, got.Get(tc.wantHeader), "%s must carry the credential", tc.wantHeader)
 			assert.Empty(t, got.Get(tc.otherEmpty), "%s must not be sent on this protocol", tc.otherEmpty)
+		})
+	}
+}
+
+func TestModelThinkingOverrideReachesStreamingHTTP(t *testing.T) {
+	for _, thinking := range []bool{false, true} {
+		t.Run(fmt.Sprintf("thinking=%v", thinking), func(t *testing.T) {
+			requests := make(chan map[string]any, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				requests <- body
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Synthetic answer.\"},"+
+					"\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+			}))
+			defer server.Close()
+
+			row := &types.Model{
+				ID: "synthetic-model", Name: "relay-model-alias", Source: types.ModelSourceRemote,
+				Parameters: types.ModelParameters{
+					BaseURL: server.URL + "/v1", Provider: "openai",
+					Spec: &types.ModelSpecOverride{
+						Compat: map[string]any{"thinking_format": "enable-thinking"},
+					},
+				},
+			}
+			client, err := chat.NewChat(chat.ConfigFromModel(row, "", ""), nil)
+			require.NoError(t, err)
+			opts := &chat.ChatOptions{Thinking: &thinking}
+			if !thinking {
+				opts.ReasoningEffort = api.ReasoningOff
+			}
+			stream, err := client.ChatStream(t.Context(), userTurn, opts)
+			require.NoError(t, err)
+			for chunk := range stream {
+				require.NotEqual(t, types.ResponseTypeError, chunk.ResponseType, chunk.Content)
+			}
+			body := <-requests
+			assert.Equal(t, row.Name, body["model"])
+			assert.Equal(t, true, body["stream"])
+			assert.Equal(t, thinking, body["enable_thinking"])
+			assert.NotContains(t, body, "reasoning_effort")
+			assert.NotContains(t, body, "chat_template_kwargs")
+			assert.NotContains(t, body, "thinking")
 		})
 	}
 }

@@ -603,6 +603,27 @@ func TestReadDocumentRejectsUnknownIDAndOutOfScopeDocument(t *testing.T) {
 	}
 }
 
+func TestReadDocumentRejectsSiblingDocumentAndChunk(t *testing.T) {
+	tool, repo := newReadDocumentFixture(3)
+	tool.searchTargets = types.SearchTargets{{
+		Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-1", TenantID: 7,
+		KnowledgeIDs: []string{"doc-1"},
+	}}
+	docs := tool.knowledgeService.(*readDocKnowledgeService).docs
+	docs["doc-2"] = &types.Knowledge{ID: "doc-2", TenantID: 7, KnowledgeBaseID: "kb-1"}
+	sibling := testDocumentChunks("doc-2", 1)[0]
+	sibling.ID = "sibling-chunk"
+	repo.ordered = append(repo.ordered, sibling)
+
+	for _, id := range []string{"doc-2", "sibling-chunk"} {
+		res, err := tool.Execute(t.Context(), json.RawMessage(fmt.Sprintf(`{"id":%q}`, id)))
+		if err == nil || res == nil || res.Success || res.Data != nil ||
+			!strings.Contains(res.Error, "not accessible") {
+			t.Fatalf("same-library ID %q escaped the document scope: res=%+v err=%v", id, res, err)
+		}
+	}
+}
+
 func TestReadDocumentSurfacesRepositoryFailure(t *testing.T) {
 	tool, repo := newReadDocumentFixture(3)
 	repo.listErr = errors.New("db down")

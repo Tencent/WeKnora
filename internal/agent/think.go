@@ -317,6 +317,15 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	runtimeNotices ...string,
 ) (*types.ChatResponse, error) {
 	runtimeNotice := strings.Join(runtimeNotices, "\n")
+	if e.config.DocumentScoped {
+		planningNotice := documentAnswerNotice
+		if iteration == 0 {
+			planningNotice += "\n" + documentInitialSearchNotice
+		} else {
+			planningNotice += "\n" + documentEvidenceNotice
+		}
+		runtimeNotice = strings.TrimSpace(runtimeNotice + "\n" + planningNotice)
+	}
 	budgetMessages := messages
 	if runtimeNotice != "" {
 		budgetMessages = append(
@@ -386,7 +395,9 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		}
 	}
 	emitAnswer := func(content string) {
-		if e.holdCollaborationAnswer {
+		// API clients cannot retract a tool preamble already appended to their
+		// answer. The loop publishes the text after confirming a terminal round.
+		if e.config.DocumentScoped || e.holdCollaborationAnswer {
 			return
 		}
 		if content == "" {

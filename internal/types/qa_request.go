@@ -221,6 +221,8 @@ type QARequest struct {
 	// RunNote is appended to the system prompt of this run only: how the
 	// run was started, for runs nobody is watching.
 	RunNote string
+	// Set by the Agent endpoint after authorizing an explicit document-only request.
+	DocumentScopeAPIKeyID uint64
 }
 
 // AgentResume is what a resumed run continues from.

@@ -8808,6 +8808,10 @@ definitions:
         items:
           type: string
         type: array
+      knowledge_ids:
+        items:
+          type: string
+        type: array
       source:
         type: string
       text:

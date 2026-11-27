@@ -12,11 +12,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/collaboration"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -125,7 +127,7 @@ func (s *sessionService) AgentQA(
 	}
 
 	// Set VLM model ID for tool result image analysis (runtime-only field)
-	if req.CustomAgent != nil && req.CustomAgent.Config.VLMModelID != "" {
+	if !agentConfig.DocumentScoped && req.CustomAgent.Config.VLMModelID != "" {
 		agentConfig.VLMModelID = req.CustomAgent.Config.VLMModelID
 	}
 
@@ -255,54 +257,57 @@ func (s *sessionService) AgentQA(
 	// source of truth. Gated on the sandbox manager advertising a session
 	// filesystem capability so provider-neutral remote wiring stays here.
 	var stagedAttachments []stagedSessionAttachment
-	stager, ok := s.agentService.(sessionAttachmentStager)
-	if !ok {
-		return errors.New("agent service does not support session attachment staging")
-	}
-	// Probe the backend this session's sandbox actually runs on. Gating on the
-	// process-wide manager instead could inspect a different backend than the
-	// named workspace config selected by this agent.
-	inputStore, storeErr := stager.sessionSandboxInputStore(ctx, sessionID, agentConfig.SandboxConfigID)
-	if storeErr != nil {
-		return fmt.Errorf("resolve sandbox file store for session %s: %w", sessionID, storeErr)
-	}
-	mgr, _, layoutErr := resolveSandboxForExecution(
-		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
-		req.Session.TenantID, sessionID, agentConfig.SandboxConfigID, s.sandboxPolicy,
-		withLiteHostSandbox(s.hostSandbox), withLiteDesktop(s.hostDesktop),
-	)
-	layout := sessionWorkspaceLayout(
-		ctx, sessionID, mgr, layoutErr, s.hostSandbox, agentConfig.SandboxConfigID,
-	)
-	if inputStore != nil && strings.TrimSpace(layout.InputDir) != "" {
-		sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
-		if loadErr != nil {
-			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
+	var layout sandbox.WorkspaceLayout
+	if !agentConfig.DocumentScoped {
+		stager, ok := s.agentService.(sessionAttachmentStager)
+		if !ok {
+			return errors.New("agent service does not support session attachment staging")
 		}
-		stagedAttachments, err = stager.stageSessionAttachments(
-			ctx, sessionID, agentConfig.SandboxConfigID, req.Session.TenantID, sessionAttachments, layout,
+		// Probe the backend this session's sandbox actually runs on. Gating on the
+		// process-wide manager instead could inspect a different backend than the
+		// named workspace config selected by this agent.
+		inputStore, storeErr := stager.sessionSandboxInputStore(ctx, sessionID, agentConfig.SandboxConfigID)
+		if storeErr != nil {
+			return fmt.Errorf("resolve sandbox file store for session %s: %w", sessionID, storeErr)
+		}
+		mgr, _, layoutErr := resolveSandboxForExecution(
+			ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
+			req.Session.TenantID, sessionID, agentConfig.SandboxConfigID, s.sandboxPolicy,
+			withLiteHostSandbox(s.hostSandbox), withLiteDesktop(s.hostDesktop),
 		)
-		if err != nil {
-			return fmt.Errorf("restore session attachments into sandbox: %w", err)
-		}
-		for _, staged := range stagedAttachments {
-			if staged.AttachmentPath == "" {
-				continue
+		layout = sessionWorkspaceLayout(
+			ctx, sessionID, mgr, layoutErr, s.hostSandbox, agentConfig.SandboxConfigID,
+		)
+		if inputStore != nil && strings.TrimSpace(layout.InputDir) != "" {
+			sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
+			if loadErr != nil {
+				return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
 			}
-			if agentConfig.AttachmentSandboxCopies == nil {
-				agentConfig.AttachmentSandboxCopies = make(map[string]string, len(stagedAttachments))
+			stagedAttachments, err = stager.stageSessionAttachments(
+				ctx, sessionID, agentConfig.SandboxConfigID, req.Session.TenantID, sessionAttachments, layout,
+			)
+			if err != nil {
+				return fmt.Errorf("restore session attachments into sandbox: %w", err)
 			}
-			agentConfig.AttachmentSandboxCopies[staged.Path] = staged.AttachmentPath
+			for _, staged := range stagedAttachments {
+				if staged.AttachmentPath == "" {
+					continue
+				}
+				if agentConfig.AttachmentSandboxCopies == nil {
+					agentConfig.AttachmentSandboxCopies = make(map[string]string, len(stagedAttachments))
+				}
+				agentConfig.AttachmentSandboxCopies[staged.Path] = staged.AttachmentPath
+			}
 		}
-	}
 
-	pin, err := sandboxConfigForExistingSandbox(ctx, s.sandboxPinner, sessionID)
-	if err != nil {
-		return fmt.Errorf("read sandbox scope for child tasks: %w", err)
+		pin, err := sandboxConfigForExistingSandbox(ctx, s.sandboxPinner, sessionID)
+		if err != nil {
+			return fmt.Errorf("read sandbox scope for child tasks: %w", err)
+		}
+		ctx = context.WithValue(ctx, childSourceKey{}, childSource{
+			Agent: req.CustomAgent, ModelID: effectiveModelID, SandboxConfigID: pin.ConfigID,
+		})
 	}
-	ctx = context.WithValue(ctx, childSourceKey{}, childSource{
-		Agent: req.CustomAgent, ModelID: effectiveModelID, SandboxConfigID: pin.ConfigID,
-	})
 
 	// Create agent engine with EventBus
 	logger.Info(ctx, "Creating agent engine")
@@ -518,10 +523,12 @@ func (s *sessionService) buildAgentConfig(
 	tenantInfo *types.Tenant,
 	agentTenantID uint64,
 ) (*types.AgentConfig, error) {
-	if inherited, err := inheritedConfigFromBinding(ctx); err != nil {
-		return nil, err
-	} else if inherited != nil {
-		return s.restoreInheritedConfig(ctx, inherited, tenantInfo)
+	if req.DocumentScopeAPIKeyID == 0 {
+		if inherited, err := inheritedConfigFromBinding(ctx); err != nil {
+			return nil, err
+		} else if inherited != nil {
+			return s.restoreInheritedConfig(ctx, inherited, tenantInfo)
+		}
 	}
 	customAgent := req.CustomAgent
 	agentConfig := &types.AgentConfig{
@@ -554,17 +561,51 @@ func (s *sessionService) buildAgentConfig(
 		ParallelToolCalls: true,
 	}
 	applyRequestReasoningEffort(req.ReasoningEffort, &agentConfig.Thinking, &agentConfig.ReasoningEffort)
+	// Use the global timeout when the Agent does not set one.
+	if agentConfig.LLMCallTimeout == 0 && s.cfg.Agent != nil && s.cfg.Agent.LLMCallTimeout > 0 {
+		agentConfig.LLMCallTimeout = s.cfg.Agent.LLMCallTimeout
+	}
+	if req.DocumentScopeAPIKeyID != 0 {
+		scope, _ := types.TenantAPIKeyScopeFromContext(ctx)
+		if scope.KeyID != req.DocumentScopeAPIKeyID || agentTenantID != req.Session.TenantID ||
+			customAgent.TenantID != agentTenantID || req.Resume != nil ||
+			len(req.KnowledgeBaseIDs)+len(req.TagScopes)+len(req.Attachments)+len(req.ImageURLs) > 0 ||
+			req.QuotedContext != "" {
+			return nil, apperrors.NewForbiddenError("Invalid document-scoped Agent execution")
+		}
+		targets, err := buildRestrictedAgentDocumentTargets(
+			ctx, s.knowledgeService, s.knowledgeBaseService, req.Session.TenantID, req.KnowledgeIDs,
+		)
+		if err != nil {
+			return nil, err
+		}
+		agentConfig.DocumentScoped = true
+		agentConfig.MultiTurnEnabled = false
+		memoryEnabled := false
+		agentConfig.MemoryEnabled = &memoryEnabled
+		agentConfig.MCPSelectionMode = "none"
+		agentConfig.MCPServices = nil
+		agentConfig.WebSearchEnabled = false
+		agentConfig.LocalBrowserEnabled = false
+		agentConfig.AssistantAccess = types.AssistantAccessReadOnly
+		agentConfig.AllowedTools = append([]string{}, intersectPreservingRequestOrder(
+			tools.EffectiveAllowedTools(customAgent.Config.AllowedTools),
+			[]string{tools.ToolSearchKnowledge, tools.ToolListDocuments, tools.ToolReadDocument},
+		)...)
+		agentConfig.SearchTargets = targets
+		agentConfig.KnowledgeIDs = req.KnowledgeIDs
+		if systemPrompt, _ := s.cfg.ResolveCustomAgentPrompts(customAgent); systemPrompt != "" {
+			agentConfig.UseCustomSystemPrompt = true
+			agentConfig.SystemPrompt = systemPrompt
+		}
+		return agentConfig, nil
+	}
 	// An unset MCP mode means "all" at runtime, but the share scope and the
 	// agent UI both present it as none. A shared run must not hand receivers
 	// every MCP service (with the owner's credentials) that its owner believes
 	// is off.
 	if req.SharedAgentReadOnly && agentConfig.MCPSelectionMode == "" {
 		agentConfig.MCPSelectionMode = "none"
-	}
-
-	// Falls back to global configuration if no specific timeout is set for the agent.
-	if agentConfig.LLMCallTimeout == 0 && s.cfg.Agent != nil && s.cfg.Agent.LLMCallTimeout > 0 {
-		agentConfig.LLMCallTimeout = s.cfg.Agent.LLMCallTimeout
 	}
 
 	// Configure skills based on CustomAgentConfig

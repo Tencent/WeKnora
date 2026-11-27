@@ -37,6 +37,7 @@ type SuggestionItem struct {
 	Category         string   `json:"category,omitempty"`
 	Source           string   `json:"source"`
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
+	KnowledgeIDs     []string `json:"knowledge_ids,omitempty"`
 }
 
 type SuggestionItems []SuggestionItem

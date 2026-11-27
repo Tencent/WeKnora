@@ -46,23 +46,29 @@ type suggestionConversationTurn struct {
 }
 
 type messageSuggestionService struct {
-	repo               interfaces.MessageSuggestionRepository
-	messageService     interfaces.MessageService
-	modelService       interfaces.ModelService
-	customAgentService interfaces.CustomAgentService
+	repo                 interfaces.MessageSuggestionRepository
+	messageService       interfaces.MessageService
+	knowledgeService     interfaces.KnowledgeService
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	modelService         interfaces.ModelService
+	customAgentService   interfaces.CustomAgentService
 }
 
 func NewMessageSuggestionService(
 	repo interfaces.MessageSuggestionRepository,
 	messageService interfaces.MessageService,
+	knowledgeService interfaces.KnowledgeService,
+	knowledgeBaseService interfaces.KnowledgeBaseService,
 	modelService interfaces.ModelService,
 	customAgentService interfaces.CustomAgentService,
 ) interfaces.MessageSuggestionService {
 	return &messageSuggestionService{
-		repo:               repo,
-		messageService:     messageService,
-		modelService:       modelService,
-		customAgentService: customAgentService,
+		repo:                 repo,
+		messageService:       messageService,
+		knowledgeService:     knowledgeService,
+		knowledgeBaseService: knowledgeBaseService,
+		modelService:         modelService,
+		customAgentService:   customAgentService,
 	}
 }
 
@@ -79,13 +85,14 @@ func (s *messageSuggestionService) EnsureFollowUps(
 	if message.Role != "assistant" || !message.IsCompleted {
 		return nil, errors.New("follow-up suggestions require a completed assistant message")
 	}
+	ctx, err = s.authorizeFollowUp(ctx, message)
+	if err != nil {
+		return nil, err
+	}
 
 	tenantID := types.MustTenantIDFromContext(ctx)
 	locale := types.ResolveLanguage(ctx, message.ExecutionContext.Locale)
-	configHash := message.ExecutionContext.AgentConfigHash
-	if configHash == "" {
-		configHash = "no-agent-config"
-	}
+	configHash := followUpCacheHash(ctx, message.ExecutionContext)
 	config := message.ExecutionContext.QuestionSuggestions
 	if regenerate && (config == nil || !config.FollowUps.Enabled || !config.FollowUps.AllowRegenerate) {
 		return nil, errors.New("suggestion regeneration is not allowed")
@@ -175,12 +182,13 @@ func (s *messageSuggestionService) GetFollowUps(
 	if err != nil {
 		return nil, err
 	}
+	ctx, err = s.authorizeFollowUp(ctx, message)
+	if err != nil {
+		return nil, err
+	}
 	tenantID := types.MustTenantIDFromContext(ctx)
 	locale := types.ResolveLanguage(ctx, message.ExecutionContext.Locale)
-	configHash := message.ExecutionContext.AgentConfigHash
-	if configHash == "" {
-		configHash = "no-agent-config"
-	}
+	configHash := followUpCacheHash(ctx, message.ExecutionContext)
 	return s.repo.GetByCacheKey(
 		ctx,
 		tenantID,
@@ -206,6 +214,9 @@ func (s *messageSuggestionService) RecordEvent(
 	tenantID := types.MustTenantIDFromContext(ctx)
 	set, err := s.repo.GetByID(ctx, tenantID, sessionID, setID)
 	if err != nil {
+		return err
+	}
+	if err := s.authorizeFollowUpSet(ctx, set); err != nil {
 		return err
 	}
 	if questionID != "" && !containsSuggestionID(set.Questions, questionID) {
@@ -236,6 +247,9 @@ func (s *messageSuggestionService) ValidateAttribution(
 		attribution.SuggestionSetID,
 	)
 	if err != nil {
+		return err
+	}
+	if err := s.authorizeFollowUpSet(ctx, set); err != nil {
 		return err
 	}
 	if set.Status != types.SuggestionStatusReady {
@@ -316,14 +330,20 @@ func (s *messageSuggestionService) generate(
 	if count < 1 {
 		count = 3
 	}
-	generationContext, err := s.buildGenerationContext(ctx, message, config.MaxContextTurns)
+	strict := len(followUpDocumentTargets(ctx)) > 0
+	maxTurns := config.MaxContextTurns
+	if strict {
+		maxTurns = 1
+	}
+	generationContext, err := s.buildGenerationContext(ctx, message, maxTurns)
 	if err != nil {
 		return nil, types.TokenUsage{}, err
 	}
 	var generated types.SuggestionItems
 	var knowledge types.SuggestionItems
 	var modelErr error
-	if config.Mode == types.SuggestionModeGenerated || config.Mode == types.SuggestionModeHybrid {
+	if (config.Mode == types.SuggestionModeGenerated || config.Mode == types.SuggestionModeHybrid) &&
+		(!strict || generationContext.Evidence != "") {
 		generated, usage, modelErr = s.generateWithModel(
 			ctx, message, answer, generationContext, config, count,
 		)
@@ -391,6 +411,11 @@ func (s *messageSuggestionService) generateWithModel(
 	if instruction := strings.TrimSpace(config.AdditionalInstruction); instruction != "" {
 		systemPrompt += " Additional agent instruction: " + instruction
 	}
+	if len(followUpDocumentTargets(ctx)) > 0 {
+		systemPrompt += " Use only the supplied document evidence as the factual source. " +
+			"Every follow-up must be directly supported by that evidence. " +
+			"Return fewer questions, or none, when evidence is insufficient."
+	}
 	userPrompt := "Current user question:\n" + emptySuggestionSection(generationContext.CurrentQuery) +
 		"\n\nLatest assistant answer:\n" + truncateRunes(answer, 6000) +
 		"\n\nRecent completed turns (excluding the current turn):\n" + emptySuggestionSection(generationContext.History) +
@@ -412,6 +437,20 @@ func (s *messageSuggestionService) generateWithModel(
 		// The system prompt already asks the model not to repeat prior user
 		// questions, but that is guidance the model does not always honour.
 		items = filterSuggestionItemsAgainstQuery(items, generationContext.CurrentQuery)
+		if targets := followUpDocumentTargets(ctx); len(targets) > 0 {
+			basesByDocument := followUpDocumentBases(targets)
+			var knowledgeIDs, knowledgeBaseIDs []string
+			for _, id := range generationContext.ActualKnowledgeIDs {
+				if kbID, allowed := basesByDocument[id]; allowed {
+					knowledgeIDs = append(knowledgeIDs, id)
+					knowledgeBaseIDs = mergeUniqueStrings(knowledgeBaseIDs, []string{kbID})
+				}
+			}
+			for i := range items {
+				items[i].KnowledgeIDs = knowledgeIDs
+				items[i].KnowledgeBaseIDs = knowledgeBaseIDs
+			}
+		}
 	}
 	return items, response.Usage, err
 }
@@ -463,8 +502,6 @@ func (s *messageSuggestionService) generateFromKnowledge(
 	knowledgeIDs := message.ExecutionContext.KnowledgeIDs
 	preferActualEvidence := len(generationContext.ActualKnowledgeIDs) > 0
 	if scope, ok := types.TenantAPIKeyScopeFromContext(knowledgeCtx); ok && scope.IsKnowledgeBaseRestricted() {
-		// Restricted API keys cannot safely pass document IDs through the generic
-		// suggestion API because that surface cannot verify each ID's KB binding.
 		preferActualEvidence = false
 	}
 	if preferActualEvidence {
@@ -501,6 +538,8 @@ func (s *messageSuggestionService) generateFromKnowledge(
 		generationContext.CurrentQuery+"\n"+answer+"\n"+generationContext.Evidence,
 	)
 	items := make(types.SuggestionItems, 0, len(candidates))
+	documentTargets := followUpDocumentTargets(ctx)
+	documentBases := followUpDocumentBases(documentTargets)
 	for _, candidate := range candidates {
 		text := strings.TrimSpace(candidate.Question)
 		// The knowledge path never reaches the model, so the "do not repeat
@@ -521,6 +560,13 @@ func (s *messageSuggestionService) generateFromKnowledge(
 			ID:     uuid.NewString(),
 			Text:   text,
 			Source: candidate.Source,
+		}
+		if len(documentTargets) > 0 {
+			kbID, allowed := documentBases[candidate.KnowledgeID]
+			if !allowed || kbID != candidate.KnowledgeBaseID {
+				continue
+			}
+			item.KnowledgeIDs = []string{candidate.KnowledgeID}
 		}
 		if candidate.KnowledgeBaseID != "" {
 			item.KnowledgeBaseIDs = []string{candidate.KnowledgeBaseID}
@@ -547,7 +593,11 @@ func (s *messageSuggestionService) buildGenerationContext(
 	if err != nil {
 		return suggestionGenerationContext{}, err
 	}
-	return buildSuggestionGenerationContext(messages, current, maxTurns), nil
+	result := buildSuggestionGenerationContext(messages, current, maxTurns)
+	if len(followUpDocumentTargets(ctx)) > 0 && current.RequestID == "" {
+		result.CurrentQuery = ""
+	}
+	return result, nil
 }
 
 func buildSuggestionGenerationContext(

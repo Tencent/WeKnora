@@ -576,6 +576,7 @@ type MessageExecutionContext struct {
 	QuestionSuggestions   *QuestionSuggestionConfig `json:"question_suggestions,omitempty"`
 	KnowledgeBaseIDs      []string                  `json:"knowledge_base_ids,omitempty"`
 	KnowledgeIDs          []string                  `json:"knowledge_ids,omitempty"`
+	DocumentScopeAPIKeyID uint64                    `json:"document_scope_api_key_id,omitempty"`
 	TagIDs                []string                  `json:"tag_ids,omitempty"`
 	TagScopes             []TagScope                `json:"tag_scopes,omitempty"`
 	MCPServiceIDs         []string                  `json:"mcp_service_ids,omitempty"`
