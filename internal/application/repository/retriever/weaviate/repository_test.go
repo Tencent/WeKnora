@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	sdk "github.com/weaviate/weaviate-go-client/v5/weaviate"
 )
 
 // weaviateErrorBody is how Weaviate words a refused schema request.
@@ -35,8 +33,7 @@ type schemaTestServer struct {
 
 func (s *schemaTestServer) repository(t *testing.T) *weaviateRepository {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+	fake := &fakeWeaviate{rest: func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/schema/"):
 			// Answer from the state the worker found on arrival, before the
@@ -66,17 +63,12 @@ func (s *schemaTestServer) repository(t *testing.T) *weaviateRepository {
 			s.mu.Unlock()
 			w.WriteHeader(code)
 			_, _ = w.Write([]byte(body))
-		case r.URL.Path == "/v1/meta":
-			_, _ = w.Write([]byte(`{"version":"1.37.3"}`))
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}))
-	t.Cleanup(server.Close)
-	client, err := sdk.NewClient(sdk.Config{Scheme: "http", Host: strings.TrimPrefix(server.URL, "http://")})
-	require.NoError(t, err)
-	return &weaviateRepository{client: client, collectionBaseName: "Weknora_embeddings"}
+	}}
+	return fake.repository(t, "Weknora_embeddings")
 }
 
 // The first batches written at a new dimension are saved by several workers at

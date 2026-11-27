@@ -108,9 +108,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
-	"github.com/weaviate/weaviate-go-client/v5/weaviate"
-	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
-	wgrpc "github.com/weaviate/weaviate-go-client/v5/weaviate/grpc"
 )
 
 // BuildContainer constructs the dependency injection container
@@ -129,6 +126,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}
 	ctx := context.Background()
 	logger.Debugf(ctx, "[Container] Starting container initialization...")
+
+	// Every Weaviate client reports this version in its integration header,
+	// including the connection test the service layer builds on its own.
+	weaviateRepo.IntegrationVersion = handler.Version
 
 	// Register resource cleaner for proper cleanup of resources
 	must(container.Provide(NewResourceCleaner, dig.As(new(interfaces.ResourceCleaner))))
@@ -1691,20 +1692,21 @@ func initRetrieveEngineRegistry(
 		if weaviateScheme == "" {
 			weaviateScheme = "http"
 		}
-		var authConfig auth.Config
+		var apiKey string
 		if strings.EqualFold(strings.TrimSpace(os.Getenv("WEAVIATE_AUTH_ENABLED")), "true") {
-			if apiKey := strings.TrimSpace(os.Getenv("WEAVIATE_API_KEY")); apiKey != "" {
-				authConfig = auth.ApiKey{Value: apiKey}
-			}
+			apiKey = strings.TrimSpace(os.Getenv("WEAVIATE_API_KEY"))
 		}
-		weaviateClient, err := weaviate.NewClient(weaviate.Config{
-			Host: weaviateHost,
-			GrpcConfig: &wgrpc.Config{
-				Host: weaviateGrpcAddress,
-			},
-			Scheme:     weaviateScheme,
-			AuthConfig: authConfig,
+		// The client connects while it is built, and under compose Weaviate
+		// starts alongside this process and takes longer, so wait for it:
+		// an engine that is not registered here stays missing until restart.
+		connectCtx, cancelConnect := context.WithTimeout(context.Background(), weaviateConnectTimeout)
+		weaviateClient, err := weaviateRepo.NewClientWithRetry(connectCtx, weaviateRepo.ClientConfig{
+			Host:        weaviateHost,
+			GrpcAddress: weaviateGrpcAddress,
+			Scheme:      weaviateScheme,
+			APIKey:      apiKey,
 		})
+		cancelConnect()
 		if err != nil {
 			log.Errorf("Create weaviate client failed: %v", err)
 		} else {

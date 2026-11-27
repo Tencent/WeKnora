@@ -14,9 +14,6 @@ import (
 	"github.com/go-sql-driver/mysql" // 通过 database/sql 注册 mysql 驱动给 Doris 使用
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/qdrant/go-client/qdrant"
-	"github.com/weaviate/weaviate-go-client/v5/weaviate"
-	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
-	wgrpc "github.com/weaviate/weaviate-go-client/v5/weaviate/grpc"
 	"google.golang.org/grpc"
 	"gorm.io/gorm"
 
@@ -73,7 +70,7 @@ func createEngineServiceFromStore(
 	case types.MilvusRetrieverEngineType:
 		return createMilvusEngine(ctx, store)
 	case types.WeaviateRetrieverEngineType:
-		return createWeaviateEngine(store)
+		return createWeaviateEngine(ctx, store)
 	case types.DorisRetrieverEngineType:
 		return createDorisEngine(store)
 	case types.SQLiteRetrieverEngineType:
@@ -283,7 +280,11 @@ func buildMilvusClientConfig(cc types.ConnectionConfig) milvusclient.ClientConfi
 	return milvusCfg
 }
 
-func createWeaviateEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+// weaviateConnectTimeout bounds the /v1/meta request the Weaviate client makes
+// while it connects.
+const weaviateConnectTimeout = 30 * time.Second
+
+func createWeaviateEngine(ctx context.Context, store types.VectorStore) (interfaces.RetrieveEngineService, error) {
 	cc := store.ConnectionConfig
 	host := cc.Host
 	if host == "" {
@@ -298,21 +299,17 @@ func createWeaviateEngine(store types.VectorStore) (interfaces.RetrieveEngineSer
 		scheme = "http"
 	}
 
-	weaviateCfg := weaviate.Config{
-		Host:             host,
-		ConnectionClient: utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
-		GrpcConfig: &wgrpc.Config{
-			Host: grpcAddress,
-		},
-		Scheme: scheme,
-	}
-	// Unlike the env path (which checks WEAVIATE_AUTH_ENABLED), the factory uses
-	// APIKey directly — if a user provides it, they intend to use it.
-	if cc.APIKey != "" {
-		weaviateCfg.AuthConfig = auth.ApiKey{Value: cc.APIKey}
-	}
-
-	client, err := weaviate.NewClient(weaviateCfg)
+	// The factory uses APIKey directly, unlike the env path (which checks
+	// WEAVIATE_AUTH_ENABLED) — if a user provides it, they intend to use it.
+	// Both addresses were checked by validateRuntimeVectorStoreAddresses.
+	ctx, cancel := context.WithTimeout(ctx, weaviateConnectTimeout)
+	defer cancel()
+	client, err := weaviateRepo.NewClient(ctx, weaviateRepo.ClientConfig{
+		Host:        host,
+		GrpcAddress: grpcAddress,
+		Scheme:      scheme,
+		APIKey:      cc.APIKey,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create weaviate client: %w", err)
 	}

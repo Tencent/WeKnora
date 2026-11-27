@@ -768,14 +768,23 @@ services:
     profiles:
       - milvus
 
+  # WeKnora 的 Weaviate 检索引擎要求 Weaviate >= 1.33。
+  # Weaviate 每次只支持升级一个 minor 版本。weaviate_data 卷中已有旧版本数据时，
+  # 请逐个 minor 升级（1.28 → 1.29 → … → 1.40，每步使用该 minor 的最新 patch），
+  # 或备份后清空该卷、重新导入知识库。
   weaviate:
-    image: semitechnologies/weaviate:1.28.4
+    image: cr.weaviate.io/semitechnologies/weaviate:1.40.5
     container_name: WeKnora-weaviate
+    # 1.34.0 起的镜像按工作目录的相对路径查找 gse 词典；不设置时，
+    # 使用 gse 分词的 content 属性关键词检索不会返回任何结果。
+    working_dir: /go/pkg/mod
     environment:
       - PERSISTENCE_DATA_PATH=/var/lib/weaviate
       - CLUSTER_HOSTNAME=node1
       - DEFAULT_VECTORIZER_MODULE=none
       - ENABLE_MODULES=none
+      # WeKnora 使用 gse 对切片内容分词；未启用该分词器时 Weaviate 会拒绝创建集合。
+      - ENABLE_TOKENIZER_GSE=true
       - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
       - CLUSTER_GOSSIP_BIND_PORT=7000
       - CLUSTER_DATA_BIND_PORT=7001

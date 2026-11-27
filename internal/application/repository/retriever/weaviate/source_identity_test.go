@@ -1,16 +1,16 @@
 package weaviate
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"net/http"
-	"net/http/httptest"
 	"path"
-	"regexp"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 
@@ -18,18 +18,25 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	sdk "github.com/weaviate/weaviate-go-client/v5/weaviate"
-	"github.com/weaviate/weaviate/entities/models"
+	pb "github.com/weaviate/weaviate/grpc/generated/protocol/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const identityCollection = "Identity_3"
 
-// identityStore implements the REST contract through the real Weaviate SDK.
-// Batch writes replace objects with the same UUID; a single create rejects an
-// existing UUID. These are the server's semantics, not a count of request rows.
+type identityObject struct {
+	properties map[string]any
+	vector     []float32
+}
+
+// identityStore is a Weaviate that keeps what it is sent, driven through the
+// real SDK. A batch write replaces an object with the same UUID, a merge
+// changes only the properties it names, and a search answers from what is
+// stored. These are the server's semantics, not a count of request rows.
 type identityStore struct {
 	mu         sync.Mutex
-	objects    map[string]models.Object
+	objects    map[string]identityObject
 	failBatch  bool
 	failMerge  bool
 	queryError string
@@ -38,164 +45,173 @@ type identityStore struct {
 
 func (s *identityStore) repository(t *testing.T) *weaviateRepository {
 	t.Helper()
-	s.objects = make(map[string]models.Object)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/v1/meta":
-			_, _ = w.Write([]byte(`{"version":"1.37.3"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/schema":
-			_ = json.NewEncoder(w).Encode(map[string]any{"classes": []any{map[string]any{"class": identityCollection}}})
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/schema/"+identityCollection:
-			_ = json.NewEncoder(w).Encode(map[string]any{"class": identityCollection})
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/objects":
-			var object models.Object
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&object))
-			if _, exists := s.objects[object.ID.String()]; exists {
-				w.WriteHeader(http.StatusUnprocessableEntity)
-				_, _ = w.Write([]byte(weaviateErrorBody("id already exists")))
+	s.objects = make(map[string]identityObject)
+	schema := schemaExists(identityCollection)
+	fake := &fakeWeaviate{
+		rest: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				schema(w, r)
 				return
 			}
-			if !s.put(t, object) {
-				w.WriteHeader(http.StatusUnprocessableEntity)
-				return
-			}
-			_ = json.NewEncoder(w).Encode(object)
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/batch/objects":
-			var body struct {
-				Objects []models.Object `json:"objects"`
-			}
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			results := make([]any, 0, len(body.Objects))
-			for _, object := range body.Objects {
-				if !s.put(t, object) {
-					w.WriteHeader(http.StatusUnprocessableEntity)
-					return
-				}
-				if s.failBatch {
-					s.failBatch = false // one object persisted before the request failed
-					w.WriteHeader(http.StatusServiceUnavailable)
-					return
-				}
-				results = append(results, map[string]any{
-					"id": object.ID, "result": map[string]any{"status": "SUCCESS"},
-				})
-			}
-			_ = json.NewEncoder(w).Encode(results)
-		case r.Method == http.MethodPatch || r.Method == http.MethodPut:
-			if s.failMerge {
-				s.failMerge = false
-				w.WriteHeader(http.StatusServiceUnavailable)
-				return
-			}
-			id := path.Base(r.URL.Path)
-			object, exists := s.objects[id]
-			if !exists {
-				w.WriteHeader(http.StatusNotFound)
-				return
-			}
-			var update models.Object
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&update))
-			if r.Method == http.MethodPut {
-				object = update // a replacement must not masquerade as a merge
-			} else {
-				maps.Copy(object.Properties.(map[string]any), update.Properties.(map[string]any))
-			}
-			s.objects[id] = object
-			if r.Method == http.MethodPut {
-				_ = json.NewEncoder(w).Encode(object)
-			} else {
-				w.WriteHeader(http.StatusNoContent)
-			}
-		case r.Method == http.MethodDelete && r.URL.Path == "/v1/batch/objects":
-			var body struct {
-				Match struct {
-					Where struct {
-						Path      []string `json:"path"`
-						ValueText []string `json:"valueTextArray"`
-					} `json:"where"`
-				} `json:"match"`
-			}
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			require.Len(t, body.Match.Where.Path, 1)
-			for id, object := range s.objects {
-				value, _ := object.Properties.(map[string]any)[body.Match.Where.Path[0]].(string)
-				if slices.Contains(body.Match.Where.ValueText, value) {
-					delete(s.objects, id)
-				}
-			}
-			_, _ = w.Write([]byte(`{"results":{"successful":1,"failed":0}}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/graphql":
-			var body struct {
-				Query string `json:"query"`
-			}
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-			if s.queryError != "" {
-				_ = json.NewEncoder(w).Encode(map[string]any{"errors": []any{map[string]any{"message": s.queryError}}})
-				return
-			}
-			limit := 10000
-			if match := regexp.MustCompile(`limit:\s*(\d+)`).FindStringSubmatch(body.Query); match != nil {
-				_, _ = fmt.Sscanf(match[1], "%d", &limit)
-			}
-			if s.queryLimit > 0 && limit > s.queryLimit {
-				message := fmt.Sprintf("query exceeds QUERY_MAXIMUM_RESULTS '%d'", s.queryLimit)
-				_ = json.NewEncoder(w).Encode(map[string]any{"errors": []any{map[string]any{"message": message}}})
-				return
-			}
-			rows := make([]any, 0)
-			for _, id := range slices.Sorted(maps.Keys(s.objects)) {
-				object := s.objects[id]
-				props := object.Properties.(map[string]any)
-				if strings.Contains(body.Query, `path: ["chunk_id"]`) &&
-					!strings.Contains(body.Query, props[fieldChunkID].(string)) {
-					continue
-				}
-				if strings.Contains(body.Query, "nearVector:") {
-					vectorJSON, _ := json.Marshal(object.Vector)
-					if props[fieldIsEnabled] != true ||
-						!strings.Contains(strings.ReplaceAll(body.Query, " ", ""), string(vectorJSON)) {
-						continue
-					}
-				}
-				row := maps.Clone(props)
-				row["_additional"] = map[string]any{"id": id, "certainty": 1.0}
-				rows = append(rows, row)
-				if len(rows) == limit {
-					break
-				}
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": map[string]any{"Get": map[string]any{identityCollection: rows}},
-			})
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(server.Close)
-	client, err := sdk.NewClient(sdk.Config{Scheme: "http", Host: strings.TrimPrefix(server.URL, "http://")})
-	require.NoError(t, err)
-	return &weaviateRepository{client: client, collectionBaseName: "Identity"}
-}
-
-func (s *identityStore) put(t *testing.T, object models.Object) bool {
-	t.Helper()
-	if _, err := uuid.Parse(object.ID.String()); !assert.NoError(t, err, "Weaviate requires UUID object IDs") {
-		return false
+			s.merge(t, w, r)
+		},
+		search:       s.search,
+		batchObjects: func(req *pb.BatchObjectsRequest) (*pb.BatchObjectsReply, error) { return s.write(t, req) },
+		batchDelete:  s.remove,
 	}
-	s.objects[object.ID.String()] = object
-	return true
+	return fake.repository(t, "Identity")
 }
 
-func (s *identityStore) snapshot() map[string]models.Object {
+// write stores a batch. With failBatch set, the request fails after its first
+// object was persisted, the way an interrupted write leaves things.
+func (s *identityStore) write(t *testing.T, req *pb.BatchObjectsRequest) (*pb.BatchObjectsReply, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, obj := range req.GetObjects() {
+		if _, err := uuid.Parse(obj.GetUuid()); !assert.NoError(t, err, "Weaviate requires UUID object IDs") {
+			return nil, status.Error(codes.InvalidArgument, "invalid object id")
+		}
+		assert.Equal(t, identityCollection, obj.GetCollection())
+		var vector []float32
+		for _, v := range obj.GetVectors() {
+			if v.GetName() == fieldEmbedding {
+				vector = bytesFloat32(v.GetVectorBytes())
+			}
+		}
+		s.objects[obj.GetUuid()] = identityObject{
+			properties: obj.GetProperties().GetNonRefProperties().AsMap(),
+			vector:     vector,
+		}
+		if s.failBatch {
+			s.failBatch = false
+			return nil, status.Error(codes.Unavailable, "node went away")
+		}
+	}
+	return &pb.BatchObjectsReply{}, nil
+}
+
+// merge serves the single-object update. Anything but a PATCH would replace
+// the object, so it is refused rather than passed off as a merge.
+func (s *identityStore) merge(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !assert.Equal(t, http.MethodPatch, r.Method, "an update must merge, not replace") {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.failMerge {
+		s.failMerge = false
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	id := path.Base(r.URL.Path)
+	object, exists := s.objects[id]
+	if !exists {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var update struct {
+		Properties map[string]any `json:"properties"`
+		Vectors    map[string]any `json:"vectors"`
+	}
+	require.NoError(t, json.NewDecoder(r.Body).Decode(&update))
+	assert.Empty(t, update.Vectors, "the stored vector must be left alone")
+	maps.Copy(object.properties, update.Properties)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *identityStore) remove(req *pb.BatchDeleteRequest) (*pb.BatchDeleteReply, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	field := req.GetFilters().GetTarget().GetProperty()
+	values := filterTexts(req.GetFilters())
+	var removed int64
+	for id, object := range s.objects {
+		if value, _ := object.properties[field].(string); slices.Contains(values, value) {
+			delete(s.objects, id)
+			removed++
+		}
+	}
+	return &pb.BatchDeleteReply{Matches: removed, Successful: removed}, nil
+}
+
+func (s *identityStore) search(req *pb.SearchRequest) (*pb.SearchReply, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.queryError != "" {
+		return nil, status.Error(codes.Unknown, s.queryError)
+	}
+	limit := int(req.GetLimit())
+	if s.queryLimit > 0 && limit > s.queryLimit {
+		return nil, status.Error(codes.Unknown, fmt.Sprintf(
+			"query maximum results exceeded: the total limit calculated from the provided offset '0' "+
+				"and limit '%d' exceeds the configured value for QUERY_MAXIMUM_RESULTS '%d'",
+			limit, s.queryLimit))
+	}
+	chunkIDs := filterTexts(filterCondition(req.GetFilters(), fieldChunkID))
+	enabledOnly := filterCondition(req.GetFilters(), fieldIsEnabled).GetValueBoolean()
+	var rows []fakeRow
+	for _, id := range slices.Sorted(maps.Keys(s.objects)) {
+		object := s.objects[id]
+		if chunkIDs != nil && !slices.Contains(chunkIDs, object.properties[fieldChunkID].(string)) {
+			continue
+		}
+		if enabledOnly && object.properties[fieldIsEnabled] != true {
+			continue
+		}
+		if nv := req.GetNearVector(); nv != nil && !nearVectorIs(nv, object.vector) {
+			continue
+		}
+		properties := make(map[string]any, len(object.properties))
+		for name, value := range object.properties {
+			if number, ok := value.(float64); ok {
+				value = int(number)
+			}
+			properties[name] = value
+		}
+		rows = append(rows, fakeRow{id: id, properties: properties, certainty: float32Ptr(1)})
+		if limit > 0 && len(rows) == limit {
+			break
+		}
+	}
+	return searchReply(rows...), nil
+}
+
+// nearVectorIs reports whether a search asks for exactly vector, wherever the
+// client put it in the request.
+func nearVectorIs(nv *pb.NearVector, vector []float32) bool {
+	want := float32Bytes(vector)
+	var candidates [][]byte
+	for _, v := range nv.GetVectors() {
+		candidates = append(candidates, v.GetVectorBytes())
+	}
+	for _, target := range nv.GetVectorForTargets() {
+		for _, v := range target.GetVectors() {
+			candidates = append(candidates, v.GetVectorBytes())
+		}
+	}
+	for _, candidate := range candidates {
+		if len(candidate) > 0 && bytes.Equal(candidate, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func bytesFloat32(b []byte) []float32 {
+	vector := make([]float32, len(b)/4)
+	for i := range vector {
+		vector[i] = math.Float32frombits(binary.LittleEndian.Uint32(b[4*i:]))
+	}
+	return vector
+}
+
+func (s *identityStore) snapshot() map[string]identityObject {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	objects := maps.Clone(s.objects)
 	for id, object := range objects {
-		object.Properties = maps.Clone(object.Properties.(map[string]any))
+		object.properties = maps.Clone(object.properties)
 		objects[id] = object
 	}
 	return objects
@@ -253,7 +269,9 @@ func TestBatchSavePreservesBodyAndGeneratedQuestionVectors(t *testing.T) {
 	assert.Equal(t, ids, slices.Sorted(maps.Keys(store.snapshot())), "batch retries reuse the original UUIDs")
 }
 
-func TestSavePreservesGeneratedQuestionsAndRejectsDuplicateSource(t *testing.T) {
+// Save goes through the same batch insert as BatchSave, so saving a source
+// again replaces its object instead of failing or adding a second one.
+func TestSavePreservesGeneratedQuestionsAndDoesNotDuplicateARetriedSource(t *testing.T) {
 	store := &identityStore{}
 	repo := store.repository(t)
 	rows, params := identityInputs()
@@ -261,8 +279,8 @@ func TestSavePreservesGeneratedQuestionsAndRejectsDuplicateSource(t *testing.T) 
 		require.NoError(t, repo.Save(context.Background(), row, params))
 	}
 	require.Len(t, store.snapshot(), 3)
-	require.Error(t, repo.Save(context.Background(), rows[1], params), "a retried create must not add a duplicate")
-	require.Len(t, store.snapshot(), 3)
+	require.NoError(t, repo.Save(context.Background(), rows[1], params))
+	require.Len(t, store.snapshot(), 3, "a retried save must not add a duplicate")
 }
 
 func TestSaveKeepsLegacyBodyObjectIDs(t *testing.T) {
@@ -292,8 +310,7 @@ func TestBatchSaveScopesSourceIdentityToItsChunk(t *testing.T) {
 	require.Len(t, objects, 2, "an external source ID must not overwrite a different chunk")
 	chunks := make([]string, 0, 2)
 	for _, object := range objects {
-		props := object.Properties.(map[string]any)
-		chunks = append(chunks, props[fieldChunkID].(string))
+		chunks = append(chunks, object.properties[fieldChunkID].(string))
 	}
 	assert.ElementsMatch(t, []string{first.ChunkID, second.ChunkID}, chunks)
 }
@@ -313,28 +330,27 @@ func TestChunkMetadataAndDeletionApplyToEveryRetrievalSource(t *testing.T) {
 	objects := store.snapshot()
 	require.Len(t, objects, 4)
 	for _, row := range rows {
-		var object models.Object
+		var object identityObject
 		for _, candidate := range objects {
-			if candidate.Properties.(map[string]any)[fieldSourceID] == row.SourceID {
+			if candidate.properties[fieldSourceID] == row.SourceID {
 				object = candidate
 				break
 			}
 		}
-		require.NotNil(t, object.Properties, "each retrieval source must still exist")
-		props := object.Properties.(map[string]any)
-		assert.Equal(t, false, props[fieldIsEnabled])
-		assert.Equal(t, "tag-new", props[fieldTagID])
-		assert.Equal(t, row.Content, props[fieldContent])
-		assert.Equal(t, row.KnowledgeBaseID, props[fieldKnowledgeBaseID])
-		assert.Equal(t, params[fieldEmbedding].(map[string][]float32)[row.SourceID], []float32(object.Vector))
+		require.NotNil(t, object.properties, "each retrieval source must still exist")
+		assert.Equal(t, false, object.properties[fieldIsEnabled])
+		assert.Equal(t, "tag-new", object.properties[fieldTagID])
+		assert.Equal(t, row.Content, object.properties[fieldContent])
+		assert.Equal(t, row.KnowledgeBaseID, object.properties[fieldKnowledgeBaseID])
+		assert.Equal(t, params[fieldEmbedding].(map[string][]float32)[row.SourceID], object.vector)
 		results, err := repo.VectorRetrieve(ctx, types.RetrieveParams{
-			Embedding: []float32(object.Vector), TopK: 1, KnowledgeBaseIDs: []string{"kb-1"},
+			Embedding: object.vector, TopK: 1, KnowledgeBaseIDs: []string{"kb-1"},
 		})
 		require.NoError(t, err)
 		assert.Empty(t, results[0].Results, "disabled questions must no longer recall the chunk")
 	}
-	assert.Equal(t, true, objects[other.ChunkID].Properties.(map[string]any)[fieldIsEnabled])
-	assert.Equal(t, "", objects[other.ChunkID].Properties.(map[string]any)[fieldTagID])
+	assert.Equal(t, true, objects[other.ChunkID].properties[fieldIsEnabled])
+	assert.Equal(t, "", objects[other.ChunkID].properties[fieldTagID])
 	require.NoError(t, repo.BatchUpdateChunkEnabledStatus(ctx, map[string]bool{rows[0].ChunkID: true}))
 	require.NoError(t, repo.DeleteBySourceIDList(ctx, []string{rows[1].SourceID}, 3, ""))
 	require.Len(t, store.snapshot(), 3, "deleting one question preserves its body and sibling")
@@ -370,7 +386,7 @@ func TestChunkMetadataUpdateFailuresAreReturned(t *testing.T) {
 				context.Background(), map[string]bool{rows[0].ChunkID: false},
 			))
 			for _, object := range store.snapshot() {
-				assert.Equal(t, false, object.Properties.(map[string]any)[fieldIsEnabled])
+				assert.Equal(t, false, object.properties[fieldIsEnabled])
 			}
 		})
 	}
