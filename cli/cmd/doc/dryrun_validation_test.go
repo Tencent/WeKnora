@@ -146,7 +146,8 @@ func TestDocFetchDryRunShowsRequestOptions(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	root := withRootHarnessDoc(NewCmdFetch(docDryRunFactory(t)),
 		"https://example.test/download", "--kb", "00000000-0000-0000-0000-000000000001",
-		"--name", "original.pdf", "--title", "Policy", "--file-type", "pdf", "--tag-id", "ops", "--channel", "migration",
+		"--name", "original.pdf", "--title", "Policy", "--file-type", "pdf",
+		"--tag-id", "ops", "--channel", "migration",
 		"--enable-multimodel=false", "--dry-run", "--format", "json")
 	require.NoError(t, root.Execute())
 	var result struct {

@@ -115,7 +115,8 @@ Server-side ingestion knobs:
 				if opts.EnableMultimodel != nil {
 					args["enable_multimodel"] = *opts.EnableMultimodel
 				}
-				if handled, err := cmdutil.HandleDryRun(c, true, cmdutil.DryRunPlan{Action: "doc.fetch", Args: args}); handled {
+				plan := cmdutil.DryRunPlan{Action: "doc.fetch", Args: args}
+				if handled, err := cmdutil.HandleDryRun(c, true, plan); handled {
 					return err
 				}
 			}
