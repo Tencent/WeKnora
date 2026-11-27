@@ -125,6 +125,10 @@ func (s *wikiPageService) prepareWikiPageForCreate(ctx context.Context, page *ty
 	if page.ID == "" {
 		page.ID = uuid.New().String()
 	}
+	// Out-links are normalized to lower case, so storing a mixed-case or
+	// spaced slug would make the new page permanently unlinkable. Legacy
+	// rows keep their stored slug; only creation canonicalizes it.
+	page.Slug = normalizeSlug(page.Slug)
 	if page.Slug == "" {
 		return errors.New("wiki page slug is required")
 	}
