@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -58,19 +58,21 @@ func (c *PaddleOCRVLReader) Read(ctx context.Context, req *types.ReadRequest) (*
 	logger.Infof(context.Background(), "[PaddleOCR-VL] Parsing file=%s size=%d via %s",
 		req.FileName, len(content), c.endpoint)
 
-	mdContent, imagesB64, layoutUnits, err := c.callLayoutParsing(ctx, req, content)
+	mdContent, imagesB64, pages, err := c.callLayoutParsing(ctx, req, content)
 	if err != nil {
 		return nil, fmt.Errorf("PaddleOCR-VL layout-parsing: %w", err)
 	}
 
-	// PaddleOCR-VL renders tables as styled HTML (per-cell text-align), which
-	// wastes tokens and defeats the chunker's table-protection logic. Convert
-	// them to Markdown tables (or strip layout attributes when conversion is
-	// not possible) before downstream processing.
-	mdContent = NormalizeHTMLTables(mdContent)
-
+	sourceBlocks := paddleOCRVLSourceBlocks(pages, req.FileType)
 	imageRefs, mdContent := c.processImages(mdContent, imagesB64)
+	originalLength := utf8.RuneCountInString(mdContent)
 	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
+	// The original image reference only prepends text; do not realign pages.
+	prefixLength := utf8.RuneCountInString(mdContent) - originalLength
+	for i := range sourceBlocks {
+		sourceBlocks[i].Start += prefixLength
+		sourceBlocks[i].End += prefixLength
+	}
 
 	logger.Infof(context.Background(), "[PaddleOCR-VL] Parsed successfully, markdown=%d chars, images=%d",
 		len(mdContent), len(imageRefs))
@@ -78,7 +80,7 @@ func (c *PaddleOCRVLReader) Read(ctx context.Context, req *types.ReadRequest) (*
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
-		SourceBlocks:    paddleOCRVLSourceBlocks(mdContent, layoutUnits, req.FileType),
+		SourceBlocks:    sourceBlocks,
 	}, nil
 }
 
@@ -139,7 +141,7 @@ type paddleOCRVLResponse struct {
 
 func (c *PaddleOCRVLReader) callLayoutParsing(
 	ctx context.Context, req *types.ReadRequest, content []byte,
-) (string, map[string]string, []sourceloc.Unit, error) {
+) (string, map[string]string, []paddleOCRVLPage, error) {
 	payload := paddleOCRVLRecognitionParams(c.useSeal, c.useChart)
 	payload["file"] = base64.StdEncoding.EncodeToString(content)
 	payload["fileType"] = fileTypeCode(req)
@@ -194,9 +196,11 @@ func (c *PaddleOCRVLReader) callLayoutParsing(
 	// Merge per-page markdown and image dicts into one document.
 	texts := make([]string, 0, len(pages))
 	images := make(map[string]string)
-	var units []sourceloc.Unit
-	for i, p := range pages {
-		units = append(units, paddleOCRVLPageUnits(i+1, p)...)
+	for i := range pages {
+		p := &pages[i]
+		// Normalize before matching so converted image alt text is visible,
+		// while all layout matches remain confined to their original page.
+		p.Markdown.Text = NormalizeHTMLTables(p.Markdown.Text)
 		if t := strings.TrimSpace(p.Markdown.Text); t != "" {
 			texts = append(texts, p.Markdown.Text)
 		}
@@ -208,7 +212,7 @@ func (c *PaddleOCRVLReader) callLayoutParsing(
 	}
 
 	logger.Infof(context.Background(), "[PaddleOCR-VL] parsed %d page(s), images=%d", len(pages), len(images))
-	return strings.Join(texts, "\n\n"), images, units, nil
+	return strings.Join(texts, "\n\n"), images, pages, nil
 }
 
 // processImages decodes the inline base64 images returned by PaddleOCR-VL and

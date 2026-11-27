@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -83,15 +83,21 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 		return nil, fmt.Errorf("PaddleOCR-VL Cloud poll: %w", err)
 	}
 
-	mdContent, imagesURL, layoutUnits, err := c.fetchResults(jsonlURL)
+	mdContent, imagesURL, pages, err := c.fetchResults(jsonlURL)
 	if err != nil {
 		return nil, fmt.Errorf("PaddleOCR-VL Cloud fetch results: %w", err)
 	}
 
-	mdContent = NormalizeHTMLTables(mdContent)
-
+	sourceBlocks := paddleOCRVLSourceBlocks(pages, req.FileType)
 	imageRefs := c.downloadImages(mdContent, imagesURL)
+	originalLength := utf8.RuneCountInString(mdContent)
 	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
+	// The original image reference only prepends text; do not realign pages.
+	prefixLength := utf8.RuneCountInString(mdContent) - originalLength
+	for i := range sourceBlocks {
+		sourceBlocks[i].Start += prefixLength
+		sourceBlocks[i].End += prefixLength
+	}
 
 	logger.Infof(context.Background(), "[PaddleOCR-VL Cloud] Parsed successfully, markdown=%d chars, images=%d",
 		len(mdContent), len(imageRefs))
@@ -99,7 +105,7 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
-		SourceBlocks:    paddleOCRVLSourceBlocks(mdContent, layoutUnits, req.FileType),
+		SourceBlocks:    sourceBlocks,
 	}, nil
 }
 
@@ -282,7 +288,7 @@ type paddleOCRVLCloudResultLine struct {
 	} `json:"result"`
 }
 
-func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[string]string, []sourceloc.Unit, error) {
+func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[string]string, []paddleOCRVLPage, error) {
 	if err := utils.ValidateURLForSSRF(jsonlURL); err != nil {
 		return "", nil, nil, fmt.Errorf("jsonl URL blocked by SSRF check: %v", err)
 	}
@@ -302,8 +308,7 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 
 	texts := make([]string, 0)
 	images := make(map[string]string)
-	var units []sourceloc.Unit
-	pageNumber := 0
+	var pages []paddleOCRVLPage
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -315,8 +320,9 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 			continue
 		}
 		for _, p := range parsed.Result.LayoutParsingResults {
-			pageNumber++
-			units = append(units, paddleOCRVLPageUnits(pageNumber, p)...)
+			// Normalize before matching, preserving each page's text bounds.
+			p.Markdown.Text = NormalizeHTMLTables(p.Markdown.Text)
+			pages = append(pages, p)
 			if t := strings.TrimSpace(p.Markdown.Text); t != "" {
 				texts = append(texts, p.Markdown.Text)
 			}
@@ -329,7 +335,7 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 	}
 
 	logger.Infof(context.Background(), "[PaddleOCR-VL Cloud] fetched %d page(s), images=%d", len(texts), len(images))
-	return strings.Join(texts, "\n\n"), images, units, nil
+	return strings.Join(texts, "\n\n"), images, pages, nil
 }
 
 // downloadImages fetches each referenced image URL and builds ImageRef entries.
