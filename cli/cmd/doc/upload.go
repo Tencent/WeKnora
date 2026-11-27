@@ -3,6 +3,7 @@ package doc
 import (
 	"cmp"
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"os"
@@ -187,7 +188,8 @@ Server-side ingestion knobs:
 	// raw string is decoded into opts.EnableMultimodel in RunE.
 	cmd.Flags().String("enable-multimodel", "", "Toggle multimodal extraction (true|false); unset ⇒ server default")
 	cmd.Flags().Lookup("enable-multimodel").NoOptDefVal = "true"
-	cmd.Flags().StringSliceVar(&opts.Metadata, "metadata", nil, "Attach metadata `key=value` (repeatable; empty value allowed, last-wins on duplicate keys)")
+	cmd.Flags().StringArrayVar(&opts.Metadata, "metadata", nil,
+		"Attach metadata `key=value` (repeatable; empty value allowed, last-wins on duplicate keys)")
 	cmd.Flags().StringVar(&opts.Channel, "channel", "", "Ingestion-channel tag recorded server-side (default \"api\")")
 	cmdutil.AddFormatFlag(cmd, docUploadFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
@@ -229,13 +231,28 @@ func parseMetadataKV(raw []string) (map[string]string, error) {
 		return nil, nil
 	}
 	out := make(map[string]string, len(raw))
-	for _, kv := range raw {
-		eq := strings.IndexByte(kv, '=')
-		if eq <= 0 {
-			return nil, cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
-				fmt.Sprintf("--metadata expects key=value (got %q)", kv))
+	for _, occurrence := range raw {
+		// Preserve the previous CSV shorthand when every field is an assignment.
+		// Otherwise commas are part of this occurrence's value.
+		pairs, err := csv.NewReader(strings.NewReader(occurrence)).Read()
+		if err != nil || len(pairs) == 0 || strings.ContainsAny(occurrence, "\r\n") {
+			pairs = []string{occurrence}
+		} else {
+			for _, p := range pairs {
+				if !strings.Contains(p, "=") {
+					pairs = []string{occurrence}
+					break
+				}
+			}
 		}
-		out[kv[:eq]] = kv[eq+1:]
+		for _, kv := range pairs {
+			eq := strings.IndexByte(kv, '=')
+			if eq <= 0 {
+				return nil, cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+					fmt.Sprintf("--metadata expects key=value (got %q)", kv))
+			}
+			out[kv[:eq]] = kv[eq+1:]
+		}
 	}
 	return out, nil
 }

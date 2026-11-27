@@ -326,3 +326,27 @@ func TestValidateRecursiveUploadPlan(t *testing.T) {
 		require.Error(t, validateUploadFlags(&opts, []string{"docs"}))
 	}
 }
+
+func TestUploadMetadataCommaValues(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want map[string]string
+	}{
+		{
+			[]string{"region=Guangzhou,Shenzhen", "team=QA"},
+			map[string]string{"region": "Guangzhou,Shenzhen", "team": "QA"},
+		},
+		{[]string{"team=QA,stage=prod"}, map[string]string{"team": "QA", "stage": "prod"}},
+		{[]string{`"region=A,B",team=QA`}, map[string]string{"region": "A,B", "team": "QA"}},
+	} {
+		cmd := NewCmdUpload(&cmdutil.Factory{})
+		for _, v := range tc.args {
+			require.NoError(t, cmd.Flags().Set("metadata", v))
+		}
+		flag := cmd.Flags().Lookup("metadata")
+		values := flag.Value.(interface{ GetSlice() []string }).GetSlice()
+		got, err := parseMetadataKV(values)
+		require.NoError(t, err)
+		assert.Equal(t, tc.want, got)
+	}
+}
