@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -88,6 +89,10 @@ func (c *Client) Chat(ctx context.Context, messages []api.Message, opts *api.Opt
 	raw, err := api.ReadResponseCapped(resp.Body, 0)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
+	}
+	// Some compatible endpoints return SSE for non-streaming requests.
+	if mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type")); mediaType == "text/event-stream" {
+		return c.collectStream(ctx, bytes.NewReader(raw), opts)
 	}
 	result, err := c.parseResponse(raw, opts)
 	if err != nil {
@@ -414,6 +419,48 @@ func splitThinkTags(content string) (answer, reasoning string) {
 		return "", strings.TrimSpace(trimmed[len(start):])
 	}
 	return strings.TrimSpace(trimmed[idx+len(end):]), strings.TrimSpace(trimmed[len(start):idx])
+}
+
+// collectStream folds the stream's deltas and terminal chunk into one completion.
+func (c *Client) collectStream(ctx context.Context, body io.Reader, opts *api.Options) (*types.ChatResponse, error) {
+	ch := make(chan types.StreamResponse)
+	go func() {
+		defer close(ch)
+		c.processStream(ctx, body, ch, nil, opts)
+	}()
+
+	var content, reasoning strings.Builder
+	var lastAnswer types.StreamResponse
+	for chunk := range ch {
+		switch chunk.ResponseType {
+		case types.ResponseTypeError:
+			return nil, fmt.Errorf("%s", chunk.Content)
+		case types.ResponseTypeThinking:
+			reasoning.WriteString(chunk.Content)
+		case types.ResponseTypeAnswer:
+			content.WriteString(chunk.Content)
+			lastAnswer = chunk
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	answer, inlineReasoning := splitThinkTags(content.String())
+	metadata, _ := lastAnswer.Data["reasoning_metadata"].(types.ProviderMetadata)
+	result := &types.ChatResponse{
+		Content:           answer,
+		ReasoningContent:  orDefault(reasoning.String(), inlineReasoning),
+		ReasoningMetadata: metadata,
+		ToolCalls:         lastAnswer.ToolCalls,
+		FinishReason:      lastAnswer.FinishReason,
+	}
+	if lastAnswer.Usage != nil {
+		result.Usage = *lastAnswer.Usage
+	} else {
+		result.Usage = (api.OpenAIUsage{}).ToTokenUsage(c.cfg.Settings.PromptCacheAccounting)
+	}
+	return result, nil
 }
 
 func (c *Client) processStream(
