@@ -542,7 +542,52 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		resourceRewriter:      resourceRewriter,
 	}
 
+	backfillTraceMetadata(reqCtx)
+
 	return reqCtx, &request, nil
+}
+
+// backfillTraceMetadata reports the resolved business dimensions of a QA
+// request on the active Langfuse trace. GinMiddleware opens the trace before
+// the request body is parsed, so channel / agent / tenant / language are only
+// known here — once parseQARequest has resolved them — and must be merged
+// into the trace metadata afterwards. These keys let Langfuse dashboards
+// attribute cost and quality per channel, agent and tenant without opening
+// individual generations. Optional dimensions (agent, tenant, channel) are
+// omitted when unset; all keys are scalars and never shadow the middleware's
+// correlation fields. See issue #5169 (approach A).
+func backfillTraceMetadata(reqCtx *qaRequestContext) {
+	if reqCtx == nil || reqCtx.ctx == nil {
+		return
+	}
+	langfuse.SetTraceMetadata(reqCtx.ctx, traceMetadataFromRequest(reqCtx))
+}
+
+// traceMetadataFromRequest extracts the business dimension key/value pairs
+// for the Langfuse trace backfill. Split from backfillTraceMetadata so the
+// extraction rules are unit-testable without a live Langfuse manager.
+func traceMetadataFromRequest(reqCtx *qaRequestContext) map[string]interface{} {
+	kv := map[string]interface{}{
+		"language": types.LanguageFromContextOrDefault(reqCtx.ctx),
+	}
+	if reqCtx.channel != "" {
+		kv["channel"] = reqCtx.channel
+	}
+	if agent := reqCtx.customAgent; agent != nil {
+		if agent.ID != "" {
+			kv["agent_id"] = agent.ID
+		}
+		if agent.Name != "" {
+			kv["agent_name"] = agent.Name
+		}
+		if agent.Config.AgentMode != "" {
+			kv["agent_mode"] = agent.Config.AgentMode
+		}
+	}
+	if info, ok := types.TenantInfoFromContext(reqCtx.ctx); ok && info != nil && info.Name != "" {
+		kv["tenant_name"] = info.Name
+	}
+	return kv
 }
 
 func decodeAndValidateAttachmentUploads(

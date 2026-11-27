@@ -46,6 +46,55 @@ func TraceFromContext(ctx context.Context) (*Trace, bool) {
 	return traceFromCtx(ctx)
 }
 
+// SetTraceMetadata merges business key/value pairs into the active trace's
+// metadata before Finish reports it. GinMiddleware opens traces before the
+// business context is parsed, so handlers call this once they have resolved
+// request-scoped dimensions (channel, agent, language, ...) that the
+// middleware cannot know. Values must be scalars (string, bool, numbers);
+// non-scalar and empty entries are skipped. Existing keys win: built-in
+// correlation fields (http.*, request_id) and caller keys from
+// X-Langfuse-Metadata are already on the trace by the time a handler runs,
+// so a backfill never shadows them, matching mergeMetadataHeader's
+// caller-key semantics. Safe to call when tracing is disabled or ctx
+// carries no trace (no-op).
+func SetTraceMetadata(ctx context.Context, kv map[string]interface{}) {
+	if ctx == nil || len(kv) == 0 {
+		return
+	}
+	t, ok := traceFromCtx(ctx)
+	if !ok || t == nil || t.manager == nil || !t.manager.Enabled() {
+		return
+	}
+	if t.metadata == nil {
+		t.metadata = make(map[string]interface{}, len(kv))
+	}
+	for k, v := range kv {
+		if k == "" || v == nil || !isScalarBusinessMetadataValue(v) {
+			continue
+		}
+		if _, exists := t.metadata[k]; !exists {
+			t.metadata[k] = v
+		}
+	}
+}
+
+// isScalarBusinessMetadataValue reports whether v is a scalar produced by Go
+// business code: string, bool or any numeric type. Wider than
+// isScalarMetadataValue — which only sees encoding/json-decoded values, where
+// every number is a float64 — because handlers pass typed Go values directly,
+// and silently dropping an int dimension would be hard to diagnose.
+func isScalarBusinessMetadataValue(v interface{}) bool {
+	switch v.(type) {
+	case string, bool,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64:
+		return true
+	default:
+		return false
+	}
+}
+
 // TraceparentFromContext returns the W3C traceparent for the active span, or
 // empty when Langfuse is disabled or ctx carries no span. Used to stamp the
 // originating chat trace onto derived work (follow-up suggestions) that may
