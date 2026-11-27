@@ -30,7 +30,7 @@ func TestOutputTextRendersCurrentEvidenceChunkAsCitation(t *testing.T) {
 		ChunkID: "chunk-real", KnowledgeID: "doc-real", KnowledgeBaseID: "kb-real", DocumentTitle: "Doc",
 	})
 	require.Equal(t,
-		`见 <kb doc="Doc" chunk_id="chunk-real" kb_id="kb-real" />`,
+		`见 <kb doc="Doc" chunk_id="chunk-real" knowledge_id="doc-real" kb_id="kb-real" />`,
 		registry.DecodeOutputText("见 chunk://1"))
 }
 
