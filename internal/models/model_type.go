@@ -16,15 +16,25 @@ var frontendTypes = map[string]types.ModelType{
 }
 
 // ParseModelType accepts both frontend ("chat") and backend ("KnowledgeQA")
-// spellings.
+// spellings. Both spellings match case-insensitively: the value comes from
+// a raw query parameter, so "knowledgeqa" must work the same as "chat" and
+// "KnowledgeQA" instead of being rejected as unknown.
 func ParseModelType(s string) (types.ModelType, bool) {
-	if t, ok := frontendTypes[strings.ToLower(strings.TrimSpace(s))]; ok {
+	normalized := strings.ToLower(strings.TrimSpace(s))
+	if t, ok := frontendTypes[normalized]; ok {
 		return t, true
 	}
-	switch types.ModelType(s) {
-	case types.ModelTypeKnowledgeQA, types.ModelTypeEmbedding, types.ModelTypeRerank,
-		types.ModelTypeVLLM, types.ModelTypeASR:
-		return types.ModelType(s), true
+	switch normalized {
+	case "knowledgeqa":
+		return types.ModelTypeKnowledgeQA, true
+	case "embedding":
+		return types.ModelTypeEmbedding, true
+	case "rerank":
+		return types.ModelTypeRerank, true
+	case "vllm":
+		return types.ModelTypeVLLM, true
+	case "asr":
+		return types.ModelTypeASR, true
 	}
 	return "", false
 }
