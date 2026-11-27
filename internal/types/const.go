@@ -24,6 +24,8 @@ const (
 	UserContextKey ContextKey = "User"
 	// UserIDContextKey is the context key for user ID
 	UserIDContextKey ContextKey = "UserID"
+	// IMSenderNameContextKey carries the current message's display name for agent prompts.
+	IMSenderNameContextKey ContextKey = "IMSenderName"
 	// PrincipalContextKey is the context key for the terminal caller principal.
 	PrincipalContextKey ContextKey = "Principal"
 	// PrincipalAuthSourceContextKey records how the auth middleware verified

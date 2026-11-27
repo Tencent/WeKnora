@@ -82,6 +82,34 @@ func checkQAExitResult(t *testing.T, result <-chan qaExitResult, stream, failed 
 	}
 }
 
+func TestIMQAAgentReceivesSenderName(t *testing.T) {
+	for _, stream := range []bool{true, false} {
+		mode := "runQA"
+		if stream {
+			mode = "stream"
+		}
+		t.Run(mode, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				channel := &IMChannel{ID: "group-channel", TenantID: 42}
+				for _, name := range []string{"张三", "李四", ""} {
+					msg := &IncomingMessage{Platform: PlatformYunzhijia, UserID: "sender", UserName: name}
+					ctx := withIMIdentity(context.Background(), channel, msg)
+					sender := make(chan string, 1)
+					result := startQAExitHandler(ctx, stream, true, func(ctx context.Context, _ *event.EventBus) error {
+						got, _ := ctx.Value(types.IMSenderNameContextKey).(string)
+						sender <- got
+						return nil
+					})
+					checkQAExitResult(t, result, stream, false, imNoAnswerFallback)
+					if got := <-sender; got != name {
+						t.Fatalf("agent QA sender = %q, want %q", got, name)
+					}
+				}
+			})
+		})
+	}
+}
+
 func TestIMQAAgentReturnClosesReply(t *testing.T) {
 	for _, stream := range []bool{true, false} {
 		mode := "runQA"

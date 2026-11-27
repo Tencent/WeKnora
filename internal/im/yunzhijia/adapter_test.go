@@ -52,6 +52,9 @@ func TestVerifyCallbackSignature(t *testing.T) {
 	if parsed == nil || parsed.Content != "hello" {
 		t.Fatalf("parsed message = %#v, want content hello", parsed)
 	}
+	if parsed.UserName != "User" {
+		t.Fatalf("parsed sender name = %q, want User", parsed.UserName)
+	}
 }
 
 func TestToIncomingMessageRequiresRobotMention(t *testing.T) {
