@@ -510,6 +510,9 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
+              <AnswerReferencedDocuments
+                v-if="!embeddedMode && answerFullyRendered && event === pinnedAnswerEvent && event.content?.trim()"
+                :references="session.knowledge_references" :message-id="session.id" />
               <div v-if="event === pinnedAnswerEvent && (pinnedPageLinks.length > 0 || pinnedPageEdits.length > 0)"
                 class="answer-page-links">
                 <OpenPageCard v-for="link in pinnedPageLinks" :key="link.tool_call_id" :link="link.tool_data" />
@@ -810,6 +813,7 @@ import { isAssistantPageLink } from '@/utils/assistantPageLink';
 import AskUserCard from './AskUserCard.vue';
 import SecureFormCard from './SecureFormCard.vue';
 import ChatActionIcon from '@/components/ChatActionIcon.vue';
+import AnswerReferencedDocuments from './AnswerReferencedDocuments.vue';
 import ChatTimelineIcon from '@/components/ChatTimelineIcon.vue';
 import HostApprovalCard from './HostApprovalCard.vue';
 import HostReviewRecord from './HostReviewRecord.vue';
