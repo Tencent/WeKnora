@@ -78,15 +78,18 @@ func generateNonce(length int) string {
 
 // rfc3986Encode 对字符串做 RFC3986 编码
 // 保留字符：A-Z a-z 0-9 - _ . ~
+// 按字节遍历：非 ASCII 字符按 UTF-8 字节逐字节编码（如“中”应为 %E4%B8%AD，
+// 而不是按码点编码出的 %4E2D）。
 func rfc3986Encode(s string) string {
 	var buf bytes.Buffer
-	for _, r := range s {
-		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
-			(r >= '0' && r <= '9') || r == '-' || r == '_' ||
-			r == '.' || r == '~' {
-			buf.WriteRune(r)
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') ||
+			(b >= '0' && b <= '9') || b == '-' || b == '_' ||
+			b == '.' || b == '~' {
+			buf.WriteByte(b)
 		} else {
-			fmt.Fprintf(&buf, "%%%02X", r)
+			fmt.Fprintf(&buf, "%%%02X", b)
 		}
 	}
 	return buf.String()
