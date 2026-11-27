@@ -471,13 +471,26 @@ func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOp
 			return cmdutil.NewError(code, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
 		}
 
-		var pageResp struct {
+		type pageData struct {
 			Data     []json.RawMessage `json:"data"`
 			Total    int64             `json:"total"`
 			Page     int               `json:"page"`
 			PageSize int               `json:"page_size"`
 		}
-		if err := json.Unmarshal(body, &pageResp); err != nil {
+		var pageResp pageData
+		err = json.Unmarshal(body, &pageResp)
+		if err != nil {
+			// Tag lists wrap the entire page inside the success envelope.
+			var nested struct {
+				Data pageData `json:"data"`
+			}
+			nestedErr := json.Unmarshal(body, &nested)
+			if nestedErr == nil && nested.Data.PageSize > 0 && nested.Data.Data != nil {
+				pageResp = nested.Data
+				err = nil
+			}
+		}
+		if err != nil {
 			// Non-JSON response on first page — fall back through the envelope.
 			if page == 1 {
 				return emitRawBody(body, fopts)

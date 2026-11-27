@@ -719,3 +719,25 @@ func TestFieldBodyPreservesUnsignedID(t *testing.T) {
 		t.Errorf("unexpected request: %s", body)
 	}
 }
+
+func TestAPI_PaginateNestedTags(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	calls := 0
+	svc := &fakeAPISvc{do: func(_, path string, _ any) (*http.Response, error) {
+		calls++
+		if calls > 2 || !strings.Contains(path, fmt.Sprintf("page=%d", calls)) {
+			return nil, fmt.Errorf("unexpected page %s", path)
+		}
+		body := fmt.Sprintf(
+			`{"success":true,"data":{"page":%d,"page_size":1,"total":2,"data":[{"id":"tag%d"}]}}`, calls, calls)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+	}}
+	opts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+	path := "/api/v1/knowledge-bases/kb/tags?page_size=1"
+	if err := runAPIPaginated(context.Background(), &Options{}, opts, svc, path); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || !strings.Contains(out.String(), "tag2") {
+		t.Fatalf("calls=%d output=%s", calls, out.String())
+	}
+}
