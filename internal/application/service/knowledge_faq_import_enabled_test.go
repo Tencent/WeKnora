@@ -1,12 +1,108 @@
 package service
 
 import (
+	"context"
 	"testing"
+	"testing/synctest"
+	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/require"
 )
+
+type faqTimeoutEngine struct {
+	parentChildRetrieveEngine
+	ctx     context.Context
+	succeed bool
+}
+
+func (e *faqTimeoutEngine) BatchIndex(
+	ctx context.Context, _ embedding.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType,
+) error {
+	e.ctx = ctx
+	if e.succeed {
+		return nil
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (*faqTimeoutEngine) DeleteBySourceIDList(context.Context, []string, int, string) error {
+	return nil
+}
+
+func TestFAQIndexOperationBudget(t *testing.T) {
+	for _, incremental := range []bool{false, true} {
+		name := "replace-and-merge-batch"
+		if incremental {
+			name = "incremental"
+		}
+		t.Run(name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name    string
+				parent  time.Duration
+				want    time.Duration
+				succeed bool
+			}{
+				{name: "no parent deadline", want: api.DefaultJSONTimeout},
+				{name: "long task deadline", parent: 2 * time.Hour, want: api.DefaultJSONTimeout},
+				{name: "shorter parent deadline", parent: api.DefaultJSONTimeout / 2, want: api.DefaultJSONTimeout / 2},
+				{name: "success releases child", parent: 2 * time.Hour, succeed: true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					synctest.Test(t, func(t *testing.T) {
+						engine := &faqTimeoutEngine{succeed: tc.succeed}
+						store := "faq-timeout-store"
+						svc := &knowledgeService{
+							retrieveEngine: &fakeFanoutRegistry{
+								byStore: map[string]interfaces.RetrieveEngineService{store: engine},
+							},
+							ownership: &fakeOwnership{owned: map[string]uint64{store: 7}},
+							repo:      &parentChildKnowledgeRepo{},
+						}
+						ctx := types.WithExecutionTenant(context.Background(), 7)
+						ctx = context.WithValue(ctx, types.TenantInfoContextKey, &types.Tenant{ID: 7})
+						if tc.parent > 0 {
+							var cancel context.CancelFunc
+							ctx, cancel = context.WithTimeout(ctx, tc.parent)
+							defer cancel()
+						}
+						kb := &types.KnowledgeBase{ID: "kb", TenantID: 7, VectorStoreID: &store}
+						knowledge := &types.Knowledge{ID: "faq"}
+						chunk := &types.Chunk{
+							ID: "one", KnowledgeID: "faq", KnowledgeBaseID: "kb", Content: "new question",
+						}
+						start := time.Now()
+						var err error
+						if incremental {
+							err = svc.incrementalIndexFAQEntry(ctx, kb, knowledge, chunk, parentChildEmbedder{},
+								"old question", nil, nil, &types.FAQChunkMetadata{StandardQuestion: "new question"})
+						} else {
+							err = svc.indexFAQChunks(
+								ctx, kb, knowledge, []*types.Chunk{chunk}, parentChildEmbedder{}, false, false,
+							)
+						}
+						if tc.succeed {
+							require.NoError(t, err)
+						} else {
+							require.ErrorIs(t, err, context.DeadlineExceeded)
+						}
+						require.Equal(t, tc.want, time.Since(start))
+						require.NotNil(t, engine.ctx)
+						require.Error(t, engine.ctx.Err(), "operation child must be canceled on return")
+						if tc.parent == 0 || tc.parent > tc.want {
+							require.NoError(t, ctx.Err(),
+								"task context must remain usable for failure progress and cleanup")
+						}
+					})
+				})
+			}
+		})
+	}
+}
 
 func TestFAQImportPreservesEnabledStateInStorageAndIndex(t *testing.T) {
 	for _, mode := range []string{types.FAQBatchModeAppend, types.FAQBatchModeReplace} {

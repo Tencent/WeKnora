@@ -163,6 +163,11 @@ func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 // marshalling, SSRF, transport, non-2xx, decoding — returns an error, so a
 // caller cannot mistake an empty result for a successful empty answer.
 func (e Endpoint) PostJSON(ctx context.Context, url string, body, out any) error {
+	// Bound a stalled JSON exchange when the caller has no deadline.
+	// Existing deadlines are honored unchanged; background tasks with longer
+	// deadlines must apply their own operation-level budget.
+	ctx, cancel := WithLLMTimeout(ctx, DefaultJSONTimeout)
+	defer cancel()
 	req, _, err := e.NewRequest(ctx, url, body, false)
 	if err != nil {
 		return err

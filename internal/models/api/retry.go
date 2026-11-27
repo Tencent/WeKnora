@@ -57,6 +57,10 @@ func (p RetryPolicy) delay(attempt int) time.Duration {
 func (e Endpoint) PostJSONWithRetry(
 	ctx context.Context, url string, body, out any, policy RetryPolicy, label string,
 ) error {
+	// All attempts and backoffs share one budget rather than restarting the
+	// fallback timeout for each request. Explicit caller deadlines still win.
+	ctx, cancel := WithLLMTimeout(ctx, DefaultJSONTimeout)
+	defer cancel()
 	return withRetry(ctx, policy, label, func() error {
 		return e.PostJSON(ctx, url, body, out)
 	})

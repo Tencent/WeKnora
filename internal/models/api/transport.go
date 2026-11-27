@@ -16,9 +16,16 @@ import (
 // 都会原样尊重，不再叠加默认超时。可通过环境变量覆盖：
 //   - WEKNORA_LLM_CHAT_TIMEOUT_SECONDS    非流式调用兜底超时（默认 600s）
 //   - WEKNORA_LLM_STREAM_TIMEOUT_SECONDS  流式调用兜底超时（默认 1800s）
+//   - WEKNORA_LLM_JSON_TIMEOUT_SECONDS    JSON 往返兜底超时（默认 600s）
 var (
 	DefaultChatTimeout   = envDurationSeconds("WEKNORA_LLM_CHAT_TIMEOUT_SECONDS", 300*time.Second)
 	DefaultStreamTimeout = envDurationSeconds("WEKNORA_LLM_STREAM_TIMEOUT_SECONDS", 600*time.Second)
+	// DefaultJSONTimeout is the fallback budget for JSON requests, including
+	// retries (embeddings, rerank, transcriptions). FAQ indexing also uses it
+	// as an operation-level cap within the much longer background task.
+	// HTTPClient intentionally has no Timeout because streaming calls are
+	// bounded by context instead.
+	DefaultJSONTimeout = envDurationSeconds("WEKNORA_LLM_JSON_TIMEOUT_SECONDS", 600*time.Second)
 )
 
 // envDurationSeconds 读取以"秒"为单位的环境变量，解析失败或非正值时回退到 fallback。
