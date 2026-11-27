@@ -473,7 +473,7 @@ func TestDeleteTaskScopeRejectsMovedDocumentsBeforeAnyMutation(t *testing.T) {
 	f.requireNoWrites(t)
 }
 
-func TestDeleteTaskRetriesAfterPartialCleanupAndAlreadyDeletedRows(t *testing.T) {
+func TestDeleteTaskToleratesGraphFailureAndAlreadyDeletedRows(t *testing.T) {
 	f := newDocumentWriteFixture(t)
 	require.NoError(t, f.db.Model(&types.Knowledge{}).Where("id = ?", "doc").Update("file_path", "local://doc").Error)
 	task := deleteDocumentTask(
@@ -484,21 +484,20 @@ func TestDeleteTaskRetriesAfterPartialCleanupAndAlreadyDeletedRows(t *testing.T)
 			KnowledgeIDs:    []string{"doc", "doc", "already-gone"},
 		},
 	)
+	// Graph cleanup is best-effort (issue #5220): a transient Neo4j failure
+	// is retried independently and must not fail the delete task — the rows,
+	// files and storage accounting still complete, and the residual graph is
+	// left for a later cleanup pass.
 	f.graph.err = errors.New("graph unavailable")
-	err := f.svc.ProcessKnowledgeListDelete(context.Background(), task)
-	require.ErrorContains(t, err, "graph unavailable")
-	require.NotErrorIs(t, err, asynq.SkipRetry)
-	row, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
-	require.NoError(t, err)
-	require.Equal(t, types.ParseStatusDeleting, row.ParseStatus)
-	require.Empty(t, f.files.deleted)
-	require.Empty(t, f.tenants.adjustments)
-	f.graph.err = nil
 	f.files.beforeDelete = func() { _, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc"); require.Error(t, err) }
 	require.NoError(t, f.svc.ProcessKnowledgeListDelete(context.Background(), task))
+	require.Equal(t, graphCleanupMaxAttempts, f.graph.calls)
+	_, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+	require.Error(t, err)
 	require.Equal(t, []string{"local://doc"}, f.files.deleted)
 	require.Equal(t, []int64{-5}, f.tenants.adjustments)
 	// A completed task does not need live KB metadata or current user grants.
+	f.graph.err = nil
 	delete(f.kbs.values, "kb")
 	writes, calls := f.repo.writes, f.graph.calls
 	require.NoError(t, f.svc.ProcessKnowledgeListDelete(context.Background(), task))

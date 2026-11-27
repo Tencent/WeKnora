@@ -109,6 +109,24 @@ func TestCleanupStopsBeforeSideEffectsWhenKBUnavailable(t *testing.T) {
 	}
 }
 
+func TestCleanupKnowledgeResourcesToleratesGraphFailure(t *testing.T) {
+	f := newDocumentWriteFixture(t)
+	f.graph.err = errors.New("neo4j timeout")
+	row, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+	require.NoError(t, err)
+	// The fixture row is a draft with indexed data, so cleanup proceeds
+	// instead of taking the draft fast path.
+	require.NoError(t, f.svc.cleanupKnowledgeResources(f.ctx, row))
+	// The graph cleanup was retried independently and then left as a
+	// best-effort residual instead of failing the rebuild cleanup.
+	require.Equal(t, graphCleanupMaxAttempts, f.graph.calls)
+	// Vector/chunk cleanup still completed: the chunk is gone and the
+	// storage accounting was adjusted.
+	_, err = f.chunkRepo.GetChunkByID(f.ctx, 7, "chunk")
+	require.Error(t, err)
+	require.Equal(t, []int64{-5}, f.tenants.adjustments)
+}
+
 func TestMoveReparseKBLookupFailurePreservesSourceCheckpoint(t *testing.T) {
 	f := transferFixture(t, access.KBTransferMove)
 	row, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")

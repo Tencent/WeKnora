@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -590,7 +591,9 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 		return nil
 	})
 
-	// Delete the knowledge graph
+	// Delete the knowledge graph. Graph cleanup is best-effort (issue
+	// #5220): a transient Neo4j failure must not fail the whole batch
+	// delete, so the residual graph is left for a later cleanup pass.
 	wg.Go(func() error {
 		namespaces := []types.NameSpace{}
 		for _, knowledge := range knowledgeList {
@@ -599,10 +602,7 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 				types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID},
 			)
 		}
-		if err := s.graphEngine.DelGraph(ctx, namespaces); err != nil {
-			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge graph failed")
-			return err
-		}
+		s.deleteKnowledgeGraphBestEffort(ctx, namespaces)
 		return nil
 	})
 
@@ -681,6 +681,45 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 	return nil
 }
 
+// graphCleanupMaxAttempts bounds the independent retries for Neo4j graph
+// cleanup. The first attempt runs immediately; the sleeps between retries
+// back off so a transient Neo4j timeout does not turn into a hot loop.
+const graphCleanupMaxAttempts = 3
+
+// deleteKnowledgeGraphBestEffort removes the graph data for the given
+// namespaces, retrying transient Neo4j failures with backoff. A graph
+// cleanup failure must never fail the surrounding delete or rebuild (issue
+// #5220): the vector store and chunk cleanup still have to complete, and the
+// orphaned graph nodes are left for a later cleanup pass. The failure is
+// logged at error level after the retries are exhausted, so it is never
+// silently swallowed.
+func (s *knowledgeService) deleteKnowledgeGraphBestEffort(ctx context.Context, namespaces []types.NameSpace) {
+	backoff := 100 * time.Millisecond
+	var err error
+	for attempt := 1; attempt <= graphCleanupMaxAttempts; attempt++ {
+		err = s.graphEngine.DelGraph(ctx, namespaces)
+		if err == nil {
+			return
+		}
+		if attempt == graphCleanupMaxAttempts {
+			break
+		}
+		logger.GetLogger(ctx).WithField("error", err).Warnf(
+			"Knowledge graph cleanup attempt %d/%d failed, retrying", attempt, graphCleanupMaxAttempts)
+		select {
+		case <-ctx.Done():
+			logger.GetLogger(ctx).WithField("error", err).Error(
+				"Knowledge graph cleanup aborted: context done, leaving residual graph data for a later cleanup")
+			return
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+	}
+	logger.GetLogger(ctx).WithField("error", err).Errorf(
+		"Knowledge graph cleanup failed after %d attempts, leaving residual graph data for a later cleanup",
+		graphCleanupMaxAttempts)
+}
+
 func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowledge *types.Knowledge) error {
 	logger.GetLogger(ctx).Infof("Cleaning knowledge resources before manual update, knowledge ID: %s", knowledge.ID)
 
@@ -748,10 +787,10 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 	deleteExtractedImages(ctx, fileSvc, knowledgeResourceOwners(s.resourceCatalog, knowledge.ID), imageURLs)
 
 	namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
-	if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Error("Failed to delete manual knowledge graph data")
-		cleanupErr = errors.Join(cleanupErr, err)
-	}
+	// Graph cleanup is best-effort (issue #5220): retry it independently,
+	// and never let a Neo4j failure fail the rebuild cleanup — the residual
+	// graph is left for a later cleanup pass.
+	s.deleteKnowledgeGraphBestEffort(ctx, []types.NameSpace{namespace})
 
 	if knowledge.StorageSize > 0 {
 		tenantInfo.StorageUsed -= knowledge.StorageSize
