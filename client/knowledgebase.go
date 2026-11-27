@@ -90,8 +90,10 @@ type ImageProcessingConfig struct {
 
 // VLMConfig represents the VLM configuration
 type VLMConfig struct {
-	Enabled bool   `json:"enabled"`
-	ModelID string `json:"model_id"`
+	// CustomInstructions adds image-reading guidance without changing the output format.
+	CustomInstructions string `json:"custom_instructions,omitempty"`
+	Enabled            bool   `json:"enabled"`
+	ModelID            string `json:"model_id"`
 }
 
 // StorageProviderConfig stores the KB-level storage provider selection.
@@ -113,11 +115,13 @@ type StorageConfig struct {
 
 // ExtractConfig represents the extract configuration for a knowledge base
 type ExtractConfig struct {
-	Enabled   bool             `json:"enabled"`
-	Text      string           `json:"text,omitempty"`
-	Tags      []string         `json:"tags,omitempty"`
-	Nodes     []*GraphNode     `json:"nodes,omitempty"`
-	Relations []*GraphRelation `json:"relations,omitempty"`
+	// CustomInstructions adds domain guidance for knowledge graph extraction.
+	CustomInstructions string           `json:"custom_instructions,omitempty"`
+	Enabled            bool             `json:"enabled"`
+	Text               string           `json:"text,omitempty"`
+	Tags               []string         `json:"tags,omitempty"`
+	Nodes              []*GraphNode     `json:"nodes,omitempty"`
+	Relations          []*GraphRelation `json:"relations,omitempty"`
 }
 
 // GraphNode represents a node in the graph extraction configuration
@@ -142,8 +146,10 @@ type ParserEngineRule struct {
 
 // QuestionGenerationConfig controls LLM-generated questions per chunk during parsing.
 type QuestionGenerationConfig struct {
-	Enabled       bool `json:"enabled"`
-	QuestionCount int  `json:"question_count"`
+	// CustomInstructions describes the audience for generated questions.
+	CustomInstructions string `json:"custom_instructions,omitempty"`
+	Enabled            bool   `json:"enabled"`
+	QuestionCount      int    `json:"question_count"`
 }
 
 // AutoTagConfig controls optional automatic association of existing knowledge
