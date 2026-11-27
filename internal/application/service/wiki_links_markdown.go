@@ -18,6 +18,15 @@ type markdownWikiLink struct {
 	slug, display, separator string
 }
 
+// withSlug keeps the original display text and table-separator escaping.
+func (link markdownWikiLink) withSlug(slug string) string {
+	replacement := "[[" + slug
+	if link.display != "" {
+		replacement += link.separator + link.display
+	}
+	return replacement + "]]"
+}
+
 func wikiOutLinks(content string) types.StringArray {
 	seen := make(map[string]bool)
 	var links types.StringArray
