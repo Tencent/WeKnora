@@ -3,6 +3,7 @@ package vlm
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -129,10 +130,24 @@ func (v *RemoteAPIVLM) PredictWithOptions(
 		if len(imgBytes) == 0 {
 			continue
 		}
-		// A grayscale, palette or CMYK image goes as RGB: a vision processor
-		// that takes three channels fails on anything else (#5528).
+		// A grayscale, palette or CMYK image goes as RGB first: a vision
+		// processor that takes three channels fails on anything else (#5528).
 		if img, err := imageprep.Prepare(imgBytes, imageprep.Limits{}); err == nil {
 			imgBytes = img.Data
+		}
+		// An image with an extreme aspect ratio (a thin table border or page
+		// rule extracted as its own resource) is rejected by the vision
+		// preprocessor with "absolute aspect ratio must be smaller than 200"
+		// on every retry. Clamp it before sending, and drop one so degenerate
+		// that it carries no content (#5530).
+		if clamped, err := imageprep.ClampAspectRatio(imgBytes); err != nil {
+			if errors.Is(err, imageprep.ErrDegenerateImage) {
+				logger.Warnf(ctx, "[VLM] Skipping degenerate image (%d bytes): %v", len(imgBytes), err)
+				continue
+			}
+			logger.Warnf(ctx, "[VLM] Could not clamp image aspect ratio: %v", err)
+		} else {
+			imgBytes = clamped
 		}
 		totalImageSize += len(imgBytes)
 		dataURI := fmt.Sprintf("data:%s;base64,%s",
