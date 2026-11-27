@@ -73,6 +73,11 @@ const (
 	// maxConsecutiveFailedToolCalls is the number of identical failed tool
 	// calls allowed before the model is asked to switch tools or strategies.
 	maxConsecutiveFailedToolCalls = 3
+	// maxConsecutiveFailedToolCallStop is the hard limit for an identical
+	// failed-call streak. The first threshold only nudges the model, so a model
+	// that ignores it must still be stopped before it can exhaust an unlimited
+	// turn's wall-clock budget.
+	maxConsecutiveFailedToolCallStop = 2 * maxConsecutiveFailedToolCalls
 
 	// maxConsecutiveLengthRounds is how many rounds in a row may be cut off at
 	// the completion-token cap before the loop gives up. A truncated answer

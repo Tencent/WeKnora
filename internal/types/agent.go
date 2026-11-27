@@ -389,6 +389,9 @@ type Cleanable interface {
 
 // ToolResult represents the result of a tool execution
 type ToolResult struct {
+	// AttachmentParsingPending signals that read_file should be retried after
+	// background parsing instead of being treated as a repeated tool failure.
+	AttachmentParsingPending bool `json:"-"`
 	// OutputFiles holds sandbox references for this live result only. History
 	// uses the final answer's persistent resource references instead.
 	// A non-nil empty slice means output inspection found no eligible changes;

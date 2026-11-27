@@ -580,21 +580,29 @@ type loopGuards struct {
 	failedToolCallNudged       bool
 }
 
+type failedToolCallAction uint8
+
+const (
+	failedToolCallContinue failedToolCallAction = iota
+	failedToolCallNudge
+	failedToolCallStop
+)
+
 // recordFailedToolCall tracks consecutive failures of the same model-facing
 // tool name and arguments. A successful or different call breaks the streak.
-func (g *loopGuards) recordFailedToolCall(call types.ToolCall) (string, int, bool) {
-	if call.Result != nil && call.Result.Success {
+func (g *loopGuards) recordFailedToolCall(call types.ToolCall) (string, int, failedToolCallAction) {
+	if call.Result != nil && (call.Result.Success || call.Result.AttachmentParsingPending) {
 		g.resetFailedToolCallStreak()
-		return "", 0, false
+		return "", 0, failedToolCallContinue
 	}
 	if call.Name == "" {
 		g.resetFailedToolCallStreak()
-		return "", 0, false
+		return "", 0, failedToolCallContinue
 	}
 	args, err := json.Marshal(call.Args)
 	if err != nil {
 		g.resetFailedToolCallStreak()
-		return "", 0, false
+		return "", 0, failedToolCallContinue
 	}
 	signature := call.Name + "\x00" + string(args)
 	if signature != g.failedToolCallSignature {
@@ -604,11 +612,14 @@ func (g *loopGuards) recordFailedToolCall(call types.ToolCall) (string, int, boo
 	} else {
 		g.consecutiveFailedToolCalls++
 	}
+	if g.consecutiveFailedToolCalls >= maxConsecutiveFailedToolCallStop {
+		return call.Name, g.consecutiveFailedToolCalls, failedToolCallStop
+	}
 	if g.consecutiveFailedToolCalls >= maxConsecutiveFailedToolCalls && !g.failedToolCallNudged {
 		g.failedToolCallNudged = true
-		return call.Name, g.consecutiveFailedToolCalls, true
+		return call.Name, g.consecutiveFailedToolCalls, failedToolCallNudge
 	}
-	return "", g.consecutiveFailedToolCalls, false
+	return "", g.consecutiveFailedToolCalls, failedToolCallContinue
 }
 
 func (g *loopGuards) resetFailedToolCallStreak() {
@@ -1386,18 +1397,36 @@ func (e *AgentEngine) runReActIteration(
 	var (
 		failedToolName     string
 		failedToolAttempts int
+		failedToolAction   failedToolCallAction
 	)
 	for _, toolCall := range step.ToolCalls {
-		if name, attempts, shouldNudge := guards.recordFailedToolCall(toolCall); shouldNudge {
+		name, attempts, action := guards.recordFailedToolCall(toolCall)
+		if action > failedToolAction {
 			failedToolName = name
 			failedToolAttempts = attempts
+			failedToolAction = action
 		}
 	}
 
 	state.RoundSteps = append(state.RoundSteps, step)
 	*messagesPtr = e.appendToolResults(*messagesPtr, step)
 	*messagesPtr = e.appendToolImages(ctx, *messagesPtr, step)
-	if failedToolName != "" {
+	if failedToolAction == failedToolCallStop {
+		logger.Warnf(ctx, "[Agent][Round-%d] Repeated failed call to %q reached the hard limit "+
+			"(%d attempts); stopping", round, failedToolName, failedToolAttempts)
+		common.PipelineWarn(ctx, "Agent", "repeated_failed_tool_call_stop", map[string]interface{}{
+			"iteration": state.CurrentRound,
+			"round":     round,
+			"tool":      failedToolName,
+			"attempts":  failedToolAttempts,
+		})
+		if e.collaborationOwnsFailure(ctx) {
+			return iterOutcomeBreak, fmt.Errorf("collaboration stopped after repeated failed tool calls")
+		}
+		e.finishStalledTurn(ctx, state, sessionID, response, false)
+		return iterOutcomeBreak, nil
+	}
+	if failedToolAction == failedToolCallNudge {
 		logger.Warnf(ctx, "[Agent][Round-%d] Repeated failed call to %q (%d attempts); "+
 			"asking the model to change strategy", round, failedToolName, failedToolAttempts)
 		guidance := fmt.Sprintf(
