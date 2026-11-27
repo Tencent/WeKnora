@@ -105,6 +105,36 @@ func TestUpdateWikiPagePersistsAndClearsAliases(t *testing.T) {
 	require.Empty(t, stored.Aliases)
 }
 
+func TestCreateWikiPageNormalizesSlug(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.WikiFolder{}, &types.WikiPage{}, &types.WikiPageRevision{}))
+
+	ctx := context.Background()
+	repo := repository.NewWikiPageRepository(db)
+	svc := NewWikiPageService(repo, nil, nil, nil, nil, nil)
+	seedWikiTestKnowledgeBase(t, db, "kb-slug", 1)
+
+	page, err := svc.CreatePage(ctx, &types.WikiPage{
+		TenantID: 1, KnowledgeBaseID: "kb-slug", Slug: "Concept/Foo Bar",
+		Title: "Foo", Content: "See [[Concept/Foo Bar]].",
+		PageType: types.WikiPageTypeConcept,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "concept/foo-bar", page.Slug)
+
+	stored, err := svc.GetPageBySlug(ctx, "kb-slug", "concept/foo-bar")
+	require.NoError(t, err)
+	require.Equal(t, "concept/foo-bar", stored.Slug)
+	require.Equal(t, types.StringArray{"concept/foo-bar"}, stored.OutLinks)
+
+	_, err = svc.CreatePage(ctx, &types.WikiPage{
+		TenantID: 1, KnowledgeBaseID: "kb-slug", Slug: "   ",
+		Title: "Empty", PageType: types.WikiPageTypeConcept,
+	})
+	require.ErrorContains(t, err, "wiki page slug is required")
+}
+
 func TestParseOutLinks(t *testing.T) {
 	svc := &wikiPageService{}
 
