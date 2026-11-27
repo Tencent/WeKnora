@@ -974,10 +974,17 @@ func (r *chunkRepository) FindFAQChunkWithDuplicateQuestion(
 		}
 		db = db.Where(strings.Join(parts, " OR "), args...)
 	case "postgres":
+		// metadata is a `json` column (gorm:"type:json"), and the `->`
+		// operator yields `json` for it. COALESCE cannot mix json with the
+		// jsonb fallback, and jsonb_array_elements_text only accepts jsonb,
+		// so the column has to be cast before either is used:
+		//   ERROR: COALESCE could not convert type jsonb to json
+		// Casting the column (rather than the whole expression) also keeps
+		// working on a deployment whose column was migrated to jsonb.
 		db = db.Where(
 			"(metadata->>'standard_question' IN ? OR EXISTS ("+
 				"SELECT 1 FROM jsonb_array_elements_text("+
-				"COALESCE(metadata->'similar_questions', '[]'::jsonb)) elem "+
+				"COALESCE((metadata::jsonb)->'similar_questions', '[]'::jsonb)) elem "+
 				"WHERE elem.value IN ?))",
 			questions, questions)
 	default: // sqlite
@@ -1462,8 +1469,12 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	// Query chunks that have non-empty generated_questions in metadata
 	switch r.db.Name() {
 	case "postgres":
+		// Same cast as FindFAQChunkWithDuplicateQuestion: `json -> json` and a
+		// `jsonb` fallback cannot be merged by COALESCE.
 		if err := baseQuery.
-			Where("metadata IS NOT NULL AND metadata::text != '{}' AND jsonb_array_length(COALESCE(metadata->'generated_questions', '[]'::jsonb)) > 0").
+			Where("metadata IS NOT NULL AND metadata::text != '{}' AND " +
+				"jsonb_array_length(COALESCE((metadata::jsonb)->'generated_questions', " +
+				"'[]'::jsonb)) > 0").
 			Order(orderClause).
 			Limit(limit).
 			Find(&chunks).Error; err != nil {
