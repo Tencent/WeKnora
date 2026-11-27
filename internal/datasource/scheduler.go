@@ -3,6 +3,7 @@ package datasource
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -236,7 +237,7 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 		asynq.TaskID(taskID),
 	)
 	if err != nil {
-		if err == asynq.ErrTaskIDConflict {
+		if errors.Is(err, asynq.ErrTaskIDConflict) {
 			logger.Infof(ctx, "[Scheduler] sync already enqueued by another instance for ds=%s", dataSourceID)
 			syncLog.Status = types.SyncLogStatusCanceled
 			now := time.Now().UTC()

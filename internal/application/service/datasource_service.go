@@ -1179,7 +1179,8 @@ func (s *DataSourceService) applyFetchedItem(
 			logger.Warnf(ctx, "item %q (external_id=%s) fetch failed: %s", item.Title, item.ExternalID, errMsg)
 			result.Failed++
 			recordSyncError(result, fetchFailureSyncError(item, errMsg))
-			return item.Metadata["error_reason_code"] == "dingtalk_document_too_large", nil
+			code := item.Metadata["error_reason_code"]
+			return code == "dingtalk_document_too_large" || code == "dingtalk_rate_limited", nil
 		} else {
 			logger.Infof(ctx, "skipping item %q (external_id=%s): no content or URL", item.Title, item.ExternalID)
 			result.Skipped++
@@ -1747,10 +1748,10 @@ func allFetchedItemsFailedError(result *types.SyncResult, nonBlockingFailures in
 		result.Deleted != 0 || result.Skipped != 0 {
 		return nil
 	}
-	// An oversized or unsupported file will not recover by replaying the same
-	// task. Keep the failure visible as a partial run. Oversized downloads retain
-	// their connector revision until the source file is replaced. Other failures
-	// still follows the existing failure/retry path, even beyond the sample cap.
+	// Keep non-blocking failures visible without replaying the whole task.
+	// DingTalk throttling has already exhausted request retries and needs the
+	// next scheduled run to recover. Other errors still follow the failure path,
+	// even beyond the sample cap.
 	if nonBlockingFailures == result.Failed {
 		return nil
 	}

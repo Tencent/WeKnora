@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -24,6 +25,7 @@ const (
 	maxResponseBytes = 16 << 20
 	maxPages         = 1000
 	maxAttempts      = 3
+	qpsLimitCode     = "Forbidden.AccessDenied.QpsLimitForApi"
 
 	// downloadTimeout is deliberately longer than apiTimeout: the JSON calls
 	// are small, while an uploaded document can be several megabytes.
@@ -337,12 +339,17 @@ func (c *client) doJSON(
 			continue
 		}
 
-		if isTransient(resp.StatusCode) {
-			apiErr := c.redactAPIError(decodeAPIError(resp.StatusCode, responseBody))
-			if retryAttempt+1 < maxAttempts {
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			decoded := decodeAPIError(resp.StatusCode, responseBody)
+			limited := decoded.isRateLimited()
+			apiErr := c.redactAPIError(decoded)
+			if (limited || isTransient(resp.StatusCode)) && retryAttempt+1 < maxAttempts {
 				delay := retryDelay(retryAttempt)
-				if resp.StatusCode == http.StatusTooManyRequests {
-					delay = parseRetryAfter(resp.Header.Get("Retry-After"), delay)
+				if limited {
+					// Allow the one-second quota window to clear and spread callers
+					// that hit it at the same time when no retry hint is provided.
+					fallback := (time.Second << retryAttempt) + time.Duration(rand.Int64N(int64(250*time.Millisecond)))
+					delay = parseRetryAfter(resp.Header.Get("Retry-After"), fallback)
 				}
 				retryAttempt++
 				if err := c.wait(ctx, delay); err != nil {
@@ -350,11 +357,9 @@ func (c *client) doJSON(
 				}
 				continue
 			}
-			return apiErr
-		}
-
-		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			apiErr := c.redactAPIError(decodeAPIError(resp.StatusCode, responseBody))
+			if limited {
+				return fmt.Errorf("%w: %w", errRateLimited, apiErr)
+			}
 			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 				return fmt.Errorf("%w: %w", datasource.ErrInvalidCredentials, apiErr)
 			}
@@ -690,6 +695,13 @@ type apiError struct {
 	message string
 }
 
+var errRateLimited = errors.New("DingTalk API rate limited")
+
+func (e *apiError) isRateLimited() bool {
+	return e.status == http.StatusTooManyRequests ||
+		(e.status == http.StatusForbidden && e.code == qpsLimitCode)
+}
+
 func (e *apiError) Error() string {
 	switch {
 	case e.code != "" && e.message != "":
@@ -701,7 +713,7 @@ func (e *apiError) Error() string {
 	}
 }
 
-func decodeAPIError(status int, body []byte) error {
+func decodeAPIError(status int, body []byte) *apiError {
 	var response struct {
 		Code    json.RawMessage `json:"code"`
 		ErrCode json.RawMessage `json:"errcode"`
@@ -758,9 +770,13 @@ func retryDelay(attempt int) time.Duration {
 
 func parseRetryAfter(value string, fallback time.Duration) time.Duration {
 	const maximum = 30 * time.Second
+	value = strings.TrimSpace(value)
 	delay := fallback
-	if seconds, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && value != "" {
-		if seconds <= 0 {
+	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil {
+		if seconds >= uint64(maximum/time.Second) {
+			return maximum
+		}
+		if seconds == 0 {
 			delay = 100 * time.Millisecond
 		} else {
 			delay = time.Duration(seconds) * time.Second

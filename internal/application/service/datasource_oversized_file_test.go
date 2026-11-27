@@ -53,7 +53,7 @@ func TestProcessSyncOversizedFilesKeepSchedule(t *testing.T) {
 		for _, scenario := range []string{
 			"mixed", "all-failed", "many-oversized", "transient-only",
 			"mixed-failures", "ingest-failed", "paused", "fetch-failed",
-			"mixed-permanent", "oversized-and-ingest-failed",
+			"mixed-permanent", "oversized-and-ingest-failed", "rate-limited-only",
 		} {
 			name := scenario + "/batch"
 			if stream {
@@ -67,9 +67,10 @@ func TestProcessSyncOversizedFilesKeepSchedule(t *testing.T) {
 				h.ds.LastSyncCursor, _ = oldCursor.ToJSON()
 				c := itemFailureConnector{
 					items: []types.FetchedItem{{Title: "large.pptx", Metadata: map[string]string{
-						"error":             "document exceeds the download limit",
-						"error_reason_code": "dingtalk_document_too_large",
-						"error_reason":      "DingTalk file exceeds the 64 MiB download limit",
+						"error":                   "document exceeds the download limit",
+						"error_reason_code":       "dingtalk_document_too_large",
+						"error_reason_code_value": "64",
+						"error_reason":            "DingTalk file exceeds the WeKnora sync download limit of 64 MiB",
 					}}},
 					cursor: &types.SyncCursor{ConnectorCursor: map[string]interface{}{
 						"revision": "healthy-advanced-failed-retained",
@@ -93,6 +94,16 @@ func TestProcessSyncOversizedFilesKeepSchedule(t *testing.T) {
 				case "transient-only":
 					c.items[0].Metadata = map[string]string{
 						"error": "temporary API error", "error_reason_code": "dingtalk_document_failed",
+					}
+				case "rate-limited-only":
+					c.items[0] = types.FetchedItem{ExternalID: "dingtalk-resource:sample", Metadata: map[string]string{
+						"error":             "DingTalk API rate limited",
+						"error_reason_code": "dingtalk_rate_limited",
+						"error_reason":      "DingTalk API rate limit reached; retry later",
+					}}
+					c.cursor = nil
+					if !stream {
+						c.err = &datasource.PartialFetchError{}
 					}
 				case "mixed-permanent":
 					healthy.FileName = "unsupported.mp4"
@@ -133,7 +144,7 @@ func TestProcessSyncOversizedFilesKeepSchedule(t *testing.T) {
 					}
 					return
 				}
-				require.NoError(t, err, "oversized files must not replay the whole task")
+				require.NoError(t, err, "non-blocking item failures must not replay the whole task")
 				require.Equal(t, types.SyncLogStatusPartial, log.Status)
 				wantState := types.DataSourceStatusActive
 				if scenario == "paused" {
@@ -144,7 +155,13 @@ func TestProcessSyncOversizedFilesKeepSchedule(t *testing.T) {
 				result, err := log.ParseResult()
 				require.NoError(t, err)
 				require.NotEmpty(t, result.Errors)
+				if scenario == "rate-limited-only" {
+					require.Equal(t, "dingtalk_rate_limited", result.Errors[0].Code)
+					require.JSONEq(t, string(mustCursorJSON(t, oldCursor)), string(h.ds.LastSyncCursor))
+					return
+				}
 				require.Equal(t, "dingtalk_document_too_large", result.Errors[0].Code)
+				require.Equal(t, "64", result.Errors[0].Params["code"])
 				require.Contains(t, result.Errors[0].Message, "64 MiB")
 				require.JSONEq(t, string(mustCursorJSON(t, c.cursor)), string(h.ds.LastSyncCursor))
 				if scenario == "many-oversized" {

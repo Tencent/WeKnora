@@ -15,6 +15,7 @@ import (
 
 type fakeAPI struct {
 	workspaces   []workspace
+	workspaceErr error
 	nodes        map[string][]node
 	blocks       map[string][]json.RawMessage
 	downloads    map[string][]byte
@@ -28,7 +29,7 @@ type fakeAPI struct {
 }
 
 func (f *fakeAPI) listWorkspaces(context.Context) ([]workspace, error) {
-	return f.workspaces, nil
+	return f.workspaces, f.workspaceErr
 }
 
 func (f *fakeAPI) listNodes(_ context.Context, parentID string) ([]node, error) {
