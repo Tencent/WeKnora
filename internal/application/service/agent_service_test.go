@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/operations"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -20,6 +21,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 type fakeAgentKnowledgeBaseService struct {
@@ -59,6 +62,7 @@ type fakeAgentChatModel struct {
 	lastToolNames        []string
 	lastToolDescriptions map[string]string
 	lastSystemPrompt     string
+	lastMessages         []chat.Message
 }
 
 func (*fakeAgentChatModel) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
@@ -71,6 +75,7 @@ func (m *fakeAgentChatModel) ChatStream(
 	m.lastToolNames = nil
 	m.lastToolDescriptions = map[string]string{}
 	m.lastSystemPrompt = ""
+	m.lastMessages = append([]chat.Message(nil), messages...)
 	for _, msg := range messages {
 		if msg.Role == "system" {
 			m.lastSystemPrompt = msg.Content
@@ -986,6 +991,90 @@ func TestCreateAgentEngineInjectsHostWorkspaceIntoPromptAndTools(t *testing.T) {
 	require.NotContains(t, chatModel.lastSystemPrompt, "There is no /workspace")
 	require.Contains(t, chatModel.lastToolDescriptions[tools.ToolShellExec], root)
 	require.NotContains(t, chatModel.lastToolDescriptions[tools.ToolShellExec], sandbox.SessionWorkspaceRoot)
+}
+
+func TestCreateAgentEngineIncludesCurrentUserInLiveTurn(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&types.User{}, &types.Message{}))
+	require.NoError(t, db.Create(&[]types.User{
+		{ID: "caller-1", Username: "张三\"<&", Email: "first@example.test"},
+		{ID: "caller-2", Username: "李四", Email: "second@example.test"},
+		{ID: "blank", Email: "blank@example.test"},
+	}).Error)
+
+	const sessionID = "sess-1"
+	const assistantLabel = "Workspace assistant"
+	rows := storedTurns(1)
+	for _, row := range rows {
+		row.SessionID = sessionID
+	}
+	rows[0].RenderedContent = "stale rendered content"
+	require.NoError(t, db.Create(rows).Error)
+
+	baseCtx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	history, _, err := LoadAgentHistory(baseCtx, repository.NewMessageRepository(db), sessionID, unlimitedBudget, false)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name, userID, escapedLabel string
+	}{
+		{name: "signed-in user", userID: "caller-1", escapedLabel: "张三&quot;&lt;&amp;"},
+		{name: "another caller in the same session", userID: "caller-2", escapedLabel: "李四"},
+		{name: "unknown user", userID: "missing"},
+		{name: "blank username", userID: "blank"},
+		{name: "synthetic caller", userID: "system-7"},
+		{name: "absent identity"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := baseCtx
+			if tc.userID != "" {
+				ctx = context.WithValue(ctx, types.UserIDContextKey, tc.userID)
+			}
+			model := &fakeAgentChatModel{}
+			svc := &agentService{db: db}
+			engine, err := svc.CreateAgentEngine(ctx, &types.AgentConfig{
+				AssistantName: assistantLabel,
+			}, model, nil, nil, sessionID, "msg-1")
+			require.NoError(t, err)
+			_, err = engine.Execute(ctx, sessionID, "msg-1", "Who am I?", history)
+			require.NoError(t, err)
+
+			turns := questions(model.lastMessages)
+			require.Len(t, turns, 2)
+			assert.Equal(t, "question 1", turns[0], "replayed history must keep the original user content")
+			assert.Contains(t, turns[1], "<runtime_context scope=\"this_turn\">")
+			assert.Contains(t, turns[1], assistantLabel)
+			assert.Contains(t, turns[1], "Who am I?")
+			assert.NotContains(t, model.lastSystemPrompt, "<current_user")
+			assert.NotContains(t, turns[1], "@example.test")
+			if tc.escapedLabel == "" {
+				assert.NotContains(t, turns[1], "<current_user")
+				return
+			}
+			assert.Contains(t, turns[1], "<current_user name=\""+tc.escapedLabel+
+				"\" username=\""+tc.escapedLabel+"\"")
+		})
+	}
+}
+
+func TestCreateAgentEngineIncludesIMSenderInLiveTurn(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "system-7")
+	ctx = context.WithValue(ctx, types.IMSenderNameContextKey, "张三\"<&")
+	model := &fakeAgentChatModel{}
+	engine, err := (&agentService{}).CreateAgentEngine(ctx, &types.AgentConfig{}, model, nil, nil, "sess-1", "msg-1")
+	require.NoError(t, err)
+	_, err = engine.Execute(ctx, "sess-1", "msg-1", "Who am I?", nil)
+	require.NoError(t, err)
+
+	turns := questions(model.lastMessages)
+	require.Len(t, turns, 1)
+	assert.Contains(t, turns[0], `<current_user name="张三&quot;&lt;&amp;" username=""`)
+	assert.NotContains(t, turns[0], "system-7")
 }
 
 func TestLookupSessionWorkspaceLayoutFailsClosedWhenHostPinReadFails(t *testing.T) {

@@ -32,6 +32,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 const MAX_ITERATIONS = 100 // Max iterations for agent execution
@@ -414,6 +415,7 @@ func (s *agentService) CreateAgentEngine(
 	engine.SetPageContext(s.resolvePageContextInfo(
 		ctx, config.PageContext, config.SearchTargets, kbInfos, config.OperationsAgentID != ""))
 	engine.SetAssistantName(config.AssistantName)
+	engine.SetCurrentUser(s.resolveCurrentUser(ctx))
 
 	// Non-vision chat models use the configured VLM to describe tool images.
 	// Vision chat models receive the original images after the tool replies.
@@ -481,6 +483,29 @@ func (s *agentService) CreateAgentEngine(
 	engine.SetDesktopEnabled(s.lookupSessionDesktopEnabled(ctx, sessionID, config))
 
 	return engine, nil
+}
+
+func (s *agentService) resolveCurrentUser(ctx context.Context) agent.CurrentUserInfo {
+	id, _ := types.UserIDFromContext(ctx)
+	switch {
+	case types.IsSyntheticUserID(id):
+		if name, _ := ctx.Value(types.IMSenderNameContextKey).(string); strings.TrimSpace(name) != "" {
+			return agent.CurrentUserInfo{Name: name}
+		}
+	case id != "" && s.db != nil:
+		// This lookup is best effort. Report failures once without logging the SQL.
+		db := s.db.Session(&gorm.Session{Logger: gormlogger.Discard})
+		user, err := repository.NewUserRepository(db).GetUserByID(ctx, id)
+		if err != nil {
+			logger.Warnf(ctx, "Could not resolve current user for agent prompt: %v", err)
+			return agent.CurrentUserInfo{}
+		}
+		if strings.TrimSpace(user.Username) != "" {
+			return agent.CurrentUserInfo{Username: user.Username}
+		}
+	}
+	logger.Warn(ctx, "No display identity available for agent prompt")
+	return agent.CurrentUserInfo{}
 }
 
 // attachBackgroundWork gives the run its background-notice tracker and, when

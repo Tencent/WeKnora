@@ -50,6 +50,7 @@ type AgentEngine struct {
 	questionOrigin       *QuestionOriginInfo     // Source of a picked suggested question, if any
 	pageContext          *PageContextInfo        // Page the user has open, if any
 	assistantName        string                  // Workspace name for the assistant, if renamed
+	currentUser          CurrentUserInfo         // Display identity for this turn
 	sessionID            string                  // Session ID for logging and event emission
 	systemPromptTemplate string                  // System prompt template (optional, uses default if empty)
 	memoryPrompt         string                  // Long-term memory envelope appended to the system prompt
@@ -179,6 +180,11 @@ func (e *AgentEngine) SetPageContext(page *PageContextInfo) {
 // keeps the one in the system prompt.
 func (e *AgentEngine) SetAssistantName(name string) {
 	e.assistantName = name
+}
+
+// SetCurrentUser records the display identity for this turn.
+func (e *AgentEngine) SetCurrentUser(user CurrentUserInfo) {
+	e.currentUser = user
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.
