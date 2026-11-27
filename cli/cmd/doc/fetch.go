@@ -103,13 +103,20 @@ Server-side ingestion knobs:
 				if err != nil {
 					return err
 				}
-				if handled, err := cmdutil.HandleDryRun(c, true, cmdutil.DryRunPlan{
-					Action: "doc.fetch",
-					Args: map[string]any{
-						"url": opts.URL,
-						"kb":  kbID,
-					},
-				}); handled {
+				args := map[string]any{"url": opts.URL, "kb": kbID}
+				for key, value := range map[string]string{
+					"file_name": opts.Name, "title": opts.Title, "file_type": opts.FileType,
+					"tag_id": opts.TagID, "channel": opts.Channel,
+				} {
+					if value != "" {
+						args[key] = value
+					}
+				}
+				if opts.EnableMultimodel != nil {
+					args["enable_multimodel"] = *opts.EnableMultimodel
+				}
+				plan := cmdutil.DryRunPlan{Action: "doc.fetch", Args: args}
+				if handled, err := cmdutil.HandleDryRun(c, true, plan); handled {
 					return err
 				}
 			}

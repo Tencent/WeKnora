@@ -8,6 +8,7 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -139,4 +140,25 @@ func TestDocUpload_DryRun_RejectsBadEnableMultimodel(t *testing.T) {
 	var typed *cmdutil.Error
 	require.True(t, errors.As(err, &typed))
 	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+}
+
+func TestDocFetchDryRunShowsRequestOptions(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	root := withRootHarnessDoc(NewCmdFetch(docDryRunFactory(t)),
+		"https://example.test/download", "--kb", "00000000-0000-0000-0000-000000000001",
+		"--name", "original.pdf", "--title", "Policy", "--file-type", "pdf",
+		"--tag-id", "ops", "--channel", "migration",
+		"--enable-multimodel=false", "--dry-run", "--format", "json")
+	require.NoError(t, root.Execute())
+	var result struct {
+		Meta struct{ Plan struct{ Args map[string]any } }
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &result))
+	args := result.Meta.Plan.Args
+	assert.Equal(t, "original.pdf", args["file_name"])
+	assert.Equal(t, "Policy", args["title"])
+	assert.Equal(t, "pdf", args["file_type"])
+	assert.Equal(t, "ops", args["tag_id"])
+	assert.Equal(t, "migration", args["channel"])
+	assert.Equal(t, false, args["enable_multimodel"])
 }
