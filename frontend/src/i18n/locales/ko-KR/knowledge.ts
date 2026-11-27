@@ -1395,6 +1395,10 @@ export default {
     tagUpdateSuccess: '태그 업데이트 성공',
     tagEditDialogHeading: '태그 편집',
     folderTree: {
+      deleteEmpty: '빈 폴더 삭제',
+      confirmDeleteEmpty: '빈 폴더 “{path}”을 삭제할까요?',
+      create: '새 폴더',
+      invalidName: '마침표로 끝나지 않는 단일 폴더 이름을 입력하세요',
       totalDocuments: '전체 문서 {count}개',
       countHint: '현재 폴더 문서 {direct}개, 하위 폴더 포함 {total}개',
       filteredCount: '일치하는 문서 {count}개',

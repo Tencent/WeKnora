@@ -115,7 +115,7 @@ const folderTree = {
 }
 
 async function renderTree(props: Record<string, unknown>): Promise<string> {
-  const app = createSSRApp({ render: () => h(KbFolderTree, props) })
+  const app = createSSRApp({ render: () => h(KbFolderTree, { createFolder: async () => true, ...props }) })
   app.use(createI18n({ legacy: false, locale: 'en-US', messages: { 'en-US': en } }))
   // The TDesign widgets are registered globally by the app; empty shells keep
   // the rendered row markup readable here.
@@ -150,4 +150,10 @@ test('the root row shows the knowledge base total, not the root-level count', as
   const row = rowHtml(html, 'is-root')
   assert.match(row, /kb-folder-row__count[^>]*>17</)
   assert.doesNotMatch(row, /kb-folder-row__count[^>]*>3</)
+})
+
+test('editors can create the first folder from the root while read-only users cannot', async () => {
+  const props = { tree: { folders: [], root_document_count: 0, total_document_count: 0 }, selectedPath: '' }
+  assert.match(await renderTree({ ...props, canEdit: true }), /aria-label="New sub-folder under root"/)
+  assert.doesNotMatch(await renderTree({ ...props, canEdit: false }), /kb-folder-row__add/)
 })

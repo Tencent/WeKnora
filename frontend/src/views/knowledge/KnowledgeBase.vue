@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useAssistantDataChange } from '@/utils/assistantDataChange';
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
-import { MessagePlugin } from "tdesign-vue-next";
+import { DialogPlugin, MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
@@ -35,6 +35,8 @@ import {
   batchReparseKnowledge,
   getKnowledgeSpans,
   getKnowledgeDetails,
+  createKnowledgeFolder,
+  deleteEmptyKnowledgeFolder,
   listKnowledgeFolders,
   moveKnowledgeToFolder,
   renameKnowledgeFolder,
@@ -850,9 +852,8 @@ const selectedFolderPath = ref<string>(ROOT_FOLDER_PATH);
 watch([kbId, selectedFolderPath], resetStatusPolling, { flush: 'sync' });
 const folderTreeCollapsed = ref(readStoredFlag(FOLDER_TREE_COLLAPSED_KEY));
 const hasFolders = computed(() => (folderTree.value?.folders?.length ?? 0) > 0);
-// The folder column only earns its space once the knowledge base actually has
-// folders, so knowledge bases filled with single-file uploads look unchanged.
-const showFolderTree = computed(() => !isFAQ.value && hasFolders.value);
+// Editors need the root row to create the first folder in an empty library.
+const showFolderTree = computed(() => !isFAQ.value && (canEdit.value || hasFolders.value));
 // Browsing lists one folder's own contents; filtering searches its whole
 // subtree. There is no mode switch: the list follows what the user is doing.
 const isFiltering = computed(() =>
@@ -1029,6 +1030,55 @@ const folderOptions = computed(() => {
   walk(folderTree.value?.folders || [], 0);
   return result;
 });
+
+function confirmDeleteFolder(path: string) {
+  const targetKb = kbId.value;
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeBase.folderTree.deleteEmpty'),
+    body: t('knowledgeBase.folderTree.confirmDeleteEmpty', { path }),
+    confirmBtn: { content: t('common.delete'), theme: 'danger' },
+    onCancel: () => dialog.destroy(),
+    onClose: () => dialog.destroy(),
+    onConfirm: async () => {
+      dialog.destroy();
+      if (!isCurrentKb(targetKb)) return;
+      try {
+        await deleteEmptyKnowledgeFolder(targetKb, path);
+        if (!isCurrentKb(targetKb)) return;
+        if (selectedFolderPath.value === path) {
+          handleFolderSelect(path.split('/').slice(0, -1).join('/'));
+        }
+        MessagePlugin.success(t('common.deleteSuccess'));
+      } catch (error: any) {
+        MessagePlugin.error(error?.message || t('common.deleteFailed'));
+      }
+      if (isCurrentKb(targetKb)) await loadFolderTree(targetKb);
+    },
+  });
+}
+
+async function submitFolder(parent: string, name: string): Promise<boolean> {
+  if (/[\/\\]/.test(name) || name.endsWith('.')) {
+    MessagePlugin.warning(t('knowledgeBase.folderTree.invalidName'));
+    return false;
+  }
+  const targetKb = kbId.value;
+  const path = [parent, name].filter(Boolean).join('/');
+  if (folderOptions.value.some(folder => folder.path === path)) {
+    MessagePlugin.warning(t('knowledgeBase.moveToFolder.duplicate'));
+    return false;
+  }
+  try {
+    await createKnowledgeFolder(targetKb, path);
+    if (!isCurrentKb(targetKb)) return false;
+    await loadFolderTree(targetKb);
+    if (isCurrentKb(targetKb)) handleFolderSelect(path);
+    return true;
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeEditor.wikiBrowser.createFolderFailed'));
+    return false;
+  }
+}
 
 const moveKnowledgeIntoFolder = async (ids: string[], folderPath: string) => {
   if (!kbId.value || ids.length === 0) return;
@@ -2589,10 +2639,10 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
            carried over from a previous KB) falls back to documents. -->
       <template v-if="activeKbTab === 'documents' || (!isWiki && activeKbTab !== 'gallery')">
         <div class="knowledge-main">
-          <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
+          <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :key="kbId" :create-folder="submitFolder" :tree="folderTree" :selected-path="selectedFolderPath"
             :loading="folderTreeLoading" :can-edit="canEdit" :root-label="kbInfo?.name"
             @select="handleFolderSelect" @update:collapsed="handleFolderTreeCollapsedChange"
-            @rename="handleFolderRename" />
+            @rename="handleFolderRename" @delete-empty="confirmDeleteFolder" />
           <div class="tag-content">
             <div class="doc-card-area">
               <div class="doc-filter-bar">

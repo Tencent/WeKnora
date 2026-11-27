@@ -1548,7 +1548,7 @@ func (h *KnowledgeHandler) GetGalleryConfig(c *gin.Context) {
 
 // ListKnowledgeFolders godoc
 // @Summary      获取知识库文件夹目录树
-// @Description  返回知识库内由文件夹上传形成的目录树，包含每个文件夹的直接文档数与含子目录的总数
+// @Description  返回知识库内显式创建和由文档路径形成的目录树，包含每个文件夹的直接文档数与含子目录的总数
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
@@ -1585,6 +1585,69 @@ func (h *KnowledgeHandler) ListKnowledgeFolders(c *gin.Context) {
 		"success": true,
 		"data":    tree,
 	})
+}
+
+type KnowledgeFolderPathRequest struct {
+	FolderPath string `json:"folder_path" binding:"required" example:"Projects/Specs"`
+}
+
+// CreateKnowledgeFolder godoc
+// @Summary      创建知识库文件夹
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "知识库ID" extensions(x-agent=knowledge_base_id)
+// @Param        request body handler.KnowledgeFolderPathRequest true "知识库内的目录路径"
+// @Success      200 {object} handler.DataResponse{data=handler.KnowledgeFolderPathRequest}
+// @Failure      400 {object} errors.AppError
+// @Failure      403 {object} errors.AppError
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/folders [post]
+func (h *KnowledgeHandler) CreateKnowledgeFolder(c *gin.Context) {
+	h.writeKnowledgeFolder(c, h.kgService.CreateKnowledgeFolder)
+}
+
+// DeleteEmptyKnowledgeFolder godoc
+// @Summary      删除空的知识库叶目录
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "知识库ID" extensions(x-agent=knowledge_base_id)
+// @Param        request body handler.KnowledgeFolderPathRequest true "知识库内的目录路径"
+// @Success      200 {object} handler.DataResponse{data=handler.KnowledgeFolderPathRequest}
+// @Failure      400 {object} errors.AppError
+// @Failure      403 {object} errors.AppError
+// @Failure      409 {object} errors.AppError
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/knowledge/folders/empty [delete]
+func (h *KnowledgeHandler) DeleteEmptyKnowledgeFolder(c *gin.Context) {
+	h.writeKnowledgeFolder(c, h.kgService.DeleteEmptyKnowledgeFolder)
+}
+
+func (h *KnowledgeHandler) writeKnowledgeFolder(c *gin.Context, write func(context.Context, string, string) error) {
+	var req KnowledgeFolderPathRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("需要文件夹路径"))
+		return
+	}
+	kbID, tenantID, err := h.requireKnowledgeWriteAccess(c, c.Param("id"))
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	ctx := types.WithExecutionTenant(c.Request.Context(), tenantID)
+	if err := write(ctx, kbID, req.FolderPath); err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("文件夹操作失败"))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": req})
 }
 
 // MoveKnowledgeToFolderRequest is the body schema for POST /knowledge/folder.

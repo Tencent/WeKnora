@@ -89,6 +89,8 @@ type KnowledgeService interface {
 		page *types.Pagination,
 		filter types.KnowledgeListFilter,
 	) (*types.PageResult, error)
+	CreateKnowledgeFolder(ctx context.Context, kbID, path string) error
+	DeleteEmptyKnowledgeFolder(ctx context.Context, kbID, path string) error
 	// ListKnowledgeFolderTree returns the folder hierarchy derived from the
 	// folder_path of every knowledge entry in a knowledge base, with per-folder
 	// document counts. It powers the document sidebar tree.
@@ -287,6 +289,8 @@ type KnowledgeRepository interface {
 		kbID string,
 		params *types.KnowledgeCheckParams,
 	) (bool, *types.Knowledge, error)
+	CreateKnowledgeFolder(ctx context.Context, tenantID uint64, kbID, path string) error
+	DeleteEmptyKnowledgeFolder(ctx context.Context, tenantID uint64, kbID, path string) (bool, error)
 	// ListKnowledgeFolderCounts aggregates the number of knowledge entries
 	// stored directly in each folder_path of a knowledge base.
 	ListKnowledgeFolderCounts(

@@ -115,6 +115,10 @@ export default {
     tagUpdateSuccess: 'Tag updated successfully',
     tagEditDialogHeading: 'Edit tags',
     folderTree: {
+      deleteEmpty: 'Delete empty folder',
+      confirmDeleteEmpty: 'Delete the empty folder “{path}”?',
+      create: 'New folder',
+      invalidName: 'Enter one folder name without a trailing period',
       totalDocuments: '{count} documents total',
       countHint: '{direct} documents in this folder; {total} including subfolders',
       filteredCount: '{count} matching documents',

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test, { type TestContext } from 'node:test'
 import { createI18n } from 'vue-i18n'
 import * as vue from 'vue'
+import * as kbPermission from '../../utils/kbPermission.ts'
 import * as stall from '../../utils/knowledgeProcessingStall.ts'
 import { fixture, flush } from '../../test-utils/vueFixture.ts'
 import enUS from '../../i18n/locales/en-US'
@@ -53,7 +54,7 @@ const syncedTree = {
   ],
 }
 
-async function setup(t: TestContext, tree: unknown) {
+async function setup(t: TestContext, tree: unknown, permission = 'editor') {
   const f = fixture(t)
   const route = vue.reactive({ params: { kbId: 'kb' }, query: {} })
   const hook = {
@@ -69,7 +70,7 @@ async function setup(t: TestContext, tree: unknown) {
     'tdesign-vue-next': { MessagePlugin: {} },
     '@/hooks/useKnowledgeBase': () => hook,
     '@/stores/ui': { useUIStore: () => ({ clearSelectedTagIds() {} }) },
-    '@/stores/organization': { useOrganizationStore: () => ({ sharedKnowledgeBases: [], getKBPermission: () => 'owner' }) },
+    '@/stores/organization': { useOrganizationStore: () => ({ sharedKnowledgeBases: [], getKBPermission: () => permission }) },
     '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true }) },
     '@/stores/chatResources': { useChatResourcesStore: () => ({
       fetchKnowledgeBaseById, rawKnowledgeBases: [], async ensureKnowledgeBases() {},
@@ -79,7 +80,7 @@ async function setup(t: TestContext, tree: unknown) {
     '@/stores/uploadTasks': { useUploadTasksStore: () => ({}) },
     '@/hooks/useMarqueeSelect': { useMarqueeSelect: () => ({}) },
     '@/composables/useAssistantPageContext': { useAssistantPageContext() {} },
-    '@/utils/kbPermission': {}, '@/utils/knowledgeDeletion': {}, '@/utils/knowledgeTrace': {},
+    '@/utils/kbPermission': kbPermission, '@/utils/knowledgeDeletion': {}, '@/utils/knowledgeTrace': {},
     '@/utils/knowledgeProcessingStall': stall, '@/api/wiki': {}, '@/api/knowledge-base': {},
     '@/api/knowledge-base/index': { listKnowledgeFolders, listKnowledgeTags: async () => ({ data: { data: [], total: 0 } }) },
   })
@@ -313,4 +314,14 @@ test('the empty state tells sub-folder documents apart from an empty folder', ()
   assert.match(source, /v-else-if="folderEmptyState === 'subfolders'"/)
   assert.match(source, /emptyFolderWithSubfolders', \{ count: folderSubfolderDocumentCount \}/)
   assert.match(source, /v-else-if="folderEmptyState === 'folder'"/)
+})
+
+test('an empty library shows the root creation entry only to editors', async t => {
+  const empty = { folders: [], total_document_count: 0, root_document_count: 0 }
+  for (const [permission, visible] of [['editor', true], ['viewer', false]] as const) {
+    await t.test(permission, async t => {
+      const f = await setup(t, empty, permission)
+      assert.equal(f.vm.showFolderTree, visible)
+    })
+  }
 })

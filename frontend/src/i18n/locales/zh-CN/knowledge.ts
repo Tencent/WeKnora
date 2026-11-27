@@ -1395,6 +1395,10 @@ export default {
     tagUpdateSuccess: '标签已更新',
     tagEditDialogHeading: '编辑标签',
     folderTree: {
+      deleteEmpty: '删除空文件夹',
+      confirmDeleteEmpty: '确定删除空文件夹「{path}」吗？',
+      create: '新建文件夹',
+      invalidName: '请输入单层文件夹名称，结尾不要使用句点',
       totalDocuments: '共 {count} 个文档',
       countHint: '当前目录 {direct} 个文档，含子目录共 {total} 个',
       filteredCount: '匹配 {count} 个文档',

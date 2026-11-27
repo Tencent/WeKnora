@@ -707,7 +707,7 @@ func (s *knowledgeService) ListPagedKnowledgeByKnowledgeBaseID(ctx context.Conte
 
 // ListKnowledgeFolderTree returns the folder hierarchy of a knowledge base with
 // per-folder document counts, derived from the folder_path stored on each
-// knowledge entry.
+// knowledge entry and any explicitly created empty folders.
 func (s *knowledgeService) ListKnowledgeFolderTree(ctx context.Context,
 	kbID string,
 ) (*types.KnowledgeFolderTree, error) {
@@ -719,9 +719,57 @@ func (s *knowledgeService) ListKnowledgeFolderTree(ctx context.Context,
 	return types.BuildKnowledgeFolderTree(counts), nil
 }
 
+func (s *knowledgeService) folderWriteScope(ctx context.Context, kbID string) (context.Context, uint64, error) {
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return ctx, 0, err
+	}
+	if kb == nil || kb.ID != kbID {
+		return ctx, 0, werrors.NewNotFoundError("knowledge base not found")
+	}
+	ctx, err = requireKBWrite(ctx, kb)
+	if err != nil {
+		return ctx, 0, err
+	}
+	return ctx, kb.TenantID, nil
+}
+
+func (s *knowledgeService) CreateKnowledgeFolder(ctx context.Context, kbID, path string) error {
+	normalized, err := normalizeTargetFolderPath(ctx, path)
+	if err != nil {
+		return err
+	}
+	if normalized == "" || normalized != path {
+		return werrors.NewBadRequestError("文件夹名称或路径无效，请检查名称和目录层级")
+	}
+	ctx, tenantID, err := s.folderWriteScope(ctx, kbID)
+	if err != nil {
+		return err
+	}
+	return s.repo.CreateKnowledgeFolder(ctx, tenantID, kbID, path)
+}
+
+func (s *knowledgeService) DeleteEmptyKnowledgeFolder(ctx context.Context, kbID, path string) error {
+	if path == "" || types.NormalizeKnowledgeFolderPath(path) != path {
+		return werrors.NewBadRequestError("无效的文件夹路径")
+	}
+	ctx, tenantID, err := s.folderWriteScope(ctx, kbID)
+	if err != nil {
+		return err
+	}
+	deleted, err := s.repo.DeleteEmptyKnowledgeFolder(ctx, tenantID, kbID, path)
+	if err != nil {
+		return err
+	}
+	if !deleted {
+		return werrors.NewConflictError("文件夹包含文档、子目录或已被移动，请刷新目录后重试")
+	}
+	return nil
+}
+
 // MoveKnowledgeToFolder re-files knowledge entries under folderPath. Since
 // folders are derived from the stored paths, a folder that does not exist yet is
-// created by this call; a folder whose last entry moves away disappears.
+// created by this call. Explicitly created folders stay visible when empty.
 func (s *knowledgeService) MoveKnowledgeToFolder(ctx context.Context,
 	kbID string, ids []string, folderPath string,
 ) (int64, error) {
@@ -778,18 +826,10 @@ func (s *knowledgeService) RenameKnowledgeFolder(ctx context.Context,
 		return 0, werrors.NewBadRequestError("不能将文件夹移动到它自己的子目录下")
 	}
 
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+	ctx, tenantID, err := s.folderWriteScope(ctx, kbID)
 	if err != nil {
 		return 0, err
 	}
-	if kb == nil || kb.ID != kbID {
-		return 0, werrors.NewNotFoundError("knowledge base not found")
-	}
-	ctx, err = requireKBWrite(ctx, kb)
-	if err != nil {
-		return 0, err
-	}
-	tenantID := kb.TenantID
 	affected, err := s.repo.RenameKnowledgeFolderPath(ctx, tenantID, kbID, source, target)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to rename folder %q to %q: %v", source, target, err)
