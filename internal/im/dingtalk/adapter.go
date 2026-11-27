@@ -511,15 +511,25 @@ func streamToIncoming(data *chatbot.BotCallbackDataModel, fallbackRobotCode stri
 // ── Send reply ──
 
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
-	content := im.FormatIMDisplayContent(reply.Content, im.StreamDisplayFinal)
+	return a.sendMarkdown(ctx, incoming, im.FormatIMDisplayContent(reply.Content, im.StreamDisplayFinal))
+}
 
+// sendMarkdown sends one markdown message through the session webhook, and
+// through the OpenAPI when there is no webhook or it fails.
+func (a *Adapter) sendMarkdown(ctx context.Context, incoming *im.IncomingMessage, content string) error {
 	sessionWebhook := ""
 	if incoming.Extra != nil {
 		sessionWebhook = incoming.Extra["session_webhook"]
 	}
 
 	if sessionWebhook != "" {
-		return a.replyViaSessionWebhook(ctx, sessionWebhook, content)
+		err := a.replyViaSessionWebhook(ctx, sessionWebhook, content)
+		if err == nil {
+			return nil
+		}
+		// The session webhook expires and can be refused; the OpenAPI is not
+		// tied to it.
+		logger.Warnf(ctx, "[DingTalk] sessionWebhook reply failed, falling back to OpenAPI: %v", err)
 	}
 	return a.replyViaOpenAPI(ctx, incoming, content)
 }
@@ -564,6 +574,17 @@ func (a *Adapter) replyViaSessionWebhook(ctx context.Context, webhookURL, conten
 			return fmt.Errorf("read dingtalk sessionWebhook response: %w", err)
 		}
 		return fmt.Errorf("dingtalk sessionWebhook returned %d: %s", resp.StatusCode, string(respBody))
+	}
+	// DingTalk reports a refused message (rate limit, rejected content) as
+	// HTTP 200 with a non-zero errcode. A body that is not that shape is left
+	// as success.
+	var result struct {
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+	}
+	if respBody, err := im.ReadIMResponse(resp.Body); err == nil &&
+		json.Unmarshal(respBody, &result) == nil && result.ErrCode != 0 {
+		return fmt.Errorf("dingtalk sessionWebhook error: code=%d msg=%s", result.ErrCode, result.ErrMsg)
 	}
 	return nil
 }
@@ -784,12 +805,12 @@ func (a *Adapter) streamingUpdateCard(ctx context.Context, outTrackID, content s
 // ── StreamSender implementation ──
 
 type streamState struct {
-	mu             sync.Mutex
-	content        strings.Builder
-	sessionWebhook string
-	outTrackID     string    // non-empty when using AI card streaming
-	lastUpdate     time.Time // for card update throttling
-	createdAt      time.Time // for orphan stream detection
+	mu         sync.Mutex
+	content    strings.Builder
+	outTrackID string    // non-empty when using AI card streaming
+	finalized  bool      // FinalizeStream already sent (or failed to send) the answer
+	lastUpdate time.Time // for card update throttling
+	createdAt  time.Time // for orphan stream detection
 }
 
 const (
@@ -832,17 +853,9 @@ func startStreamReaper() {
 }
 
 func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage) (string, error) {
-	sessionWebhook := ""
-	if incoming.Extra != nil {
-		sessionWebhook = incoming.Extra["session_webhook"]
-	}
-
 	streamID := fmt.Sprintf("dt:%s:%s", incoming.UserID, incoming.MessageID)
 
-	state := &streamState{
-		sessionWebhook: sessionWebhook,
-		createdAt:      time.Now(),
-	}
+	state := &streamState{createdAt: time.Now()}
 
 	// If card template is configured, create an AI card for streaming
 	if a.cardTemplateID != "" {
@@ -910,12 +923,20 @@ func (a *Adapter) FinalizeStream(ctx context.Context, incoming *im.IncomingMessa
 	state.content.Reset()
 	state.content.WriteString(finalContent)
 	outTrackID := state.outTrackID
+	state.finalized = outTrackID == ""
 	state.mu.Unlock()
 
 	if outTrackID != "" {
 		if err := a.streamingUpdateCard(ctx, outTrackID, finalContent, false); err != nil {
 			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: %v", err)
 		}
+		return nil
+	}
+	// Without a card the answer is one plain message. Send it here, not in
+	// EndStream, so a failure reaches the caller, which only falls back to a
+	// plain reply when FinalizeStream reports an error.
+	if err := a.sendMarkdown(ctx, incoming, finalContent); err != nil {
+		return fmt.Errorf("dingtalk finalize stream: %w", err)
 	}
 	return nil
 }
@@ -937,20 +958,17 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 	state.mu.Lock()
 	fullContent := state.content.String()
 	outTrackID := state.outTrackID
-	sessionWebhook := state.sessionWebhook
+	finalized := state.finalized
 	state.mu.Unlock()
 
 	if outTrackID != "" {
 		if err := a.streamingUpdateCard(ctx, outTrackID, fullContent, true); err != nil {
 			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: %v", err)
 		}
-	} else if sessionWebhook != "" {
-		if err := a.replyViaSessionWebhook(ctx, sessionWebhook, fullContent); err != nil {
-			logger.Warnf(ctx, "[DingTalk] Failed to end stream: %v", err)
-		}
-	} else {
-		if err := a.replyViaOpenAPI(ctx, incoming, fullContent); err != nil {
-			logger.Warnf(ctx, "[DingTalk] Failed to end stream via OpenAPI: %v", err)
+	} else if !finalized {
+		// Ended without FinalizeStream: send what was collected.
+		if err := a.sendMarkdown(ctx, incoming, fullContent); err != nil {
+			return fmt.Errorf("dingtalk end stream: %w", err)
 		}
 	}
 
