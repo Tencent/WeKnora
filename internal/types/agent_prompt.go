@@ -42,7 +42,7 @@ const (
 type AgentPrompt struct {
 	ID                 string `json:"id"                    gorm:"type:varchar(36);primaryKey"`
 	TenantID           uint64 `json:"tenant_id"             gorm:"not null"`
-	UserID             string `json:"user_id"               gorm:"type:varchar(64);not null;default:''"`
+	UserID             string `json:"user_id"               gorm:"type:varchar(255);not null;default:''"`
 	SessionID          string `json:"session_id"            gorm:"type:varchar(36);not null"`
 	AssistantMessageID string `json:"assistant_message_id"  gorm:"type:varchar(36);not null;default:''"`
 	RequestID          string `json:"request_id"            gorm:"type:varchar(128);not null;default:''"`
@@ -56,7 +56,7 @@ type AgentPrompt struct {
 	Status      string `json:"status"                gorm:"type:varchar(32);not null"`
 	// CloseReason explains a system-side ending (timeout, cancel, supersede).
 	CloseReason   string     `json:"close_reason"          gorm:"type:text;not null;default:''"`
-	ResolvedBy    string     `json:"resolved_by"           gorm:"type:varchar(64);not null;default:''"`
+	ResolvedBy    string     `json:"resolved_by"           gorm:"type:varchar(255);not null;default:''"`
 	ResolvedAt    *time.Time `json:"resolved_at,omitempty"`
 	OwnerInstance string     `json:"owner_instance"        gorm:"type:varchar(64);not null;default:''"`
 	LeaseUntil    *time.Time `json:"lease_until,omitempty"`

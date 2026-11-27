@@ -222,3 +222,32 @@ func TestAgentPromptTransitionRechecksOwnerAndLease(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 }
+
+// Embed sessions own prompts with a prefixed advisory principal rather than a
+// bare user UUID. The value is longer than 64 characters, so it must survive
+// both creation and the answer recorded in resolved_by.
+func TestAgentPromptRepositoryRoundTripsEmbedPrincipal(t *testing.T) {
+	ctx := t.Context()
+	repo := newAgentPromptTestRepo(t)
+	const principal = "embed_session:10000:b60edf5c-d7da-4a58-95c8-4d020d3099ef:22777ab5-0477-4cbd-95e8-d5b17f414396"
+	require.Len(t, principal, 93)
+
+	require.NoError(t, repo.Create(ctx, &types.AgentPrompt{
+		ID: "p-embed", TenantID: 10000, UserID: principal, SessionID: "s1",
+		Kind: types.AgentPromptKindMCPOAuth, Status: types.AgentPromptPending,
+		OwnerInstance: "owner",
+	}))
+
+	resolvedBy := principal
+	ok, err := repo.Transition(ctx, "p-embed", types.AgentPromptTransition{
+		From: []string{types.AgentPromptPending}, To: types.AgentPromptAnswered,
+		Response: types.JSON(`{"authorized":true}`), ResolvedBy: &resolvedBy,
+	})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	row, err := repo.Get(ctx, "p-embed")
+	require.NoError(t, err)
+	require.Equal(t, principal, row.UserID)
+	require.Equal(t, principal, row.ResolvedBy)
+}
