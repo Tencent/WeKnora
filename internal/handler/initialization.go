@@ -124,6 +124,7 @@ type KBModelConfigRequest struct {
 		EnableParentChild *bool                     `json:"enableParentChild"`
 		ParentChunkSize   *int                      `json:"parentChunkSize,omitempty"`
 		ChildChunkSize    *int                      `json:"childChunkSize,omitempty"`
+		ChildChunkOverlap *int                      `json:"childChunkOverlap,omitempty"`
 		// Strategy / TokenLimit / Languages use pointer types so the
 		// handler can distinguish "field absent in payload" (no change)
 		// from "field present with empty/zero value" (clear / disable).
@@ -412,6 +413,9 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 	if req.DocumentSplitting.ChildChunkSize != nil {
 		kb.ChunkingConfig.ChildChunkSize = *req.DocumentSplitting.ChildChunkSize
+	}
+	if req.DocumentSplitting.ChildChunkOverlap != nil {
+		kb.ChunkingConfig.ChildChunkOverlap = req.DocumentSplitting.ChildChunkOverlap
 	}
 	if req.DocumentSplitting.Strategy != nil {
 		kb.ChunkingConfig.Strategy = *req.DocumentSplitting.Strategy

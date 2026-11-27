@@ -47,7 +47,8 @@ WeKnora 的分块在 **Go 侧**完成（`internal/infrastructure/chunker` 包）
 | `languages` | []string | 空（自动检测） | 启发式模式的语言提示，如 `["zh"]`、`["en","de"]` |
 | `enable_parent_child` | bool | false | 启用父子（两级）分块，见 [父子分块（Parent-Child / 多粒度）](#_5-父子分块-parent-child-多粒度) |
 | `parent_chunk_size` | int | 4096 | 父块大小（仅父子模式） |
-| `child_chunk_size` | int | 384 | 子块大小（仅父子模式），子块 overlap 固定为 `child_size/5`（约 20%） |
+| `child_chunk_size` | int | 384 | 子块大小（仅父子模式） |
+| `child_chunk_overlap` | int | 缺省为子块大小的 20% | 相邻子块的重叠字符数（仅父子模式）；显式设置为 `0` 可关闭子块重叠 |
 | `parser_engine_rules` | []ParserEngineRule | 空 | 文件类型 → 解析引擎路由，附带解析器级开关如 `xlsx_first_row_as_header`（属于解析而非分块，但同在此结构） |
 | `table_metadata_instructions` | string | 空 | CSV/Excel 表格摘要生成时的业务指引 |
 
@@ -350,7 +351,8 @@ processDocument
     "separators": ["\n\n", "\n", "。"],
     "strategy": "auto", "token_limit": 0, "languages": ["zh"],
     "enable_parent_child": false,
-    "parent_chunk_size": 4096, "child_chunk_size": 384
+    "parent_chunk_size": 4096, "child_chunk_size": 384,
+    "child_chunk_overlap": 0
   }
 }
 ```

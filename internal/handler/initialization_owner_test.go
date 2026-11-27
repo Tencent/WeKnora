@@ -143,7 +143,9 @@ func TestUpdateKBConfigFromAnotherWorkspace(t *testing.T) {
 		},
 		{
 			name: "share admin keeping storage", permission: types.OrgRoleAdmin,
-			body:       `{"llmModelId":"m-llm","storageBackendId":"backend-of-owner","storageProvider":"minio"}`,
+			body: `{"llmModelId":"m-llm","storageBackendId":"backend-of-owner",` +
+				`"storageProvider":"minio","documentSplitting":{"enableParentChild":true,` +
+				`"parentChunkSize":4096,"childChunkSize":384,"childChunkOverlap":0}}`,
 			wantStatus: http.StatusOK,
 		},
 	}
@@ -179,6 +181,10 @@ func TestUpdateKBConfigFromAnotherWorkspace(t *testing.T) {
 				require.Empty(t, c.Errors)
 				require.NotNil(t, repo.updated)
 				require.Equal(t, backend, *repo.updated.StorageBackendID)
+				if tc.name == "share admin keeping storage" {
+					require.NotNil(t, repo.updated.ChunkingConfig.ChildChunkOverlap)
+					require.Zero(t, *repo.updated.ChunkingConfig.ChildChunkOverlap)
+				}
 				return
 			}
 			require.Len(t, c.Errors, 1)

@@ -61,6 +61,7 @@ type PreviewChunkingPayload struct {
 	EnableParentChild bool     `json:"enable_parent_child"`
 	ParentChunkSize   int      `json:"parent_chunk_size"`
 	ChildChunkSize    int      `json:"child_chunk_size"`
+	ChildChunkOverlap *int     `json:"child_chunk_overlap,omitempty"`
 	Strategy          string   `json:"strategy"`
 	TokenLimit        int      `json:"token_limit"`
 	Languages         []string `json:"languages"`
@@ -175,6 +176,7 @@ func PreviewChunking(c *gin.Context) {
 				cfg,
 				req.ChunkingConfig.ParentChunkSize,
 				req.ChunkingConfig.ChildChunkSize,
+				req.ChunkingConfig.ChildChunkOverlap,
 			)
 			result, parentDiag := chunker.SplitParentChildWithDiagnostics(text, parentCfg, childCfg)
 			chunks = make([]chunker.Chunk, len(result.Children))

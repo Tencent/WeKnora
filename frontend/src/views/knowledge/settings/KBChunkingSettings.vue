@@ -40,7 +40,7 @@
       </div>
 
       <!-- Chunk Size -->
-      <div class="setting-row">
+      <div v-if="!localEnableParentChild" class="setting-row">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.chunking.sizeLabel') }}</label>
           <p class="desc">{{ $t('knowledgeEditor.chunking.sizeDescription') }}</p>
@@ -64,8 +64,8 @@
       <!-- Chunk Overlap -->
       <div class="setting-row">
         <div class="setting-info">
-          <label>{{ $t('knowledgeEditor.chunking.overlapLabel') }}</label>
-          <p class="desc">{{ $t('knowledgeEditor.chunking.overlapDescription') }}</p>
+          <label>{{ $t(localEnableParentChild ? 'knowledgeEditor.chunking.parentChunkOverlapLabel' : 'knowledgeEditor.chunking.overlapLabel') }}</label>
+          <p class="desc">{{ $t(localEnableParentChild ? 'knowledgeEditor.chunking.parentChunkOverlapDescription' : 'knowledgeEditor.chunking.overlapDescription') }}</p>
           <p v-if="overlapTooHigh" class="warn">{{ $t('knowledgeEditor.chunking.overlapWarning') }}</p>
         </div>
         <div class="setting-control">
@@ -162,6 +162,27 @@
         </div>
       </div>
 
+      <!-- Child Chunk Overlap -->
+      <div v-if="localEnableParentChild" class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.chunking.childChunkOverlapLabel') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.chunking.childChunkOverlapDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <div class="slider-container">
+            <t-slider
+              v-model="localChildChunkOverlap"
+              :min="0"
+              :max="maxChildChunkOverlap"
+              :step="1"
+              @change="handleChildChunkOverlapChange"
+              :style="sliderStyle"
+            />
+            <span class="value-display">{{ localChildChunkOverlap }} {{ $t('knowledgeEditor.chunking.characters') }}</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Advanced section toggle -->
       <button type="button" class="advanced-toggle" @click="advancedOpen = !advancedOpen">
         <chevron-right-icon class="toggle-arrow" :class="{ open: advancedOpen }" />
@@ -245,6 +266,7 @@ interface ChunkingConfig {
   enableParentChild: boolean
   parentChunkSize: number
   childChunkSize: number
+  childChunkOverlap?: number
   // Adaptive chunking strategy. Empty string = legacy / not set.
   strategy?: string
   // Cap chunk size in approx tokens. 0 = char-based budget only.
@@ -282,6 +304,11 @@ const localSeparators = ref([...props.config.separators])
 const localEnableParentChild = ref(props.config.enableParentChild ?? false)
 const localParentChunkSize = ref(props.config.parentChunkSize || 4096)
 const localChildChunkSize = ref(props.config.childChunkSize || 384)
+const localChildChunkOverlap = ref(clampChildChunkOverlap(
+  localChildChunkSize.value,
+  props.config.childChunkOverlap ?? Math.floor(localChildChunkSize.value / 5),
+))
+const maxChildChunkOverlap = computed(() => Math.min(500, Math.floor(localChildChunkSize.value / 2)))
 const localStrategy = ref(props.config.strategy ?? '')
 const localTokenLimit = ref(props.config.tokenLimit ?? 0)
 const localLanguages = ref<string[]>([...(props.config.languages ?? [])])
@@ -320,7 +347,7 @@ const currentStrategyInfo = computed(() => {
 const advancedDisabled = computed(() => localStrategy.value === 'legacy')
 
 const overlapTooHigh = computed(
-  () => localChunkOverlap.value > 0 && localChunkOverlap.value >= localChunkSize.value / 2
+  () => localChunkOverlap.value > 0 && localChunkOverlap.value >= (localEnableParentChild.value ? localParentChunkSize.value : localChunkSize.value) / 2
 )
 
 // Live config snapshot for the debug panel — uses current local form values
@@ -332,6 +359,7 @@ const debugConfig = computed(() => ({
   enableParentChild: localEnableParentChild.value,
   parentChunkSize: localParentChunkSize.value,
   childChunkSize: localChildChunkSize.value,
+  childChunkOverlap: localChildChunkOverlap.value,
   strategy: localStrategy.value,
   tokenLimit: localTokenLimit.value,
   languages: localLanguages.value
@@ -361,6 +389,10 @@ watch(() => props.config, (newConfig) => {
   localEnableParentChild.value = newConfig.enableParentChild ?? false
   localParentChunkSize.value = newConfig.parentChunkSize || 4096
   localChildChunkSize.value = newConfig.childChunkSize || 384
+  localChildChunkOverlap.value = clampChildChunkOverlap(
+    localChildChunkSize.value,
+    newConfig.childChunkOverlap ?? Math.floor(localChildChunkSize.value / 5),
+  )
   localStrategy.value = newConfig.strategy ?? ''
   localTokenLimit.value = newConfig.tokenLimit ?? 0
   localLanguages.value = [...(newConfig.languages ?? [])]
@@ -371,10 +403,18 @@ const handleChunkOverlapChange = () => { emitUpdate() }
 const handleSeparatorsChange = () => { emitUpdate() }
 const handleParentChildChange = () => { emitUpdate() }
 const handleParentChunkSizeChange = () => { emitUpdate() }
-const handleChildChunkSizeChange = () => { emitUpdate() }
+const handleChildChunkSizeChange = () => {
+  localChildChunkOverlap.value = clampChildChunkOverlap(localChildChunkSize.value, localChildChunkOverlap.value)
+  emitUpdate()
+}
+const handleChildChunkOverlapChange = () => { emitUpdate() }
 const handleStrategyChange = () => { emitUpdate() }
 const handleTokenLimitChange = () => { emitUpdate() }
 const handleLanguagesChange = () => { emitUpdate() }
+
+function clampChildChunkOverlap(childSize: number, overlap: number): number {
+  return Math.max(0, Math.min(overlap, Math.min(500, Math.floor(childSize / 2))))
+}
 
 const emitUpdate = () => {
   // Spread arrays so the parent gets its own copy. Mutating the emitted
@@ -388,6 +428,7 @@ const emitUpdate = () => {
     enableParentChild: localEnableParentChild.value,
     parentChunkSize: localParentChunkSize.value,
     childChunkSize: localChildChunkSize.value,
+    childChunkOverlap: localChildChunkOverlap.value,
     strategy: localStrategy.value,
     tokenLimit: localTokenLimit.value,
     languages: [...localLanguages.value]

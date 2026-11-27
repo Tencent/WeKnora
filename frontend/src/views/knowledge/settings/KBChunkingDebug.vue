@@ -231,6 +231,7 @@ interface Props {
     enableParentChild: boolean
     parentChunkSize: number
     childChunkSize: number
+    childChunkOverlap?: number
     strategy?: string
     tokenLimit?: number
     languages?: string[]
@@ -318,6 +319,7 @@ const runPreview = async () => {
         enable_parent_child: props.config.enableParentChild,
         parent_chunk_size: props.config.parentChunkSize,
         child_chunk_size: props.config.childChunkSize,
+        child_chunk_overlap: props.config.childChunkOverlap,
         strategy: props.config.strategy ?? '',
         token_limit: props.config.tokenLimit ?? 0,
         languages: [...(props.config.languages ?? [])]

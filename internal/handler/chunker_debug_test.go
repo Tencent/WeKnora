@@ -200,6 +200,7 @@ func TestPreviewChunking_ChunkTruncation(t *testing.T) {
 
 func TestPreviewChunking_ParentChildMatchesIngestion(t *testing.T) {
 	text := strings.Repeat("## Record\n"+strings.Repeat("A sufficiently long entry body. ", 10)+"\n\n", 12)
+	zeroChildOverlap := 0
 	payload := PreviewChunkingPayload{
 		ChunkSize:         300,
 		ChunkOverlap:      30,
@@ -207,6 +208,7 @@ func TestPreviewChunking_ParentChildMatchesIngestion(t *testing.T) {
 		EnableParentChild: true,
 		ParentChunkSize:   300,
 		ChildChunkSize:    100,
+		ChildChunkOverlap: &zeroChildOverlap,
 		Strategy:          chunker.StrategyHeading,
 	}
 	w, parsed := postPreview(t, PreviewChunkingRequest{Text: text, ChunkingConfig: payload})
@@ -220,7 +222,12 @@ func TestPreviewChunking_ParentChildMatchesIngestion(t *testing.T) {
 		Separators:   payload.Separators,
 		Strategy:     payload.Strategy,
 	})
-	parentCfg, childCfg := chunker.DeriveParentChildConfigs(base, payload.ParentChunkSize, payload.ChildChunkSize)
+	parentCfg, childCfg := chunker.DeriveParentChildConfigs(
+		base,
+		payload.ParentChunkSize,
+		payload.ChildChunkSize,
+		payload.ChildChunkOverlap,
+	)
 	want := chunker.SplitParentChild(text, parentCfg, childCfg)
 
 	data := parsed["data"].(map[string]any)
