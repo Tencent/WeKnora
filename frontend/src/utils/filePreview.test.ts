@@ -184,3 +184,21 @@ test('recognizes named build files with no extension', () => {
   }
   assert.equal(resolveFilePreviewExt('notes'), '')
 })
+
+test('identifies Ogg audio outputs without mistaking other Ogg streams for audio', () => {
+  const encoder = new TextEncoder()
+  const page = (packet: string) => {
+    const data = new Uint8Array(28 + packet.length)
+    data.set(encoder.encode('OggS'))
+    data[5] = 2
+    data[26] = 1
+    data[27] = packet.length
+    data.set(encoder.encode(packet), 28)
+    return data
+  }
+  for (const packet of ['OpusHead', '\x01vorbis']) {
+    assert.deepEqual(sniffPreview(page(packet)), { kind: 'audio', ext: 'ogg' })
+  }
+  assert.notEqual(sniffPreview(page('unknown!')).kind, 'audio')
+  assert.notEqual(sniffPreview(page('OpusHead').subarray(0, 30)).kind, 'audio')
+})

@@ -363,6 +363,15 @@ function sniffFromMagic(bytes: Uint8Array): FilePreviewSniff | null {
   if (bytes.length >= 6 && asciiTag(bytes, 0, 3) === 'GIF') {
     return { kind: 'image', ext: 'gif' }
   }
+  if (bytes.length >= 28 && asciiTag(bytes, 0, 4) === 'OggS' && bytes[4] === 0 && (bytes[5] & 2)) {
+    const segmentCount = bytes[26]
+    const packetStart = 27 + segmentCount
+    const firstSegment = segmentCount ? bytes[27] : 0
+    if ((firstSegment >= 8 && asciiTag(bytes, packetStart, 8) === 'OpusHead')
+      || (firstSegment >= 7 && asciiTag(bytes, packetStart, 7) === '\x01vorbis')) {
+      return { kind: 'audio', ext: 'ogg' }
+    }
+  }
   if (bytes.length >= 12 && asciiTag(bytes, 0, 4) === 'RIFF') {
     const tag = asciiTag(bytes, 8, 4)
     if (tag === 'WEBP') return { kind: 'image', ext: 'webp' }
