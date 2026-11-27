@@ -326,7 +326,7 @@ export async function startMockWeknora(options = {}) {
             content: '',
             done: false,
             session_id: sessionId,
-            tool_calls: [{ id: 'call-1', function: { name: 'knowledge_search', arguments: '{}' } }],
+            data: { tool_name: 'knowledge_search', tool_call_id: 'call-1', arguments: {} },
           })
         }
         send({ id: 'r1', response_type: 'references', content: '', done: false, knowledge_references: results })
