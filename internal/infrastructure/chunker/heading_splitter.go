@@ -104,7 +104,7 @@ func splitByHeadingsImpl(text string, cfg SplitterConfig, profile *DocProfile) [
 		// active at its start, so deep `###`/`####` sub-headings inside a
 		// long section aren't collapsed to the section-level header.
 		subBreadcrumbs := sectionBreadcrumbs(sectionRunes, primaryLevel, sectionStart)
-		subChunks := SplitText(sectionContent, cfg)
+		subChunks := carryTrailingHeadings(SplitText(sectionContent, cfg), cfg.ChunkSize)
 		for _, sub := range subChunks {
 			out = append(out, Chunk{
 				Content:       sub.Content,
@@ -118,6 +118,78 @@ func splitByHeadingsImpl(text string, cfg SplitterConfig, profile *DocProfile) [
 	}
 
 	return coalesceTinyChunks(out, cfg.ChunkSize)
+}
+
+// carryTrailingHeadings moves heading lines that end a sub-chunk to the start
+// of the following sub-chunk. The legacy splitter packs lines greedily, so a
+// sub-heading can land as the last line of a chunk while its body opens the
+// next one: the heading is then separated from the text it introduces and the
+// next chunk's breadcrumb misses it. Only adjacent chunks (End == next.Start,
+// i.e. no overlap) are touched, a chunk is never emptied, and the move is
+// skipped when the receiving chunk would exceed chunkSize, so positions and
+// the End-Start == len(Content) invariant are preserved.
+func carryTrailingHeadings(chunks []Chunk, chunkSize int) []Chunk {
+	for i := 0; i+1 < len(chunks); i++ {
+		cur, next := &chunks[i], &chunks[i+1]
+		if cur.End != next.Start {
+			continue
+		}
+		cut := trailingHeadingStart(cur.Content)
+		if cut <= 0 {
+			continue
+		}
+		runes := []rune(cur.Content)
+		moved := len(runes) - cut
+		if chunkSize > 0 && utf8.RuneCountInString(next.Content)+moved > chunkSize {
+			continue
+		}
+		next.Content = string(runes[cut:]) + next.Content
+		next.Start -= moved
+		cur.Content = string(runes[:cut])
+		cur.End -= moved
+	}
+	return chunks
+}
+
+// trailingHeadingStart returns the rune offset where a trailing run of
+// Markdown heading lines (and blank lines between or after them) begins, or
+// -1 when the content does not end with a heading or consists of nothing
+// else. Headings inside fenced code blocks are not headings.
+func trailingHeadingStart(content string) int {
+	lines := strings.Split(content, "\n")
+	inFence := make([]bool, len(lines))
+	var fence markdownFence
+	for i, line := range lines {
+		code, _ := fence.consume(line)
+		inFence[i] = code
+	}
+	start, sawHeading := len(lines), false
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if strings.TrimSpace(line) == "" {
+			start = i
+			continue
+		}
+		if inFence[i] || !MarkdownHeadingPattern.MatchString(line) {
+			break
+		}
+		start, sawHeading = i, true
+	}
+	if !sawHeading {
+		return -1
+	}
+	// Blank lines in front of the heading stay with the current chunk.
+	for start < len(lines) && strings.TrimSpace(lines[start]) == "" {
+		start++
+	}
+	offset := 0
+	for _, line := range lines[:start] {
+		offset += utf8.RuneCountInString(line) + 1
+	}
+	if strings.TrimSpace(strings.Join(lines[:start], "\n")) == "" {
+		return -1
+	}
+	return offset
 }
 
 // coalesceTinyChunks merges adjacent small chunks under their shared heading
@@ -153,8 +225,12 @@ func coalesceTinyChunks(in []Chunk, chunkSize int) []Chunk {
 		next := in[i]
 		nextLen := utf8.RuneCountInString(next.Content)
 		sharedHeader := commonHeadingPrefix(cur.ContextHeader, next.ContextHeader)
-		// Adjacent + still-small + would not blow the size budget → merge.
-		if sharedHeader != "" && cur.End == next.Start && curLen < target && curLen+nextLen <= chunkSize {
+		// Adjacent + (still-small, or the next section is too small to stand
+		// alone) + would not blow the size budget → merge. Without the second
+		// case a short closing section ("## Conclusion" with two lines) becomes
+		// its own chunk as soon as the previous chunk reached the merge target.
+		small := curLen < target || nextLen < target/4
+		if sharedHeader != "" && cur.End == next.Start && small && curLen+nextLen <= chunkSize {
 			cur.Content += next.Content
 			cur.ContextHeader = sharedHeader
 			cur.End = next.End
