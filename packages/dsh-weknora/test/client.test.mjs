@@ -72,6 +72,42 @@ test('a knowledge-base-restricted key falls back from public URLs to handles', a
   assert.equal(mock.requests.at(-1).query.resource_urls, undefined, 'later calls must not retry public mode')
 })
 
+for (const first of ['list', 'chat']) test(`concurrent public-mode requests each fall back when ${first} is refused first`, async (t) => {
+  const client = new WeknoraClient(resolveConfig({ baseUrl: 'https://weknora.example/api/v1' }))
+  const publicResponses = new Map()
+  const retried = []
+  const answer = 'data: {"response_type":"answer","content":"answer"}\n\ndata: {"response_type":"complete"}\n\n'
+  t.mock.method(globalThis, 'fetch', (url) => {
+    const { pathname, searchParams } = new URL(url)
+    if (searchParams.has('resource_urls')) {
+      return new Promise(resolve => publicResponses.set(pathname, resolve))
+    }
+    retried.push(pathname)
+    return Promise.resolve(new Response(pathname.includes('agent-chat') ? answer : '{"data":[]}'))
+  })
+
+  const listing = client.listKnowledgeBases(never)
+  const chat = client.ask(
+    { sessionId: 's1', query: 'question', knowledgeBaseIds: [], agentId: 'agent-9', webSearch: false },
+    never,
+  )
+  const forbidden = () => new Response('resource_urls=public is forbidden', { status: 403 })
+  const listPath = '/api/v1/knowledge-bases'
+  const chatPath = '/api/v1/agent-chat/s1'
+  assert.deepEqual([...publicResponses.keys()], [listPath, chatPath])
+
+  const paths = first === 'list' ? [listPath, chatPath] : [chatPath, listPath]
+  const completed = new Map([
+    [listPath, listing.then(bases => assert.deepEqual(bases, []))],
+    [chatPath, chat.then(result => assert.equal(result.answer, 'answer'))],
+  ])
+  for (const path of paths) {
+    publicResponses.get(path)(forbidden())
+    await completed.get(path)
+  }
+  assert.deepEqual(retried, paths)
+})
+
 test('chunk pages carry their pagination envelope', async () => {
   const { client } = await harness()
   const page = await client.listChunks({ knowledgeId: 'doc-retrieval-pipeline', page: 1, pageSize: 2 }, never)
