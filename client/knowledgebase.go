@@ -142,8 +142,14 @@ type ParserEngineRule struct {
 
 // QuestionGenerationConfig controls LLM-generated questions per chunk during parsing.
 type QuestionGenerationConfig struct {
-	Enabled       bool `json:"enabled"`
-	QuestionCount int  `json:"question_count"`
+	// ModelID selects the chat model used to write questions. Empty inherits
+	// the knowledge base's summary model.
+	ModelID       string `json:"model_id,omitempty"`
+	Enabled       bool   `json:"enabled"`
+	QuestionCount int    `json:"question_count"`
+	// CustomInstructions describes the intended audience for the generated
+	// questions. The question format stays fixed.
+	CustomInstructions string `json:"custom_instructions,omitempty"`
 }
 
 // AutoTagConfig controls optional automatic association of existing knowledge
