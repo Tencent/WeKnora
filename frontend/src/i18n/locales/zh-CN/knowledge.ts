@@ -1,4 +1,13 @@
 export default {
+  sourceEditor: {
+    title: '编辑原文', content: '原始文件内容',
+    hint: '编辑 UTF-8 文本原文件（最大 2 MiB）。保存后按当前处理配置重建分块、检索索引、Wiki 和图谱，手工分块修改可能被覆盖。文档 ID 和标签保持不变。',
+    save: '保存并重建', saved: '原文已保存，请在文档处理详情中查看重建进度。',
+    reload: '重新加载原文', loadFailed: '无法加载原文，请重试。',
+    saveFailed: '保存失败，草稿已保留。若原文已变更，请重新加载。',
+    discardTitle: '放弃未保存的修改？', discardBody: '如需保留修改，请先复制草稿。',
+    discard: '放弃修改', size: '{size} / 2,097,152 字节',
+  },
   upload: {
     uploadDocument: '上传文档',
     uploadFolder: '上传文件夹',

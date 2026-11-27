@@ -1,4 +1,13 @@
 export default {
+  sourceEditor: {
+    title: '원문 편집', content: '원본 파일 내용',
+    hint: 'UTF-8 텍스트 원본(최대 2 MiB)을 편집합니다. 저장하면 현재 처리 설정으로 청크, 검색 인덱스, Wiki 및 그래프를 다시 생성합니다. 수동 청크 편집은 덮어쓸 수 있습니다. 문서 ID와 태그는 유지됩니다.',
+    save: '저장 후 다시 생성', saved: '원문을 저장했습니다. 문서 처리 상세에서 진행 상황을 확인하세요.',
+    reload: '원문 다시 불러오기', loadFailed: '원문을 불러올 수 없습니다. 다시 시도하세요.',
+    saveFailed: '저장하지 못했습니다. 초안은 유지됩니다. 원문이 변경되었다면 다시 불러오세요.',
+    discardTitle: '저장하지 않은 변경 사항을 버릴까요?', discardBody: '변경 사항을 유지하려면 먼저 초안을 복사하세요.',
+    discard: '변경 사항 버리기', size: '{size} / 2,097,152 바이트',
+  },
   upload: {
     uploadDocument: '문서 업로드',
     uploadFolder: '폴더 업로드',
