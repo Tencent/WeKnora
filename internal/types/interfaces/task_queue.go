@@ -93,6 +93,11 @@ type TaskPendingOpsClaimableCounter interface {
 	ClaimableCount(ctx context.Context, taskType, scope, scopeID string, staleBefore time.Time) (int64, error)
 }
 
+// TaskPendingOpsCheckpointer saves consumer progress without releasing its claim.
+type TaskPendingOpsCheckpointer interface {
+	CheckpointPayload(ctx context.Context, id int64, payload []byte) error
+}
+
 // TaskPendingOpsKnowledgeClaimer preserves ClaimBatch's whole-key exclusion
 // when an operator requests one document instead of the next automatic batch.
 type TaskPendingOpsKnowledgeClaimer interface {

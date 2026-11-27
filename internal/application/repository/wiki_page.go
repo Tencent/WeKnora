@@ -104,7 +104,10 @@ func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) e
 		if err := assertWikiKnowledgeBaseActive(tx, page); err != nil {
 			return err
 		}
-		return tx.Create(page).Error
+		if err := tx.Create(page).Error; err != nil {
+			return err
+		}
+		return checkpointWikiPageWrite(ctx, tx, page)
 	})
 }
 
@@ -195,7 +198,13 @@ func (r *wikiPageRepository) Update(ctx context.Context, page *types.WikiPage) e
 // and be un-revertable.
 func (r *wikiPageRepository) UpdateWithRevision(
 	ctx context.Context, page *types.WikiPage, rev *types.WikiPageRevision,
-) error {
+) (err error) {
+	expectedVersion := page.Version
+	defer func() {
+		if err != nil {
+			page.Version = expectedVersion
+		}
+	}()
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
 			return err
@@ -211,7 +220,10 @@ func (r *wikiPageRepository) UpdateWithRevision(
 				return err
 			}
 		}
-		return updateWikiPageRow(tx, page)
+		if err := updateWikiPageRow(tx, page); err != nil {
+			return err
+		}
+		return checkpointWikiPageWrite(ctx, tx, page)
 	})
 }
 
@@ -374,12 +386,16 @@ func (r *wikiPageRepository) UpdateAutoLinkedContent(ctx context.Context, page *
 
 // UpdateMeta 保存来源、状态和目录等元数据，不修改反链或版本。
 func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPage) error {
-	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded {
+	_, checkpointed := types.WikiPageCheckpointFromContext(ctx)
+	if _, guarded := types.WikiPageWriteSnapshotFromContext(ctx); guarded || checkpointed {
 		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			if err := checkWikiPageWriteSnapshot(tx, page); err != nil {
 				return err
 			}
-			return updateWikiPageMeta(tx, page)
+			if err := updateWikiPageMeta(tx, page); err != nil {
+				return err
+			}
+			return checkpointWikiPageWrite(ctx, tx, page)
 		})
 	}
 	return updateWikiPageMeta(r.db.WithContext(ctx), page)

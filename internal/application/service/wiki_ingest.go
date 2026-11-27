@@ -353,6 +353,9 @@ const (
 // unexported and excluded from JSON so the persisted payload does not
 // duplicate the column.
 type WikiPendingOp struct {
+	// Resume belongs to this queue row, never to a later reparse of the document.
+	Resume      *wikiReduceCheckpoint `json:"reduce_checkpoint,omitempty"`
+	deferred    bool
 	Op          string `json:"op"`
 	KnowledgeID string `json:"knowledge_id"`
 	// Ingest fields
@@ -1325,6 +1328,12 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			// retry against.
 			continue
 		}
+		if op.deferred {
+			if err := s.pendingRepo.ReleaseByIDs(ctx, []int64{op.dbID}); err != nil {
+				settleErrs = append(settleErrs, err)
+			}
+			continue
+		}
 		count, err := s.pendingRepo.IncrFailCount(ctx, op.dbID)
 		if err != nil {
 			logger.Warnf(ctx, "wiki ingest: failed to increment fail count for %s (id=%d): %v", op.KnowledgeID, op.dbID, err)
@@ -1407,7 +1416,7 @@ type docIngestResult struct {
 	// been materialised — see the EndSpan call near the end of
 	// ProcessWikiIngest. nil when no parent attempt was found, in which
 	// case the tracker helpers are all no-ops anyway.
-	WikiSpan *Span
+	WikiSpan *Span `json:"-"`
 }
 
 // WikiBatchContext holds shared data across Map and Reduce phases.

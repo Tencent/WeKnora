@@ -18,6 +18,11 @@ type taskPendingOpsRepository struct {
 	db *gorm.DB
 }
 
+func (r *taskPendingOpsRepository) CheckpointPayload(ctx context.Context, id int64, payload []byte) error {
+	return r.db.WithContext(ctx).Model(&types.TaskPendingOp{}).
+		Where("id = ?", id).Update("payload", payload).Error
+}
+
 // NewTaskPendingOpsRepository constructs a GORM-backed implementation.
 func NewTaskPendingOpsRepository(db *gorm.DB) interfaces.TaskPendingOpsRepository {
 	return &taskPendingOpsRepository{db: db}
