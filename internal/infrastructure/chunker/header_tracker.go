@@ -197,8 +197,10 @@ func extractSeparatorLine(header string) string {
 	return ""
 }
 
+// clearTableHeader drops the active table header because the current unit
+// belongs to another table. It does not mark the hook as ended: the unit may
+// be that table's own header, which must be picked up in the same update.
 func (ht *headerTracker) clearTableHeader() {
-	ht.endedHeaders[markdownTableHookPriority] = true
 	delete(ht.activeHeaders, markdownTableHookPriority)
 	delete(ht.pendingExtend, markdownTableHookPriority)
 }

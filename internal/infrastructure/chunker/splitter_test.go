@@ -1399,3 +1399,32 @@ func TestSplitTextParentChild_WithTableHeaders(t *testing.T) {
 		}
 	}
 }
+
+// A table that follows another one is a table of its own: when it is split,
+// its later chunks must carry its header, as they do for the first table.
+func TestSplitText_SecondTableKeepsItsHeaderOnLaterChunks(t *testing.T) {
+	first := "| a | b |\n|---|---|\n| 1 | x |\n| 2 | y |\n"
+	second := "| c | d |\n|---|---|\n| 3 | z |\n| 4 | w |\n| 5 | v |\n| 6 | u |\n"
+	wider := "| c | d | e |\n|---|---|---|\n| 3 | z | p |\n| 4 | w | q |\n| 5 | v | r |\n| 6 | u | s |\n"
+	cfg := SplitterConfig{ChunkSize: 50, ChunkOverlap: 0, Separators: []string{"\n\n", "\n"}}
+
+	for name, text := range map[string]string{
+		"after a blank line":        first + "\n" + second,
+		"with another column count": first + wider,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var last string
+			for _, c := range SplitText(text, cfg) {
+				if strings.Contains(c.Content, "| 6 | u |") {
+					last = c.Content
+				}
+			}
+			if !strings.HasPrefix(last, "| c | d |") {
+				t.Fatalf("chunk with the last row of the second table has no header:\n%q", last)
+			}
+			if strings.Contains(last, "| a | b |") {
+				t.Fatalf("chunk of the second table carries the first table's header:\n%q", last)
+			}
+		})
+	}
+}
