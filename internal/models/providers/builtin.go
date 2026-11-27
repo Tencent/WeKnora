@@ -18,6 +18,7 @@ func Builtins() []*Definition {
 		newJinaProvider(),
 		newLitellmProvider(),
 		newLkeapProvider(),
+		newLlmtrProvider(),
 		newLongcatProvider(),
 		newMimoProvider(),
 		newMinimaxProvider(),
