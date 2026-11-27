@@ -147,9 +147,11 @@ func TestBuildSplitterConfigFromChunking_UsesEffectiveChunkingConfig(t *testing.
 	kb := &types.KnowledgeBase{
 		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 50, Strategy: "token"},
 	}
+	overlap := 120
 	overrides := &types.KnowledgeProcessOverrides{
 		ChunkingConfig: &types.ChunkingConfigOverride{
-			ChunkingConfig: types.ChunkingConfig{ChunkSize: 1500, ChunkOverlap: 120, Strategy: "character"},
+			ChunkingConfig: types.ChunkingConfig{ChunkSize: 1500, Strategy: "character"},
+			ChunkOverlap:   &overlap,
 		},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
@@ -764,6 +766,51 @@ func TestDocumentTokenLimitSurvivesProcessConfigRoundTrip(t *testing.T) {
 			effective = ResolveProcessConfig(kb, stored)
 			splitter := buildSplitterConfigFromChunking(effective.ChunkingConfig)
 			assert.Equal(t, tc.want, splitter.TokenLimit, "after queued payload and metadata")
+			assert.Equal(t, 640, splitter.ChunkSize, "other chunking overrides still apply")
+		})
+	}
+}
+
+// An explicit chunk_overlap: 0 is a valid setting that disables the inherited
+// overlap; only an absent/null field keeps the knowledge base value. The
+// pointer has to survive JSON decoding, the queued reparse payload, and the
+// knowledge metadata round-trip (the token_limit fix in #6086 covers the same
+// paths).
+func TestDocumentChunkOverlapSurvivesProcessConfigRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 160},
+	}
+	tests := []struct {
+		name    string
+		request string
+		want    int
+	}{
+		{"omitted", `{"process_config":{"chunking_config":{"chunk_size":640}}}`, 160},
+		{"null", `{"process_config":{"chunking_config":{"chunk_size":640,"chunk_overlap":null}}}`, 160},
+		{"disabled", `{"process_config":{"chunking_config":{"chunk_size":640,"chunk_overlap":0}}}`, 0},
+		{"positive", `{"process_config":{"chunking_config":{"chunk_size":640,"chunk_overlap":32}}}`, 32},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var request types.KnowledgeListReparsePayload
+			require.NoError(t, json.Unmarshal([]byte(tc.request), &request))
+			effective := ResolveProcessConfig(kb, request.ProcessConfig)
+			assert.Equal(t, tc.want, effective.ChunkingConfig.ChunkOverlap, "decoded request")
+
+			taskJSON, err := json.Marshal(request)
+			require.NoError(t, err)
+			var task types.KnowledgeListReparsePayload
+			require.NoError(t, json.Unmarshal(taskJSON, &task))
+
+			var knowledge types.Knowledge
+			require.NoError(t, knowledge.SetProcessOverrides(task.ProcessConfig))
+			stored, err := knowledge.ProcessOverrides()
+			require.NoError(t, err)
+			effective = ResolveProcessConfig(kb, stored)
+			splitter := buildSplitterConfigFromChunking(effective.ChunkingConfig)
+			assert.Equal(t, tc.want, splitter.ChunkOverlap, "after queued payload and metadata")
 			assert.Equal(t, 640, splitter.ChunkSize, "other chunking overrides still apply")
 		})
 	}

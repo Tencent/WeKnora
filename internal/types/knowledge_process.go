@@ -37,11 +37,14 @@ type KnowledgeProcessOverrides struct {
 	ParserEngineOverrides map[string]string `json:"parser_engine_overrides,omitempty"`
 }
 
-// ChunkingConfigOverride records whether a document supplied a token budget.
+// ChunkingConfigOverride records which chunking values a document supplied
+// explicitly. Pointer fields distinguish "not sent" from an explicit zero.
 type ChunkingConfigOverride struct {
 	ChunkingConfig
 	// TokenLimit inherits the knowledge base budget when nil and disables it when zero.
 	TokenLimit *int `json:"token_limit,omitempty" minimum:"0" maximum:"100000" extensions:"x-agent"`
+	// ChunkOverlap inherits the knowledge base overlap when nil and disables it when zero.
+	ChunkOverlap *int `json:"chunk_overlap,omitempty" minimum:"0" maximum:"5000" extensions:"x-agent"`
 }
 
 // EffectiveProcessConfig is the merged view used by the parse pipeline.
