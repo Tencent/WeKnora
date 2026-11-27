@@ -136,6 +136,31 @@ test('caller cancellation aborts an in-flight call', async () => {
   await assert.rejects(client.listKnowledgeBases(controller.signal), /the call was cancelled/)
 })
 
+for (const status of [200, 503]) test(`cancellation while reading an HTTP ${status} response body is a WeKnora transport error`, async (t) => {
+  const controller = new AbortController()
+  let bodyReadStarted = false
+  t.mock.method(globalThis, 'fetch', async (_url, { signal }) => {
+    return new Response(new ReadableStream({
+      pull(stream) {
+        bodyReadStarted = true
+        signal.addEventListener('abort', () => stream.error(signal.reason), { once: true })
+        controller.abort()
+      },
+    }, { highWaterMark: 0 }), { status })
+  })
+  const client = new WeknoraClient(resolveConfig({ baseUrl: 'https://weknora.example/api/v1' }))
+
+  const call = status === 200
+    ? client.listKnowledgeBases(controller.signal)
+    : client.ask({ sessionId: 's1', query: 'x', knowledgeBaseIds: [], agentId: 'agent-9', webSearch: false }, controller.signal)
+  const request = status === 200 ? 'GET /knowledge-bases' : 'POST /agent-chat/s1'
+  await assert.rejects(call, {
+    name: 'WeknoraApiError',
+    message: `${request} failed: the call was cancelled`,
+  })
+  assert.ok(bodyReadStarted)
+})
+
 test('an unreachable backend reports a transport failure', async () => {
   const client = new WeknoraClient(resolveConfig({ baseUrl: 'http://127.0.0.1:1/api/v1', requestTimeoutMs: 1000 }))
   await assert.rejects(client.listKnowledgeBases(never), WeknoraApiError)
