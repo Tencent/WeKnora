@@ -86,6 +86,7 @@ export const DOMAIN_BY_NAMESPACE: Readonly<Record<string, LocaleDomain>> = {
   uploadTasks: 'knowledge',
   uploadConfirm: 'knowledge',
   manualEditor: 'knowledge',
+  sourceEditor: 'knowledge',
   faqManager: 'knowledge',
   imageAttr: 'knowledge',
   imagePipeline: 'knowledge',
