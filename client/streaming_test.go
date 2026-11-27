@@ -438,6 +438,48 @@ func TestAgentQAStreamWithRequest_TerminalErrorEndsStream(t *testing.T) {
 	}
 }
 
+func TestChatStreamsReturnAfterCompletion(t *testing.T) {
+	for _, endpoint := range []string{"agent-chat", "knowledge-chat", "continue-stream"} {
+		t.Run(endpoint, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				knowledgeSSEEvent(t, w, StreamResponse{ResponseType: ResponseTypeAnswer, Content: "hello", Done: true}, "message")
+				knowledgeSSEEvent(t, w, StreamResponse{ResponseType: ResponseTypeComplete, Done: true}, "message")
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}))
+			defer server.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			c := NewClient(server.URL)
+			var events []ResponseType
+			receive := func(resp *StreamResponse) error {
+				events = append(events, resp.ResponseType)
+				return nil
+			}
+			var err error
+			switch endpoint {
+			case "agent-chat":
+				err = c.AgentQAStreamWithRequest(ctx, "s", &AgentQARequest{Query: "q"}, func(resp *AgentStreamResponse) error {
+					events = append(events, ResponseType(resp.ResponseType))
+					return nil
+				})
+			case "knowledge-chat":
+				err = c.KnowledgeQAStream(ctx, "s", &KnowledgeQARequest{Query: "q"}, receive)
+			case "continue-stream":
+				err = c.ContinueStream(ctx, "s", "m", receive)
+			}
+			if err != nil {
+				t.Fatalf("stream should succeed after complete, got %v", err)
+			}
+			if len(events) != 2 || events[0] != ResponseTypeAnswer || events[1] != ResponseTypeComplete {
+				t.Errorf("events = %v, want [answer complete]", events)
+			}
+		})
+	}
+}
+
 func TestKnowledgeQAStream_TerminalErrorEndsStream(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher, _ := w.(http.Flusher)

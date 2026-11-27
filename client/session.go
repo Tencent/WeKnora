@@ -375,8 +375,13 @@ func (c *Client) KnowledgeQAStream(
 					debugLogger.Debug("sse_callback_failed", "error", err)
 					return err
 				}
-				if streamResponse.ResponseType == ResponseTypeError && streamResponse.Done {
-					return NewSSEStreamError(streamResponse.Content)
+				if streamResponse.Done {
+					switch streamResponse.ResponseType {
+					case ResponseTypeComplete:
+						return nil
+					case ResponseTypeError:
+						return NewSSEStreamError(streamResponse.Content)
+					}
 				}
 			}
 			dataBuffer = ""
@@ -460,8 +465,13 @@ func (c *Client) ContinueStream(
 				if err := callback(&streamResponse); err != nil {
 					return err
 				}
-				if streamResponse.ResponseType == ResponseTypeError && streamResponse.Done {
-					return NewSSEStreamError(streamResponse.Content)
+				if streamResponse.Done {
+					switch streamResponse.ResponseType {
+					case ResponseTypeComplete:
+						return nil
+					case ResponseTypeError:
+						return NewSSEStreamError(streamResponse.Content)
+					}
 				}
 			}
 			dataBuffer = ""

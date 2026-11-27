@@ -97,6 +97,7 @@ func (c *Client) AgentQAStream(ctx context.Context, sessionID string, query stri
 
 // AgentQAStreamWithRequest performs agent-based Q&A with SSE streaming using the full request payload.
 // Pass ResourceURLOptions to receive public HTTP(S) file URLs in the stream.
+// A terminal complete event is delivered to the callback before returning.
 // An unfinished SSE data frame at EOF returns an error wrapping io.ErrUnexpectedEOF.
 func (c *Client) AgentQAStreamWithRequest(ctx context.Context,
 	sessionID string, request *AgentQARequest, callback AgentEventCallback,
@@ -155,12 +156,13 @@ func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCall
 				if err := callback(&streamResponse); err != nil {
 					return err
 				}
-				// A terminal error frame is the stream's final outcome even if a
-				// buggy/proxied server leaves the HTTP connection open and never
-				// follows it with `complete` or EOF. Deliver it to the callback
-				// first, then terminate the SDK call with an error.
-				if streamResponse.ResponseType == AgentResponseTypeError && streamResponse.Done {
-					return NewSSEStreamError(streamResponse.Content)
+				if streamResponse.Done {
+					switch streamResponse.ResponseType {
+					case AgentResponseTypeComplete:
+						return nil
+					case AgentResponseTypeError:
+						return NewSSEStreamError(streamResponse.Content)
+					}
 				}
 			}
 			dataBuffer = ""
