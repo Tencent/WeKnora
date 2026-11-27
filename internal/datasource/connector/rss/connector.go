@@ -8,7 +8,10 @@ import (
 	"strings"
 	"time"
 
-	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/converter"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/base"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/commonmark"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/strikethrough"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -417,7 +420,11 @@ func htmlToMarkdown(html string) string {
 	if strings.TrimSpace(html) == "" {
 		return ""
 	}
-	md, err := htmltomd.ConvertString(html)
+	// Keep struck-out text as ~~text~~ so a superseded value is not indexed as current.
+	conv := converter.NewConverter(converter.WithPlugins(
+		base.NewBasePlugin(), commonmark.NewCommonmarkPlugin(), strikethrough.NewStrikethroughPlugin(),
+	))
+	md, err := conv.ConvertString(html)
 	if err != nil || strings.TrimSpace(md) == "" {
 		return strings.TrimSpace(html)
 	}

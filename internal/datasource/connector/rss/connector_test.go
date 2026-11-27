@@ -440,3 +440,12 @@ func TestResolveItem_FileNamePolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestHTMLToMarkdownKeepsStrikethrough(t *testing.T) {
+	for _, tag := range []string{"s", "del", "strike"} {
+		got := htmlToMarkdown("<p>Price: <" + tag + ">$49</" + tag + "> $39 from today.</p>")
+		if got != "Price: ~~$49~~ $39 from today." {
+			t.Errorf("<%s>: got %q", tag, got)
+		}
+	}
+}
