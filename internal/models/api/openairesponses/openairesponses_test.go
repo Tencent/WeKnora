@@ -195,6 +195,47 @@ func TestBuildRequestBodyNonReasoningStream(t *testing.T) {
 	}
 }
 
+func TestBuildRequestBodyRespectsUnsupportedReasoning(t *testing.T) {
+	on := true
+	for _, tc := range []struct {
+		name string
+		opts api.Options
+	}{
+		{name: "legacy thinking", opts: api.Options{Thinking: &on}},
+		{name: "explicit auto", opts: api.Options{ReasoningEffort: api.ReasoningAuto}},
+		{name: "graded fallback to auto", opts: api.Options{ReasoningEffort: api.ReasoningHigh}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestClient(t, nil, false)
+			// The runtime marks every level unsupported for a catalogued
+			// non-reasoning model, including the automatic fallback.
+			c.cfg.ThinkingLevels = api.ThinkingLevelMap{}
+			for _, level := range api.AllReasoningEfforts {
+				c.cfg.ThinkingLevels[level] = nil
+			}
+
+			body, err := c.BuildRequestBody([]api.Message{{Role: "user", Content: "hi"}}, &tc.opts, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := body["reasoning"]; ok {
+				t.Errorf("unsupported reasoning must not be sent, got %v", got)
+			}
+
+			// A model with no restrictions can still honor the same request.
+			c.cfg.ThinkingLevels = nil
+			body, err = c.BuildRequestBody([]api.Message{{Role: "user", Content: "hi"}}, &tc.opts, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reasoning, _ := body["reasoning"].(map[string]any)
+			if reasoning["summary"] != "auto" {
+				t.Errorf("supported reasoning should still request a summary, got %v", reasoning)
+			}
+		})
+	}
+}
+
 func TestBuildRequestBodyOffWithoutMapping(t *testing.T) {
 	c := newTestClient(t, nil, false)
 	off := false
