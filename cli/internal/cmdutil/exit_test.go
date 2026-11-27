@@ -83,6 +83,22 @@ func TestPrintError_JSONMode_WritesEnvelope(t *testing.T) {
 	}
 }
 
+func TestPrintError_TextMode_TypesCobraFlagErrors(t *testing.T) {
+	t.Cleanup(func() { SetFormatMode("") })
+	SetFormatMode("text")
+
+	var buf bytes.Buffer
+	PrintError(&buf, NewFlagError(errors.New(`required flag(s) "host" not set`)))
+
+	got := buf.String()
+	if !strings.Contains(got, `input.invalid_argument: required flag(s) "host" not set`) {
+		t.Errorf("expected typed code prefix on the prose line; got %q", got)
+	}
+	if !strings.Contains(got, "hint: see `weknora <command> --help` for valid usage") {
+		t.Errorf("expected the input.invalid_argument hint; got %q", got)
+	}
+}
+
 func TestPrintError_JSONMode_IncludesRetryAfter(t *testing.T) {
 	t.Cleanup(func() { SetFormatMode("") })
 	SetFormatMode("json")
