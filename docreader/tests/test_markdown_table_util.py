@@ -54,6 +54,17 @@ class TestMarkdownTableUtil(unittest.TestCase):
             normalized,
         )
 
+    def test_headerless_single_row_table_keeps_delimiter(self):
+        """A one-row table needs its delimiter row as much as a two-row one.
+
+        MarkItDown writes a headerless table as an empty header row, a
+        delimiter row and the data rows. Dropping the fake prefix leaves a
+        single row, which GFM no longer reads as a table.
+        """
+        raw = "|  |  |\n| --- | --- |\n| only | row |"
+        formatted = MarkdownTableUtil().format_table(raw)
+        self.assertEqual(formatted, "| only | row |\n| --- | --- |")
+
     def test_malformed_unclosed_row_is_passthrough(self):
         """An unclosed ``|``-prefixed row must not hang the process.
 

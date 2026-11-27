@@ -204,13 +204,22 @@ class MarkdownTableUtil:
     @classmethod
     def _normalize_table_block(cls, block: List[str]) -> List[str]:
         """Fix MarkItDown-style tables: drop bogus prefix rows, ensure GFM delimiter."""
+        dropped_prefix = False
         while block and cls._is_empty_row(block[0]):
             block.pop(0)
+            dropped_prefix = True
         if block and cls._is_separator_row(block[0]):
             block.pop(0)
+            dropped_prefix = True
         # GFM/marked need "| --- |" after the first row. Headerless Word tables
-        # only have data rows after we strip the fake empty+separator prefix.
-        if len(block) >= 2 and not cls._is_separator_row(block[1]):
+        # only have data rows after we strip the fake empty+separator prefix,
+        # so the first data row becomes the header. A table with one data row
+        # needs the delimiter as much as a longer one: without it the row is
+        # plain text with pipes in it.
+        needs_separator = len(block) > 1 and not cls._is_separator_row(block[1])
+        if len(block) == 1 and dropped_prefix and not cls._is_separator_row(block[0]):
+            needs_separator = True
+        if block and needs_separator:
             sep = cls._separator_row_for(block[0])
             block = [block[0], sep] + block[1:]
         return block
