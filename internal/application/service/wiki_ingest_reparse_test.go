@@ -179,7 +179,9 @@ func TestWikiRetractPreservesLinkedPageWithStaleLastSource(t *testing.T) {
 	require.NoError(t, err)
 
 	svc := &wikiIngestService{wikiService: pageSvc}
-	model := &templateCaptureChatModel{response: "SUMMARY: Removed source\nThis page no longer has its original evidence."}
+	model := &templateCaptureChatModel{
+		response: "SUMMARY: Removed source\nThis page no longer has its original evidence.",
+	}
 	batch := &WikiBatchContext{SlugTitleMany: func(context.Context, []string) map[string]string { return nil }}
 	updates := []SlugUpdate{{Slug: page.Slug, Type: "retract", KnowledgeID: "kn-1"}}
 	changed, _, failed, deferred, err := svc.reduceSlugUpdates(

@@ -70,7 +70,7 @@ func TestDeleteWikiRemovesEveryChunkType(t *testing.T) {
 
 func TestKnowledgeDeletePreservesLinkedWikiPages(t *testing.T) {
 	backlinkBackends(t, func(t *testing.T, h backlinkHarness) {
-		if h.db.Dialector.Name() != "postgres" {
+		if h.db.Name() != "postgres" {
 			t.Skip("ListBySourceRef uses PostgreSQL JSONB")
 		}
 		ctx := context.Background()
@@ -78,7 +78,9 @@ func TestKnowledgeDeletePreservesLinkedWikiPages(t *testing.T) {
 		kb := f.kbs.values["kb"]
 		kb.IndexingStrategy.WikiEnabled = true
 		seedWikiTestKnowledgeBase(t, h.db, kb.ID, kb.TenantID)
-		require.NoError(t, h.db.Exec("ALTER TABLE wiki_pages ALTER COLUMN source_refs TYPE jsonb, ALTER COLUMN in_links TYPE jsonb").Error)
+		require.NoError(t, h.db.Exec(
+			"ALTER TABLE wiki_pages ALTER COLUMN source_refs TYPE jsonb, ALTER COLUMN in_links TYPE jsonb",
+		).Error)
 		require.NoError(t, h.db.AutoMigrate(&types.WikiPageIssue{}))
 		require.NoError(t, f.db.Create(&types.Knowledge{
 			ID: "support-doc", TenantID: kb.TenantID, KnowledgeBaseID: kb.ID, ParseStatus: types.ParseStatusCompleted,
@@ -157,11 +159,15 @@ func TestKnowledgeDeletePreservesLinkedWikiPages(t *testing.T) {
 		require.NoError(t, json.Unmarshal(pending.ops[0].Payload, &op))
 		require.Contains(t, op.PageSlugs, target)
 		ingest := &wikiIngestService{wikiService: h.svc}
-		model := &templateCaptureChatModel{response: "SUMMARY: Removed source\nThis page no longer has its original evidence."}
+		model := &templateCaptureChatModel{
+			response: "SUMMARY: Removed source\nThis page no longer has its original evidence.",
+		}
 		batch := &WikiBatchContext{SlugTitleMany: func(context.Context, []string) map[string]string { return nil }}
 		changed, _, failed, deferred, err := ingest.reduceSlugUpdates(ctx, model, kb.ID, target,
-			[]SlugUpdate{{Slug: target, Type: "retract", KnowledgeID: op.KnowledgeID, DocTitle: op.DocTitle,
-				RetractDocContent: op.DocSummary}}, kb.TenantID, batch, nil)
+			[]SlugUpdate{
+				{Slug: target, Type: "retract", KnowledgeID: op.KnowledgeID, DocTitle: op.DocTitle,
+					RetractDocContent: op.DocSummary},
+			}, kb.TenantID, batch, nil)
 		require.NoError(t, err)
 		require.False(t, changed)
 		require.False(t, failed)
