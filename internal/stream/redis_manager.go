@@ -109,7 +109,28 @@ func (r *RedisStreamManager) ResetEvents(ctx context.Context, sessionID, message
 	return nil
 }
 
-// GetEvents gets events starting from offset using Redis LRange
+// readStreamList renews the list atomically with the read so it cannot expire
+// between reading the range and extending its lifetime. An empty range can
+// also be a poll at the end of an existing list and must renew that list.
+var readStreamList = redis.NewScript(`
+local events = redis.call('LRANGE', KEYS[1], ARGV[1], -1)
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+return events
+`)
+
+func (r *RedisStreamManager) readList(ctx context.Context, key string, offset int) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Match go-redis's EXPIRE conversion on event writes.
+	ttlSeconds := int64(r.ttl / time.Second)
+	if r.ttl > 0 && ttlSeconds == 0 {
+		ttlSeconds = 1
+	}
+	return readStreamList.Run(ctx, r.client, []string{key}, offset, ttlSeconds).StringSlice()
+}
+
+// GetEvents gets events starting from offset and refreshes the Redis list TTL.
 // Returns: events slice, next offset, error
 func (r *RedisStreamManager) GetEvents(
 	ctx context.Context,
@@ -118,9 +139,7 @@ func (r *RedisStreamManager) GetEvents(
 ) ([]interfaces.StreamEvent, int, error) {
 	key := r.buildKey(sessionID, messageID)
 
-	// Get all events from offset to end using LRange
-	// LRange is inclusive, so fromOffset to -1 gets all remaining elements
-	results, err := r.client.LRange(ctx, key, int64(fromOffset), -1).Result()
+	results, err := r.readList(ctx, key, fromOffset)
 	if err != nil {
 		if err == redis.Nil {
 			// Key doesn't exist - return empty slice
@@ -213,7 +232,7 @@ func (r *RedisStreamManager) GetSteerEvents(
 ) ([]interfaces.StreamEvent, int, error) {
 	key := r.buildSteerKey(sessionID, messageID)
 
-	results, err := r.client.LRange(ctx, key, int64(fromOffset), -1).Result()
+	results, err := r.readList(ctx, key, fromOffset)
 	if err != nil {
 		if err == redis.Nil {
 			return []interfaces.StreamEvent{}, fromOffset, nil
