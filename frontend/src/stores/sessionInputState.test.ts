@@ -1,3 +1,4 @@
+import { applyChatEntrySelection } from '../utils/chatEntrySelection.ts'
 import assert from 'node:assert/strict'
 import { after, before, beforeEach, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -224,4 +225,32 @@ test('missing session state and first-send hydration preserve the current draft 
 
   assert.equal(JSON.stringify(store.settings), draft)
   assert.equal(store._defaultsSnapshot, null)
+})
+
+
+test('card quick-use selects only the target KB and keeps it through empty-session hydration', () => {
+  const store = useSettingsStore(createPinia())
+  selectDefaults(store)
+  store.selectAgent('previous-shared-agent', '42')
+  store.selectKnowledgeBases(['previous-kb'])
+  applyChatEntrySelection({ agent_id: 'builtin-quick-answer', knowledge_base_id: 'target-kb' }, store)
+  store.hydrateSessionInputState(null)
+  assert.equal(store.getSelectedAgentId(), 'builtin-quick-answer')
+  assert.equal(store.settings.selectedAgentSourceTenantId, null)
+  assert.deepEqual(store.getSelectedKnowledgeBases(), ['target-kb'])
+  assert.deepEqual(store.getSelectedFiles(), [])
+  assert.deepEqual(store.settings.selectedTags, [])
+})
+
+test('card quick-use retains shared-agent origin and ignores array query values', () => {
+  const store = useSettingsStore(createPinia())
+  selectDefaults(store)
+  applyChatEntrySelection({ agent_id: 'shared-agent', source_tenant_id: '42' }, store)
+  store.hydrateSessionInputState(null)
+  assert.equal(store.getSelectedAgentId(), 'shared-agent')
+  assert.equal(store.settings.selectedAgentSourceTenantId, '42')
+  assert.deepEqual(store.getSelectedKnowledgeBases(), [])
+  applyChatEntrySelection({ agent_id: ['bad'], knowledge_base_id: ['bad'] }, store)
+  assert.equal(store.getSelectedAgentId(), 'shared-agent')
+  assert.deepEqual(store.getSelectedKnowledgeBases(), [])
 })

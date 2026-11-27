@@ -355,6 +355,8 @@ export default {
     sharedTooltip: '共有スペース経由で外部ワークスペースからアクセス'
   },
   common: {
+    quickUse: 'すぐに使う',
+    quickUseResource: '{name} でチャットを開始',
     add: '追加',
     me: '自分',
     confirm: '確認',

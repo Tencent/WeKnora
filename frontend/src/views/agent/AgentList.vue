@@ -280,6 +280,7 @@
                 </div>
                 <ResourceOriginBadge v-else-if="showAgentOriginBadge(agent)" :variant="agentOriginVariant(agent)"
                   :creator-name="(agent as any).creator_name" />
+                <ResourceQuickUse :agent-id="agent.id" :resource-name="agent.name" :source-tenant-id="'source_tenant_id' in agent ? agent.source_tenant_id : undefined" :disabled="agent.disabled_by_me" />
               </div>
             </div>
           </template>
@@ -441,6 +442,7 @@
                 </div>
                 <ResourceOriginBadge v-else-if="showAgentOriginBadge(agent)" :variant="agentOriginVariant(agent)"
                   :creator-name="(agent as any).creator_name" />
+                <ResourceQuickUse :agent-id="agent.id" :resource-name="agent.name" :disabled="agent.disabled_by_me" />
               </div>
             </div>
           </template>
@@ -565,6 +567,7 @@
                     </t-tooltip>
                   </div>
                 </div>
+                <ResourceQuickUse :agent-id="shared.agent?.id" :resource-name="shared.agent?.name || ''" :source-tenant-id="shared.source_tenant_id" :disabled="shared.disabled_by_me || !shared.agent" />
               </div>
             </div>
           </template>
@@ -765,6 +768,7 @@ import ResourceCardAvatar from '@/components/ResourceCardAvatar.vue'
 import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import ResourceSortControl from '@/components/ResourceSortControl.vue'
+import ResourceQuickUse from '@/components/ResourceQuickUse.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
 import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
 import { useAuthStore } from '@/stores/auth'

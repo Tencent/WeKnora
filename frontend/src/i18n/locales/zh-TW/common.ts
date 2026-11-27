@@ -290,6 +290,8 @@ export default {
     upload: '上傳檔案'
   },
   common: {
+    quickUse: '快速使用',
+    quickUseResource: '使用「{name}」開始對話',
     add: '新增',
     me: '我',
     confirm: '確認',

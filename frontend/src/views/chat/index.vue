@@ -251,6 +251,7 @@ import { getMessageList, getSession, forkSession, rewindSession } from "@/api/ch
 import { resolveForkAffordance } from './forkPoint';
 import { rewindSkipMessage } from './rewindNotice';
 import { rewindPrefillText, rewindBlockedByOutgoingWork, canReplaceRewindTranscript, shouldApplyRewindLocally, rewindHistoryHasMore, keepMessagesThroughRewindPoint, rewindableMessageIds, rewindHttpConflictCode, rewindConflictI18nKey } from './rewindView';
+import { applyChatEntrySelection } from '@/utils/chatEntrySelection';
 import { getSuggestedQuestions } from "@/api/agent/index";
 import { questionOriginFromSuggestion } from '@/utils/questionOrigin';
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
@@ -1940,14 +1941,7 @@ const handleSessionMutation = (event) => {
 onBeforeMount(async () => {
     // 嵌入式的 agent / 知识库由宿主随请求传入，不能写进主对话的 settings store。
     if (props.embeddedMode) return;
-    // 若从智能体列表点击共享智能体进入，URL 带 agent_id 与 source_tenant_id，同步到 store
-    const agentIdFromQuery = route.query.agent_id && String(route.query.agent_id);
-    const sourceTenantIdFromQuery = route.query.source_tenant_id && String(route.query.source_tenant_id);
-    if (agentIdFromQuery && sourceTenantIdFromQuery) {
-        useSettingsStoreInstance.selectAgent(agentIdFromQuery, sourceTenantIdFromQuery);
-    } else if (agentIdFromQuery) {
-        useSettingsStoreInstance.selectAgent(agentIdFromQuery, null);
-    }
+    applyChatEntrySelection(route.query, useSettingsStoreInstance);
 
     // 必须在 Input-field onMounted 之前完成：按 session.last_request_state 恢复输入栏
     await loadSessionAndHydrate(session_id.value);

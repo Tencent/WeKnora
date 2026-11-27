@@ -290,6 +290,8 @@ export default {
     upload: 'Загрузить файл'
   },
   common: {
+    quickUse: 'Начать чат',
+    quickUseResource: 'Начать чат с {name}',
     add: 'Добавить',
     me: 'Я',
     confirm: 'Подтвердить',
