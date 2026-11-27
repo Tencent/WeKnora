@@ -48,11 +48,13 @@ var versionedSQLiteTables = []string{
 	"session_sandbox_assignments",
 	"sandbox_user_machines",
 	"credential_vault_items",
+	"knowledge_folders",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
+	"knowledge_folders":     {"tenant_id", "knowledge_base_id", "folder_path"},             // 000054
 	"automations":           {"model_id"},                                                  // 000049
 	"automation_runs":       {"execution_duration_ms"},                                     // 000048
 	"model_catalog_configs": {"version", "overlay", "history", "updated_by", "updated_at"}, // 000031
@@ -89,7 +91,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 53
+const expectedSQLiteMigrationVersion = 54
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
