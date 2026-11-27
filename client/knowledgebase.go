@@ -15,6 +15,9 @@ import (
 
 // KnowledgeBase represents a knowledge base
 type KnowledgeBase struct {
+	// IndexingStrategy reports enabled indexes. Nil means the server omitted it.
+	IndexingStrategy *IndexingStrategy `json:"indexing_strategy,omitempty"`
+
 	ID                    string                 `json:"id"`
 	Name                  string                 `json:"name"` // Name must be unique within the same tenant
 	Type                  string                 `json:"type"`

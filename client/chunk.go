@@ -14,6 +14,9 @@ import (
 // Chunk represents the information about a document chunk
 // Chunks are the basic units of storage and indexing in the knowledge base
 type Chunk struct {
+	// ContentRevision is the version to pass as expected_revision when editing.
+	ContentRevision int `json:"content_revision"`
+
 	SourceLocators []SourceLocator `json:"source_locators,omitempty"`
 
 	ID                     string `json:"id"`                       // Unique identifier of the chunk
@@ -61,6 +64,11 @@ type ChunkListResponse struct {
 // UpdateChunkRequest represents the request structure for updating a chunk
 // Used for requesting chunk information updates
 type UpdateChunkRequest struct {
+	// ExpectedRevision prevents overwriting a newer edit. Read ContentRevision
+	// first; on HTTP 409, reread and reconcile before retrying. Nil omits the
+	// check for compatibility; a pointer to zero checks the initial revision.
+	ExpectedRevision *int `json:"expected_revision,omitempty"`
+
 	Content    string    `json:"content"`     // Chunk content
 	Embedding  []float32 `json:"embedding"`   // Vector embedding
 	ChunkIndex int       `json:"chunk_index"` // Chunk index

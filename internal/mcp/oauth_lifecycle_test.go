@@ -103,6 +103,16 @@ func newOAuthLifecycleFixture(
 	t *testing.T, tokenStatus int, tokenBody map[string]any,
 ) (*oauthRuntime, *lockedOAuthRepo, *atomic.Int32, func()) {
 	t.Helper()
+	return newOAuthLifecycleFixtureWithResponses(t, func(w http.ResponseWriter, _ int32) {
+		w.WriteHeader(tokenStatus)
+		_ = json.NewEncoder(w).Encode(tokenBody)
+	})
+}
+
+func newOAuthLifecycleFixtureWithResponses(
+	t *testing.T, respond func(http.ResponseWriter, int32),
+) (*oauthRuntime, *lockedOAuthRepo, *atomic.Int32, func()) {
+	t.Helper()
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.URL.Path {
@@ -115,12 +125,10 @@ func newOAuthLifecycleFixture(
 				"token_endpoint_auth_methods_supported": []string{"none"},
 			})
 		case "/token":
-			requests.Add(1)
 			require.NoError(t, req.ParseForm())
 			require.Equal(t, "refresh_token", req.Form.Get("grant_type"))
 			require.Equal(t, "old-refresh", req.Form.Get("refresh_token"))
-			w.WriteHeader(tokenStatus)
-			_ = json.NewEncoder(w).Encode(tokenBody)
+			respond(w, requests.Add(1))
 		default:
 			http.NotFound(w, req)
 		}
@@ -141,6 +149,9 @@ func newOAuthLifecycleFixture(
 		UpdatedAt:     time.Now().Add(-time.Hour),
 	}
 	repo.tokens[fakeOAuthKey(7, principal, "svc-1")] = row
+	require.NoError(t, repo.SaveClient(t.Context(), &types.MCPOAuthClient{
+		TenantID: 7, ServiceID: "svc-1", ClientID: "client-1",
+	}))
 	store := newDBTokenStore(repo, 7, principal, "svc-1")
 	runtime := newOAuthRuntime(repo, 7, principal, "svc-1", server.URL, transport.OAuthConfig{
 		ClientID:              "client-1",
@@ -170,35 +181,70 @@ func TestOAuthRuntimeRefreshesExpiredToken(t *testing.T) {
 }
 
 func TestOAuthRuntimeDeletesPermanentlyInvalidRefreshToken(t *testing.T) {
-	runtime, repo, requests, closeServer := newOAuthLifecycleFixture(t, http.StatusBadRequest, map[string]any{
-		"error":             "invalid_grant",
-		"error_description": "refresh token expired",
-	})
-	defer closeServer()
+	for _, tc := range []struct {
+		name        string
+		status      int
+		body        map[string]any
+		resetClient bool
+	}{
+		{"invalid grant", 400, map[string]any{"error": "invalid_grant"}, false},
+		{"invalid client", 401, map[string]any{"error": "invalid_client"}, true},
+		{"unstructured 400", 400, map[string]any{"message": "previous status 401"}, false},
+		{"unstructured 401", 401, map[string]any{"message": "previous status 400"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime, repo, requests, closeServer := newOAuthLifecycleFixture(t, tc.status, tc.body)
+			defer closeServer()
 
-	err := runtime.ensureFresh(context.Background(), false, nil)
-	var reauth *OAuthReauthorizationRequiredError
-	require.ErrorAs(t, err, &reauth)
-	require.EqualValues(t, 1, requests.Load())
-	row, getErr := repo.GetTokenForPrincipal(context.Background(), 7, runtime.principal, "svc-1")
-	require.NoError(t, getErr)
-	require.Nil(t, row)
+			err := runtime.ensureFresh(t.Context(), false, nil)
+			var reauth *OAuthReauthorizationRequiredError
+			require.ErrorAs(t, err, &reauth)
+			require.EqualValues(t, 1, requests.Load())
+			row, err := repo.GetTokenForPrincipal(t.Context(), 7, runtime.principal, "svc-1")
+			require.NoError(t, err)
+			require.Nil(t, row)
+			registration, err := repo.GetClient(t.Context(), 7, "svc-1")
+			require.NoError(t, err)
+			require.Equal(t, tc.resetClient, registration == nil)
+		})
+	}
 }
 
 func TestOAuthRuntimePreservesTokenOnTemporaryRefreshFailure(t *testing.T) {
-	runtime, repo, requests, closeServer := newOAuthLifecycleFixture(t, http.StatusServiceUnavailable, map[string]any{
-		"error": "temporarily_unavailable",
-	})
-	defer closeServer()
+	for name, body := range map[string]map[string]any{
+		"OAuth error": {"error": "temporarily_unavailable", "error_description": "upstream status 401"},
+		"raw error":   {"message": "upstream status 400"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			respond := func(w http.ResponseWriter, attempt int32) {
+				if attempt == 1 {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					_ = json.NewEncoder(w).Encode(body)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "recovered", "expires_in": 3600})
+			}
+			runtime, repo, requests, closeServer := newOAuthLifecycleFixtureWithResponses(t, respond)
+			defer closeServer()
 
-	err := runtime.ensureFresh(context.Background(), false, nil)
-	var temporary *OAuthRefreshTemporaryError
-	require.ErrorAs(t, err, &temporary)
-	require.EqualValues(t, 1, requests.Load())
-	row, getErr := repo.GetTokenForPrincipal(context.Background(), 7, runtime.principal, "svc-1")
-	require.NoError(t, getErr)
-	require.NotNil(t, row)
-	require.Equal(t, "old-refresh", row.RefreshToken)
+			err := runtime.ensureFresh(t.Context(), false, nil)
+			var temporary *OAuthRefreshTemporaryError
+			require.ErrorAs(t, err, &temporary)
+			registration, err := repo.GetClient(t.Context(), 7, "svc-1")
+			require.NoError(t, err)
+			require.NotNil(t, registration)
+			row, err := repo.GetTokenForPrincipal(t.Context(), 7, runtime.principal, "svc-1")
+			require.NoError(t, err)
+			require.NotNil(t, row)
+			require.Equal(t, "old-refresh", row.RefreshToken)
+
+			require.NoError(t, runtime.ensureFresh(t.Context(), false, nil))
+			require.EqualValues(t, 2, requests.Load())
+			row, err = repo.GetTokenForPrincipal(t.Context(), 7, runtime.principal, "svc-1")
+			require.NoError(t, err)
+			require.Equal(t, "recovered", row.AccessToken)
+		})
+	}
 }
 
 func TestOAuthRuntimeSerializesRotatingRefreshToken(t *testing.T) {
