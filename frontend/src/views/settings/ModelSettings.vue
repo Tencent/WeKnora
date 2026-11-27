@@ -303,7 +303,7 @@
 
     <!-- 模型编辑器抽屉 -->
     <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
-      :draft="modelDraft" :save-model="handleModelSave" />
+      :draft="modelDraft" :fallback-chat-models="fallbackChatModels" :save-model="handleModelSave" />
     <ModelDebugDrawer v-model:visible="showDebugDrawer" :models="allModels" />
 
   </div>
@@ -424,6 +424,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
     isBuiltin: model.is_builtin || false,
     supportsVision: model.parameters.supports_vision || false,
+    fallbackChatModelId: model.parameters.fallback_chat_model_id || '',
     contextWindow: model.parameters.context_window || undefined,
     maxConcurrency: model.parameters.max_concurrency,
     maxOutputTokens: model.parameters.max_output_tokens || undefined,
@@ -445,6 +446,9 @@ function convertToLegacyFormat(model: ModelConfig) {
 }
 
 // 平铺 + 过滤
+const fallbackChatModels = computed(() => allModels.value
+  .filter(model => model.type === 'KnowledgeQA' && model.status === 'active' && model.id && model.id !== editingModel.value?.id)
+  .map(model => ({ label: model.display_name || model.name, value: model.id! })));
 const allLegacyModels = computed(() => allModels.value.map(convertToLegacyFormat))
 const filteredModels = computed(() => allLegacyModels.value.filter(model =>
   (activeTypeFilter.value === 'all' || model._modelType === activeTypeFilter.value)
@@ -749,6 +753,9 @@ const handleModelSave = async (modelData: any) => {
         ...((saveType === 'chat' || saveType === 'vllm')
           && Number(modelData.maxOutputTokens) > 0
           ? { max_output_tokens: Math.round(Number(modelData.maxOutputTokens)) }
+          : {}),
+        ...(saveType === 'chat' && modelData.fallbackChatModelId
+          ? { fallback_chat_model_id: modelData.fallbackChatModelId }
           : {}),
         ...specFields,
         // 后台并发上限：仅 chat/embedding/vllm 受治理，>0 才写入（0/空沿用全局默认）。

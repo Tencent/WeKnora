@@ -6,6 +6,7 @@ import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
 import * as integration from './mcpServerIntegration'
+import * as mcpBaseUrl from '../../utils/mcpBaseUrl'
 
 const filename = new URL('./McpServerIntegrationSettings.vue', import.meta.url)
 const { descriptor } = parse(readFileSync(filename, 'utf8'))
@@ -55,6 +56,7 @@ async function fixture() {
     'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
     'tdesign-vue-next': { MessagePlugin: { error: assert.fail } },
     '@/stores/auth': { useAuthStore: () => ({ hasRole: () => true }) },
+    '@/utils/mcpBaseUrl': mcpBaseUrl,
     '@/utils/clipboard': { copyWithToast: assert.fail },
     '@/utils/mcpBaseUrl': { resolveMcpBaseUrl: () => '' },
     '@/composables/useApiBaseUrlDisplay': { useApiBaseUrlDisplay: () => ({ apiBaseUrlDisplay: vue.ref('https://example.com') }) },

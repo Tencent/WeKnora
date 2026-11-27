@@ -528,6 +528,15 @@
           </div>
         </div>
 
+        <div v-if="activeModelType === 'chat' && !formData.isBuiltin &&
+            (fallbackChatModels?.length || formData.fallbackChatModelId)" class="form-item">
+          <label class="form-label" for="fallback-chat-model">{{ $t('model.editor.fallbackChatLabel') }}</label>
+          <t-select v-model="formData.fallbackChatModelId" input-id="fallback-chat-model"
+            :aria-label="$t('model.editor.fallbackChatLabel')" :options="fallbackChatModels"
+            :placeholder="$t('model.editor.fallbackChatPlaceholder')" clearable filterable />
+          <p class="form-desc">{{ $t('model.editor.fallbackChatDesc') }}</p>
+        </div>
+
         <!-- Chat / VLM: max output tokens (catalog default when empty). -->
         <div v-if="activeModelType === 'chat' || activeModelType === 'vllm'" class="form-item">
           <label class="form-label">{{ $t('model.editor.maxOutputTokensLabel') }}</label>
@@ -678,6 +687,8 @@ interface ModelFormData {
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean
+  fallbackChatModelId?: string
+  isBuiltin?: boolean
   /** 对话/VLM 上下文窗口（token）。空/0 表示使用默认 200000。 */
   contextWindow?: number
   /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding/vllm 生效。 */
@@ -729,6 +740,7 @@ interface Props {
   visible: boolean
   modelType: EditorModelType
   modelData?: ModelFormData | null
+  fallbackChatModels?: { label: string; value: string }[]
   /** Create mode only: fields to start the new model's form with. */
   draft?: Partial<ModelFormData> | null
   saveModel: (data: ModelFormData & { modelType?: EditorModelType }) => Promise<void>

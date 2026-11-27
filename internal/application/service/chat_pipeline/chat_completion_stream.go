@@ -98,8 +98,20 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	pipelineInfo(ctx, "Stream", "model_call", map[string]interface{}{
 		"chat_model": chatManage.ChatModelID,
 	})
-	responseChan, err := chatModel.ChatStream(ctx, chatMessages, opt)
+	primaryCtx, cancelPrimary := context.WithCancel(ctx)
+	responseChan, err := chatModel.ChatStream(primaryCtx, chatMessages, opt)
+	tryFallback := func(cause error) (<-chan types.StreamResponse, error) {
+		return p.startFallbackChatStream(ctx, chatManage, chatMessages, opt, cancelPrimary, cause)
+	}
+	fallbackAttempted := false
+	usingFallback := false
+	if err != nil && isRetryableChatFailure(err) {
+		fallbackAttempted = true
+		responseChan, err = tryFallback(err)
+		usingFallback = err == nil
+	}
 	if err != nil {
+		cancelPrimary()
 		pipelineError(ctx, "Stream", "model_call", map[string]interface{}{
 			"chat_model": chatManage.ChatModelID,
 			"error":      err.Error(),
@@ -107,6 +119,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		return ErrModelCall.WithError(err)
 	}
 	if responseChan == nil {
+		cancelPrimary()
 		pipelineError(ctx, "Stream", "model_call", map[string]interface{}{
 			"chat_model": chatManage.ChatModelID,
 			"error":      "nil_channel",
@@ -124,6 +137,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	// The goroutine monitors ctx.Done() to avoid leaking when the context is cancelled
 	// and the upstream channel is not closed promptly.
 	go func() {
+		defer cancelPrimary()
+		var startedResponse bool
 		answerDecoder := modelContext.StreamDecoder()
 		thinkingDecoder := modelContext.StreamDecoder()
 		thinkingID := fmt.Sprintf("%s-thinking", uuid.New().String()[:8])
@@ -183,6 +198,23 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 			}
 		}
 
+		emitStreamError := func(message string) {
+			pipelineError(ctx, "Stream", "stream_error", map[string]interface{}{
+				"session_id": chatManage.SessionID,
+				"error":      message,
+			})
+			_ = eventBus.Emit(ctx, types.Event{
+				ID:        fmt.Sprintf("%s-error", uuid.New().String()[:8]),
+				Type:      types.EventType(event.EventError),
+				SessionID: chatManage.SessionID,
+				Data: event.ErrorData{
+					Error:     message,
+					Stage:     "chat_completion_stream",
+					SessionID: chatManage.SessionID,
+				},
+			})
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -209,6 +241,23 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 
 			case response, ok := <-responseChan:
 				if !ok {
+					if !fallbackAttempted && !startedResponse {
+						fallbackAttempted = true
+						cause := errors.New(types.StreamEndedEarlyError)
+						backupStream, fallbackErr := tryFallback(cause)
+						if fallbackErr == nil {
+							responseChan = backupStream
+							usingFallback = true
+							turnUsage = nil
+							continue
+						}
+						if fallbackErr != cause {
+							emitStreamError(fallbackErr.Error())
+						}
+					}
+					if usingFallback && !startedResponse {
+						emitStreamError(types.StreamEndedEarlyError)
+					}
 					flushDecoders()
 					closeThinking()
 					if pendingClose != nil {
@@ -229,6 +278,29 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					return
 				}
 
+				incomplete := response.ResponseType == types.ResponseTypeAnswer && response.Done &&
+					response.FinishReason == types.FinishReasonIncomplete
+				if !fallbackAttempted && !startedResponse && len(response.ToolCalls) == 0 &&
+					(incomplete || (response.ResponseType == types.ResponseTypeError &&
+						isRetryableChatFailure(response.Cause))) {
+					fallbackAttempted = true
+					cause := response.Cause
+					if cause == nil {
+						cause = errors.New(types.StreamEndedEarlyError)
+					}
+					backupStream, fallbackErr := tryFallback(cause)
+					if fallbackErr == nil {
+						responseChan = backupStream
+						usingFallback = true
+						turnUsage = nil
+						continue
+					}
+					response.ResponseType = types.ResponseTypeError
+					response.Content = fallbackErr.Error()
+				}
+				startedResponse = startedResponse || len(response.ToolCalls) > 0 ||
+					(response.ResponseType != types.ResponseTypeError && response.Content != "") ||
+					(response.Done && response.ResponseType == types.ResponseTypeAnswer && !incomplete)
 				// A stream that stopped without a finish reason is a broken
 				// one, not a short answer: report it the way a read error is
 				// reported instead of closing the answer as complete.
@@ -238,20 +310,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					response.Content = types.StreamEndedEarlyError
 				}
 				if response.ResponseType == types.ResponseTypeError {
-					pipelineError(ctx, "Stream", "stream_error", map[string]interface{}{
-						"session_id": chatManage.SessionID,
-						"error":      response.Content,
-					})
-					eventBus.Emit(ctx, types.Event{
-						ID:        fmt.Sprintf("%s-error", uuid.New().String()[:8]),
-						Type:      types.EventType(event.EventError),
-						SessionID: chatManage.SessionID,
-						Data: event.ErrorData{
-							Error:     response.Content,
-							Stage:     "chat_completion_stream",
-							SessionID: chatManage.SessionID,
-						},
-					})
+					startedResponse = true
+					emitStreamError(response.Content)
 					continue
 				}
 
