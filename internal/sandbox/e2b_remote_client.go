@@ -40,6 +40,11 @@ type E2BRemoteClient struct {
 	templateID string
 	timeout    time.Duration
 
+	// v2Templates keeps what the /v2/templates listing needs: the SDK keeps
+	// apiKey / apiBaseURL / httpClient private, and every E2B-compatible
+	// control plane serves templates only through the v2 surface.
+	v2Templates e2bTemplatesEndpoint
+
 	// snapshotCreateImmutable is true for Aliyun Agent Sandbox. Creating a
 	// sandbox from a snapshot there rejects envVars and function-config
 	// overrides with HTTP 400, even when the values match the snapshot.
@@ -139,6 +144,19 @@ func newE2BRemoteClient(
 		templateID:              strings.TrimSpace(cfg.E2BTemplate),
 		timeout:                 ttl,
 		snapshotCreateImmutable: e2bSnapshotCreateImmutable(cfg.E2BAPIURL),
+		v2Templates: e2bTemplatesEndpoint{
+			baseURL: strings.TrimSpace(cfg.E2BAPIURL),
+			apiKey:  strings.TrimSpace(cfg.E2BAPIKey),
+			httpClient: &http.Client{
+				// Plain control-plane transport: the envd-compat rewrite below
+				// targets sandbox RPC payloads, not the templates catalog, and
+				// it would corrupt the nextToken pagination query.
+				Transport: &e2bRPCTimeoutTransport{
+					next:    transport,
+					timeout: timeout,
+				},
+			},
+		},
 	}, nil
 }
 
@@ -264,7 +282,14 @@ func (c *E2BRemoteClient) Health(ctx context.Context) error {
 }
 
 func (c *E2BRemoteClient) ListTemplates(ctx context.Context) ([]RemoteTemplate, error) {
-	items, err := c.client.ListTemplates(ctx)
+	items, err := c.v2Templates.listTemplatesV2(ctx)
+	// A control plane that still serves the legacy bare-array surface answers
+	// the v2 path with 404 (this is how AGS, which only implements v2, used
+	// to look from the other side). Fall back to the SDK call so neither
+	// flavor of deployment breaks.
+	if err != nil && isE2BNotFoundStatus(err) {
+		items, err = c.client.ListTemplates(ctx)
+	}
 	if err != nil {
 		return nil, normalizeE2BError("ListTemplates", err)
 	}
