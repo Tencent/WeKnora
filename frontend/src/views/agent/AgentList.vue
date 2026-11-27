@@ -1178,22 +1178,33 @@ const handleOpenAgentEditor = (event: CustomEvent) => {
   }
 }
 
+let spaceAgentsRequestSeq = 0
+
 // 选中空间时请求该空间内全部智能体（含我共享的）
 watch(spaceSelection, (val) => {
+  const requestSeq = ++spaceAgentsRequestSeq
   if (!val || RESERVED_SCOPES.has(val)) {
     spaceAgentsList.value = []
+    spaceAgentsLoading.value = false
     return
   }
+  spaceAgentsList.value = []
   spaceAgentsLoading.value = true
   listOrganizationSharedAgents(val).then((res) => {
+    if (requestSeq !== spaceAgentsRequestSeq) return
     if (res.success && res.data) {
       spaceAgentsList.value = res.data
       spaceAgentCountByOrg.value = { ...spaceAgentCountByOrg.value, [val]: res.data.length }
     } else {
       spaceAgentsList.value = []
     }
+  }).catch(() => {
+    if (requestSeq !== spaceAgentsRequestSeq) return
+    spaceAgentsList.value = []
   }).finally(() => {
-    spaceAgentsLoading.value = false
+    if (requestSeq === spaceAgentsRequestSeq) {
+      spaceAgentsLoading.value = false
+    }
   })
 }, { immediate: true })
 
@@ -1212,6 +1223,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  spaceAgentsRequestSeq++
   window.removeEventListener('openAgentEditor', handleOpenAgentEditor as EventListener)
 })
 
