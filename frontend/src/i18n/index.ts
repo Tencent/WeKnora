@@ -11,6 +11,7 @@ export const SUPPORTED_MAIN_LOCALES = [
   'ru-RU',
   'ko-KR',
   'ja-JP',
+  'vi-VN',
 ] as const
 
 export type SupportedMainLocale = (typeof SUPPORTED_MAIN_LOCALES)[number]
@@ -24,6 +25,7 @@ const LOCALE_LOADERS: Record<SupportedMainLocale, () => Promise<LocaleModule>> =
   'ru-RU': () => import('./locales/ru-RU.ts'),
   'ko-KR': () => import('./locales/ko-KR.ts'),
   'ja-JP': () => import('./locales/ja-JP.ts'),
+  'vi-VN': () => import('./locales/vi-VN.ts'),
 }
 
 export function normalizeMainLocale(raw?: string | null): SupportedMainLocale {
@@ -45,6 +47,7 @@ export function normalizeMainLocale(raw?: string | null): SupportedMainLocale {
   if (lower.startsWith('ru')) return 'ru-RU'
   if (lower.startsWith('ko')) return 'ko-KR'
   if (lower.startsWith('ja')) return 'ja-JP'
+  if (lower.startsWith('vi')) return 'vi-VN'
   return BUILT_IN_DEFAULT as SupportedMainLocale
 }
 
