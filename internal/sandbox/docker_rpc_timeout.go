@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/moby/moby/client"
@@ -50,6 +51,14 @@ func (a *dockerRPCTimeoutAPI) ContainerStart(
 	rpcCtx, cancel := a.rpcCtx(ctx)
 	defer cancel()
 	return a.inner.ContainerStart(rpcCtx, containerID, options)
+}
+
+func (a *dockerRPCTimeoutAPI) ContainerPause(
+	ctx context.Context, containerID string, options client.ContainerPauseOptions,
+) (client.ContainerPauseResult, error) {
+	rpcCtx, cancel := a.rpcCtx(ctx)
+	defer cancel()
+	return a.inner.ContainerPause(rpcCtx, containerID, options)
 }
 
 func (a *dockerRPCTimeoutAPI) ContainerUnpause(
@@ -165,6 +174,18 @@ func (a *dockerRPCTimeoutAPI) ContainerCommit(
 	ctx context.Context, containerID string, options client.ContainerCommitOptions,
 ) (client.ContainerCommitResult, error) {
 	return a.inner.ContainerCommit(ctx, containerID, options)
+}
+
+func (a *dockerRPCTimeoutAPI) ContainerExport(
+	ctx context.Context, containerID string, options client.ContainerExportOptions,
+) (client.ContainerExportResult, error) {
+	return a.inner.ContainerExport(ctx, containerID, options)
+}
+
+func (a *dockerRPCTimeoutAPI) ImageLoad(
+	ctx context.Context, input io.Reader, opts ...client.ImageLoadOption,
+) (client.ImageLoadResult, error) {
+	return a.inner.ImageLoad(ctx, input, opts...)
 }
 
 var _ dockerEngineAPI = (*dockerRPCTimeoutAPI)(nil)

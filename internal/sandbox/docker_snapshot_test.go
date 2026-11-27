@@ -5,12 +5,23 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 	"github.com/stretchr/testify/require"
 )
 
-func TestDockerCreateSnapshotTagsASkillImage(t *testing.T) {
+func newFakeDockerSnapshotEngine(containerIDs ...string) *fakeDockerEngine {
 	engine := newFakeDockerEngine()
+	const parent = "sha256:base"
+	engine.imagePresent[parent] = true
+	for _, id := range containerIDs {
+		engine.inspect[id] = container.InspectResponse{ID: id, Image: parent}
+	}
+	return engine
+}
+
+func TestDockerCreateSnapshotTagsASkillImage(t *testing.T) {
+	engine := newFakeDockerSnapshotEngine("container-1")
 	docker := newTestDockerClient(t, engine)
 
 	ref, err := docker.CreateSnapshot(context.Background(), "container-1", "weknora-sk-cfg1-g1")
@@ -44,7 +55,7 @@ func TestDockerDeleteSnapshotRejectsEmptySnapshotID(t *testing.T) {
 }
 
 func TestDockerSnapshotRoundTripAndListFilter(t *testing.T) {
-	engine := newFakeDockerEngine()
+	engine := newFakeDockerSnapshotEngine("container-a", "container-b")
 	docker := newTestDockerClient(t, engine)
 	ctx := context.Background()
 
@@ -79,7 +90,7 @@ func TestDockerSnapshotRoundTripAndListFilter(t *testing.T) {
 // so untagging one alone frees nothing while its descendant lives. Without
 // noprune=0 the layers of a fully retired chain would stay on disk forever.
 func TestDockerDeleteSnapshotPrunesUntaggedAncestors(t *testing.T) {
-	engine := newFakeDockerEngine()
+	engine := newFakeDockerSnapshotEngine("container-a")
 	docker := newTestDockerClient(t, engine)
 
 	ref, err := docker.CreateSnapshot(context.Background(), "container-a", "weknora-sk-a-g1")
@@ -260,7 +271,7 @@ func TestDockerListTemplatesHidesForkSnapshots(t *testing.T) {
 }
 
 func TestDockerListSnapshotsExcludesForkImages(t *testing.T) {
-	engine := newFakeDockerEngine()
+	engine := newFakeDockerSnapshotEngine("container-1")
 	docker := newTestDockerClient(t, engine)
 	ctx := context.Background()
 

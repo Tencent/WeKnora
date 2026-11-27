@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -36,6 +37,9 @@ type dockerEngineAPI interface {
 	ContainerStart(
 		ctx context.Context, containerID string, options client.ContainerStartOptions,
 	) (client.ContainerStartResult, error)
+	ContainerPause(
+		ctx context.Context, containerID string, options client.ContainerPauseOptions,
+	) (client.ContainerPauseResult, error)
 	ContainerUnpause(
 		ctx context.Context, containerID string, options client.ContainerUnpauseOptions,
 	) (client.ContainerUnpauseResult, error)
@@ -78,12 +82,15 @@ type dockerEngineAPI interface {
 		ctx context.Context, imageID string, options client.ImageRemoveOptions,
 	) (client.ImageRemoveResult, error)
 
-	// ContainerCommit is a long call (a large skill image can take well
-	// over the short RPC budget), so the timeout wrapper leaves it on the
-	// caller's context the way it does ImagePull.
+	// Snapshot transfers can exceed the short RPC budget and use the
+	// caller's context, the same way ImagePull does.
 	ContainerCommit(
 		ctx context.Context, containerID string, options client.ContainerCommitOptions,
 	) (client.ContainerCommitResult, error)
+	ContainerExport(
+		ctx context.Context, containerID string, options client.ContainerExportOptions,
+	) (client.ContainerExportResult, error)
+	ImageLoad(ctx context.Context, input io.Reader, opts ...client.ImageLoadOption) (client.ImageLoadResult, error)
 }
 
 var _ dockerEngineAPI = (*client.Client)(nil)

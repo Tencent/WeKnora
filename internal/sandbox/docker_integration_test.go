@@ -34,6 +34,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/sandbox/admission"
 	"github.com/Tencent/WeKnora/internal/sandbox/allocation"
@@ -41,6 +42,86 @@ import (
 )
 
 const dockerIntegrationTenantID = 1
+
+// Build the DOCKER_INTEGRATION_DEEP_IMAGE fixture from busybox:1.37 with
+// ENV SNAPSHOT_TEST=retained, HEALTHCHECK CMD true and 124 COPY instructions.
+// Each instruction copies the same "payload" file to /snapshot-layer-N
+// (N from 1 through 124), giving 125 filesystem layers.
+func TestDockerSkillSnapshotCompactsDeepImageIntegration(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Type = SandboxTypeDocker
+	cfg.DockerImage = integrationEnv(t, "DOCKER_INTEGRATION_DEEP_IMAGE")
+	cfg.DockerHost = strings.TrimSpace(os.Getenv("DOCKER_INTEGRATION_HOST"))
+	cfg.DockerNetworkMode = "none"
+	adapter, err := NewDockerRemoteClientForCheck(cfg)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	base, err := adapter.api.ImageInspect(ctx, cfg.DockerImage)
+	require.NoError(t, err)
+	require.Len(t, base.RootFS.Layers, 125)
+
+	create := func(template string) RemoteSandboxHandle {
+		handle, err := adapter.Create(ctx, RemoteCreateRequest{TemplateID: template})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			require.NoError(t, adapter.Delete(cleanup, handle.ID()))
+		})
+		return handle
+	}
+	run := func(handle RemoteSandboxHandle, command string) string {
+		result, err := adapter.Exec(ctx, handle, RemoteExecRequest{
+			Command: "/bin/sh", Args: []string{"-c", command}, User: "root", Timeout: 30 * time.Second,
+		})
+		require.NoError(t, err)
+		require.Zero(t, result.ExitCode, result.Stderr)
+		return strings.TrimSpace(result.Stdout)
+	}
+	snapshot := func(handle RemoteSandboxHandle) (RemoteSnapshotRef, int) {
+		name := "weknora-sk-itest-" + uuid.NewString()
+		t.Cleanup(func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			require.NoError(t, adapter.DeleteSnapshot(cleanup, "weknora-skill/"+name))
+		})
+		ref, err := adapter.CreateSnapshot(ctx, handle.ID(), name)
+		require.NoError(t, err)
+		got, err := adapter.api.ImageInspect(ctx, ref.ID)
+		require.NoError(t, err)
+		require.Equal(t, base.Architecture, got.Architecture)
+		require.Equal(t, base.Os, got.Os)
+		require.Equal(t, base.Config.Healthcheck, got.Config.Healthcheck)
+		require.Contains(t, got.Config.Env, "SNAPSHOT_TEST=retained")
+		require.Equal(t, "true", got.Config.Labels[dockerSkillSnapshotLabel])
+		require.Equal(t, handle.ID(), got.Config.Labels[dockerSkillSnapshotSourceLabel])
+		listed, err := adapter.ListSnapshots(ctx, handle.ID())
+		require.NoError(t, err)
+		require.Contains(t, listed, ref)
+		return ref, len(got.RootFS.Layers)
+	}
+
+	skillDir := SkillsImageRoot + "/itest"
+	builder := create(cfg.DockerImage)
+	run(builder, "mkdir -p "+skillDir+" && echo installed > "+skillDir+"/SKILL.md"+
+		" && ln -s /snapshot-layer-123 "+skillDir+"/dependency && rm /snapshot-layer-124")
+	first, layers := snapshot(builder)
+	require.Equal(t, 1, layers, "a snapshot of a 125-layer parent must compact the image")
+	source, err := adapter.api.ContainerInspect(ctx, builder.ID(), client.ContainerInspectOptions{})
+	require.NoError(t, err)
+	require.True(t, source.Container.State.Running)
+	require.False(t, source.Container.State.Paused)
+
+	next := create(first.ID)
+	require.Equal(t, "installed", run(next, "test ! -e /snapshot-layer-124 && cat "+skillDir+"/SKILL.md"))
+	require.Equal(t, "payload", run(next, "test -L "+skillDir+"/dependency && cat "+skillDir+"/dependency"))
+	run(next, "rm -r "+skillDir)
+	second, layers := snapshot(next)
+	require.Equal(t, 2, layers, "a shallow snapshot should continue using incremental commit")
+	run(create(second.ID), "test ! -e "+skillDir)
+}
 
 func dockerIntegrationConfig(t *testing.T) *Config {
 	t.Helper()
