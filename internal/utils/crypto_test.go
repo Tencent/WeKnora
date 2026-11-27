@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -155,5 +157,60 @@ func TestGetAESKey(t *testing.T) {
 		t.Setenv("SYSTEM_AES_KEY", "too-short")
 		key := GetAESKey()
 		assert.Nil(t, key)
+	})
+
+	t.Run("decodes 64 hex chars to 32 bytes (openssl rand -hex 32 output)", func(t *testing.T) {
+		t.Setenv("SYSTEM_AES_KEY", hex.EncodeToString([]byte(testAESKey)))
+		key := GetAESKey()
+		assert.Equal(t, []byte(testAESKey), key)
+	})
+
+	t.Run("decodes standard base64 of 32 bytes", func(t *testing.T) {
+		t.Setenv("SYSTEM_AES_KEY", base64.StdEncoding.EncodeToString([]byte(testAESKey)))
+		key := GetAESKey()
+		assert.Equal(t, []byte(testAESKey), key)
+	})
+
+	t.Run("decodes raw URL base64 of 32 bytes", func(t *testing.T) {
+		rawKey := make([]byte, 32)
+		for i := range rawKey {
+			rawKey[i] = 0xff
+		}
+		t.Setenv("SYSTEM_AES_KEY", base64.RawURLEncoding.EncodeToString(rawKey))
+		key := GetAESKey()
+		assert.Equal(t, rawKey, key)
+	})
+
+	t.Run("decodes raw standard base64 of 32 bytes", func(t *testing.T) {
+		rawKey := make([]byte, 32)
+		for i := range rawKey {
+			rawKey[i] = 0xfb
+		}
+		t.Setenv("SYSTEM_AES_KEY", base64.RawStdEncoding.EncodeToString(rawKey))
+		key := GetAESKey()
+		assert.Equal(t, rawKey, key)
+	})
+
+	t.Run("returns nil for 64 chars that are not hex", func(t *testing.T) {
+		t.Setenv("SYSTEM_AES_KEY", strings.Repeat("z", 64))
+		key := GetAESKey()
+		assert.Nil(t, key)
+	})
+
+	t.Run("returns nil for base64 decoding to non-32 bytes", func(t *testing.T) {
+		t.Setenv("SYSTEM_AES_KEY", base64.StdEncoding.EncodeToString([]byte("short")))
+		key := GetAESKey()
+		assert.Nil(t, key)
+	})
+
+	t.Run("round-trips through the hex form end to end", func(t *testing.T) {
+		t.Setenv("SYSTEM_AES_KEY", hex.EncodeToString([]byte(testAESKey)))
+		encrypted, err := EncryptAESGCM("sk-secret", GetAESKey())
+		require.NoError(t, err)
+		assert.True(t, strings.HasPrefix(encrypted, EncPrefix))
+
+		out, err := DecryptStoredSecret(encrypted)
+		require.NoError(t, err)
+		assert.Equal(t, "sk-secret", out)
 	})
 }

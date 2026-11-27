@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -15,11 +16,40 @@ import (
 const EncPrefix = "enc:v1:"
 
 // GetAESKey reads the 32-byte AES key from SYSTEM_AES_KEY env.
-// Returns nil if not set or not exactly 32 bytes.
+//
+// Accepted forms (all must yield exactly 32 bytes, in this order):
+//   - the raw 32-byte value itself;
+//   - 64 hex characters decoding to 32 bytes (e.g. `openssl rand -hex 32`,
+//     the command neighbouring lines in .env.example suggest — a common
+//     copy-paste mistake that used to silently disable encryption);
+//   - a base64 encoding (standard, padded or raw, or raw URL) decoding to
+//     exactly 32 bytes.
+//
+// Returns nil if the variable is unset, empty, or cannot be decoded to
+// 32 bytes. Callers treat nil as "no encryption" and must not silently
+// write plaintext when a key was configured: see ValidateStartupEnv in
+// internal/runtime, which aborts startup for a set-but-invalid value.
 func GetAESKey() []byte {
-	key := []byte(os.Getenv("SYSTEM_AES_KEY"))
-	if len(key) == 32 {
-		return key
+	raw := os.Getenv("SYSTEM_AES_KEY")
+	if raw == "" {
+		return nil
+	}
+	if len(raw) == 32 {
+		return []byte(raw)
+	}
+	if len(raw) == 64 {
+		if decoded, err := hex.DecodeString(raw); err == nil && len(decoded) == 32 {
+			return decoded
+		}
+	}
+	for _, decode := range []func(string) ([]byte, error){
+		base64.StdEncoding.DecodeString,
+		base64.RawStdEncoding.DecodeString,
+		base64.RawURLEncoding.DecodeString,
+	} {
+		if decoded, err := decode(raw); err == nil && len(decoded) == 32 {
+			return decoded
+		}
 	}
 	return nil
 }
