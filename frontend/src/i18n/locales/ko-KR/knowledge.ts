@@ -1487,6 +1487,8 @@ export default {
     channelWechat: 'WeChat',
     channelWecom: 'WeCom',
     channelFeishu: 'Feishu',
+    channelFeishuLinks: 'Feishu 링크',
+    channelLarkLinks: 'Lark 링크',
     channelFeishuDrive: '페이슈 드라이브',
     channelLarkDrive: 'Lark 드라이브',
     channelDingtalk: 'DingTalk',

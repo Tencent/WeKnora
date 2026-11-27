@@ -29,6 +29,8 @@ const (
 	ChannelFeishu           = "feishu"            // Feishu / Lark
 	ChannelFeishuDrive      = "feishu_drive"      // Feishu Drive (云盘)
 	ChannelLarkDrive        = "lark_drive"        // Lark Drive (international)
+	ChannelFeishuLinks      = "feishu_links"      // Feishu document URL list
+	ChannelLarkLinks        = "lark_links"        // Lark document URL list
 	ChannelDingtalk         = "dingtalk"          // DingTalk
 	ChannelSlack            = "slack"             // Slack
 	ChannelIM               = "im"                // Generic IM channel
