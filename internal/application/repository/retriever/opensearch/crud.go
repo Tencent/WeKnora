@@ -27,8 +27,7 @@ import (
 // dim-less keywords index). Missing "chunk_enabled" → IndexInfo's own
 // IsEnabled field is used as-is.
 
-// Save indexes a single chunk. Idempotent: _id is set to chunk_id so
-// re-indexing the same chunk overwrites instead of creating a duplicate.
+// Save upserts a single retrieval source by its stable document ID.
 func (r *Repository) Save(
 	ctx context.Context,
 	info *types.IndexInfo,
@@ -59,7 +58,7 @@ func (r *Repository) Save(
 	}
 	req := osapi.IndexReq{
 		Index:      targetIndex,
-		DocumentID: info.ChunkID, // _id = chunk_id (idempotent)
+		DocumentID: indexDocumentID(info),
 		Body:       bytes.NewReader(doc),
 	}
 	resp, err := r.client.Index(ctx, req)
@@ -153,7 +152,7 @@ func buildBulkBody(alias string, infos []*types.IndexInfo, emb [][]float32, para
 		action := map[string]any{
 			"index": map[string]any{
 				"_index": alias,
-				"_id":    info.ChunkID,
+				"_id":    indexDocumentID(info),
 			},
 		}
 		actionJSON, err := json.Marshal(action)
@@ -172,6 +171,15 @@ func buildBulkBody(alias string, infos []*types.IndexInfo, emb [][]float32, para
 		buf.WriteByte('\n')
 	}
 	return buf.Bytes(), nil
+}
+
+// SourceID distinguishes a chunk body from each generated question tied
+// to that chunk. Fall back to ChunkID for callers that omit SourceID.
+func indexDocumentID(info *types.IndexInfo) string {
+	if info.SourceID != "" {
+		return info.SourceID
+	}
+	return info.ChunkID
 }
 
 // inspectBulkResponse parses OpenSearch bulk response, returns a typed
