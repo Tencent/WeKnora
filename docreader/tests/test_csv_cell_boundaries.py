@@ -40,3 +40,21 @@ class CSVCellBoundaryTests(unittest.TestCase):
             Parser().parse_file("plain.csv", "csv", b"A,B\nx,2\n").content,
             "| A | B |\n| --- | --- |\n| x | 2 |",
         )
+
+    def test_leading_blank_line_does_not_eat_the_table(self):
+        data = b"\r\nname,age\r\nAlice,30\r\n"
+        for engine in ["", "builtin", "markitdown"]:
+            with self.subTest(engine=engine):
+                result = Parser().parse_file("blank.csv", "csv", data, engine)
+                self.assertEqual(
+                    result.content, "| name | age |\n| --- | --- |\n| Alice | 30 |"
+                )
+
+    def test_bom_is_not_part_of_the_first_header_cell(self):
+        data = "name,age\r\nAlice,30\r\n".encode("utf-8-sig")
+        for engine in ["", "builtin", "markitdown"]:
+            with self.subTest(engine=engine):
+                result = Parser().parse_file("bom.csv", "csv", data, engine)
+                self.assertEqual(
+                    result.content, "| name | age |\n| --- | --- |\n| Alice | 30 |"
+                )

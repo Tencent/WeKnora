@@ -28,7 +28,14 @@ class EscapedCSVConverter(CsvConverter):
             if stream_info.charset
             else str(from_bytes(data).best())
         )
-        rows = list(csv.reader(io.StringIO(content)))
+        # A BOM survives the decode and would end up inside the first header
+        # cell; strip it before the table is built.
+        rows = list(csv.reader(io.StringIO(content.lstrip("\ufeff"))))
+        # Exported sheets often start with a blank line. Taking that line as the
+        # header leaves a width of 0, which turns every cell of the table into an
+        # empty string and drops the whole document.
+        while rows and not any(cell.strip() for cell in rows[0]):
+            rows.pop(0)
         if not rows:
             return DocumentConverterResult(markdown="")
         width = len(rows[0])
