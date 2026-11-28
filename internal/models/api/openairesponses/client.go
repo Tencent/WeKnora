@@ -353,10 +353,12 @@ type rawStreamEvent struct {
 // streamState tracks the function_call items seen so far so argument deltas
 // can be routed to the assembler index that announced the call.
 type streamState struct {
-	toolIndex      map[string]int // item id -> assembler index
-	argsSeen       map[string]bool
-	nextToolIndex  int
-	reasoningItems []json.RawMessage
+	toolIndex         map[string]int    // item id -> assembler index
+	callItems         map[string]string // call id -> original stream item key
+	argsSeen          map[string]bool
+	terminalArguments map[int]string
+	nextToolIndex     int
+	reasoningItems    []json.RawMessage
 }
 
 func (st *streamState) indexFor(itemID string) int {
@@ -374,11 +376,12 @@ func (c *Client) processStream(
 ) {
 	assembler := api.NewStreamAssembler(ctx, c.cfg.Endpoint.Model)
 	reader := api.NewSSEReader(body)
-	st := &streamState{toolIndex: map[string]int{}, argsSeen: map[string]bool{}}
+	st := &streamState{toolIndex: map[string]int{}, callItems: map[string]string{}, argsSeen: map[string]bool{}}
 
 	// response.completed / response.incomplete return before either caller,
 	// so reaching finish means the terminal event never arrived.
 	finish := func() {
+		st.applyTerminalArguments(assembler)
 		assembler.ReasoningMetadata = reasoningMetadata(st.reasoningItems)
 		assembler.EndAtEOF(ch)
 	}
@@ -450,6 +453,9 @@ func (c *Client) processStream(
 				continue
 			}
 			itemID := streamItemID(item, ev.OutputIndex)
+			if item.CallID != "" {
+				st.callItems[item.CallID] = itemID
+			}
 			idx := st.indexFor(itemID)
 			assembler.Process(ch, api.Delta{ToolCalls: []api.ToolCallDelta{{
 				Index: idx, ID: item.CallID, Type: "function", Name: item.Name,
@@ -480,17 +486,7 @@ func (c *Client) processStream(
 			case "reasoning":
 				st.reasoningItems = append(st.reasoningItems, ev.Item)
 			case "function_call":
-				// Providers that never stream argument deltas deliver the
-				// arguments only on the done item.
-				itemID := streamItemID(item, ev.OutputIndex)
-				if !st.argsSeen[itemID] && item.Arguments != "" {
-					st.argsSeen[itemID] = true
-					assembler.Process(ch, api.Delta{ToolCalls: []api.ToolCallDelta{{
-						Index: st.indexFor(itemID), ID: item.CallID, Type: "function",
-						Name: item.Name, Arguments: item.Arguments,
-					}}})
-					assembler.SetToolCallMetadata(st.indexFor(itemID), toolCallMetadata(item))
-				}
+				st.completeToolCall(ch, assembler, item, ev.OutputIndex)
 			}
 		case "response.completed", "response.incomplete":
 			c.completeStream(ch, assembler, st, ev.Response, ev.Type == "response.incomplete")
@@ -528,6 +524,64 @@ func streamEventKey(itemID string, outputIndex int) string {
 	return fmt.Sprintf("output_index:%d", outputIndex)
 }
 
+// completeToolCall fills in a call from a complete output item. Compatible
+// gateways can omit argument deltas or the intermediate item events entirely.
+// A terminal snapshot supersedes deltas when the stream closes.
+func (st *streamState) completeToolCall(
+	ch chan<- types.StreamResponse, assembler *api.StreamAssembler, item rawOutputItem, outputIndex int,
+) {
+	itemID := st.callItems[item.CallID]
+	if itemID == "" {
+		itemID = streamItemID(item, outputIndex)
+		if _, exists := st.toolIndex[itemID]; !exists {
+			// A gateway may omit item_id on deltas but include id in the
+			// terminal item. Reuse that output index's existing placeholder.
+			fallback := streamEventKey("", outputIndex)
+			if _, exists := st.toolIndex[fallback]; exists {
+				itemID = fallback
+			}
+		}
+	}
+	if item.CallID != "" {
+		st.callItems[item.CallID] = itemID
+	}
+	index := st.indexFor(itemID)
+	arguments := ""
+	if item.Arguments != "" {
+		if st.argsSeen[itemID] {
+			if st.terminalArguments == nil {
+				st.terminalArguments = make(map[int]string)
+			}
+			st.terminalArguments[index] = item.Arguments
+		} else {
+			st.argsSeen[itemID] = true
+			arguments = item.Arguments
+		}
+	}
+	assembler.Process(ch, api.Delta{ToolCalls: []api.ToolCallDelta{{
+		Index: index, ID: item.CallID, Type: "function", Name: item.Name, Arguments: arguments,
+	}}})
+	assembler.SetToolCallMetadata(index, toolCallMetadata(item))
+}
+
+func (st *streamState) applyTerminalArguments(assembler *api.StreamAssembler) {
+	if len(st.terminalArguments) == 0 {
+		return
+	}
+	calls := assembler.OrderedToolCalls()
+	changed := false
+	// indexFor assigns consecutive indices, and OrderedToolCalls sorts by them.
+	for index := range calls {
+		if arguments, ok := st.terminalArguments[index]; ok && calls[index].Function.Arguments != arguments {
+			calls[index].Function.Arguments = arguments
+			changed = true
+		}
+	}
+	if changed {
+		assembler.ReplaceToolCalls(calls)
+	}
+}
+
 // completeStream handles the terminal response.completed / response.incomplete
 // event: usage, finish reason, reasoning artifacts and the closing chunks.
 func (c *Client) completeStream(
@@ -537,19 +591,27 @@ func (c *Client) completeStream(
 		if resp.Usage != nil {
 			assembler.SetUsage(resp.Usage.toTokenUsage())
 		}
-		// Fall back to the final response body for reasoning items when the
-		// vendor never emitted output_item.done for them.
-		if len(st.reasoningItems) == 0 {
-			for _, rawItem := range resp.Output {
-				// Tolerated on purpose, unlike the item events above: the
-				// deltas already carried the answer and its tool calls, so an
-				// unreadable item here costs at most a reasoning artifact.
-				if item, err := decodeItem(rawItem); err == nil && item.Type == "reasoning" {
+		// The terminal output can be the only source of a tool call. Recover
+		// missing calls before choosing the finish reason, and retain the
+		// existing reasoning fallback when no done items were received.
+		needReasoning := len(st.reasoningItems) == 0
+		for outputIndex, rawItem := range resp.Output {
+			item, err := decodeItem(rawItem)
+			if err != nil {
+				assembler.Fail(ch, err)
+				return
+			}
+			switch item.Type {
+			case "function_call":
+				st.completeToolCall(ch, assembler, item, outputIndex)
+			case "reasoning":
+				if needReasoning {
 					st.reasoningItems = append(st.reasoningItems, rawItem)
 				}
 			}
 		}
 	}
+	st.applyTerminalArguments(assembler)
 	finishReason := resp.finishReason(assembler.ToolCallCount() > 0)
 	if incomplete && (finishReason == "stop" || finishReason == "tool_calls") {
 		finishReason = "length"

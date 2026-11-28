@@ -751,6 +751,33 @@ test('applyStreamingTailFade is a no-op for empty content', () => {
   assert.equal(applyStreamingTailFade('<p></p>'), '<p></p>')
 })
 
+test('applyStreamingTailFade fades only the text after the last inline element', () => {
+  // The completed <strong> run stays outside the span; the leading space of
+  // the trailing run stays outside too, and the trailing newline is untouched.
+  assert.equal(
+    applyStreamingTailFade(
+      '<p>Great, that narrows it down a lot. <strong>Two</strong> more quick</p>\n',
+    ),
+    '<p>Great, that narrows it down a lot. <strong>Two</strong> <span class="stream-fade-tail">more quick</span></p>\n',
+  )
+})
+
+test('applyStreamingTailFade fades the whole text of the last list item', () => {
+  assert.equal(
+    applyStreamingTailFade('<ol>\n<li>第一项</li>\n<li>正在生成的第二项内容</li>\n</ol>'),
+    '<ol>\n<li>第一项</li>\n<li><span class="stream-fade-tail">正在生成的第二项内容</span></li>\n</ol>',
+  )
+})
+
+test('applyStreamingTailFade fades the text inside a trailing citation span', () => {
+  // The fade targets the last text run wherever it sits, so the span lands
+  // inside the citation element rather than around it.
+  assert.equal(
+    applyStreamingTailFade('<p>结尾是引用 <span class="citation">doc</span></p>'),
+    '<p>结尾是引用 <span class="citation"><span class="stream-fade-tail">doc</span></span></p>',
+  )
+})
+
 test('renderChatMarkdown adds the tail fade only while streaming', () => {
   const renderer = createChatMarkdownRenderer()
   const opts = {

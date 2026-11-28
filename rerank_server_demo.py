@@ -1,4 +1,5 @@
 import gc
+import os
 import torch
 import uvicorn
 from fastapi import FastAPI
@@ -43,7 +44,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"使用的设备: {device}")
 try:
     # 请确保这里的路径是正确的
-    model_path = '/data1/home/lwx/work/Download/rerank_model_weight'
+    model_path = os.environ.get("RERANK_MODEL_PATH")
+    if not model_path:
+        raise ValueError("Set RERANK_MODEL_PATH to a reranker model directory or model ID")
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = AutoModelForSequenceClassification.from_pretrained(model_path)
     model.to(device)
@@ -52,7 +55,7 @@ try:
 except Exception as e:
     print(f"模型加载失败: {e}")
     # 在测试环境中，如果模型加载失败，可以考虑退出以避免运行一个无效的服务
-    exit()
+    raise SystemExit(1) from e
 
 # --- 3. 创建FastAPI应用 ---
 app = FastAPI(

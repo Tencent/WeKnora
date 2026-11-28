@@ -4,15 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
-	"math/big"
-	"reflect"
-	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/collaboration"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 const delegatedCallInProgressError = "A child task is already handling this call; wait for its result."
@@ -148,77 +146,10 @@ func matchesDelegatedMCPApproval(
 }
 
 func sameMCPArguments(a, b json.RawMessage) bool {
-	decode := func(raw json.RawMessage) (any, bool) {
-		d := json.NewDecoder(bytes.NewReader(raw))
-		d.UseNumber()
-		var value any
-		if d.Decode(&value) != nil || d.Decode(new(any)) != io.EOF {
-			return nil, false
-		}
-		return value, true
+	left, err := jsonschema.UnmarshalJSON(bytes.NewReader(a))
+	if err != nil {
+		return false
 	}
-	left, leftOK := decode(a)
-	right, rightOK := decode(b)
-	return leftOK && rightOK && equalMCPJSON(left, right)
-}
-
-func equalMCPJSON(a, b any) bool {
-	switch a := a.(type) {
-	case json.Number:
-		other, ok := b.(json.Number)
-		if !ok {
-			return false
-		}
-		return canonicalMCPNumber(string(a)) == canonicalMCPNumber(string(other))
-	case map[string]any:
-		other, ok := b.(map[string]any)
-		if !ok || len(a) != len(other) {
-			return false
-		}
-		for key, value := range a {
-			v, exists := other[key]
-			if !exists || !equalMCPJSON(value, v) {
-				return false
-			}
-		}
-		return true
-	case []any:
-		other, ok := b.([]any)
-		if !ok || len(a) != len(other) {
-			return false
-		}
-		for i, value := range a {
-			if !equalMCPJSON(value, other[i]) {
-				return false
-			}
-		}
-		return true
-	default:
-		return reflect.DeepEqual(a, b)
-	}
-}
-
-// Normalize decimal tokens without expanding large exponents or rounding large
-// integer IDs through float64. JSON decoding has already validated the grammar.
-func canonicalMCPNumber(raw string) string {
-	mantissa, exponent := raw, new(big.Int)
-	if i := strings.IndexAny(raw, "eE"); i >= 0 {
-		mantissa = raw[:i]
-		exponent.SetString(raw[i+1:], 10)
-	}
-	sign := ""
-	if strings.HasPrefix(mantissa, "-") {
-		sign, mantissa = "-", mantissa[1:]
-	}
-	if i := strings.IndexByte(mantissa, '.'); i >= 0 {
-		exponent.Sub(exponent, big.NewInt(int64(len(mantissa)-i-1)))
-		mantissa = mantissa[:i] + mantissa[i+1:]
-	}
-	mantissa = strings.TrimLeft(mantissa, "0")
-	if mantissa == "" {
-		return "0"
-	}
-	digits := strings.TrimRight(mantissa, "0")
-	exponent.Add(exponent, big.NewInt(int64(len(mantissa)-len(digits))))
-	return sign + digits + "e" + exponent.String()
+	right, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+	return err == nil && mcp.EqualJSONValues(left, right)
 }

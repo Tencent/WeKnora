@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -63,6 +64,11 @@ func (h *MCPServiceHandler) SubmitSecureForm(c *gin.Context) {
 	dec := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, maxSecureFormBody))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&body); err != nil {
+		_ = c.Error(apperrors.NewBadRequestError("invalid request body"))
+		return
+	}
+	// Reject trailing JSON rather than silently recording the first submission.
+	if err := dec.Decode(new(any)); err != io.EOF {
 		_ = c.Error(apperrors.NewBadRequestError("invalid request body"))
 		return
 	}

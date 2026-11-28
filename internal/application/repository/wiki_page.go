@@ -90,12 +90,89 @@ func (r *wikiPageRepository) wikiEmptyInLinksPredicate() string {
 	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
 		return "(in_links IS NULL OR json_array_length(in_links) = 0)"
 	}
-	return "(in_links IS NULL OR in_links IN ('[]'::JSONB, 'null'::JSONB))"
+	// in_links is a json column (gorm:"type:json") and PostgreSQL defines no
+	// equality operator for json — only for jsonb. Comparing the column against
+	// '[]'::JSONB therefore fails the query with SQLSTATE 42883, so cast the
+	// column. jsonb equality also ignores the whitespace an older or
+	// hand-written row may carry.
+	return "(in_links IS NULL OR in_links::jsonb IN ('[]'::JSONB, 'null'::JSONB))"
 }
 
-// Create inserts a new wiki page record
+// Create inserts a page only while its knowledge base is active.
 func (r *wikiPageRepository) Create(ctx context.Context, page *types.WikiPage) error {
-	return r.db.WithContext(ctx).Create(page).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := assertWikiKnowledgeBaseActive(tx, page); err != nil {
+			return err
+		}
+		return tx.Create(page).Error
+	})
+}
+
+// GetOrCreate inserts page, or returns the live page that already owns
+// (knowledge_base_id, slug) when a concurrent writer won the race.
+//
+// Batch ingest resolves "does this slug exist" from a snapshot taken
+// before the reduce phase, so two batches — or a retry overlapping a new
+// batch — can both decide the slug is missing and then collide on the
+// unique index idx_wiki_pages_kb_slug. A bare insert turns that race
+// into a permanent REDUCE_FAILED: every retry replays the same losing
+// insert and the document never leaves finalizing. Catching the
+// unique-key violation and returning the winner's row instead lets the
+// caller apply its content through the normal versioned update path.
+//
+// The refetch runs outside the insert transaction: a failed INSERT
+// aborts a PostgreSQL transaction, so the lookup must not run inside
+// it. When the winner's row is gone by refetch time (soft-deleted in
+// between), the original conflict error is returned and the next retry
+// recreates the page.
+//
+// Deliberately not ON CONFLICT DO NOTHING: that statement is only
+// valid where the partial index exists, and AutoMigrate-only schemas
+// (several wiki ingest test harnesses) do not have it — the statement
+// itself would fail even with no conflicting row.
+func (r *wikiPageRepository) GetOrCreate(ctx context.Context, page *types.WikiPage) (*types.WikiPage, bool, error) {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := assertWikiKnowledgeBaseActive(tx, page); err != nil {
+			return err
+		}
+		return tx.Create(page).Error
+	})
+	if err == nil {
+		return page, true, nil
+	}
+	if !isWikiPageUniqueViolation(err) {
+		return nil, false, err
+	}
+	existing, getErr := r.GetBySlug(ctx, page.KnowledgeBaseID, page.Slug)
+	if getErr != nil {
+		return nil, false, err
+	}
+	return existing, false, nil
+}
+
+// isWikiPageUniqueViolation recognizes a duplicate-key error on both
+// dialects, translated or not. Same shape as isCredentialUniqueViolation.
+func isWikiPageUniqueViolation(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate") || strings.Contains(msg, "unique constraint")
+}
+
+// assertWikiKnowledgeBaseActive verifies the page's knowledge base still
+// exists for this tenant. An in-flight Wiki worker may finish after the
+// KB cleanup has run, so the check runs inside the write transaction
+// with a SHARE lock to serialize against the KB soft-delete.
+func assertWikiKnowledgeBaseActive(tx *gorm.DB, page *types.WikiPage) error {
+	var kb types.KnowledgeBase
+	err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Select("id").
+		Where("id = ? AND tenant_id = ?", page.KnowledgeBaseID, page.TenantID).
+		Take(&kb).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrKnowledgeBaseNotFound
+	}
+	return err
 }
 
 // Update updates an existing wiki page record with optimistic locking.

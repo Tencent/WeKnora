@@ -383,3 +383,32 @@ func TestOAuthConnectionReportsItsClientRegistration(t *testing.T) {
 	require.Equal(t, liveTenantID, tenantID)
 	require.Equal(t, "client-1", clientID)
 }
+
+// schemaCacheClient records header-schema cache drops.
+type schemaCacheClient struct {
+	*disconnectClient
+	dropped int
+}
+
+func (c *schemaCacheClient) invalidateToolSchemas() { c.dropped++ }
+
+func TestDropCachedToolSchemasTouchesOnlyThatPrincipal(t *testing.T) {
+	m := NewMCPManager(nil)
+	defer m.cancel()
+	service := oauthTestService("svc-1")
+	alice, bob := webUser("alice"), webUser("bob")
+	aliceConn := &schemaCacheClient{disconnectClient: &disconnectClient{}}
+	bobConn := &schemaCacheClient{disconnectClient: &disconnectClient{}}
+	m.clients[cacheKey(service, alice)] = &managedMCPClient{MCPClient: aliceConn, cancel: func() {}}
+	m.clients[cacheKey(service, bob)] = bobConn
+
+	m.dropCachedToolSchemas(service, alice)
+	require.Equal(t, 1, aliceConn.dropped)
+	require.Zero(t, bobConn.dropped, "one user's re-list must not make every other user list the tools again")
+
+	shared := &types.MCPService{ID: "svc-2", Enabled: true, TransportType: types.MCPTransportHTTPStreamable}
+	sharedConn := &schemaCacheClient{disconnectClient: &disconnectClient{}}
+	m.clients[shared.ID] = sharedConn
+	m.dropCachedToolSchemas(shared, types.Principal{})
+	require.Equal(t, 1, sharedConn.dropped)
+}

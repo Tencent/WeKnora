@@ -852,7 +852,7 @@ import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAn
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
 import { getMcpToolDisplayType, getMcpToolTitle, mcpToolResultOutput } from '@/utils/mcpToolDisplay';
 import { getCatalogToolDisplayType, getCatalogToolTitle } from '@/utils/catalogToolDisplay';
-import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
+import { countSearchResultFiles, getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
 import {
   formatToolTitleWithDetail,
   getEventSkillName,
@@ -1251,7 +1251,7 @@ const emit = defineEmits<{
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
 const canRewind = computed(() => props.canRewind === true && !props.embeddedMode)
-const forkTooltip = '从这条回答继续分叉'
+const forkTooltip = computed(() => t('chat.branchFromReply'))
 const rewindTooltip = computed(() => t('chat.rewind.tooltip'))
 const emitFork = () => {
   const messageId = persistedAssistantId(props.session) || String(props.session?.id || '')
@@ -3142,11 +3142,11 @@ const getSearchResultsSummary = (event: any): string => {
   const count = Number(toolData.results?.length ?? toolData.count ?? 0) || 0;
   if (count === 0) return t('agentStream.search.noResults');
 
-  // Build summary text
+  // Build summary text. kb_counts is keyed by knowledge base, not by file.
   let summary = '';
-  const kbCount = toolData.kb_counts ? Object.keys(toolData.kb_counts).length : 0;
-  if (kbCount > 0) {
-    summary = t('agentStream.search.foundResultsFromFiles', { count: `<strong>${count}</strong>`, files: `<strong>${kbCount}</strong>` });
+  const fileCount = countSearchResultFiles(toolData.results);
+  if (fileCount > 0) {
+    summary = t('agentStream.search.foundResultsFromFiles', { count: `<strong>${count}</strong>`, files: `<strong>${fileCount}</strong>` });
   } else {
     summary = t('agentStream.search.foundResults', { count: `<strong>${count}</strong>` });
   }
@@ -3680,8 +3680,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   &.markdown-content {
     // Compact thinking-panel Markdown is intentionally not the chat answer body.
-    // Answer Markdown typography belongs to chat-markdown.less.
+    // Answer Markdown typography belongs to chat-markdown.less. Images still need
+    // the shared size caps: thinking renders model-authored Markdown through the
+    // same pipeline, and a native-size <img> would blow out the step panel.
     .chat-citation-pills();
+    .chat-markdown-images();
   }
 }
 
@@ -4298,6 +4301,9 @@ const handleAddToKnowledge = (answerEvent: any) => {
     line-height: 1.6;
     overflow-wrap: anywhere;
     user-select: text;
+    // Same rationale as .thinking-detail-content: bare <img> from model
+    // Markdown must not escape the inline reasoning row.
+    .chat-markdown-images();
 
     :deep(.thinking-inline-markdown > :first-child) {
       margin-top: 0;

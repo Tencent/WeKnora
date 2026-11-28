@@ -3,12 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
 )
@@ -148,4 +151,97 @@ func TestKnowledgeCopyRejectsInvalidBatchBeforeWriting(t *testing.T) {
 	require.Len(t, target, 1)
 	require.Equal(t, "other-doc", target[0].ID)
 	require.Zero(t, f.chunkRepo.writes)
+}
+
+// Fail after a committed chunk write to exercise a genuinely partial batch.
+type copyFailureChunks struct {
+	interfaces.ChunkRepository
+	calls  int
+	failAt int
+}
+
+func (r *copyFailureChunks) CreateChunks(ctx context.Context, chunks []*types.Chunk) error {
+	if err := r.ChunkRepository.CreateChunks(ctx, chunks); err != nil {
+		return err
+	}
+	r.calls++
+	if r.calls == r.failAt {
+		return errors.New("lost copy acknowledgement")
+	}
+	return nil
+}
+
+func TestKnowledgeCopyRetryReusesCompletedSnapshotAfterSourceChanges(t *testing.T) {
+	for _, change := range []string{"deleted", "moved", "reparsing", "embedding changed"} {
+		t.Run(change, func(t *testing.T) {
+			f := transferFixture(t, access.KBTransferCopy)
+			for _, kb := range f.kbs.values {
+				kb.Type = types.KnowledgeBaseTypeDocument
+			}
+			require.NoError(t, f.db.Create(&types.Knowledge{
+				ID: "remaining", TenantID: 7, KnowledgeBaseID: "kb", Title: "remaining",
+				Type: types.KnowledgeTypeManual, ParseStatus: types.ParseStatusCompleted,
+			}).Error)
+			require.NoError(t, f.db.Create(&types.Chunk{
+				ID: "remaining-chunk", TenantID: 7, KnowledgeID: "remaining", KnowledgeBaseID: "kb",
+				ChunkType: types.ChunkTypeText, Content: "remaining",
+			}).Error)
+			fault := &copyFailureChunks{ChunkRepository: f.chunkRepo, failAt: 2}
+			f.svc.chunkRepo = fault
+			ctx := types.WithTaskRetryMetadata(context.Background(), 0, 3)
+			task := copyTask(t, "doc", "remaining")
+			require.ErrorContains(t, f.svc.ProcessKnowledgeCopy(ctx, task), "lost copy acknowledgement")
+			switch change {
+			case "deleted":
+				require.NoError(t, f.db.Unscoped().Where("id = ?", "doc").Delete(&types.Knowledge{}).Error)
+			case "moved":
+				require.NoError(t, f.db.Model(&types.Knowledge{}).Where("id = ?", "doc").
+					Update("knowledge_base_id", "third").Error)
+			case "reparsing":
+				require.NoError(t, f.db.Model(&types.Knowledge{}).Where("id = ?", "doc").
+					Update("parse_status", types.ParseStatusProcessing).Error)
+			case "embedding changed":
+				require.NoError(t, f.db.Model(&types.Knowledge{}).Where("id = ?", "doc").
+					Update("embedding_model_id", "changed-model").Error)
+			}
+			fault.failAt = 0
+			require.NoError(t, f.svc.ProcessKnowledgeCopy(ctx, task))
+			rows, err := f.repo.ListKnowledgeByKnowledgeBaseID(f.ctx, 7, "other")
+			require.NoError(t, err)
+			require.Len(t, rows, 3)
+			for _, row := range rows {
+				require.Equal(t, types.ParseStatusCompleted, row.ParseStatus)
+			}
+			progress, err := f.svc.GetKnowledgeCopyProgress(ctx, "copy-task")
+			require.NoError(t, err)
+			require.Equal(t, types.KBCloneStatusCompleted, progress.Status)
+			require.Equal(t, 2, progress.Processed)
+			require.Zero(t, progress.Failed)
+		})
+	}
+}
+
+func TestKnowledgeCopyProgressHonorsLiteRetryMetadata(t *testing.T) {
+	for _, attempt := range []int{0, 3} {
+		t.Run(fmt.Sprint(attempt), func(t *testing.T) {
+			f := transferFixture(t, access.KBTransferCopy)
+			for _, kb := range f.kbs.values {
+				kb.Type = types.KnowledgeBaseTypeDocument
+			}
+			// Exercise Lite's in-memory progress path as well as its retry metadata.
+			redisClient := f.svc.redisClient
+			f.svc.redisClient = nil
+			t.Cleanup(func() { f.svc.redisClient = redisClient })
+			f.svc.chunkRepo = &cloneFaultChunks{ChunkRepository: f.chunkRepo, fail: true}
+			ctx := types.WithTaskRetryMetadata(context.Background(), attempt, 3)
+			require.ErrorContains(t, f.svc.ProcessKnowledgeCopy(ctx, copyTask(t, "doc")), "lost clone acknowledgement")
+			progress, err := f.svc.GetKnowledgeCopyProgress(ctx, "copy-task")
+			require.NoError(t, err)
+			expected := types.KBCloneStatusProcessing
+			if attempt == 3 {
+				expected = types.KBCloneStatusFailed
+			}
+			require.Equal(t, expected, progress.Status)
+		})
+	}
 }

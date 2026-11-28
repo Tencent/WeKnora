@@ -108,6 +108,9 @@ func runDownload(ctx context.Context, opts *DownloadOptions, fopts *cmdutil.Form
 		// Raw bytes go to stdout — suppress any JSON envelope regardless of
 		// --format json because both can't occupy stdout simultaneously.
 		_, err := io.Copy(iostreams.IO.Out, body)
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return cmdutil.Wrapf(cmdutil.CodeNetworkError, err, "incomplete download")
+		}
 		return err
 	}
 	if err := refuseIfExists(dest, opts.Clobber); err != nil {
@@ -192,6 +195,9 @@ func streamToFile(body io.Reader, path string, fopts *cmdutil.FormatOptions) err
 	n, copyErr := io.Copy(f, body)
 	if copyErr != nil {
 		_ = f.Close()
+		if errors.Is(copyErr, io.ErrUnexpectedEOF) {
+			return cmdutil.Wrapf(cmdutil.CodeNetworkError, copyErr, "incomplete download")
+		}
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, copyErr, "write %s", path)
 	}
 	if err := f.Close(); err != nil {

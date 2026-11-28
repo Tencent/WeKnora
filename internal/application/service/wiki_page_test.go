@@ -38,11 +38,11 @@ func TestPruneEmptyFolderChainsDeletesOnlyEmptyCandidateAncestors(t *testing.T) 
 	createFolder("empty-chain-leaf", "empty-chain", "Leaf", "Empty chain/Leaf", 2)
 	createFolder("unrelated-empty", "", "Keep me", "Keep me", 1)
 
-	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+	require.NoError(t, db.Create(&types.WikiPage{
 		ID: "page-1", TenantID: 1, KnowledgeBaseID: "kb-prune", Slug: "entity/occupied",
 		Title: "Occupied", PageType: types.WikiPageTypeEntity, Status: types.WikiPageStatusPublished,
 		FolderID: "occupied-leaf", Version: 1, CreatedAt: now, UpdatedAt: now,
-	}))
+	}).Error)
 
 	deleted, err := svc.PruneEmptyFolderChains(ctx, "kb-prune", []string{"empty-leaf", "empty-chain-leaf"})
 	require.NoError(t, err)
@@ -80,6 +80,7 @@ func TestUpdateWikiPagePersistsAndClearsAliases(t *testing.T) {
 	ctx := context.Background()
 	repo := repository.NewWikiPageRepository(db)
 	svc := NewWikiPageService(repo, nil, nil, nil, nil, nil)
+	seedWikiTestKnowledgeBase(t, db, "kb-alias", 1)
 	page, err := svc.CreatePage(ctx, &types.WikiPage{
 		TenantID: 1, KnowledgeBaseID: "kb-alias", Slug: "concept/alias",
 		Title: "Alias", Summary: "summary", Content: "content",
@@ -187,12 +188,12 @@ func TestRepairContentLinks(t *testing.T) {
 	now := time.Now()
 
 	seed := func(slug, title, pageType string) {
-		require.NoError(t, repo.Create(ctx, &types.WikiPage{
+		require.NoError(t, db.Create(&types.WikiPage{
 			ID: uuid.New().String(), TenantID: 1, KnowledgeBaseID: kbID,
 			Slug: slug, Title: title, PageType: pageType,
 			Status: types.WikiPageStatusPublished, Version: 1,
 			CreatedAt: now, UpdatedAt: now,
-		}))
+		}).Error)
 	}
 
 	// Real summary page (clean UUID slug) + a distractor summary + an entity.
@@ -774,16 +775,16 @@ func TestFindPagesByNormalizedTitleMatchesWhitespace(t *testing.T) {
 	repo := repository.NewWikiPageRepository(db)
 	svc := NewWikiPageService(repo, nil, nil, nil, nil, nil)
 	now := time.Now()
-	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+	require.NoError(t, db.Create(&types.WikiPage{
 		ID: "page-kong", TenantID: 1, KnowledgeBaseID: "kb-id", Slug: "entity/confucius",
 		Title: "孔 子", PageType: types.WikiPageTypeEntity, Status: types.WikiPageStatusPublished,
 		Version: 1, CreatedAt: now, UpdatedAt: now,
-	}))
-	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+	}).Error)
+	require.NoError(t, db.Create(&types.WikiPage{
 		ID: "page-fable", TenantID: 1, KnowledgeBaseID: "kb-id", Slug: "concept/yuyan",
 		Title: "《寓言》", PageType: types.WikiPageTypeConcept, Status: types.WikiPageStatusPublished,
 		Version: 1, CreatedAt: now, UpdatedAt: now,
-	}))
+	}).Error)
 
 	pages, err := svc.FindPagesByNormalizedTitle(ctx, "kb-id", types.WikiPageTypeEntity, "孔子")
 	require.NoError(t, err)
@@ -794,11 +795,11 @@ func TestFindPagesByNormalizedTitleMatchesWhitespace(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, none, "punctuation-significant titles must stay distinct")
 
-	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+	require.NoError(t, db.Create(&types.WikiPage{
 		ID: "page-mencius", TenantID: 1, KnowledgeBaseID: "kb-id", Slug: "entity/mencius",
 		Title: "孟子", PageType: types.WikiPageTypeEntity, Status: types.WikiPageStatusPublished,
 		Version: 1, CreatedAt: now, UpdatedAt: now,
-	}))
+	}).Error)
 	batched, err := svc.FindPagesByNormalizedTitles(ctx, "kb-id", types.WikiPageTypeEntity, []string{"孔子", "孟子", "孔子"})
 	require.NoError(t, err)
 	require.Len(t, batched, 2)
@@ -835,11 +836,11 @@ func TestMovePageIntoTypeLabelNamedFolderKeepsHierarchy(t *testing.T) {
 
 	folder, err := svc.CreateFolder(ctx, "kb-move", 1, types.WikiFolderRootID, "概念")
 	require.NoError(t, err)
-	require.NoError(t, repo.Create(ctx, &types.WikiPage{
+	require.NoError(t, db.Create(&types.WikiPage{
 		ID: "page-plan", TenantID: 1, KnowledgeBaseID: "kb-move", Slug: "concept/plan",
 		Title: "将计就计", PageType: types.WikiPageTypeConcept, Status: types.WikiPageStatusPublished,
 		Version: 1, CreatedAt: now, UpdatedAt: now,
-	}))
+	}).Error)
 
 	moved, err := svc.MovePage(ctx, "kb-move", "concept/plan", folder.ID)
 	require.NoError(t, err)
@@ -864,4 +865,11 @@ func TestMovePageIntoTypeLabelNamedFolderKeepsHierarchy(t *testing.T) {
 	require.Equal(t, types.StringArray{"概念"}, listed.Pages[0].CategoryPath)
 	require.Equal(t, 1, listed.Pages[0].Depth)
 	require.Equal(t, "concept/概念/将计就计", listed.Pages[0].WikiPath)
+}
+
+// seedWikiTestKnowledgeBase provides a live owner for tests that exercise page creation.
+func seedWikiTestKnowledgeBase(t *testing.T, db *gorm.DB, id string, tenantID uint64) {
+	t.Helper()
+	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}))
+	require.NoError(t, db.Create(&types.KnowledgeBase{ID: id, TenantID: tenantID}).Error)
 }

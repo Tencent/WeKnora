@@ -175,3 +175,12 @@ test('sniffPreview retains video fallback and confines brands to the ftyp box', 
   withTrailingBytes.set(new TextEncoder().encode('avif'), video.length)
   assert.deepEqual(sniffPreview(withTrailingBytes), { kind: 'video', ext: 'mp4' })
 })
+
+test('recognizes named build files with no extension', () => {
+  for (const name of ['Dockerfile', 'Makefile']) {
+    const ext = resolveFilePreviewExt(name)
+    assert.equal(resolvePreviewKind(ext), 'text')
+    assert.equal(getHighlightLang(ext), name.toLowerCase())
+  }
+  assert.equal(resolveFilePreviewExt('notes'), '')
+})

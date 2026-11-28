@@ -1,13 +1,23 @@
 import { cpSync, existsSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-/** Copy the installed pdfjs-dist decoder resources into the frontend build. */
-export function copyPdfJsWasm(sourceDir, outputDir) {
-  const jbig2Wasm = resolve(sourceDir, 'jbig2.wasm')
-  if (!existsSync(jbig2Wasm)) {
-    throw new Error(`PDF.js wasm resources are missing the required decoder: ${jbig2Wasm}`)
-  }
+const assetDirectories = [
+  ['cmaps', 'Adobe-GB1-UCS2.bcmap'],
+  ['standard_fonts', 'LiberationSans-Regular.ttf'],
+  ['wasm', 'jbig2.wasm'],
+]
 
-  mkdirSync(outputDir, { recursive: true })
-  cpSync(sourceDir, outputDir, { recursive: true })
+/** Copy the installed pdfjs-dist runtime resources into the frontend build. */
+export function copyPdfJsAssets(packageDir, outputDir) {
+  for (const [directory, requiredAsset] of assetDirectories) {
+    const sourceDir = resolve(packageDir, directory)
+    const requiredPath = resolve(sourceDir, requiredAsset)
+    if (!existsSync(requiredPath)) {
+      throw new Error(`PDF.js ${directory} resources are missing the required asset: ${requiredPath}`)
+    }
+
+    const assetOutput = resolve(outputDir, directory)
+    mkdirSync(assetOutput, { recursive: true })
+    cpSync(sourceDir, assetOutput, { recursive: true })
+  }
 }

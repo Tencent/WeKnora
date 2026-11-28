@@ -30,15 +30,7 @@ func (s *knowledgeService) storeKnowledgeCopyProgress(
 	ctx context.Context, progress types.KnowledgeMoveProgress, initial bool,
 ) error {
 	if s.redisClient == nil {
-		if initial {
-			s.memCopyProgress.LoadOrStore(progress.TaskID, progress)
-		} else {
-			s.memCopyProgress.Store(progress.TaskID, progress)
-		}
-		// Match Redis expiration without deleting a newer progress update.
-		time.AfterFunc(knowledgeMoveProgressTTL, func() {
-			s.memCopyProgress.CompareAndDelete(progress.TaskID, progress)
-		})
+		storeMemProgress(&s.memCopyProgress, progress.TaskID, progress, knowledgeMoveProgressTTL, initial)
 		return nil
 	}
 	raw, err := json.Marshal(progress)
@@ -56,12 +48,11 @@ func (s *knowledgeService) GetKnowledgeCopyProgress(
 	ctx context.Context, taskID string,
 ) (*types.KnowledgeMoveProgress, error) {
 	if s.redisClient == nil {
-		value, ok := s.memCopyProgress.Load(taskID)
+		progress, ok := loadMemProgress[types.KnowledgeMoveProgress](&s.memCopyProgress, taskID)
 		if !ok {
 			return nil, werrors.NewNotFoundError("Knowledge copy task not found")
 		}
-		progress := value.(types.KnowledgeMoveProgress)
-		return &progress, nil
+		return progress, nil
 	}
 	raw, err := s.redisClient.Get(ctx, knowledgeCopyProgressPrefix+taskID).Bytes()
 	if errors.Is(err, redis.Nil) {
@@ -92,6 +83,9 @@ func (s *knowledgeService) ProcessKnowledgeCopy(ctx context.Context, task *asynq
 		Status: types.KBCloneStatusProcessing, Total: len(ids), CreatedAt: time.Now().Unix(),
 	}
 	ctx = types.WithExecutionTenant(payload.Initiator.Apply(ctx), payload.TenantID)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
 	ctx = withKBActivityTask(ctx, payload.TaskID, kbActivityTrigger(ctx))
 	if previous, err := s.GetKnowledgeCopyProgress(ctx, payload.TaskID); err == nil {
 		progress.CreatedAt = previous.CreatedAt
@@ -121,9 +115,7 @@ func (s *knowledgeService) ProcessKnowledgeCopy(ctx context.Context, task *asynq
 	if err != nil {
 		progress.Error = err.Error()
 		progress.Message = "Knowledge copy will retry"
-		retry, _ := asynq.GetRetryCount(ctx)
-		maxRetry, _ := asynq.GetMaxRetry(ctx)
-		if retry >= maxRetry || errors.Is(err, asynq.SkipRetry) {
+		if !summaryTaskWillRetry(ctx) || errors.Is(err, asynq.SkipRetry) {
 			progress.Status = types.KBCloneStatusFailed
 			progress.Message = "Knowledge copy failed"
 		}
@@ -172,28 +164,6 @@ func (s *knowledgeService) copyKnowledgeBatch(
 	if err != nil {
 		return fmt.Errorf("%v: %w", err, asynq.SkipRetry)
 	}
-	rows, err := s.repo.GetKnowledgeBatch(ctx, source.TenantID, ids)
-	if err != nil {
-		return err
-	}
-	byID := make(map[string]*types.Knowledge, len(rows))
-	for _, row := range rows {
-		if row != nil {
-			byID[row.ID] = row
-		}
-	}
-	for _, id := range ids {
-		row := byID[id]
-		if validateTransferKnowledge(row, source) != nil || row.ParseStatus != types.ParseStatusCompleted ||
-			(row.EmbeddingModelID != "" && row.EmbeddingModelID != source.EmbeddingModelID) {
-			return fmt.Errorf(
-				"knowledge %s must be completed in the source and use its embedding model: %w", id, asynq.SkipRetry,
-			)
-		}
-		if _, err := s.transferChunks(ctx, row, source.ID); err != nil {
-			return err
-		}
-	}
 
 	targetRows, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, target.TenantID, target.ID)
 	if err != nil {
@@ -211,6 +181,34 @@ func (s *knowledgeService) copyKnowledgeBatch(
 		if state != nil &&
 			matchesTransfer(ctx, state, source, target, access.KBTransferCopy, state.SourceID, payload.Mode) {
 			checkpoints[state.SourceID] = row
+		}
+	}
+
+	rows, err := s.repo.GetKnowledgeBatch(ctx, source.TenantID, ids)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]*types.Knowledge, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			byID[row.ID] = row
+		}
+	}
+	for _, id := range ids {
+		// Completed destinations are independent snapshots; retrying them does
+		// not require the original document to still exist or remain unchanged.
+		if checkpoint := checkpoints[id]; checkpoint != nil && checkpoint.ParseStatus == types.ParseStatusCompleted {
+			continue
+		}
+		row := byID[id]
+		if validateTransferKnowledge(row, source) != nil || row.ParseStatus != types.ParseStatusCompleted ||
+			(row.EmbeddingModelID != "" && row.EmbeddingModelID != source.EmbeddingModelID) {
+			return fmt.Errorf(
+				"knowledge %s must be completed in the source and use its embedding model: %w", id, asynq.SkipRetry,
+			)
+		}
+		if _, err := s.transferChunks(ctx, row, source.ID); err != nil {
+			return err
 		}
 	}
 

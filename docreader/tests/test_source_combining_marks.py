@@ -6,6 +6,21 @@ from docreader.parser.source_locator import PageGeometry, locate_lines, page_blo
 
 
 class SourceCombiningMarksTests(unittest.TestCase):
+    def test_separate_lines_keep_exact_ranges_after_mark_reordering(self):
+        first = "Evidence ấ\u0323"
+        second = "Café original evidence"
+        page = first + "\n" + second
+        lines = [
+            {"text": second, "bbox": (10, 20, 90, 30)},
+            {"text": unicodedata.normalize("NFD", first), "bbox": (10, 70, 90, 80)},
+        ]
+        blocks = page_blocks(page, 7, 2, lines, PageGeometry((0, 0, 100, 100)))
+        self.assertEqual(
+            [(block["start"], block["end"]) for block in blocks],
+            [(7, 8 + len(first)), (8 + len(first), 7 + len(page))],
+        )
+        self.assertTrue(all("bbox" in block["locator"] for block in blocks))
+
     def test_regions_match_composed_and_decomposed_text(self):
         for phrase in ("Café résumé", "한글 원문", "Ångström evidence", "Evidence ấ\u0323"):
             for page_form, glyph_form in (("NFC", "NFD"), ("NFD", "NFC")):

@@ -35,6 +35,11 @@ def _char(ch, x0, x1, y0, y1):
     return {"x0": x0, "x1": x1, "y0": y0, "y1": y1, "ch": ch}
 
 
+def _advance_char(ch, x0, x1, ax0, ax1, y0=0, y1=10):
+    """A glyph carrying both its ink box (x0/x1) and its advance box (ax0/ax1)."""
+    return {"x0": x0, "x1": x1, "ax0": ax0, "ax1": ax1, "y0": y0, "y1": y1, "ch": ch}
+
+
 def _line(text, h):
     return {"text": text, "h": h}
 
@@ -388,6 +393,25 @@ class ReadingOrderTest(unittest.TestCase):
             _char("4", 14, 18, 0, 10),
         ]
         self.assertEqual(_join_line_glyphs(chars), "124")
+
+    def test_join_line_glyphs_measures_gaps_on_the_advance_box(self):
+        # "report ID": I's ink box is 1.16 wide but its advance is 3.34, so an
+        # ink-box measurement sees a 2.05 gap before D.  That beats the line's
+        # ink threshold (1.66) and splits the token into "I D".  On the advance
+        # box the two glyphs abut exactly, so the token stays intact.
+        chars = [
+            _advance_char("I", 1.10, 2.26, 0.00, 3.34),
+            _advance_char("D", 4.31, 11.43, 3.34, 12.00),
+        ]
+        self.assertEqual(_join_line_glyphs(chars), "ID")
+
+    def test_join_line_glyphs_without_an_advance_box_uses_ink(self):
+        # Callers that build glyphs by hand keep the ink-box behaviour.
+        chars = [
+            _char("I", 1.10, 2.26, 0, 10),
+            _char("D", 4.31, 11.43, 0, 10),
+        ]
+        self.assertEqual(_join_line_glyphs(chars), "I D")
 
     def test_join_line_glyphs_keeps_large_numeric_cell_gap(self):
         chars = [

@@ -7,19 +7,33 @@ import (
 	"regexp"
 	"strings"
 
-	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/converter"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/base"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/commonmark"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/strikethrough"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"golang.org/x/net/html"
 )
 
 var nestedTableRow = regexp.MustCompile(`(?i)<tr\b`)
 
+// convertHTML keeps strikethrough as GFM ~~text~~. Confluence pages often
+// strike out superseded values, which must stay distinguishable from current
+// text once the page is indexed.
+func convertHTML(content string) (string, error) {
+	conv := converter.NewConverter(converter.WithPlugins(
+		base.NewBasePlugin(), commonmark.NewCommonmarkPlugin(), strikethrough.NewStrikethroughPlugin(),
+	))
+	return conv.ConvertString(content)
+}
+
 // convertPageHTML protects tables before the default HTML converter flattens
 // their rows and cells. The shared normalizer renders simple tables as GFM and
 // keeps complex tables as row-separated HTML.
 func convertPageHTML(content string) (string, error) {
+	content = stripBrowserOnlyMarkup(content)
 	if !strings.Contains(strings.ToLower(content), "<table") {
-		return htmltomd.ConvertString(content)
+		return convertHTML(content)
 	}
 
 	var protected strings.Builder
@@ -87,10 +101,10 @@ func convertPageHTML(content string) (string, error) {
 		copiedUntil = offset
 	}
 	if len(tables) == 0 {
-		return htmltomd.ConvertString(content)
+		return convertHTML(content)
 	}
 	protected.WriteString(content[copiedUntil:])
-	markdown, err := htmltomd.ConvertString(protected.String())
+	markdown, err := convertHTML(protected.String())
 	if err != nil {
 		return "", err
 	}

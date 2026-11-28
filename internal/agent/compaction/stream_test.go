@@ -126,6 +126,51 @@ func TestSummarizationIsCancelledWhenTheStreamCloses(t *testing.T) {
 	require.True(t, errors.Is(err, context.Canceled), "got %v", err)
 }
 
+type cancelOnSummaryChat struct {
+	closedStreamChat
+	cancel   context.CancelFunc
+	cancelAt int
+	opened   int
+}
+
+func (c *cancelOnSummaryChat) ChatStream(
+	ctx context.Context, messages []chat.Message, opts *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	c.opened++
+	if c.opened != c.cancelAt {
+		return streamOf(&types.ChatResponse{Content: "## Goal\nsummary", FinishReason: "stop"}), nil
+	}
+	c.cancel()
+	return c.closedStreamChat.ChatStream(ctx, messages, opts)
+}
+
+func TestCompactCancellationDoesNotCreateCheckpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		cancelAt int
+	}{
+		{name: "before compaction", cancelAt: 0},
+		{name: "while summarizing history", cancelAt: 1},
+		{name: "while summarizing the live turn prefix", cancelAt: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tc.cancelAt == 0 {
+				cancel()
+			}
+			model := &cancelOnSummaryChat{cancel: cancel, cancelAt: tc.cancelAt}
+			c := New(model, newEstimator(t), testSettings())
+			messages := withStoredHistory(reactTurn(12), storedTurn("turn-a", 1, "/workspace/a.txt"))
+
+			result, err := c.Compact(ctx, messages, ReasonThreshold)
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, result)
+			assert.Equal(t, tc.cancelAt, model.opened)
+		})
+	}
+}
+
 // An error reported inside the stream is a failed attempt, not a summary.
 func TestSummarizationStreamErrorIsAFailure(t *testing.T) {
 	chatModel := &pacedChat{chunks: []types.StreamResponse{

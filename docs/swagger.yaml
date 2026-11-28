@@ -617,6 +617,7 @@ definitions:
     - 2200
     - 2201
     - 2300
+    - 2400
     type: integer
     x-enum-varnames:
     - ErrBadRequest
@@ -643,6 +644,7 @@ definitions:
     - ErrVectorStoreBindingInvalid
     - ErrVectorStoreUnavailable
     - ErrModelInUse
+    - ErrImportPrerequisiteMissing
   github_com_Tencent_WeKnora_internal_handler_dto.CredentialFieldMetadata:
     properties:
       configured:
@@ -2671,6 +2673,96 @@ definitions:
         type: integer
         x-agent: true
     type: object
+  github_com_Tencent_WeKnora_internal_types.ChunkingConfigOverride:
+    properties:
+      child_chunk_size:
+        description: |-
+          ChildChunkSize is the size of child chunks used for embedding (default: 384).
+          Only used when EnableParentChild is true.
+        maximum: 10000
+        minimum: 1
+        type: integer
+        x-agent: true
+      chunk_overlap:
+        description: Chunk overlap in characters.
+        maximum: 5000
+        minimum: 0
+        type: integer
+        x-agent: true
+      chunk_size:
+        description: Chunk size in characters. Empty on create uses the server default.
+        maximum: 10000
+        minimum: 100
+        type: integer
+        x-agent: true
+      enable_parent_child:
+        description: |-
+          EnableParentChild splits into large parent chunks and small child chunks.
+          Search matches a child and returns its parent.
+        type: boolean
+        x-agent: true
+      languages:
+        description: Languages hints the splitter, for example de or zh. Empty detects
+          the language from the document.
+        items:
+          type: string
+        type: array
+        x-agent: true
+        x-agent-maximum: "20"
+      parent_chunk_size:
+        description: |-
+          ParentChunkSize is the size of parent chunks (default: 4096).
+          Only used when EnableParentChild is true.
+        maximum: 20000
+        minimum: 1
+        type: integer
+        x-agent: true
+      parser_engine_rules:
+        description: |-
+          ParserEngineRules configures which parser engine to use for each file type.
+          When empty, DefaultParserEngine is used (builtin/simple routing, except
+          types that only a specific engine can parse: ppt/pptx fall back to
+          markitdown). A linked anydoc binding is preferred for every type it
+          converts.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule'
+        type: array
+        x-agent: true
+        x-agent-response: true
+      separators:
+        description: Separators, in the order they are tried.
+        items:
+          type: string
+        type: array
+        x-agent: true
+        x-agent-maximum: "20"
+      strategy:
+        description: |-
+          Strategy selects how documents are split: auto, heading, heuristic,
+          recursive or legacy. Empty keeps the server default.
+        enum:
+        - auto
+        - heading
+        - heuristic
+        - recursive
+        - legacy
+        type: string
+        x-agent: true
+      table_metadata_instructions:
+        description: TableMetadataInstructions is extra guidance for CSV and Excel
+          summaries. The output format stays fixed.
+        type: string
+        x-agent: true
+        x-agent-detail: true
+        x-agent-max-bytes: "4000"
+      token_limit:
+        description: TokenLimit inherits the knowledge base budget when nil and disables
+          it when zero.
+        maximum: 100000
+        minimum: 0
+        type: integer
+        x-agent: true
+    type: object
   github_com_Tencent_WeKnora_internal_types.ConnectionConfig:
     properties:
       addr:
@@ -4262,9 +4354,7 @@ definitions:
     properties:
       attrs:
         additionalProperties: {}
-        description: |-
-          Attrs is the observed attribute map (e.g. contain.text, contain.data_visual)
-          produced by the attribute pipeline. Absent keys mean "not observed".
+        description: Attrs 包含模型观察属性和解析器的 source.* 来源位置；缺少来源键表示未知。
         type: object
       caption:
         description: Caption is the model-generated image description.
@@ -5379,7 +5469,7 @@ definitions:
       asr_config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig'
       chunking_config:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig'
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfigOverride'
       enable_multimodel:
         type: boolean
       extract_config:
@@ -7494,6 +7584,7 @@ definitions:
     - no_model
     - disabled
     - no_candidates
+    - no_query
     type: string
     x-enum-varnames:
     - RerankOutcomeOK
@@ -7505,6 +7596,7 @@ definitions:
     - RerankOutcomeNoModel
     - RerankOutcomeDisabled
     - RerankOutcomeNoCandidates
+    - RerankOutcomeNoQuery
   github_com_Tencent_WeKnora_internal_types.Resource:
     properties:
       description:
@@ -7985,6 +8077,15 @@ definitions:
       end_at:
         description: End at
         type: integer
+      evidence_handles:
+        description: |-
+          EvidenceHandles records storage references that citation sources of this
+          result expose to the model even though merge scoping kept them out of
+          Content and ImageInfo. The message-scoped file proxy reads them as
+          retrieval evidence (#5069); prompts and UI do not consume them.
+        items:
+          type: string
+        type: array
       id:
         description: ID
         type: string
@@ -11733,7 +11834,14 @@ definitions:
   internal_handler.KBModelConfigRequest:
     properties:
       asr_config:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig'
+        properties:
+          enabled:
+            type: boolean
+          language:
+            type: string
+          model_id:
+            type: string
+        type: object
       documentSplitting:
         description: 文档分块配置
         properties:
@@ -11823,7 +11931,24 @@ definitions:
         description: 存储引擎选择（"local" | "minio" | "cos"），影响文档上传与文档内图片存储，参数从全局设置读取
         type: string
       vlm_config:
-        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig'
+        properties:
+          api_key:
+            type: string
+          base_url:
+            type: string
+          custom_instructions:
+            type: string
+          description_language:
+            type: string
+          enabled:
+            type: boolean
+          interface_type:
+            type: string
+          model_id:
+            type: string
+          model_name:
+            type: string
+        type: object
     required:
     - llmModelId
     type: object
@@ -29300,9 +29425,15 @@ paths:
     get:
       description: |-
         Retrieve a paginated list of every user across tenants (SystemAdmin only).
-        Supports `offset` (default 0) and `limit` (default 50, max 200).
+        Supports `offset` (default 0), `limit` (default 50, max 200), and optional `q`.
+        `q` performs case-insensitive substring matching against username or email.
         Password/hashes are never serialised — only the redacted UserInfo shape.
       parameters:
+      - description: Filter by username or email
+        in: query
+        name: q
+        type: string
+        x-agent: true
       - default: 0
         description: Page offset
         in: query
@@ -29341,10 +29472,10 @@ paths:
         risk: read
         root: users
         system_admin: true
-      x-agent-hint: 'Lists platform users across workspaces, including account enabled
-        state and system administrator flag. Follow has_more using offset + limit.
-        tenant_id is the home workspace, not a list of memberships. No search or role
-        filter is supported: paginate before drawing conclusions.'
+      x-agent-hint: Lists platform users across workspaces, including account enabled
+        state and system administrator flag. q filters username or email (not role);
+        follow has_more using offset + limit. tenant_id is the home workspace, not
+        a list of memberships.
   /system/admin/users/create:
     post:
       consumes:

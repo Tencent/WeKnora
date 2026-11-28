@@ -90,3 +90,26 @@ func TestCredentialVaultHandler(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "i1", v.deleted)
 }
+
+func TestCredentialVaultHandlerRejectsTrailingJSON(t *testing.T) {
+	v := &fakeVault{}
+	r := vaultRouter(v)
+
+	w := postJSON(r, "/me/credential-vault",
+		`{"site":"a.com","password":"pw-sentinel"} {"site":"evil.com","password":"x"} trailing`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Zero(t, v.created, "nothing is saved from a body with trailing content")
+	assert.NotContains(t, w.Body.String(), "sentinel")
+
+	w = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/me/credential-vault/i1",
+		bytes.NewBufferString(`{"title":"工作"} {"password":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Nil(t, v.patched.Title)
+
+	w = postJSON(r, "/me/credential-vault", "{\"site\":\"a.com\",\"password\":\"pw-sentinel\"}\n \n")
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String(), "whitespace after the object is still fine")
+	assert.Equal(t, "a.com", v.created.Site)
+}

@@ -41,3 +41,38 @@ func TestPlaceEmbeddingsRefusesAReplyThatDoesNotCoverEachInputOnce(t *testing.T)
 		})
 	}
 }
+
+// A gateway that merges concurrent requests server-side may number this
+// request's inputs within the merged batch (Xinference: 5..9 for a five-input
+// request). A contiguous run of the requested length is rebased; the vectors
+// still land in relative order.
+func TestPlaceEmbeddingsRebasesAMergedBatchRun(t *testing.T) {
+	for name, reply := range map[string][]placed{
+		"in order":     {{5, []float32{1}}, {6, []float32{2}}, {7, []float32{3}}},
+		"out of order": {{7, []float32{3}}, {5, []float32{1}}, {6, []float32{2}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := place(3, reply)
+			require.NoError(t, err)
+			assert.Equal(t, [][]float32{{1}, {2}, {3}}, got)
+		})
+	}
+}
+
+// Only a complete contiguous run is rebased. Gaps, duplicates and a reply
+// with the wrong count stay errors, so a genuinely broken response cannot be
+// mistaken for a merged-batch offset.
+func TestPlaceEmbeddingsRefusesAnIncompleteMergedBatchRun(t *testing.T) {
+	cases := map[string][]placed{
+		"gapped":      {{5, []float32{1}}, {6, []float32{2}}, {8, []float32{3}}},
+		"duplicate":   {{5, []float32{1}}, {5, []float32{2}}, {6, []float32{3}}},
+		"short count": {{5, []float32{1}}, {6, []float32{2}}},
+		"extra count": {{5, []float32{1}}, {6, []float32{2}}, {7, []float32{3}}, {8, []float32{4}}},
+	}
+	for name, reply := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := place(3, reply)
+			assert.Error(t, err)
+		})
+	}
+}

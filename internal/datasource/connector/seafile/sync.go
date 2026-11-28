@@ -265,6 +265,7 @@ func (r *syncRun) syncFile(p string, e dirent) error {
 	size := *e.Size
 	fp := fingerprint(e.ID, e.Mtime, size)
 	if previous := r.cur.Files[p]; previous != "" && previous == fp {
+		datasource.RecordUnchangedItem(r.h)
 		return nil
 	}
 	if size > r.limit {
@@ -283,6 +284,9 @@ func (r *syncRun) syncFile(p string, e dirent) error {
 		return r.fetchError(p, e, err, downloadReason(err))
 	}
 	if err := r.emit(r.buildItem(p, e, body)); err != nil {
+		if errors.Is(err, datasource.ErrItemIngestFailed) {
+			return r.markFailed(p)
+		}
 		return err
 	}
 	r.cur.Files[p] = fp
