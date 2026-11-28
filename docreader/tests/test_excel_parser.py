@@ -384,6 +384,42 @@ class XlsxMergeFillTest(unittest.TestCase):
         self.assertEqual(out_wb.active.title, "Sheet")
         self.assertEqual(out_wb.chartsheets, [])
 
+    def test_active_chart_with_hidden_source_worksheets(self):
+        for has_visible_worksheet in (True, False):
+            with self.subTest(has_visible_worksheet=has_visible_worksheet):
+                wb = openpyxl.Workbook()
+                data = wb.active
+                data.title = "Data"
+                data["A1"] = "Revenue"
+                data.merge_cells("A1:B1")
+                data["A2"] = 12
+                data.sheet_state = "hidden"
+                wb.create_sheet("Lookup").sheet_state = "veryHidden"
+                if has_visible_worksheet:
+                    wb.create_sheet("Report")
+                chart = BarChart()
+                chart.add_data(Reference(data, min_col=1, min_row=2, max_row=2))
+                dashboard = wb.create_chartsheet("Dashboard")
+                dashboard.add_chart(chart)
+                wb.active = dashboard
+                source = io.BytesIO()
+                wb.save(source)
+
+                filled = fill_merged_cells_xlsx(source.getvalue())
+
+                result = openpyxl.load_workbook(io.BytesIO(filled))
+                self.assertEqual(
+                    result.active.title, "Report" if has_visible_worksheet else "Data"
+                )
+                self.assertEqual(
+                    result["Data"].sheet_state,
+                    "hidden" if has_visible_worksheet else "visible",
+                )
+                self.assertEqual(result["Lookup"].sheet_state, "veryHidden")
+                self.assertEqual(result["Data"]["B1"].value, "Revenue")
+                document = ExcelParser().parse_into_text(source.getvalue())
+                self.assertIn("A: Revenue,B: Revenue", document.content)
+
     def test_parse_en_mergecell_workbook(self):
         path = os.path.join(
             os.path.dirname(__file__),
