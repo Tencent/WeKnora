@@ -413,6 +413,9 @@ func TestSessionResumeRequiresCompletion(t *testing.T) {
 			if (tc.wantCode == "" && stderr != "") || (tc.wantCode != "" && !strings.Contains(stderr, tc.wantCode)) {
 				t.Errorf("stderr = %q, want error code %q", stderr, tc.wantCode)
 			}
+			if tc.wantCode == "local.sse_stream_aborted" && !strings.Contains(stderr, "retry session resume") {
+				t.Errorf("incomplete replay should suggest resuming the same message, got %q", stderr)
+			}
 		})
 	}
 }
