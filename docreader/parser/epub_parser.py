@@ -137,7 +137,7 @@ class EPUBParser(BaseParser):
 
     @staticmethod
     def _fallback_reading_order(archive, html_files: list[str]) -> list[str]:
-        """Use a recoverable package spine even when navigation is broken."""
+        """Recover XHTML documents from the manifest and order them by the spine."""
         try:
             container = ElementTree.fromstring(archive.read("META-INF/container.xml"))
             rootfile = container.find(".//{*}rootfile")
@@ -146,13 +146,13 @@ class EPUBParser(BaseParser):
             package_path = rootfile.get("full-path", "")
             package = ElementTree.fromstring(archive.read(package_path))
             manifest = package.find("{*}manifest")
-            spine = package.find("{*}spine")
-            if manifest is None or spine is None:
+            if manifest is None:
                 return html_files
         except (KeyError, ElementTree.ParseError):
             return html_files
 
-        available = set(html_files)
+        members = set(archive.namelist())
+        documents = dict.fromkeys(html_files)
         by_id = {}
         for item in manifest.findall("{*}item"):
             try:
@@ -164,16 +164,20 @@ class EPUBParser(BaseParser):
             path = posixpath.normpath(posixpath.join(
                 posixpath.dirname(package_path), unquote(href.path)
             ))
-            if path in available:
+            # The manifest can declare XHTML even when the filename has no HTML suffix.
+            media_type = item.get("media-type", "").lower()
+            if media_type == "application/xhtml+xml" and path in members:
+                documents[path] = None
+            if path in documents:
                 by_id[item.get("id")] = path
         ordered = []
         seen = set()
-        for itemref in spine.findall("{*}itemref"):
+        for itemref in package.findall("{*}spine/{*}itemref"):
             path = by_id.get(itemref.get("idref"))
             if path is not None and path not in seen:
                 ordered.append(path)
                 seen.add(path)
-        return ordered + [path for path in html_files if path not in seen]
+        return ordered + [path for path in documents if path not in seen]
 
     def _extract_metadata(self, book) -> Dict[str, str]:
         metadata: Dict[str, str] = {}

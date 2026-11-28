@@ -25,6 +25,27 @@ def without_ncx(content, encoded_path=False):
 
 
 class EPUBFallbackOrderTests(unittest.TestCase):
+    def test_fallback_recovers_manifest_xhtml_without_an_html_suffix(self):
+        book = _ordered_epub_bytes(
+            manifest=["appendix", "two", "one"],
+            spine=["one", "two", "one"],
+            svg_cover_in_spine=True,
+            chapter_files={"one": "text/part1", "appendix": "text/appendix.xml"},
+        )
+        parser = EPUBParser(file_name="book.epub")
+        with patch.object(
+            parser, "_parse_epub_fallback", wraps=parser._parse_epub_fallback
+        ) as fallback:
+            document = parser.parse(without_ncx(book))
+        fallback.assert_called_once()
+        bodies = [
+            line
+            for line in document.content.splitlines()
+            if line.startswith("Body of ")
+        ]
+        self.assertEqual(bodies, ["Body of one.", "Body of two.", "Body of appendix."])
+        self.assertNotIn("COVER ART", document.content)
+
     def test_real_navigation_failure_keeps_spine_order(self):
         for encoded_path in (False, True):
             with self.subTest(encoded_path=encoded_path):
