@@ -15,9 +15,9 @@ func TestLiteralRefTextSurvivesCitationExpansion(t *testing.T) {
 		want     string
 	}{
 		{
-			name: "unregistered legacy id stays non-citable",
+			name: "unregistered legacy id stays literal",
 			in:   `引用标签的写法是 <ref id="c1"/>。`,
-			want: `引用标签的写法是 。`,
+			want: `引用标签的写法是 <ref id="c1"/>。`,
 		},
 		{
 			name:     "registered legacy id still expands",
@@ -102,6 +102,79 @@ func TestFencedRefSplitAcrossChunksStaysLiteral(t *testing.T) {
 		got := decoder.Feed(text[:split]) + decoder.Feed(text[split:]) + decoder.Flush()
 		require.Equal(t, text, got, "split at %d", split)
 	}
+}
+
+func TestRegisteredCitationInsideCodeStaysLiteral(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "inline code",
+			in:   "写法是 `<ref id=\"chunk://1\"/>`。",
+			want: "写法是 `<ref id=\"chunk://1\"/>`。",
+		},
+		{
+			name: "backtick fence",
+			in:   "```html\n<ref id=\"chunk://1\"/>\n```",
+			want: "```html\n<ref id=\"chunk://1\"/>\n```",
+		},
+		{
+			name: "tilde fence",
+			in:   "~~~\n<ref id=\"chunk://1\"/>\n~~~",
+			want: "~~~\n<ref id=\"chunk://1\"/>\n~~~",
+		},
+		{
+			name: "citation after code",
+			in:   "前文 `<ref id=\"chunk://1\"/>` 后文 <ref id=\"chunk://1\"/>",
+			want: "前文 `<ref id=\"chunk://1\"/>` 后文 <kb doc=\"Doc\" chunk_id=\"chunk-1\" />",
+		},
+		{
+			name: "fence-like content does not close",
+			in:   "```html\n<ref id=\"chunk://1\"/>\n```not-a-close\n<ref id=\"chunk://1\"/>\n```",
+			want: "```html\n<ref id=\"chunk://1\"/>\n```not-a-close\n<ref id=\"chunk://1\"/>\n```",
+		},
+		{
+			name: "escaped backtick does not open inline code",
+			in:   "示例是 \\`<ref id=\"chunk://1\"/>",
+			want: "示例是 \\`<kb doc=\"Doc\" chunk_id=\"chunk-1\" />",
+		},
+		{
+			name: "partial ref stays literal in fenced code",
+			in:   "```\n<ref id=\"chunk://1\"",
+			want: "```\n<ref id=\"chunk://1\"",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, registry.ExpandText(tc.in))
+			var streamed strings.Builder
+			decoder := newCitationStreamExpander(registry)
+			for i := range len(tc.in) {
+				streamed.WriteString(decoder.Feed(tc.in[i : i+1]))
+			}
+			streamed.WriteString(decoder.Flush())
+			require.Equal(t, tc.want, streamed.String(), "streamed text")
+		})
+	}
+}
+
+func TestRegisteredNonCitableLegacyRefIsRemoved(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.registerChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"}, false)
+	text := `历史 <ref id="c1"/>。`
+
+	require.Equal(t, "历史 。", registry.ExpandText(text))
+	var streamed strings.Builder
+	decoder := newCitationStreamExpander(registry)
+	for i := range len(text) {
+		streamed.WriteString(decoder.Feed(text[i : i+1]))
+	}
+	streamed.WriteString(decoder.Flush())
+	require.Equal(t, "历史 。", streamed.String())
 }
 
 func TestDisabledCitationsStillDropProtocolRefs(t *testing.T) {
