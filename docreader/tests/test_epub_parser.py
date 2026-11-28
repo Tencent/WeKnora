@@ -573,7 +573,11 @@ def _epub_with_chapter_body(body: str) -> bytes:
 
 
 def _ordered_epub_bytes(
-    manifest: list[str], spine: list[str], svg_cover_in_spine: bool = False
+    manifest: list[str],
+    spine: list[str],
+    svg_cover_in_spine: bool = False,
+    *,
+    chapter_files: dict[str, str] | None = None,
 ) -> bytes:
     """Write an EPUB whose manifest lists the documents in ``manifest`` order
     and whose spine reads them in ``spine`` order."""
@@ -582,9 +586,15 @@ def _ordered_epub_bytes(
     book.set_title("Ordered EPUB")
     book.set_language("en")
 
+    chapter_files = chapter_files or {}
     chapters = {}
     for name in manifest:
-        chapter = epub.EpubHtml(title=name, file_name=f"text/{name}.xhtml", lang="en")
+        chapter = epub.EpubHtml(
+            title=name,
+            file_name=chapter_files.get(name, f"text/{name}.xhtml"),
+            media_type="application/xhtml+xml",
+            lang="en",
+        )
         chapter.content = f"<html><body><p>Body of {name}.</p></body></html>"
         book.add_item(chapter)
         chapters[name] = chapter
