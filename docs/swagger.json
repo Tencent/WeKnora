@@ -36052,6 +36052,10 @@
                 "agent_id": {
                     "type": "string"
                 },
+                "agent_source_tenant_id": {
+                    "type": "string",
+                    "example": "0"
+                },
                 "knowledge_base_ids": {
                     "type": "array",
                     "items": {
