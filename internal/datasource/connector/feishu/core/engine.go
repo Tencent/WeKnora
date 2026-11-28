@@ -155,7 +155,13 @@ func runSync[N any](
 		lastCheckpoint = time.Now()
 	}
 	for _, resourceID := range resourceIDs {
-		nodes, partial, err := ops.List(ctx, client, resourceID)
+		listingCtx, listing := startListing(ctx, resourceID)
+		nodes, partial, err := ops.List(listingCtx, client, resourceID)
+		// Walkers may downgrade child errors to partial results. A failed
+		// checkpoint must retry the job before emitting items or deletions.
+		if listing.err != nil {
+			return nil, listing.err
+		}
 		if err != nil {
 			return nil, fmt.Errorf("list %s for resource %s: %w", ops.ResourceNoun(), resourceID, err)
 		}
@@ -285,8 +291,9 @@ func runSync[N any](
 
 		// Detect deleted nodes (only when the full tree was listed successfully).
 		// A partial listing did not enumerate the whole subtree, so deletion
-		// detection would false-positive.
-		if partial == nil && prevTimes != nil {
+		// detection would false-positive. A retry that mixed saved pages with a
+		// live continuation also defers absence-based deletion until the next fresh listing.
+		if partial == nil && !listing.restored && prevTimes != nil {
 			if prev, ok := prevTimes[resourceID]; ok {
 				for tok := range prev {
 					if !currentNodes[tok] {

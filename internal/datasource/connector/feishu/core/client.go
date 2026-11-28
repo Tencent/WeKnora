@@ -474,11 +474,7 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 // ListWikiNodes returns all nodes (documents) under a wiki space.
 // If parentNodeToken is empty, returns top-level nodes.
 func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeToken string) ([]WikiNode, error) {
-	var allNodes []WikiNode
-	pageToken := ""
-	seenPageTokens := make(map[string]struct{})
-
-	for {
+	fetch := func(pageToken string) (listingPage[WikiNode], error) {
 		path := fmt.Sprintf("/open-apis/wiki/v2/spaces/%s/nodes?page_size=50", spaceID)
 		if parentNodeToken != "" {
 			path += "&parent_node_token=" + parentNodeToken
@@ -489,42 +485,30 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 
 		var resp WikiNodeListResponse
 		if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
-			return nil, fmt.Errorf("list wiki nodes: %w", err)
+			return listingPage[WikiNode]{}, fmt.Errorf("list wiki nodes: %w", err)
 		}
 		if resp.Code != 0 {
 			if resp.Code == feishuErrCodeWikiNotFound {
-				return nil, fmt.Errorf(
+				return listingPage[WikiNode]{}, fmt.Errorf(
 					"list wiki nodes error: code=%d msg=%s: %w",
 					resp.Code, resp.Msg, datasource.ErrResourceNotFound,
 				)
 			}
-			return nil, fmt.Errorf("list wiki nodes error: code=%d msg=%s", resp.Code, resp.Msg)
+			return listingPage[WikiNode]{}, fmt.Errorf("list wiki nodes error: code=%d msg=%s", resp.Code, resp.Msg)
 		}
 
-		for _, node := range resp.Data.Items {
-			if parentNodeToken != "" && node.ParentNodeID == "" {
+		for i := range resp.Data.Items {
+			node := &resp.Data.Items[i]
+			if node.ParentNodeID == "" {
 				node.ParentNodeID = parentNodeToken
 			}
 			if node.SpaceID == "" {
 				node.SpaceID = spaceID
 			}
-			allNodes = append(allNodes, node)
 		}
-
-		if !resp.Data.HasMore {
-			break
-		}
-		if resp.Data.PageToken == "" {
-			return nil, fmt.Errorf("feishu wiki node pagination: has_more=true with a missing page token")
-		}
-		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
-			return nil, fmt.Errorf("feishu wiki node pagination repeated page token %q", resp.Data.PageToken)
-		}
-		seenPageTokens[resp.Data.PageToken] = struct{}{}
-		pageToken = resp.Data.PageToken
+		return listingPage[WikiNode]{Items: resp.Data.Items, More: resp.Data.HasMore, Next: resp.Data.PageToken}, nil
 	}
-
-	return allNodes, nil
+	return listPages(ctx, []string{"wiki", spaceID, parentNodeToken}, "feishu wiki node", fetch)
 }
 
 // GetWikiNode returns metadata for a single wiki node.
@@ -955,28 +939,11 @@ func (c *Client) GetDriveFolderMeta(ctx context.Context, folderToken string) (dr
 
 // ListDriveFilesAllPages lists every direct child of a folder across all pages.
 func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string) ([]DriveFile, error) {
-	var all []DriveFile
-	pageToken := ""
-	seenPageTokens := make(map[string]struct{})
-	for {
-		files, next, hasMore, err := c.listDriveFiles(ctx, folderToken, pageToken)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, files...)
-		if !hasMore {
-			break
-		}
-		if next == "" {
-			return nil, fmt.Errorf("feishu drive file pagination: has_more=true with a missing page token")
-		}
-		if _, exists := seenPageTokens[next]; exists {
-			return nil, fmt.Errorf("feishu drive file pagination repeated page token %q", next)
-		}
-		seenPageTokens[next] = struct{}{}
-		pageToken = next
+	fetch := func(pageToken string) (listingPage[DriveFile], error) {
+		files, next, more, err := c.listDriveFiles(ctx, folderToken, pageToken)
+		return listingPage[DriveFile]{Items: files, Next: next, More: more}, err
 	}
-	return all, nil
+	return listPages(ctx, []string{"drive", folderToken}, "feishu drive file", fetch)
 }
 
 // WalkDriveTree walks a Drive folder subtree depth-first and is the single
