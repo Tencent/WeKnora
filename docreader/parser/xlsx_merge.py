@@ -245,7 +245,14 @@ def fill_merged_cells_xlsx(
     if active_sheet in wb.worksheets:
         wb.active = active_sheet
     elif wb.worksheets:
-        wb.active = wb.worksheets[0]
+        # A dashboard chart can be the only visible sheet. In that case
+        # the temporary workbook needs one visible data sheet to be saved.
+        fallback = next(
+            (ws for ws in wb.worksheets if ws.sheet_state == "visible"),
+            wb.worksheets[0],
+        )
+        fallback.sheet_state = "visible"
+        wb.active = fallback
     for ws in wb.worksheets:
         ws._charts.clear()
 
