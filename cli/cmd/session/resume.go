@@ -168,7 +168,11 @@ func runResume(ctx context.Context, opts *ResumeOptions, _ *cmdutil.FormatOption
 	// response_type=error frame) BEFORE returning, so raw passthrough still
 	// emits every event; on a terminal error frame the SDK then returns an
 	// *SSEStreamError. No CLI-level early-terminate is needed.
+	completed := false
 	cb := func(r *sdk.StreamResponse) error {
+		if r.ResponseType == sdk.ResponseTypeComplete {
+			completed = true
+		}
 		return output.EmitSDKEvent(w, r)
 	}
 	err := svc.ContinueStream(ctx, opts.SessionID, opts.MessageID, cb)
@@ -182,6 +186,9 @@ func runResume(ctx context.Context, opts *ResumeOptions, _ *cmdutil.FormatOption
 		// pre-stream HTTP failure (e.g. 404 for an unknown message_id) still
 		// surfaces via ClassifyHTTPError as resource.not_found etc.
 		return cmdutil.WrapStream(err, "resume stream")
+	}
+	if !completed {
+		return cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event")
 	}
 	return nil
 }

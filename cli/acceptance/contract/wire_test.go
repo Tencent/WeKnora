@@ -370,3 +370,42 @@ func searchTwoResults(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+func TestSessionResumeRequiresCompletion(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		terminal string
+		wantExit int
+		wantCode string
+	}{
+		{name: "EOF after answer", wantExit: 1, wantCode: "local.sse_stream_aborted"},
+		{name: "complete", terminal: "data: {\"response_type\":\"complete\",\"done\":true}\n\n"},
+		{name: "terminal error", terminal: "data: {\"response_type\":\"error\",\"content\":\"generation failed\",\"done\":true}\n\n", wantExit: 7, wantCode: "server.error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/api/v1/sessions/continue-stream/session-1" ||
+					r.URL.Query().Get("message_id") != "message-1" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("data: {\"response_type\":\"answer\",\"content\":\"partial answer\",\"done\":true}\n\n" + tc.terminal))
+			}))
+			defer srv.Close()
+
+			f := newTestFactory(t, srv, sdk.NewClient(srv.URL))
+			stdout, stderr, code := runCmd(t, f, "session", "resume", "session-1", "--message", "message-1", "--format", "ndjson")
+			if !strings.Contains(stdout, `"message_id":"message-1"`) ||
+				!strings.Contains(stdout, `"content":"partial answer"`) {
+				t.Fatalf("resume must emit the init and received answer on stdout, got %q (stderr %q)", stdout, stderr)
+			}
+			if code != tc.wantExit {
+				t.Errorf("exit = %d, want %d (stderr %q)", code, tc.wantExit, stderr)
+			}
+			if (tc.wantCode == "" && stderr != "") || (tc.wantCode != "" && !strings.Contains(stderr, tc.wantCode)) {
+				t.Errorf("stderr = %q, want error code %q", stderr, tc.wantCode)
+			}
+		})
+	}
+}
