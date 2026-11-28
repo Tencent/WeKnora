@@ -407,7 +407,7 @@ Agents parse the first colon to extract the typed code. The exit code class (see
 | `local.kb_not_found` | 1 | no | list available with `weknora kb list` |
 | `local.keychain_denied` | 1 | no (system-level) | verify keyring access; falls back to file storage |
 | `local.project_link_corrupt` | 1 | no | remove `.weknora/project.yaml` and run `weknora link` again |
-| `local.sse_stream_aborted` | 1 | yes (rerun chat / session ask) | the streaming answer was cut off mid-flight; retry, or pass `--format json` to buffer the full response |
+| `local.sse_stream_aborted` | 1 | yes (resume the existing message when its IDs are known) | the stream ended early. Retry `session resume` with the same session and message IDs |
 | `local.unimplemented` | 1 | no | (planned in a future release) |
 | `local.upload_file_not_found` | 1 | no | verify the path is correct and readable |
 | `local.user_aborted` | 1 | no (user said no) | no action taken; pass `-y/--yes` to skip the confirmation prompt |
@@ -465,9 +465,9 @@ The server **replays all stored events from the start** of the assistant message
 
 ### Agent contract
 
-1. **Dedupe by message_id** (or maintain a per-message event hash set). Naively processing all received events causes duplicate side effects (re-running tool calls, re-rendering answers).
+1. **Rebuild the partial answer for this message** from the start of each replay. Buffered text chunks can be combined into a single frame. Treat replayed tool calls as history to avoid repeating their side effects.
 2. **Capture message_id from the init event** of the original `chat` or `session ask` invocation — the CLI injects `{"event":"init", "session_id":"...", "message_id":"..."}` as the first NDJSON line.
-3. **Handle `local.sse_stream_aborted` typed error**: server-side buffer expired (TTL exceeded) or process restarted (memory mode). The message is no longer recoverable; restart the original query.
+3. **On `local.sse_stream_aborted` (exit 1)**, retry `session resume` with the same IDs. The replay ended before its `complete` event. Submitting the original query again starts a new run.
 
 ### Server-side buffer TTL
 
@@ -476,7 +476,7 @@ The server **replays all stored events from the start** of the assistant message
 | `STREAM_MANAGER_TYPE=redis` | **1 hour** (server-side; not configurable from the CLI) |
 | `STREAM_MANAGER_TYPE=memory` (default) | **Process lifetime** (server restart = data loss; no explicit cleanup logic) |
 
-After TTL, `weknora session resume` returns the typed error `local.sse_stream_aborted`, which maps to exit code 1 per the Error code reference.
+If no buffered events are available when replay starts, the server returns HTTP 404 and the CLI reports `resource.not_found` (exit 4). Check the session's persisted messages with `weknora message list --session <session-id>`.
 
 ## Dry-run contract
 

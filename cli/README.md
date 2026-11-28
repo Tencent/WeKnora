@@ -380,7 +380,7 @@ weknora session ask "..." --agent ag_xxxx --format ndjson | tee /tmp/stream.ndjs
 # Resume the same stream:
 weknora session resume sess_abc --message msg_xyz
 # Server REPLAYS all stored events from the start, then tails new ones.
-# Agent must dedupe (by message_id or event hash) to avoid double-processing.
+# Rebuild the partial answer for this message: replay can combine earlier text chunks.
 ```
 
 ### Tool-approval unlock chain
@@ -398,7 +398,9 @@ weknora session resume sess_abc --message msg_xyz
 
 Pass `--modified-args '{"key":"value"}'` to replace tool arguments on approve (must be a non-empty JSON object). Never auto-pass `-y` — the approval is the exit-10 human-in-the-loop gate.
 
-Server-side buffer TTL: 1 hour for redis mode; process lifetime for memory mode (default). After TTL, expect `local.sse_stream_aborted` typed error.
+If the connection closes cleanly before a `complete` event, the CLI reports `local.sse_stream_aborted` (exit 1). Retry `session resume` with the same IDs. Submitting the question again starts a new run and may repeat tool calls.
+
+The Redis replay buffer has a one-hour TTL. The default in-memory buffer is lost on server restart. If no buffered events are available when replay starts, the server returns HTTP 404 (`resource.not_found`, exit 4).
 
 See `cli/AGENTS.md` "Stream recovery" section for the full agent contract.
 

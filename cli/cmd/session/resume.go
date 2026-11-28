@@ -6,13 +6,12 @@
 //   - Replay-from-0 + tail: every connection replays the entire stored event
 //     log from index 0, then tails any new events. NOT a cursor-from-disconnect
 //     model. Agents that already consumed events on the original stream MUST
-//     dedupe (by message_id + event hash, or by AssistantMessageID + content
-//     fingerprint) to avoid double-processing.
+//     rebuild the partial result from replay. Buffered text chunks may be
+//     combined, so their frame boundaries can differ from the live stream.
 //   - Buffer TTL:
 //     redis mode  - 1h hardcoded (not configurable from the CLI)
 //     memory mode - process lifetime (server restart = data loss)
-//     After TTL the server returns an error which the CLI maps to
-//     local.sse_stream_aborted.
+//     An empty replay buffer returns HTTP 404 (resource.not_found).
 //
 // Output shape matches `weknora chat` and `weknora session ask` NDJSON mode:
 // one CLI-injected init line carrying {session_id, message_id, profile} at
@@ -64,14 +63,16 @@ func NewCmdResume(f *cmdutil.Factory) *cobra.Command {
 
 The server replays the entire stored event log for the given (session_id, message_id)
 from index 0, then tails any new events. This is NOT a cursor-from-disconnect
-model: agents that already consumed events on the original stream MUST dedupe
-(by message_id or event content hash) to avoid double-processing.
+model: rebuild the partial answer from the replay. The server can combine
+previously received text chunks into a single frame.
 
 Buffer TTL:
   - redis mode:  1h hardcoded (not configurable from the CLI)
   - memory mode: process lifetime (server restart = data loss)
 
-After TTL expiry the CLI surfaces local.sse_stream_aborted.
+If the connection closes cleanly before a complete event, retry this command
+with the same session and message IDs. If no buffered events are available
+when replay starts, the CLI reports resource.not_found.
 
 Typical use cases:
   - Network blip mid-stream: re-attach with the same session_id + message_id
@@ -120,8 +121,9 @@ silently treated as NDJSON.`,
 		},
 		Output: "NDJSON stream: {type:init, session_id, message_id, profile} then SDK StreamResponse events (response_type, content, done, knowledge_references, assistant_message_id, ...)",
 		Warnings: []string{
-			"Server replays from event 0 (NOT cursor-from-disconnect). Agents that already consumed events on the original stream MUST dedupe by message_id + event hash to avoid double-processing.",
-			"Buffer TTL: redis mode 1h hardcoded; memory mode = process lifetime. After expiry the CLI returns local.sse_stream_aborted.",
+			"Replay starts at event 0 and may combine text chunks. Rebuild the partial answer from the replay.",
+			"On local.sse_stream_aborted, retry session resume with the same IDs. " +
+				"An empty buffer at the start of replay returns resource.not_found.",
 			"Output is always NDJSON (an event stream, not an envelope): --jq does not apply and --format text/json/ndjson behave identically here — parse the event lines yourself.",
 		},
 	})
@@ -168,7 +170,11 @@ func runResume(ctx context.Context, opts *ResumeOptions, _ *cmdutil.FormatOption
 	// response_type=error frame) BEFORE returning, so raw passthrough still
 	// emits every event; on a terminal error frame the SDK then returns an
 	// *SSEStreamError. No CLI-level early-terminate is needed.
+	completed := false
 	cb := func(r *sdk.StreamResponse) error {
+		if r.ResponseType == sdk.ResponseTypeComplete {
+			completed = true
+		}
 		return output.EmitSDKEvent(w, r)
 	}
 	err := svc.ContinueStream(ctx, opts.SessionID, opts.MessageID, cb)
@@ -182,6 +188,10 @@ func runResume(ctx context.Context, opts *ResumeOptions, _ *cmdutil.FormatOption
 		// pre-stream HTTP failure (e.g. 404 for an unknown message_id) still
 		// surfaces via ClassifyHTTPError as resource.not_found etc.
 		return cmdutil.WrapStream(err, "resume stream")
+	}
+	if !completed {
+		return cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event").
+			WithHint("retry session resume with the same session and message IDs to replay the existing answer")
 	}
 	return nil
 }
