@@ -104,6 +104,31 @@ func TestFencedRefSplitAcrossChunksStaysLiteral(t *testing.T) {
 	}
 }
 
+func TestRegisteredCitationInsideCodeStaysLiteral(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
+	cases := []string{
+		"写法是 `<ref id=\"chunk://1\"/>`。",
+		"```html\n<ref id=\"chunk://1\"/>\n```",
+		"前文 `<ref id=\"chunk://1\"/>` 后文 <ref id=\"chunk://1\"/>",
+	}
+	for _, text := range cases {
+		got := registry.ExpandText(text)
+		var streamed strings.Builder
+		decoder := newCitationStreamExpander(registry)
+		for i := range len(text) {
+			streamed.WriteString(decoder.Feed(text[i : i+1]))
+		}
+		streamed.WriteString(decoder.Flush())
+		require.Equal(t, got, streamed.String(), "streamed text")
+	}
+
+	require.Equal(t,
+		"`<ref id=\"chunk://1\"/>` <kb doc=\"Doc\" chunk_id=\"chunk-1\" />",
+		registry.ExpandText("`<ref id=\"chunk://1\"/>` <ref id=\"chunk://1\"/>"),
+	)
+}
+
 func TestDisabledCitationsStillDropProtocolRefs(t *testing.T) {
 	registry := newSourceRegistry(false)
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})

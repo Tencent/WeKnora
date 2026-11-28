@@ -205,13 +205,8 @@ func (r *sourceRegistry) ExpandText(text string) string {
 	if r == nil || text == "" {
 		return text
 	}
-	// Public citation tags are output-only. Drop any instance written directly
-	// by the model, then create canonical tags solely from registered handles.
-	text = modelKBTagRE.ReplaceAllString(text, "")
-	text = modelWebTagRE.ReplaceAllString(text, "")
-	return refCandidateRE.ReplaceAllStringFunc(text, func(tag string) string {
-		return rewriteRefTag(r, tag)
-	})
+	expander := newCitationStreamExpander(r)
+	return expander.Feed(text) + expander.Flush()
 }
 
 // citationTag renders the public citation for a handle backed by current
@@ -242,56 +237,89 @@ func escapeAttr(value string) string { return html.EscapeString(value) }
 // citationStreamExpander prevents partial private <ref/> tags from reaching SSE while
 // preserving normal streaming for all other content.
 type citationStreamExpander struct {
-	registry *sourceRegistry
-	pending  string
+	registry     *sourceRegistry
+	pending      string
+	pendingTicks string
+	markdown     citationMarkdownState
 }
 
 func newCitationStreamExpander(registry *sourceRegistry) *citationStreamExpander {
-	return &citationStreamExpander{registry: registry}
+	return &citationStreamExpander{
+		registry: registry,
+		markdown: citationMarkdownState{lineStart: true},
+	}
 }
 
 func (d *citationStreamExpander) Feed(chunk string) string {
 	if d == nil || d.registry == nil {
 		return chunk
 	}
-	data := d.pending + chunk
+	data := d.pending + d.pendingTicks + chunk
 	d.pending = ""
+	d.pendingTicks = ""
 	var out strings.Builder
 	for data != "" {
-		idx := strings.Index(data, "<")
-		if idx < 0 {
+		if data[0] == '`' || data[0] == '~' {
+			run := 1
+			for run < len(data) && data[run] == data[0] {
+				run++
+			}
+			if run == len(data) {
+				d.pendingTicks = data
+				break
+			}
+			d.markdown.consumeRun(data[0], run)
+			out.WriteString(data[:run])
+			data = data[run:]
+			continue
+		}
+		if data[0] == '<' {
+			if d.markdown.inCode() {
+				d.markdown.consumeText("<")
+				out.WriteByte('<')
+				data = data[1:]
+				continue
+			}
+			lower := strings.ToLower(data)
+			if isSourceTagPending(lower) && !strings.Contains(data, ">") {
+				d.pending = data
+				break
+			}
+			if isRefTagStart(lower) {
+				end := strings.IndexByte(data, '>')
+				if end < 0 {
+					d.pending = data
+					break
+				}
+				tag := data[:end+1]
+				out.WriteString(rewriteRefTag(d.registry, tag))
+				data = data[end+1:]
+				continue
+			}
+			if isNamedTagStart(lower, "kb") || isNamedTagStart(lower, "web") {
+				end := strings.IndexByte(data, '>')
+				if end < 0 {
+					d.pending = data
+					break
+				}
+				data = data[end+1:]
+				continue
+			}
+			d.markdown.consumeText("<")
+			out.WriteByte('<')
+			data = data[1:]
+			continue
+		}
+
+		next := strings.IndexAny(data, "`~<")
+		if next < 0 {
+			d.markdown.consumeText(data)
 			out.WriteString(data)
 			break
 		}
-		out.WriteString(data[:idx])
-		data = data[idx:]
-		lower := strings.ToLower(data)
-		if isSourceTagPending(lower) && !strings.Contains(data, ">") {
-			d.pending = data
-			break
-		}
-		if isRefTagStart(lower) {
-			end := strings.IndexByte(data, '>')
-			if end < 0 {
-				d.pending = data
-				break
-			}
-			tag := data[:end+1]
-			out.WriteString(rewriteRefTag(d.registry, tag))
-			data = data[end+1:]
-			continue
-		}
-		if isNamedTagStart(lower, "kb") || isNamedTagStart(lower, "web") {
-			end := strings.IndexByte(data, '>')
-			if end < 0 {
-				d.pending = data
-				break
-			}
-			data = data[end+1:]
-			continue
-		}
-		out.WriteByte('<')
-		data = data[1:]
+		d.markdown.consumeText(data[:next])
+		out.WriteString(data[:next])
+		data = data[next:]
 	}
 	return out.String()
 }
@@ -326,12 +354,81 @@ func (d *citationStreamExpander) Flush() string {
 	if d == nil {
 		return ""
 	}
+	var out strings.Builder
+	if d.pendingTicks != "" {
+		d.markdown.consumeRun(d.pendingTicks[0], len(d.pendingTicks))
+		out.WriteString(d.pendingTicks)
+		d.pendingTicks = ""
+	}
 	pending := d.pending
 	d.pending = ""
-	if isSourceTagPending(strings.ToLower(pending)) && !keepLiteralRef(pending) {
-		return ""
+	if pending == "" {
+		return out.String()
 	}
-	return rewriteRefTag(d.registry, pending)
+	if d.markdown.inCode() ||
+		!isSourceTagPending(strings.ToLower(pending)) ||
+		keepLiteralRef(pending) {
+		out.WriteString(rewriteRefTag(d.registry, pending))
+	}
+	return out.String()
+}
+
+type citationMarkdownState struct {
+	fenceChar byte
+	fenceLen  int
+	inlineLen int
+	lineStart bool
+	indent    int
+}
+
+func (s *citationMarkdownState) inCode() bool {
+	return s != nil && (s.fenceLen > 0 || s.inlineLen > 0)
+}
+
+func (s *citationMarkdownState) consumeText(text string) {
+	if s == nil {
+		return
+	}
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '\n':
+			s.lineStart = true
+			s.indent = 0
+		case ' ':
+			if s.lineStart && s.indent < 4 {
+				s.indent++
+			} else if s.lineStart {
+				s.lineStart = false
+			}
+		default:
+			s.lineStart = false
+		}
+	}
+}
+
+func (s *citationMarkdownState) consumeRun(char byte, length int) {
+	if s == nil || length == 0 {
+		return
+	}
+	atLineStart := s.lineStart && s.indent <= 3
+	switch {
+	case s.fenceLen > 0:
+		if atLineStart && char == s.fenceChar && length >= s.fenceLen {
+			s.fenceChar = 0
+			s.fenceLen = 0
+		}
+	case s.inlineLen > 0:
+		if char == '`' && length == s.inlineLen {
+			s.inlineLen = 0
+		}
+	case atLineStart && (char == '`' || char == '~') && length >= 3:
+		s.fenceChar = char
+		s.fenceLen = length
+	case char == '`':
+		s.inlineLen = length
+	}
+	s.lineStart = false
+	s.indent = 0
 }
 
 // rewriteRefTag expands one citation tag. Tags that do not name a source
