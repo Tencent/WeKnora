@@ -332,6 +332,10 @@ func (c *Connector) fetchStream(
 		currentRoots[root.ResourceID] = true
 	}
 	baseline, next := prepareSyncCursors(old, forceFull)
+	refreshImages := refreshPageImagesEnabled(ds)
+	if refreshImages && next.PageImageVersions == nil {
+		next.PageImageVersions = map[string]string{}
+	}
 	prepareAttachmentCursor(decodeCursor(old), &next, forceFull, syncAttachmentsEnabled(ds))
 	// Accepted attachments establish a page baseline even if its body failed.
 	// Include those pages in the existing empty-list/mass-deletion safeguards.
@@ -407,15 +411,25 @@ func (c *Connector) fetchStream(
 			}
 			seenPages[summary.ID] = struct{}{}
 			version, versionKnown := pageVersion(summary)
-			if syncAttachmentsEnabled(ds) {
-				// Attachment revisions are independent of the page-body version.
-				if err := client.syncPageAttachments(ctx, resourceID, summary, &next, h); err != nil {
-					return nil, err
+			imageVersion, imagesKnown := "", true
+			if refreshImages || syncAttachmentsEnabled(ds) {
+				files, err := client.attachments(ctx, summary.ID)
+				if err != nil {
+					return nil, fmt.Errorf("list attachments for Confluence page %s: %w", summary.ID, err)
+				}
+				if refreshImages {
+					imageVersion, imagesKnown = pageImageVersion(files)
+				}
+				if syncAttachmentsEnabled(ds) {
+					if err := client.syncPageAttachments(ctx, resourceID, summary, files, &next, h); err != nil {
+						return nil, err
+					}
 				}
 			}
+			imagesChanged := refreshImages && (!imagesKnown || next.PageImageVersions[summary.ID] != imageVersion)
 			// An unknown version cannot prove a page unchanged, so it must
 			// always refresh the body instead of skipping on a stable "t:".
-			if versionKnown {
+			if versionKnown && !imagesChanged {
 				if forceFull {
 					if next.SpacePages[resourceID][summary.ID] == version {
 						datasource.RecordUnchangedItem(h)
@@ -429,7 +443,7 @@ func (c *Connector) fetchStream(
 			full, err := client.body(ctx, summary.ID)
 			var item types.FetchedItem
 			if err == nil {
-				item, err = markdownItem(ctx, client, resourceID, summary, full)
+				item, err = markdownItemWithImagePolicy(ctx, client, resourceID, summary, full, refreshImages)
 			}
 			if err != nil {
 				if ctx.Err() != nil {
@@ -469,6 +483,9 @@ func (c *Connector) fetchStream(
 				version = bodyVersion
 			}
 			next.SpacePages[resourceID][summary.ID] = version
+			if refreshImages && imagesKnown {
+				next.PageImageVersions[summary.ID] = imageVersion
+			}
 			if err := h.Checkpoint(ctx, next.syncCursor()); err != nil {
 				return nil, err
 			}
@@ -588,6 +605,11 @@ func (c *Connector) fetchStream(
 		}
 	}
 	next.SpacePages = committedRoots
+	for id := range next.PageImageVersions {
+		if _, present := seenPages[id]; !present {
+			delete(next.PageImageVersions, id)
+		}
+	}
 	next.FullSync = false
 	next.FullSyncBaseline = nil
 	retainAttachmentBaseline(&next)
@@ -639,11 +661,26 @@ func markdownItem(
 	summary page,
 	full pageBody,
 ) (types.FetchedItem, error) {
+	return markdownItemWithImagePolicy(ctx, client, resourceID, summary, full, false)
+}
+
+func markdownItemWithImagePolicy(
+	ctx context.Context, client *client, resourceID string, summary page, full pageBody, requireImages bool,
+) (types.FetchedItem, error) {
 	html := full.Body.View.Value
 	// Inline same-origin private Confluence images as data URIs so the generic
 	// docparser image pipeline can persist them and rewrite to resource:// URLs.
-	// Best-effort: a failed image keeps its original src and never fails the page.
-	html = newAssetResolver(client).Resolve(ctx, html)
+	// Normally best-effort; attachment refresh must not acknowledge failed downloads.
+	resolver := newAssetResolver(client)
+	html = resolver.Resolve(ctx, html)
+	if requireImages && resolver.downloadFailed {
+		return types.FetchedItem{}, fmt.Errorf(
+			"could not refresh Confluence page images; retaining previous version for retry",
+		)
+	}
+	if err := ctx.Err(); err != nil {
+		return types.FetchedItem{}, err
+	}
 	markdown, err := convertPageWithTasks(html)
 	if err != nil {
 		return types.FetchedItem{}, err
