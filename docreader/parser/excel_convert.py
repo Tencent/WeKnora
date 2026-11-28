@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -147,7 +148,8 @@ def find_soffice() -> Optional[str]:
         if path and os.path.exists(path):
             return path
 
-    result = subprocess.run(["which", "soffice"], capture_output=True, text=True)
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip()
-    return None
+    # `which` is a POSIX tool: a Windows host without Git has no such executable,
+    # so spawning it raised FileNotFoundError and that error escaped
+    # normalize_excel_bytes() before it could report an unrecognized spreadsheet.
+    # shutil.which() is portable and also honours PATHEXT on Windows.
+    return shutil.which("soffice")
