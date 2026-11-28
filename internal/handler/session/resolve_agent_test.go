@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -69,6 +70,7 @@ func (s *resolveAgentShareStub) CountByOrganizations(context.Context, []string) 
 }
 
 type resolveOwnAgentStub struct {
+	interfaces.CustomAgentService
 	agent *types.CustomAgent
 	err   error
 }

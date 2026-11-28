@@ -381,6 +381,7 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        creator  query  string  false  "创建者过滤，仅 mine 与 others 生效"  Enums(mine, others)  extensions(x-agent)
+// @Param include_usage_summary query bool false "Include per-agent activity in the current workspace over the last 30 days"
 // @Success      200  {object}  handler.ListAgentsResponse  "智能体列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
@@ -457,6 +458,13 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	// 内建 agent（IsBuiltin=true, CreatedBy=""）不会有 creator_name，前端按 builtin
 	// 分支单独渲染。
 	enrichAgentCreatorNames(ctx, h.userService, agents)
+	if c.Query("include_usage_summary") == "true" {
+		if err := h.service.PopulateUsageSummaries(ctx, agents); err != nil {
+			logger.Errorf(ctx, "Failed to load agent usage: %v", err)
+			_ = c.Error(errors.NewInternalServerError("Failed to load agent usage"))
+			return
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":                true,

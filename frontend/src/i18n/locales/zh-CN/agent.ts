@@ -1795,6 +1795,7 @@ export default {
     disabled: '已停用',
     disable: '停用',
     enable: '启用',
+    usage30Days: '近 30 天 · {answers} 次回答 · {sessions} 个会话 · {users} 位已识别用户',
     noDescription: '暂无描述',
     selectAgent: '选择智能体',
     noAgents: '暂无智能体',

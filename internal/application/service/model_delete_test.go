@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -79,6 +81,7 @@ func (s *stubKBRepoForModelDelete) ListUserKBPinIDs(context.Context, uint64, str
 }
 
 type stubAgentRepoForModelDelete struct {
+	interfaces.CustomAgentRepository
 	usages   []types.ModelUsageResource
 	count    *int64
 	usageErr error
@@ -338,6 +341,7 @@ func (s *stubTenantServiceForModelDelete) ListTenants(context.Context) ([]*types
 func (s *stubTenantServiceForModelDelete) UpdateTenant(context.Context, *types.Tenant) (*types.Tenant, error) {
 	return nil, nil
 }
+
 func (s *stubTenantServiceForModelDelete) SetChatHistoryConfig(
 	context.Context, uint64, *types.ChatHistoryConfig,
 ) error {

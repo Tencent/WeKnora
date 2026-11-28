@@ -1595,6 +1595,15 @@ definitions:
       label:
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.AgentUsageSummary:
+    properties:
+      answers:
+        type: integer
+      sessions:
+        type: integer
+      users:
+        type: integer
+    type: object
   github_com_Tencent_WeKnora_internal_types.AnswerStrategy:
     enum:
     - all
@@ -2990,6 +2999,8 @@ definitions:
       updated_at:
         type: string
         x-agent: true
+      usage_summary:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AgentUsageSummary'
     type: object
   github_com_Tencent_WeKnora_internal_types.CustomAgentConfig:
     properties:
@@ -3210,6 +3221,10 @@ definitions:
         type: boolean
         x-agent: true
         x-agent-detail: true
+      parallel_tool_calls:
+        description: Whether independent tool calls returned in the same ReAct round
+          execute concurrently.
+        type: boolean
       query_understand_model_id:
         description: |-
           Dedicated chat model ID for the query-understanding (rewrite + intent) step.
@@ -15503,6 +15518,11 @@ paths:
         name: creator
         type: string
         x-agent: true
+      - description: Include per-agent activity in the current workspace over the
+          last 30 days
+        in: query
+        name: include_usage_summary
+        type: boolean
       produces:
       - application/json
       responses:
@@ -25970,6 +25990,11 @@ paths:
         name: id
         required: true
         type: string
+      - description: Include per-agent activity in the current workspace over the
+          last 30 days
+        in: query
+        name: include_usage_summary
+        type: boolean
       produces:
       - application/json
       responses:
@@ -27919,6 +27944,12 @@ paths:
   /shared-agents:
     get:
       description: 返回所有共享给当前用户所在组织的智能体
+      parameters:
+      - description: Include per-agent activity in the current workspace over the
+          last 30 days
+        in: query
+        name: include_usage_summary
+        type: boolean
       produces:
       - application/json
       responses:

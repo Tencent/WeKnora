@@ -3,6 +3,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -10,6 +11,7 @@ import (
 // CustomAgentService defines the custom agent service interface
 // Provides high-level operations for agent creation, querying, updating, and deletion
 type CustomAgentService interface {
+	PopulateUsageSummaries(ctx context.Context, agents []*types.CustomAgent) error
 	// CreateAgent creates a new custom agent
 	// Parameters:
 	//   - ctx: Context information, carrying request tracking, user identity, etc.
@@ -92,6 +94,7 @@ type CustomAgentService interface {
 // CustomAgentRepository defines the custom agent repository interface
 // Responsible for agent data persistence and retrieval
 type CustomAgentRepository interface {
+	AgentUsage(ctx context.Context, tenantID uint64, ids []string, start, end time.Time) ([]types.AgentUsageRow, error)
 	// CreateAgent creates an agent record
 	// Parameters:
 	//   - ctx: Context information

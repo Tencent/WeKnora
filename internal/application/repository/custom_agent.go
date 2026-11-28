@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -136,4 +137,26 @@ func (r *customAgentRepository) ListNamesBySandboxConfigID(
 	query = scopeCustomAgentsBySandboxConfigID(query, configID)
 	err := query.Order("name ASC").Pluck("name", &names).Error
 	return names, err
+}
+
+func (r *customAgentRepository) AgentUsage(
+	ctx context.Context, tenantID uint64, ids []string, start, end time.Time,
+) ([]types.AgentUsageRow, error) {
+	var rows []types.AgentUsageRow
+	userSources := []string{
+		types.AuthSourceWeb, types.AuthSourceIM, types.AuthSourceAPIDirectHeader, types.AuthSourceAPISignedToken,
+	}
+	err := r.db.WithContext(ctx).Raw(`
+        SELECT m.agent_id, COALESCE(NULLIF(m.agent_tenant_id, 0), s.tenant_id) AS agent_tenant_id,
+               COUNT(*) AS answers, COUNT(DISTINCT s.id) AS sessions,
+               COUNT(DISTINCT CASE WHEN s.owner_auth_source IN ? THEN NULLIF(s.user_id, '') END) AS users
+        FROM messages m JOIN sessions s ON s.id = m.session_id
+        WHERE s.tenant_id = ? AND s.deleted_at IS NULL AND m.deleted_at IS NULL
+          AND m.agent_id IN ? AND m.role = 'assistant' AND m.is_completed = ?
+          AND m.created_at >= ? AND m.created_at < ?
+          AND (COALESCE(s.parent_session_id, '') = '' OR m.created_at >= s.created_at)
+        GROUP BY m.agent_id, COALESCE(NULLIF(m.agent_tenant_id, 0), s.tenant_id)`,
+		userSources,
+		tenantID, ids, true, start, end).Scan(&rows).Error
+	return rows, err
 }

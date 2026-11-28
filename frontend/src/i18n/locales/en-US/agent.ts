@@ -717,6 +717,7 @@ export default {
     disabled: 'Disabled',
     disable: 'Disable',
     enable: 'Enable',
+    usage30Days: 'Last 30 days · {answers} answers · {sessions} sessions · {users} identified users',
     noDescription: 'No description',
     selectAgent: 'Select Agent',
     noAgents: 'No agents',

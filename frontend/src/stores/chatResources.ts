@@ -190,13 +190,18 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
    * 智能体列表（支持 creator 筛选）。creator=all 走共享快照。
    */
   async function fetchAgentsForList(
-    params?: { creator?: ListCreatorFilter },
+    params?: { creator?: ListCreatorFilter; include_usage_summary?: boolean },
     force = false,
   ): Promise<{ data: CustomAgent[]; disabled_own_agent_ids: string[] }> {
     const creator = params?.creator ?? 'all'
     const orgStore = useOrganizationStore()
 
     // 带 creator 过滤的列表不进快照，但仍需刷新共享智能体（与全量路径保持一致）。
+    if (params?.include_usage_summary) {
+      if (force) void ensureAgents(true).catch(() => {})
+      const res = await listAgents({ creator, include_usage_summary: true })
+      return { data: res.data || [], disabled_own_agent_ids: res.disabled_own_agent_ids || [] }
+    }
     if (creator !== 'all') {
       if (force) void ensureAgents(true).catch(() => {})
       const [agentsRes] = await Promise.all([

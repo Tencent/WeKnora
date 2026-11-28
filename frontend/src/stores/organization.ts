@@ -466,11 +466,12 @@ export const useOrganizationStore = defineStore('organization', () => {
    * Fetch shared agents (shared to me through organizations).
    * 并发去重；快照只对拉取时的 UI 语言有效。
    */
+  let includeAgentUsage = false
   const sharedAgentsRequest = createVersionedRequestCoordinator(
     async () => {
       const locale = getCurrentLanguage()
       sharedAgentsInflightLocale = locale
-      const response = await listSharedAgents()
+      const response = await listSharedAgents(includeAgentUsage)
       return { response, locale }
     },
     ({ response, locale }) => {
@@ -492,7 +493,11 @@ export const useOrganizationStore = defineStore('organization', () => {
     },
   )
 
-  async function fetchSharedAgents(options?: { force?: boolean }) {
+  async function fetchSharedAgents(options?: { force?: boolean; includeUsage?: boolean }) {
+    if (options?.includeUsage && !includeAgentUsage) {
+      includeAgentUsage = true
+      sharedAgentsRequest.invalidate()
+    }
     const locale = getCurrentLanguage()
     const force = options?.force ?? false
     // 飞行中的请求是用另一种语言发起的：不能复用它，排在它后面再发一次。
@@ -793,6 +798,7 @@ export const useOrganizationStore = defineStore('organization', () => {
     sharedAgentsLoadedLocale = ''
     sharedAgentsInflightLocale = ''
     searchableOrganizationCache.clear()
+    includeAgentUsage = false
     organizationsRequest.invalidate()
     sharedKnowledgeBasesRequest.invalidate()
     sharedAgentsRequest.invalidate()

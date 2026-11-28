@@ -1795,6 +1795,7 @@ export default {
     disabled: 'Disabled',
     disable: 'Disable',
     enable: 'Enable',
+    usage30Days: 'За 30 дней · Ответы: {answers} · Сеансы: {sessions} · Известные пользователи: {users}',
     noDescription: 'No description',
     selectAgent: 'Select Agent',
     noAgents: 'No agents',

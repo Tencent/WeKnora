@@ -96,8 +96,23 @@ const (
 	AgentTypeCustom = "custom"
 )
 
+// AgentUsageSummary counts completed answers, sessions and identified users in the reporting window.
+type AgentUsageSummary struct {
+	Answers  int64 `json:"answers"`
+	Sessions int64 `json:"sessions"`
+	Users    int64 `json:"users"`
+}
+
+// AgentUsageRow associates activity with the workspace that owns the agent.
+type AgentUsageRow struct {
+	AgentID           string
+	AgentTenantID     uint64
+	AgentUsageSummary `gorm:"embedded"`
+}
+
 // CustomAgent represents a configurable AI agent (similar to GPTs)
 type CustomAgent struct {
+	UsageSummary *AgentUsageSummary `yaml:"-" json:"usage_summary,omitempty" gorm:"-"`
 	// Unique identifier of the agent (composite primary key with TenantID)
 	// For built-in agents, this is 'builtin-quick-answer' or 'builtin-smart-reasoning'
 	// For custom agents, this is a UUID
