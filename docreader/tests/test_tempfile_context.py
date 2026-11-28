@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from docreader.utils.tempfile import TempFileContext
+from docreader.utils.tempfile import TempDirContext, TempFileContext
 
 
 class TempFileContextTest(unittest.TestCase):
@@ -83,6 +83,44 @@ class TempFileContextTest(unittest.TestCase):
             with TempFileContext(b"x", ".doc") as path:
                 raise ValueError("body")
         self.assertFalse(os.path.exists(path))
+
+
+class TempDirContextTest(unittest.TestCase):
+    def test_a_reader_holding_a_file_does_not_replace_the_body_error(self):
+        # On Windows an open handle inside the directory makes rmtree raise
+        # PermissionError([WinError 32]); that must not hide the body's error.
+        handle = None
+        try:
+            with self.assertRaises(ValueError):
+                with TempDirContext() as temp_dir:
+                    path = os.path.join(temp_dir, "page.bin")
+                    with open(path, "wb") as f:
+                        f.write(b"payload")
+                    handle = open(path, "rb")
+                    raise ValueError("body")
+        finally:
+            if handle:
+                handle.close()
+
+    def test_cleanup_failure_does_not_replace_the_body_error(self):
+        with patch.object(
+            tempfile.TemporaryDirectory,
+            "cleanup",
+            side_effect=PermissionError(13, "still in use"),
+        ) as cleanup:
+            with self.assertRaises(ValueError) as ctx:
+                with TempDirContext():
+                    raise ValueError("body")
+        self.assertEqual(str(ctx.exception), "body")
+        cleanup.assert_called_once()
+
+    def test_normal_cleanup_removes_the_directory(self):
+        with TempDirContext() as temp_dir:
+            path = os.path.join(temp_dir, "page.bin")
+            with open(path, "wb") as f:
+                f.write(b"payload")
+            self.assertTrue(os.path.isdir(temp_dir))
+        self.assertFalse(os.path.exists(temp_dir))
 
 
 if __name__ == "__main__":

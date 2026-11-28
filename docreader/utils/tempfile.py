@@ -83,9 +83,22 @@ class TempDirContext:
         """
         Delete directory when exiting context
         """
-        if self.temp_dir and os.path.exists(self.temp_dir.name):
-            self.temp_dir.cleanup()
-            logger.info(f"Directory {self.temp_dir.name} has been deleted.")
+        if self.temp_dir:
+            # Removing the directory can fail while a reader still holds a file
+            # inside it: Windows refuses to unlink an open file, so rmtree
+            # leaves a PermissionError behind. As in
+            # ``TempFileContext._cleanup``, that failure must not replace the
+            # exception the body raised, or the caller loses the real cause to
+            # "the process cannot access the file".
+            try:
+                self.temp_dir.cleanup()
+            except OSError as e:
+                logger.warning(
+                    f"Could not delete temporary directory "
+                    f"{self.temp_dir.name}: {e}",
+                )
+            else:
+                logger.info(f"Directory {self.temp_dir.name} has been deleted.")
         # Return False to propagate exception (if any exception occurred)
         return False
 
