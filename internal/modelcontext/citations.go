@@ -160,10 +160,7 @@ func publicAttr(expression *regexp.Regexp, tag string) string {
 }
 
 var (
-	refTagRE       = regexp.MustCompile(`(?i)<ref\s+id\s*=\s*"([^"]+)"\s*/?>`)
-	refCandidateRE = regexp.MustCompile(`(?is)<ref(?:\s|$)[^>]*(?:>|$)`)
-	modelKBTagRE   = regexp.MustCompile(`(?is)<kb(?:\s|$)[^>]*(?:>|$)`)
-	modelWebTagRE  = regexp.MustCompile(`(?is)<web(?:\s|$)[^>]*(?:>|$)`)
+	refTagRE = regexp.MustCompile(`(?i)<ref\s+id\s*=\s*"([^"]+)"\s*/?>`)
 )
 
 var jsonCitationTagRE = regexp.MustCompile(`(?i)^<(?:ref|kb|web)\s+[a-z_]+\s*=\s*\\"`)
@@ -274,7 +271,7 @@ func (d *citationStreamExpander) Feed(chunk string) string {
 			continue
 		}
 		if data[0] == '<' {
-			if d.markdown.inCode() {
+			if d.markdown.inCode() || d.markdown.escaped() {
 				d.markdown.consumeText("<")
 				out.WriteByte('<')
 				data = data[1:]
@@ -365,8 +362,9 @@ func (d *citationStreamExpander) Flush() string {
 	if pending == "" {
 		return out.String()
 	}
-	if d.markdown.inCode() ||
-		!isSourceTagPending(strings.ToLower(pending)) ||
+	if d.markdown.inCode() {
+		out.WriteString(pending)
+	} else if !isSourceTagPending(strings.ToLower(pending)) ||
 		keepLiteralRef(pending) {
 		out.WriteString(rewriteRefTag(d.registry, pending))
 	}
@@ -374,11 +372,13 @@ func (d *citationStreamExpander) Flush() string {
 }
 
 type citationMarkdownState struct {
-	fenceChar byte
-	fenceLen  int
-	inlineLen int
-	lineStart bool
-	indent    int
+	fenceChar       byte
+	fenceLen        int
+	fenceCandidate  bool
+	inlineLen       int
+	lineStart       bool
+	indent          int
+	backslashRunLen int
 }
 
 func (s *citationMarkdownState) inCode() bool {
@@ -391,16 +391,26 @@ func (s *citationMarkdownState) consumeText(text string) {
 	}
 	for i := 0; i < len(text); i++ {
 		switch text[i] {
-		case '\n':
-			s.lineStart = true
-			s.indent = 0
+		case '\r', '\n':
+			s.endLine()
 		case ' ':
+			s.backslashRunLen = 0
 			if s.lineStart && s.indent < 4 {
 				s.indent++
 			} else if s.lineStart {
 				s.lineStart = false
 			}
+		case '\t':
+			s.backslashRunLen = 0
+			if !s.fenceCandidate {
+				s.lineStart = false
+			}
+		case '\\':
+			s.backslashRunLen++
+			s.lineStart = false
 		default:
+			s.backslashRunLen = 0
+			s.fenceCandidate = false
 			s.lineStart = false
 		}
 	}
@@ -411,24 +421,46 @@ func (s *citationMarkdownState) consumeRun(char byte, length int) {
 		return
 	}
 	atLineStart := s.lineStart && s.indent <= 3
+	escaped := s.escaped()
 	switch {
 	case s.fenceLen > 0:
-		if atLineStart && char == s.fenceChar && length >= s.fenceLen {
-			s.fenceChar = 0
-			s.fenceLen = 0
+		if s.fenceCandidate || !atLineStart || char != s.fenceChar || length < s.fenceLen {
+			s.fenceCandidate = false
+		} else {
+			// A closing fence must leave only whitespace on the rest of its line.
+			s.fenceCandidate = true
 		}
 	case s.inlineLen > 0:
 		if char == '`' && length == s.inlineLen {
 			s.inlineLen = 0
 		}
-	case atLineStart && (char == '`' || char == '~') && length >= 3:
+	case !escaped && atLineStart && (char == '`' || char == '~') && length >= 3:
 		s.fenceChar = char
 		s.fenceLen = length
-	case char == '`':
+	case !escaped && char == '`':
 		s.inlineLen = length
 	}
+	s.backslashRunLen = 0
 	s.lineStart = false
 	s.indent = 0
+}
+
+func (s *citationMarkdownState) escaped() bool {
+	return s != nil && s.backslashRunLen%2 == 1
+}
+
+func (s *citationMarkdownState) endLine() {
+	if s == nil {
+		return
+	}
+	if s.fenceLen > 0 && s.fenceCandidate {
+		s.fenceChar = 0
+		s.fenceLen = 0
+	}
+	s.fenceCandidate = false
+	s.lineStart = true
+	s.indent = 0
+	s.backslashRunLen = 0
 }
 
 // rewriteRefTag expands one citation tag. Tags that do not name a source

@@ -107,26 +107,59 @@ func TestFencedRefSplitAcrossChunksStaysLiteral(t *testing.T) {
 func TestRegisteredCitationInsideCodeStaysLiteral(t *testing.T) {
 	registry := newSourceRegistry()
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
-	cases := []string{
-		"写法是 `<ref id=\"chunk://1\"/>`。",
-		"```html\n<ref id=\"chunk://1\"/>\n```",
-		"前文 `<ref id=\"chunk://1\"/>` 后文 <ref id=\"chunk://1\"/>",
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "inline code",
+			in:   "写法是 `<ref id=\"chunk://1\"/>`。",
+			want: "写法是 `<ref id=\"chunk://1\"/>`。",
+		},
+		{
+			name: "backtick fence",
+			in:   "```html\n<ref id=\"chunk://1\"/>\n```",
+			want: "```html\n<ref id=\"chunk://1\"/>\n```",
+		},
+		{
+			name: "tilde fence",
+			in:   "~~~\n<ref id=\"chunk://1\"/>\n~~~",
+			want: "~~~\n<ref id=\"chunk://1\"/>\n~~~",
+		},
+		{
+			name: "citation after code",
+			in:   "前文 `<ref id=\"chunk://1\"/>` 后文 <ref id=\"chunk://1\"/>",
+			want: "前文 `<ref id=\"chunk://1\"/>` 后文 <kb doc=\"Doc\" chunk_id=\"chunk-1\" />",
+		},
+		{
+			name: "fence-like content does not close",
+			in:   "```html\n<ref id=\"chunk://1\"/>\n```not-a-close\n<ref id=\"chunk://1\"/>\n```",
+			want: "```html\n<ref id=\"chunk://1\"/>\n```not-a-close\n<ref id=\"chunk://1\"/>\n```",
+		},
+		{
+			name: "escaped backtick does not open inline code",
+			in:   "示例是 \\`<ref id=\"chunk://1\"/>",
+			want: "示例是 \\`<kb doc=\"Doc\" chunk_id=\"chunk-1\" />",
+		},
+		{
+			name: "partial ref stays literal in fenced code",
+			in:   "```\n<ref id=\"chunk://1\"",
+			want: "```\n<ref id=\"chunk://1\"",
+		},
 	}
-	for _, text := range cases {
-		got := registry.ExpandText(text)
-		var streamed strings.Builder
-		decoder := newCitationStreamExpander(registry)
-		for i := range len(text) {
-			streamed.WriteString(decoder.Feed(text[i : i+1]))
-		}
-		streamed.WriteString(decoder.Flush())
-		require.Equal(t, got, streamed.String(), "streamed text")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, registry.ExpandText(tc.in))
+			var streamed strings.Builder
+			decoder := newCitationStreamExpander(registry)
+			for i := range len(tc.in) {
+				streamed.WriteString(decoder.Feed(tc.in[i : i+1]))
+			}
+			streamed.WriteString(decoder.Flush())
+			require.Equal(t, tc.want, streamed.String(), "streamed text")
+		})
 	}
-
-	require.Equal(t,
-		"`<ref id=\"chunk://1\"/>` <kb doc=\"Doc\" chunk_id=\"chunk-1\" />",
-		registry.ExpandText("`<ref id=\"chunk://1\"/>` <ref id=\"chunk://1\"/>"),
-	)
 }
 
 func TestRegisteredNonCitableLegacyRefIsRemoved(t *testing.T) {
