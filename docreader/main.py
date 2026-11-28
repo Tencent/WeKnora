@@ -32,6 +32,7 @@ from docreader.proto.docreader_pb2 import (
 )
 from docreader.source_wire import source_blocks_to_proto
 from docreader.utils.request import init_logging_request_id, request_id_context
+from docreader.memory_admission import MemoryAdmission, MemoryCapacityWait, MEMORY_CAPACITY_WAIT
 from docreader.utils.request_memory import RequestThreadPoolExecutor, track_request_size
 
 _SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
@@ -165,6 +166,7 @@ def _validate_file_content_size(content: bytes) -> None:
 class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
     def __init__(self, preprocess_runner=None):
         super().__init__()
+        self._memory = MemoryAdmission(CONFIG.memory_pause_mib, CONFIG.memory_resume_mib)
         self.parser = Parser()
         self._preprocess_runner = preprocess_runner or PreprocessRunner(PreprocessLimits.from_config(CONFIG))
         # gRPC supports a per-method executor. Leave one admission thread free
@@ -230,11 +232,25 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
         )
         return result, request.file_name
 
+    def _admit(self, request, context):
+        reserved = 0
+        if self._memory.pause:
+            content = request.file_content
+            # Oversize requests follow the existing permanent rejection path.
+            if len(content) <= CONFIG.grpc_max_file_size_mb:
+                try:
+                    reserved = self._memory.reserve_request(
+                        request.file_name, request.file_type, len(content), content
+                    )
+                except MemoryCapacityWait:
+                    context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, MEMORY_CAPACITY_WAIT)
+        return self._memory.hold(reserved)
+
     def Read(self, request: ReadRequest, context):
         """Unified read: file mode (file_content set) or URL mode (url set)."""
         request_id = request.request_id or str(uuid.uuid4())
 
-        with request_id_context(request_id):
+        with request_id_context(request_id), self._admit(request, context):
             try:
                 result, source_desc = self._parse_request(request)
 
@@ -272,7 +288,7 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
         """Yield metadata first, then images as each parser produces them."""
         request_id = request.request_id or str(uuid.uuid4())
 
-        with request_id_context(request_id):
+        with request_id_context(request_id), self._admit(request, context):
             _c = to_valid_utf8_text
             parsed_stream = None
             try:

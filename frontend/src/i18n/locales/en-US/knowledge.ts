@@ -583,6 +583,8 @@ export default {
     errorCode: {
       DOCREADER_UNAVAILABLE: 'Document parsing service unavailable',
       DOCREADER_UNAVAILABLE_SUGGESTION: 'Cannot connect to DocReader, or the connection was interrupted. Check service health, restart loops, and network access. Retry after recovery; uploading the file again is unnecessary.',
+      DOCREADER_MEMORY_CAPACITY_WAIT: 'Parser memory capacity reached',
+      DOCREADER_MEMORY_CAPACITY_WAIT_SUGGESTION: 'Retry after active documents finish or increase the parser memory budget.',
       DOCREADER_TIMEOUT: 'Document parsing timed out',
       DOCREADER_TIMEOUT_SUGGESTION: 'Check DocReader health and load before retrying. Split large files if needed.',
       DOCREADER_PARSE_FAILED: 'Document parsing failed',

@@ -1225,6 +1225,8 @@ export default {
     errorCode: {
       DOCREADER_UNAVAILABLE: '문서 분석 서비스를 사용할 수 없습니다',
       DOCREADER_UNAVAILABLE_SUGGESTION: 'DocReader에 연결할 수 없거나 연결이 끊겼습니다. 서비스 상태, 반복 재시작, 네트워크를 확인한 후 다시 시도하세요. 파일을 다시 업로드할 필요는 없습니다.',
+      DOCREADER_MEMORY_CAPACITY_WAIT: '분석 서비스 메모리 부족',
+      DOCREADER_MEMORY_CAPACITY_WAIT_SUGGESTION: '처리 중인 문서가 완료된 뒤 다시 시도하거나 메모리 한도를 늘리세요.',
       DOCREADER_TIMEOUT: '문서 분석 시간 초과',
       DOCREADER_TIMEOUT_SUGGESTION: 'DocReader 상태와 부하를 확인한 후 다시 시도하세요. 필요한 경우 큰 파일을 나누세요.',
       DOCREADER_PARSE_FAILED: '문서 분석 실패',

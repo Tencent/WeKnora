@@ -127,6 +127,8 @@ class RPCFailurePropagationTest(unittest.TestCase):
         self.addCleanup(reset_ssrf_whitelist_cache_for_test)
 
         servicer = DocReaderServicer.__new__(DocReaderServicer)
+        from docreader.memory_admission import MemoryAdmission
+        servicer._memory = MemoryAdmission(0, 0)
         servicer.parser = Parser()
         pool = ThreadPoolExecutor(max_workers=2)
         self.addCleanup(pool.shutdown)
@@ -167,6 +169,8 @@ class RPCFailurePropagationTest(unittest.TestCase):
         from docreader.proto.docreader_pb2 import ReadRequest
 
         servicer = DocReaderServicer.__new__(DocReaderServicer)
+        from docreader.memory_admission import MemoryAdmission
+        servicer._memory = MemoryAdmission(0, 0)
         servicer.parser = SimpleNamespace(parse_url=lambda *args, **kwargs: self.run_parser(404))
         request = ReadRequest(url=TEST_URL, title="test")
         unary = servicer.Read(request, None)

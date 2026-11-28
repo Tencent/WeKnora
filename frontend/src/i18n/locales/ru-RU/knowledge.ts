@@ -1225,6 +1225,8 @@ export default {
     errorCode: {
       DOCREADER_UNAVAILABLE: 'Сервис обработки документов недоступен',
       DOCREADER_UNAVAILABLE_SUGGESTION: 'Не удалось подключиться к DocReader или соединение прервано. Проверьте состояние сервиса, повторные перезапуски и сеть. Повторите попытку после восстановления; загружать файл заново не нужно.',
+      DOCREADER_MEMORY_CAPACITY_WAIT: 'Недостаточно памяти для разбора',
+      DOCREADER_MEMORY_CAPACITY_WAIT_SUGGESTION: 'Дождитесь завершения текущих задач или увеличьте лимит памяти сервиса.',
       DOCREADER_TIMEOUT: 'Превышено время обработки документа',
       DOCREADER_TIMEOUT_SUGGESTION: 'Проверьте состояние и нагрузку DocReader перед повторной попыткой. При необходимости разделите большой файл.',
       DOCREADER_PARSE_FAILED: 'Ошибка обработки документа',

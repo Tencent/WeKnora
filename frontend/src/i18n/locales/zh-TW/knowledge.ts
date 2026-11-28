@@ -1225,6 +1225,8 @@ export default {
     errorCode: {
       DOCREADER_UNAVAILABLE: '文件解析服務不可用',
       DOCREADER_UNAVAILABLE_SUGGESTION: '無法連結 DocReader，或連結已中斷。請檢查解析服務是否啟動、是否反覆重啟以及網路是否正常；服務復原後再重試，無需重複上傳檔案。',
+      DOCREADER_MEMORY_CAPACITY_WAIT: '解析服務記憶體不足',
+      DOCREADER_MEMORY_CAPACITY_WAIT_SUGGESTION: '請等目前的文件完成後重試，或增加解析服務的記憶體配額。',
       DOCREADER_TIMEOUT: '文件解析超時',
       DOCREADER_TIMEOUT_SUGGESTION: '請檢查 DocReader 的健康狀態和負載；服務正常後再重試，必要時拆分大檔案。',
       DOCREADER_PARSE_FAILED: '文件解析失敗',

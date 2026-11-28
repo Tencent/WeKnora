@@ -15,6 +15,13 @@ import (
 // Keep actionable public messages separate from raw transport diagnostics,
 // which may contain internal addresses or credentials and belong in error_detail.
 func docReaderFailure(err error) (code, message string) {
+	var transport interface{ GRPCStatus() *status.Status }
+	if errors.As(err, &transport) {
+		s := transport.GRPCStatus()
+		if s.Code() == codes.ResourceExhausted && s.Message() == werrors.ErrCodeDocReaderMemoryCapacity {
+			return werrors.ErrCodeDocReaderMemoryCapacity, "Document parsing service is waiting for memory capacity."
+		}
+	}
 	if errors.Is(err, context.DeadlineExceeded) || status.Code(err) == codes.DeadlineExceeded ||
 		strings.Contains(err.Error(), "docreader call timeout") {
 		return werrors.ErrCodeDocReaderTimeout,

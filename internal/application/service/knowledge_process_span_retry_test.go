@@ -9,6 +9,9 @@ import (
 	"testing"
 	"testing/iotest"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc"
@@ -46,6 +49,7 @@ func (s spanRetryFileService) GetFile(context.Context, string) (io.ReadCloser, e
 // acknowledged, whereas transport/file errors are returned for queue retry.
 func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 	transient := errors.New("temporary read failure")
+	capacityWait := status.Error(codes.ResourceExhausted, werrors.ErrCodeDocReaderMemoryCapacity)
 	for _, tc := range []struct {
 		name                    string
 		missingReader           bool
@@ -68,6 +72,11 @@ func TestConvertFailureSpanMatchesTaskOutcome(t *testing.T) {
 			missingResult: true,
 			retryable:     true,
 			code:          werrors.ErrCodeDocReaderParseFailed,
+		},
+		{
+			name:      "memory admission",
+			rpcErr:    fmt.Errorf("recv: %w", capacityWait),
+			retryable: true, code: werrors.ErrCodeDocReaderMemoryCapacity,
 		},
 		{name: "reader call fails", rpcErr: transient, retryable: true, code: werrors.ErrCodeDocReaderParseFailed},
 		{
