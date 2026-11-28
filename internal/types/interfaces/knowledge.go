@@ -222,6 +222,9 @@ type KnowledgeService interface {
 	ProcessKBClone(ctx context.Context, t *asynq.Task) error
 	// ProcessKnowledgeMove handles Asynq knowledge move tasks
 	ProcessKnowledgeMove(ctx context.Context, t *asynq.Task) error
+	ProcessKnowledgeCopy(ctx context.Context, t *asynq.Task) error
+	SaveKnowledgeCopyProgress(ctx context.Context, progress *types.KnowledgeMoveProgress) error
+	GetKnowledgeCopyProgress(ctx context.Context, taskID string) (*types.KnowledgeMoveProgress, error)
 	// ProcessKnowledgeListDelete handles Asynq knowledge list delete tasks
 	ProcessKnowledgeListDelete(ctx context.Context, t *asynq.Task) error
 	// ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks

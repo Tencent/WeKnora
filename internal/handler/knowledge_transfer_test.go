@@ -26,6 +26,10 @@ func (*transferHandlerKnowledge) SaveKnowledgeMoveProgress(context.Context, *typ
 	return nil
 }
 
+func (*transferHandlerKnowledge) SaveKnowledgeCopyProgress(context.Context, *types.KnowledgeMoveProgress) error {
+	return nil
+}
+
 func (*transferHandlerKnowledge) GetKnowledgeByID(_ context.Context, id string) (*types.Knowledge, error) {
 	return &types.Knowledge{
 		ID:              id,
@@ -172,5 +176,50 @@ func TestMoveAdmissionDeduplicatesIDsAndRequiresBothKBs(t *testing.T) {
 		var payload types.KnowledgeMovePayload
 		require.NoError(t, json.Unmarshal(q.task.Payload(), &payload))
 		require.Equal(t, []string{"doc"}, payload.KnowledgeIDs)
+	}
+}
+
+func TestKnowledgeCopyAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode string
+		ids  types.StringArray
+		want int
+	}{
+		{"compatible pair", "reuse_vectors", types.StringArray{"source", "target"}, http.StatusOK},
+		{"missing destination scope", "reuse_vectors", types.StringArray{"source"}, http.StatusForbidden},
+		{"reparse mode", "reparse", types.StringArray{"source", "target"}, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			queue := &documentDeleteEnqueuer{}
+			kb := &stubKBService{get: func(_ context.Context, id string) (*types.KnowledgeBase, error) {
+				return &types.KnowledgeBase{
+					ID: id, TenantID: 7, CreatorID: "user", Type: types.KnowledgeBaseTypeDocument,
+				}, nil
+			}}
+			h := &KnowledgeHandler{
+				cfg: transferHandlerConfig(), kbService: kb,
+				kgService: &transferHandlerKnowledge{}, asynqClient: queue,
+			}
+			r := transferHandlerRouter(&types.TenantAPIKeyScope{
+				Capabilities: types.StringArray{"ingest"}, KnowledgeBaseIDs: tc.ids,
+			})
+			r.POST("/transfer", h.CopyKnowledge)
+			raw, err := json.Marshal(CopyKnowledgeRequest{
+				SourceKBID: "source", TargetKBID: "target", KnowledgeIDs: []string{"doc", "doc"}, Mode: tc.mode,
+			})
+			require.NoError(t, err)
+			w := transferRequest(r, string(raw))
+			require.Equal(t, tc.want, w.Code, w.Body.String())
+			if tc.want != http.StatusOK {
+				require.Nil(t, queue.task)
+				return
+			}
+			require.Equal(t, types.TypeKnowledgeCopy, queue.task.Type())
+			var payload types.KnowledgeCopyPayload
+			require.NoError(t, json.Unmarshal(queue.task.Payload(), &payload))
+			require.Equal(t, []string{"doc"}, payload.KnowledgeIDs)
+			require.Contains(t, w.Body.String(), payload.TaskID)
+		})
 	}
 }
