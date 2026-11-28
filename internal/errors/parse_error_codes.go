@@ -15,6 +15,9 @@ const (
 	// large files or checking docreader load.
 	ErrCodeDocReaderTimeout = "DOCREADER_TIMEOUT"
 
+	// ErrCodeDocReaderMemoryCapacity indicates transient parser admission pressure.
+	ErrCodeDocReaderMemoryCapacity = "DOCREADER_MEMORY_CAPACITY_WAIT"
+
 	// ErrCodeDocReaderUnavailable — no DocReader configured for the
 	// requested file type / engine, or the service refused connection.
 	ErrCodeDocReaderUnavailable = "DOCREADER_UNAVAILABLE"

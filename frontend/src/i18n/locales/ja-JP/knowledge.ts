@@ -583,6 +583,8 @@ export default {
     errorCode: {
       DOCREADER_UNAVAILABLE: '文書解析サービスを利用できません',
       DOCREADER_UNAVAILABLE_SUGGESTION: 'DocReader に接続できないか、接続が切断されました。サービスの稼働状態、再起動の繰り返し、ネットワークを確認し、復旧後に再試行してください。再アップロードは不要です。',
+      DOCREADER_MEMORY_CAPACITY_WAIT: '解析サービスのメモリ不足',
+      DOCREADER_MEMORY_CAPACITY_WAIT_SUGGESTION: '処理中の文書が完了してから再試行するか、メモリ割り当てを増やしてください。',
       DOCREADER_TIMEOUT: '文書解析がタイムアウトしました',
       DOCREADER_TIMEOUT_SUGGESTION: 'DocReader の稼働状態と負荷を確認してから再試行してください。必要に応じて大きなファイルを分割してください。',
       DOCREADER_PARSE_FAILED: '文書解析に失敗しました',

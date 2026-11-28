@@ -103,6 +103,20 @@ class DocReaderEnvelopeTest(unittest.TestCase):
         self.assertIn("exceeds", result.error)
         self.assertEqual(self.parser.calls, 0)
 
+    def test_admission_wait_and_recovery_on_both_rpcs(self):
+        usage = 128 << 20
+        self.service._memory = main.MemoryAdmission(128, 96, lambda: usage)
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                with self.assertRaises(grpc.RpcError) as caught:
+                    self.read(self.request(100), stream)
+                self.assertEqual(caught.exception.code(), grpc.StatusCode.RESOURCE_EXHAUSTED)
+                self.assertEqual(caught.exception.details(), main.MEMORY_CAPACITY_WAIT)
+                self.assertIn("exceeds", self.read(self.request(self.limit + 1), stream).error)
+        usage = 0
+        for stream in (False, True):
+            self.assertFalse(self.read(self.request(100), stream).error)
+
     def test_wire_budget_still_rejects_oversized_metadata(self):
         for stream in (False, True):
             with self.subTest(stream=stream), self.assertRaises(grpc.RpcError) as caught:

@@ -58,6 +58,8 @@ class DocReaderConfig:
     # gRPC
     grpc_max_workers: int
     grpc_max_file_size_mb: int
+    memory_pause_mib: int
+    memory_resume_mib: int
     grpc_port: int
 
     # Parser
@@ -102,6 +104,10 @@ class DocReaderConfig:
 def load_config() -> DocReaderConfig:
     """Load config from environment variables (lightweight version)."""
 
+    memory_pause_mib = max(0, _get_int(["DOCREADER_MEMORY_PAUSE_MIB"], 0))
+    memory_resume_mib = _get_int(["DOCREADER_MEMORY_RESUME_MIB"], 0)
+    if not 0 < memory_resume_mib < memory_pause_mib:
+        memory_resume_mib = memory_pause_mib * 8 // 9
     grpc_max_workers = _get_int(["DOCREADER_GRPC_MAX_WORKERS", "GRPC_MAX_WORKERS"], 4)
     grpc_max_file_size_mb = (
         _get_int(["DOCREADER_GRPC_MAX_FILE_SIZE_MB", "MAX_FILE_SIZE_MB"], 50)
@@ -159,6 +165,8 @@ def load_config() -> DocReaderConfig:
     )
 
     return DocReaderConfig(
+        memory_pause_mib=memory_pause_mib,
+        memory_resume_mib=memory_resume_mib,
         grpc_max_workers=grpc_max_workers,
         grpc_max_file_size_mb=grpc_max_file_size_mb,
         grpc_port=grpc_port,
