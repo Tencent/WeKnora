@@ -445,7 +445,11 @@ func rewriteRefTag(r *sourceRegistry, tag string) string {
 		if len(match) != 2 {
 			return ""
 		}
-		return r.citationTag(match[1])
+		citation := r.citationTag(match[1])
+		if citation == "" && legacySourceHandleRE.MatchString(match[1]) {
+			return decoded
+		}
+		return citation
 	})(tag)
 }
 

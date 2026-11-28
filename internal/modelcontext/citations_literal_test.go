@@ -15,9 +15,9 @@ func TestLiteralRefTextSurvivesCitationExpansion(t *testing.T) {
 		want     string
 	}{
 		{
-			name: "unregistered legacy id stays non-citable",
+			name: "unregistered legacy id stays literal",
 			in:   `引用标签的写法是 <ref id="c1"/>。`,
-			want: `引用标签的写法是 。`,
+			want: `引用标签的写法是 <ref id="c1"/>。`,
 		},
 		{
 			name:     "registered legacy id still expands",
