@@ -140,7 +140,7 @@ func (r *Repository) search(ctx context.Context, indexPattern string, body []byt
 // Field-by-field decode (vs map[string]any) keeps the JSON shape
 // pinned at compile time.
 type hit struct {
-	ID     string  `json:"_id"` // equals chunk_id per the indexing invariant
+	ID     string  `json:"_id"` // source_id for new rows, chunk_id for legacy rows
 	Score  float64 `json:"_score"`
 	Source struct {
 		Content         string `json:"content"`
@@ -171,10 +171,8 @@ func parseSearchHits(body io.Reader) ([]hit, error) {
 // multi-store dispatcher depends on this "one engine result per driver"
 // contract.
 //
-// Defensive: warns if hit._id != _source.chunk_id (we set _id=chunk_id
-// on every write, so a mismatch means external tooling has been writing
-// into the index) but does not fail the query — the result is still
-// usable for ranking, just suspicious.
+// Accept source IDs and legacy chunk IDs. Log unexpected IDs without
+// dropping the result.
 func wrapResults(ctx context.Context, hits []hit, rt types.RetrieverType, mt types.MatchType) []*types.RetrieveResult {
 	log := logger.GetLogger(ctx)
 	out := make([]*types.IndexWithScore, 0, len(hits))
@@ -183,9 +181,9 @@ func wrapResults(ctx context.Context, hits []hit, rt types.RetrieverType, mt typ
 		if rt == types.VectorRetrieverType {
 			score = knnScoreToCosine(score)
 		}
-		if h.ID != h.Source.ChunkID {
-			log.Warnf("[OpenSearch] hit._id=%q != _source.chunk_id=%q (D12 invariant violation)",
-				h.ID, h.Source.ChunkID)
+		if h.ID != h.Source.SourceID && h.ID != h.Source.ChunkID {
+			log.Warnf("[OpenSearch] unexpected hit._id=%q (source_id=%q, chunk_id=%q)",
+				h.ID, h.Source.SourceID, h.Source.ChunkID)
 		}
 		out = append(out, &types.IndexWithScore{
 			ID:              h.ID,

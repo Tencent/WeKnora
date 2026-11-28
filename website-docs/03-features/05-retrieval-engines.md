@@ -216,6 +216,7 @@ flowchart TD
 - **版本门禁** `probeVersion`：拒绝 ES 发行版与 OS 1.x / 2.0-2.3（Lucene HNSW 预览版）；2.4-2.10 警告接受；2.11+ / 3.x 干净接受（主测 3.3.2）。`probeKNNPlugin` 要求所有节点装有 `opensearch-knn` 插件。
 - **向量检索**：k-NN 插件 `knn` 查询（`query.go buildKNNQuery`）；k-NN 的 `COSINESIMIL` space type 返回 `(1+cosine)/2`。驱动把阈值换算成 `min_score = (1+threshold)/2` 下推，返回时再换回 cosine 相似度（`2*score-1`），与其他引擎同一尺度。
 - **关键词检索**：`match` content（BM25）。混合不走 OS 原生 hybrid pipeline，统一交给上层 RRF 融合（`query.go` 注释明示）。
+- **索引行标识**：正文与每条生成问题使用各自的 `source_id` 作为文档 `_id`，并通过 `chunk_id` 关联同一分块。旧索引中已经被生成问题覆盖的正文，需要从知识库重新构建检索索引才能恢复。
 - **建索引**：`mapping.go` 声明式 mapping（`knn_vector` 字段带 method/engine 参数），启动时校验 mapping 指纹，漂移报 `ErrConfigInvalid`；别名管理 + `copy.go` 支持 reindex；索引创建/重建事件经 AuditSink 写审计日志。
 - 配置含 `OPENSEARCH_INSECURE_SKIP_VERIFY` 与 SSRF 安全传输层（`transport.go`）。
 
