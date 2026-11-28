@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/access"
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/datasource"
+	feishu "github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -27,6 +28,7 @@ import (
 
 // DataSourceService implements the DataSourceService interface
 type DataSourceService struct {
+	listingPages      *apprepo.ListingCheckpointRepository
 	dsRepo            interfaces.DataSourceRepository
 	syncLogRepo       interfaces.SyncLogRepository
 	knowledgeService  interfaces.KnowledgeService
@@ -51,8 +53,10 @@ func NewDataSourceService(
 	tenantRepo interfaces.TenantRepository,
 	tagService interfaces.KnowledgeTagService,
 	audit interfaces.AuditLogService,
+	listingPages *apprepo.ListingCheckpointRepository,
 ) interfaces.DataSourceService {
 	return &DataSourceService{
+		listingPages:      listingPages,
 		dsRepo:            dsRepo,
 		syncLogRepo:       syncLogRepo,
 		knowledgeService:  knowledgeService,
@@ -1537,6 +1541,16 @@ func (s *DataSourceService) processSyncStreaming(
 		}
 	}
 
+	switch ds.Type {
+	case types.ConnectorTypeFeishu, types.ConnectorTypeLark,
+		types.ConnectorTypeFeishuDrive, types.ConnectorTypeLarkDrive:
+		// Terminal logs can be replayed to repair a failed source-state write.
+		// Their listing pages have already been retired by the status transition.
+		terminal := syncLog.Status == types.SyncLogStatusSuccess || syncLog.Status == types.SyncLogStatusPartial
+		if s.listingPages != nil && !terminal {
+			ctx = feishu.WithListingPageStore(ctx, s.listingPages.ForJob(ds, syncLog.ID))
+		}
+	}
 	nextCursor, fetchErr := streamingFetch(ctx, sc, config, forceFull, startCursor, fullBaseline, handler)
 	abortErrMsg := ""
 	if handler.ingestErr != nil {

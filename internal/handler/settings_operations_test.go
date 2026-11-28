@@ -139,7 +139,7 @@ func TestDataSourceSyncPatchPersistsFalseAndManualSchedule(t *testing.T) {
 	kb := &stubKBServiceForDS{getByID: func(context.Context, string) (*types.KnowledgeBase, error) {
 		return &types.KnowledgeBase{ID: "kb", TenantID: 1}, nil
 	}}
-	svc := service.NewDataSourceService(repo, nil, nil, kb, nil, nil, scheduler, nil, nil, nil)
+	svc := service.NewDataSourceService(repo, nil, nil, kb, nil, nil, scheduler, nil, nil, nil, nil)
 	original := &types.DataSource{
 		ID:               "ds",
 		TenantID:         1,
@@ -373,7 +373,7 @@ func TestDataSourceSyncPatchPreservesConcurrentPauseAndProgress(t *testing.T) {
 		LastSyncCursor: types.JSON(`{"position":"old"}`),
 	}
 	require.NoError(t, repo.Create(context.Background(), original))
-	base := service.NewDataSourceService(repo, nil, nil, kb, nil, nil, scheduler, nil, nil, nil)
+	base := service.NewDataSourceService(repo, nil, nil, kb, nil, nil, scheduler, nil, nil, nil, nil)
 	svc := &interleavedDataSourceService{DataSourceService: base, afterRead: func() {
 		require.NoError(t, db.Model(&types.DataSource{}).Where("id = ?", "ds").Updates(map[string]any{
 			"status": types.DataSourceStatusPaused, "last_sync_cursor": types.JSON(`{"position":"new"}`),
@@ -408,7 +408,7 @@ func TestDataSourceResourcePatchRejectsConcurrentConfigChange(t *testing.T) {
 		Config: types.JSON(`{"type":"notion","resource_ids":["old"],"settings":{"version":"old"}}`),
 	}
 	require.NoError(t, repo.Create(context.Background(), original))
-	base := service.NewDataSourceService(repo, nil, nil, kb, nil, nil, scheduler, nil, nil, nil)
+	base := service.NewDataSourceService(repo, nil, nil, kb, nil, nil, scheduler, nil, nil, nil, nil)
 	newConfig := types.JSON(`{"type":"notion","resource_ids":["other"],"settings":{"version":"new"}}`)
 	svc := &interleavedDataSourceService{DataSourceService: base, afterRead: func() {
 		require.NoError(t, db.Model(&types.DataSource{}).Where("id = ?", "ds").Update("config", newConfig).Error)
