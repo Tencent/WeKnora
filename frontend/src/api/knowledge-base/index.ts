@@ -668,12 +668,12 @@ export function previewKnowledgeFile(id: string) {
 }
 
 /** @param idsQueryString - query string with ids (e.g. ids=xxx&ids=yyy) */
-export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agentId?: string, agentSourceTenantId?: string) {
+export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agentId?: string, agentSourceTenantId?: string, signal?: AbortSignal) {
   let qs = idsQueryString;
   if (kbId) qs += `&kb_id=${encodeURIComponent(kbId)}`;
   if (agentId) qs += `&agent_id=${encodeURIComponent(agentId)}`;
   if (agentSourceTenantId) qs += `&agent_source_tenant_id=${encodeURIComponent(agentSourceTenantId)}`;
-  return get(`/api/v1/knowledge/batch?${qs}`);
+  return get(`/api/v1/knowledge/batch?${qs}`, signal ? { signal } : undefined);
 }
 
 export const KNOWLEDGE_CHUNK_PAGE_SIZE = 25;

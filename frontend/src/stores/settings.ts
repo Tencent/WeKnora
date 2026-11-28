@@ -3,7 +3,7 @@ import { nextTick } from "vue";
 import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
 import { getApiBaseUrl } from "@/utils/api-base";
 import { isAgentStreamAgentId } from "@/utils/agent-mode";
-import { loadAndReconcileSettings } from "@/stores/settingsStorage";
+import { loadAndReconcileSettings, SETTINGS_STORAGE_KEY } from "@/stores/settingsStorage";
 import { isReasoningLevel, type ReasoningLevel } from "@/utils/reasoningEffort";
 
 // 定义设置接口
@@ -118,6 +118,7 @@ export const useSettingsStore = defineStore("settings", {
     // 进入会话时拍下"全局默认"的快照；离开会话时还原。非持久化字段：
     // 刷新页面相当于重新走"进入会话"流程，自然会重新拍快照。
     _defaultsSnapshot: null as Settings | null,
+    _legacySessionAgentId: null as string | null,
     // 全局搜索可为下一次新对话显式指定 KB/文件；仅供一次路由跳转使用。
     _pendingNewChatReferences: null as { kbIds: string[]; fileIds: string[] } | null,
     /** 正在从 session.last_request_state 恢复输入栏，避免 agent 切换 watch 覆盖 KB 选择 */
@@ -356,6 +357,35 @@ export const useSettingsStore = defineStore("settings", {
       }
     },
 
+    applyFileSelection(
+      files: readonly { id: string; kbId?: string }[],
+      replaceWholeKbIds: readonly string[] = [],
+    ) {
+      const previousKbByFile = new Map(Object.entries(this.settings.selectedFileKbMap || {}));
+      const selectedFileIds = new Set<string>();
+      const selectedKbByFile = new Map<string, string>();
+      for (const { id, kbId } of files) {
+        selectedFileIds.add(id);
+        const ownerKbId = kbId || selectedKbByFile.get(id) || previousKbByFile.get(id);
+        if (ownerKbId) selectedKbByFile.set(id, ownerKbId);
+      }
+
+      const fileKbIds = new Set(selectedKbByFile.values());
+      const replacementIds = new Set(replaceWholeKbIds.filter(id => fileKbIds.has(id)));
+      const currentKbIds = this.getSelectedKnowledgeBases();
+      const nextSettings: Settings = {
+        ...this.settings,
+        selectedFiles: [...selectedFileIds],
+        selectedFileKbMap: Object.fromEntries(selectedKbByFile),
+        selectedKnowledgeBases: replacementIds.size > 0
+          ? currentKbIds.filter(id => !replacementIds.has(id))
+          : currentKbIds,
+      };
+      // A failed storage write leaves the entire previous selection in place.
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(nextSettings));
+      this.settings = nextSettings;
+    },
+
     removeFile(fileId: string) {
       if (!this.settings.selectedFiles) return;
       this.settings.selectedFiles = this.settings.selectedFiles.filter((id: string) => id !== fileId);
@@ -450,6 +480,16 @@ export const useSettingsStore = defineStore("settings", {
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 
+    reconcileRestoredFileKbMap(files: readonly { id: string; kbId?: string }[]) {
+      const selected = new Set(this.settings.selectedFiles);
+      for (const { id, kbId } of files) {
+        if (kbId && selected.has(id) && this.settings.selectedFileKbMap?.[id] !== kbId) {
+          this.settings.selectedFileKbMap ||= {};
+          this.settings.selectedFileKbMap[id] = kbId;
+        }
+      }
+    },
+
     removeFileKbId(fileId: string) {
       if (this.settings.selectedFileKbMap) delete this.settings.selectedFileKbMap[fileId];
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
@@ -489,6 +529,7 @@ export const useSettingsStore = defineStore("settings", {
     
     // 选择智能体（sourceTenantId 仅在使用共享智能体时传入）
     selectAgent(agentId: string, sourceTenantId?: string | null) {
+      this._legacySessionAgentId = null;
       this.reasoningEffortOverride = '';
       this.settings.selectedAgentId = agentId;
       this.settings.selectedAgentSourceTenantId = (sourceTenantId != null && sourceTenantId !== "") ? sourceTenantId : null;
@@ -538,12 +579,20 @@ export const useSettingsStore = defineStore("settings", {
 
     // 还原默认（如果有快照），用于离开会话或跨会话切换时。
     restoreDefaultsIfSnapshotted() {
+      this._legacySessionAgentId = null;
       this.reasoningEffortOverride = '';
       if (!this._defaultsSnapshot) return;
       this.settings = this._defaultsSnapshot;
       this._defaultsSnapshot = null;
       // 不写 localStorage：默认值在快照之前已经写过 localStorage，这里恢复
       // 的就是 localStorage 中既有的值，再写一次只会增加无意义的 IO。
+    },
+
+    resolveLegacySessionAgentSource(agentId: string, sourceTenantId: string) {
+      if (this._legacySessionAgentId !== agentId || this.selectedAgentId !== agentId ||
+          this.selectedAgentSourceTenantId) return;
+      this.settings.selectedAgentSourceTenantId = sourceTenantId;
+      this._legacySessionAgentId = null;
     },
 
     // 新会话首条发送沿用 createChat 的输入态，不能被异步返回的空/旧记录覆盖。
@@ -565,12 +614,12 @@ export const useSettingsStore = defineStore("settings", {
         if (typeof state.agent_enabled === "boolean") {
           this.settings.isAgentEnabled = state.agent_enabled;
         }
-        if (typeof state.agent_id === "string" && state.agent_id) {
-          this.settings.selectedAgentId = state.agent_id;
-          // 上次记录是自有 agent 还是共享 agent，目前服务端不区分回传 sourceTenantId。
-          // 与 selectAgent() 不同，这里**不**重置 KB/文件选择 —— 因为我们紧接着
-          // 就要用 state 里的 KB/文件覆盖，不需要先清空再写。
-        }
+        const historicalAgentId = state.agent_id || null;
+        if (!historicalAgentId && state.agent_enabled === undefined) this.settings.isAgentEnabled = false;
+        this.settings.selectedAgentId = historicalAgentId ||
+          (state.agent_enabled ? BUILTIN_SMART_REASONING_ID : BUILTIN_QUICK_ANSWER_ID);
+        this.settings.selectedAgentSourceTenantId = historicalAgentId ? state.agent_source_tenant_id || null : null;
+        this._legacySessionAgentId = this.settings.selectedAgentSourceTenantId ? null : historicalAgentId;
         if (state.model_id !== undefined) {
           const current = this.settings.conversationModels || defaultSettings.conversationModels;
           this.settings.conversationModels = { ...current, selectedChatModelId: state.model_id || "" };
@@ -583,11 +632,19 @@ export const useSettingsStore = defineStore("settings", {
         // 服务端省略空的选择项列表；保留现值会把其它会话或全局默认的
         // 文件、标签和工具选择带入本会话。
         this.settings.selectedFiles = Array.isArray(state.knowledge_ids) ? [...state.knowledge_ids] : [];
-        // 保留仍选中文件的已知 KB 归属（共享文件需要它）；其它文件的缓存不跨会话带入。
-        this.settings.selectedFileKbMap = Object.fromEntries(
+        // 共享文件的 KB 归属优先从本次消息恢复，历史消息沿用仍有效的本地映射。
+        const selectedFileIds = new Set(this.settings.selectedFiles);
+        const selectedKbByFile = new Map(
           Object.entries(this.settings.selectedFileKbMap || {})
-            .filter(([id]) => this.settings.selectedFiles.includes(id))
+            .filter(([id]) => selectedFileIds.has(id))
         );
+        const mentionedItems = Array.isArray(state.mentioned_items) ? state.mentioned_items : [];
+        for (const item of mentionedItems) {
+          if (item.type === "file" && item.kb_id && selectedFileIds.has(item.id)) {
+            selectedKbByFile.set(item.id, item.kb_id);
+          }
+        }
+        this.settings.selectedFileKbMap = Object.fromEntries(selectedKbByFile);
         if (Array.isArray(state.mentioned_items)) {
           const fromMentions = state.mentioned_items
             .filter(item => item.type === "tag" && item.id && item.kb_id)
@@ -651,6 +708,7 @@ export const useSettingsStore = defineStore("settings", {
 export interface SessionLastRequestStatePayload {
   reasoning_effort?: string;
   agent_id?: string;
+  agent_source_tenant_id?: string;
   agent_enabled?: boolean;
   model_id?: string;
   knowledge_base_ids?: string[];

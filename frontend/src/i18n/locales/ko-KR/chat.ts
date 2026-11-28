@@ -458,6 +458,18 @@ export default {
     }
   },
   mentionBrowser: {
+    selectMultiple: '여러 파일 선택',
+    selectionCount: '{count}개 선택됨',
+    noSelection: '선택한 파일이 없습니다.',
+    applySelection: '적용',
+    wholeConflict: '{names}의 전체 지식 베이스가 선택되어 있습니다. 지식 베이스 선택을 유지하거나 선택한 파일로 대체할 수 있습니다. 다른 지식 베이스와 태그는 유지됩니다.',
+    keepWhole: '지식 베이스 선택 유지',
+    taggedWholeConflict: '태그가 선택된 지식 베이스에서는 지식 베이스 선택을 유지해도 태그에 맞는 선택 파일만 검색합니다. 일치하는 파일이 없으면 해당 지식 베이스에서 결과가 나오지 않습니다.',
+    useFiles: '선택한 파일 사용',
+    unavailable: '일부 파일을 사용할 수 없습니다. 해당 파일을 선택에서 제외하거나 작업을 취소하세요.',
+    checkFailed: '선택한 파일을 확인하지 못했습니다. 다시 시도하세요.',
+    unavailableFile: '사용할 수 없는 파일',
+    selectedFileCount: '파일 {count}개 선택됨',
     browse: '폴더별 탐색',
     path: '폴더 경로',
     root: '루트',

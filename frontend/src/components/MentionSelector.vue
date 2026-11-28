@@ -2,9 +2,10 @@
   <div v-if="visible" class="mention-menu" :style="[style, stableHeightStyle, browsingFiles ? browserMenuStyle : undefined]" ref="menuRef" @click.stop>
     <MentionFileBrowser v-if="browsingFiles && browserContext" ref="fileBrowserRef"
       :knowledge-bases="browserKnowledgeBases || []" :context="browserContext"
-      :supported-file-types="browserFileTypes || []" :selected-file-ids="browserSelectedIds || []"
+      :supported-file-types="browserFileTypes || []" :selected-files="browserSelectedFiles || []"
       :whole-kb-ids="browserWholeKbIds || []" :tag-kb-ids="browserTagKbIds || []"
-      @select="$emit('select', $event)" @back="leaveFileBrowser" />
+      @select="$emit('select', $event)" @apply="$emit('apply-files', $event)"
+      @cancel="$emit('close')" @back="leaveFileBrowser" />
     <template v-else>
     <div class="mention-search">
       <div class="mention-search__box" :class="{ 'is-readonly': !searchable }">
@@ -274,6 +275,7 @@
 import MentionFileBrowser from './MentionFileBrowser.vue';
 import type { FileBrowserContext } from '@/composables/useMentionFileBrowser';
 import type { BrowserKnowledgeBase } from '@/utils/mentionFileBrowser';
+import type { DraftFile } from '@/utils/mentionFileSelection';
 import { fitBrowserViewport } from '@/utils/mentionFileBrowser';
 import { getRootZoom } from '@/utils/zoom';
 import { computed, watch, ref, nextTick, onBeforeUnmount } from 'vue';
@@ -299,7 +301,7 @@ const props = defineProps<{
   browserKnowledgeBases?: BrowserKnowledgeBase[];
   browserContext?: FileBrowserContext;
   browserFileTypes?: string[];
-  browserSelectedIds?: string[];
+  browserSelectedFiles?: DraftFile[];
   browserWholeKbIds?: string[];
   browserTagKbIds?: string[];
   // 搜索关键词；在根层级非空时做跨分组的全局搜索，在分组内则只过滤该分组
@@ -310,7 +312,7 @@ const props = defineProps<{
   groupCounts?: Partial<Record<MentionItemType, number>>;
 }>();
 
-const emit = defineEmits(['select', 'update:activeIndex', 'update:query', 'loadMore', 'close', 'focus-input']);
+const emit = defineEmits(['select', 'apply-files', 'update:activeIndex', 'update:query', 'loadMore', 'close', 'focus-input']);
 
 const FLAT_GROUP_LIMIT = 5;
 

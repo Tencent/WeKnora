@@ -1,3 +1,6 @@
+// Bound the number of IDs in a GET request so the query fits common proxy limits.
+export const KNOWLEDGE_BATCH_SIZE = 40;
+
 /** Verified by the server; these selectors never grant access by themselves. */
 export interface KnowledgeReadOptions {
   agent_id?: string;

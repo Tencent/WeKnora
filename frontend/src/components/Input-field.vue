@@ -21,6 +21,8 @@ import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import MentionSelector from './MentionSelector.vue';
 import { useAuthStore } from '@/stores/auth';
 import type { BrowserKnowledgeBase } from '@/utils/mentionFileBrowser';
+import type { DraftFile, FileSelection } from '@/utils/mentionFileSelection';
+import { restoreMentionFileNames } from '@/utils/restoreMentionFileNames';
 import AgentSelector from './AgentSelector.vue';
 import HostApprovalModeSelect from './HostApprovalModeSelect.vue';
 import { getCaretCoordinates } from '@/utils/caret';
@@ -32,7 +34,7 @@ import {
   isDefaultContextWindow,
   effectiveContextWindow,
 } from '@/utils/contextWindow';
-import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
+import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID, isBuiltinAgent } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
@@ -605,7 +607,7 @@ const showMention = ref(false);
 const mentionQuery = ref("");
 const mentionItems = ref<MentionItem[]>([]);
 /** 文件 ID -> 知识库 ID（用于批量查询时传 kb_id，支持共享知识库下的文档） */
-const fileIdToKbId = ref<Record<string, string>>({});
+const fileIdToKbId = computed(() => settingsStore.settings.selectedFileKbMap || {});
 const mcpServices = ref<MCPService[]>([]);
 const mentionActiveIndex = ref(0);
 const mentionStyle = ref<Record<string, string>>({});
@@ -710,13 +712,18 @@ const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
+const expandedFileChips = ref(false);
+const collapseFileChips = computed(() => selectedFileIds.value.length > 6 && !expandedFileChips.value);
+watch(() => selectedFileIds.value.length, count => {
+  if (count <= 6) expandedFileChips.value = false;
+});
 const selectedTags = computed(() => settingsStore.settings.selectedTags || []);
 const selectedMCPServiceIds = computed(() => settingsStore.settings.selectedMCPServices || []);
 const selectedSkillNames = computed(() => settingsStore.settings.selectedSkills || []);
 
 // 已就绪的知识库（来自空间级缓存）
 const knowledgeBases = computed(() => chatResources.validKnowledgeBases);
-const fileList = ref<Array<{ id: string; name: string }>>([]);
+const fileList = ref<DraftFile[]>([]);
 
 // 选中的知识库：包含自己的 + 组织共享的 + 共享智能体下的（用于展示已选列表与 org 角标）
 const selectedKbs = computed(() => {
@@ -756,6 +763,10 @@ const selectedFiles = computed(() => {
     return found || { id, name: 'Loading...' };
   });
 });
+const browserSelectedFiles = computed(() => selectedFiles.value.map(file => ({
+  ...file,
+  kbId: fileIdToKbId.value[file.id],
+})));
 
 const skillMentionItems = computed<MentionItem[]>(() => {
   return selectedSkillNames.value
@@ -820,6 +831,7 @@ const allSelectedItems = computed(() => {
     const org_name = kbId ? sharedKbOrgMap[String(kbId)] || '' : '';
     return {
       ...f,
+      kbId,
       type: 'file' as const,
       isAgentConfigured: false,
       org_name
@@ -919,51 +931,40 @@ const loadKnowledgeBases = async (force = false) => {
   }
 };
 
-const loadFiles = async () => {
-  const ids = selectedFileIds.value;
-  if (ids.length === 0) return;
-
-  const missingIds = ids.filter((id: string) => !fileList.value.find(f => f.id === id));
-  if (missingIds.length === 0) return;
-
-  try {
-    // 按 kb_id 分组：共享知识库下的文档需带 kb_id 才能正确查询
-    const byKbId = new Map<string, string[]>();
-    const noKbId: string[] = [];
-    missingIds.forEach((id: string) => {
-      const kbId = fileIdToKbId.value[id];
-      if (kbId) {
-        if (!byKbId.has(kbId)) byKbId.set(kbId, []);
-        byKbId.get(kbId)!.push(id);
-      } else {
-        noKbId.push(id);
-      }
-    });
-
-    const allNewFiles: Array<{ id: string; name: string }> = [];
-    const agentIdForBatch = settingsStore.selectedAgentSourceTenantId ? settingsStore.selectedAgentId : undefined;
-    const runBatch = async (batchIds: string[], kbId?: string, agentId?: string) => {
-      const query = new URLSearchParams();
-      batchIds.forEach((id: string) => query.append('ids', id));
-      const sourceTenantId = agentId ? settingsStore.selectedAgentSourceTenantId ?? undefined : undefined;
-      const res: any = await batchQueryKnowledge(query.toString(), kbId, agentId, sourceTenantId);
-      if (res.data && Array.isArray(res.data)) {
-        res.data.forEach((f: any) => allNewFiles.push({ id: f.id, name: f.title || f.file_name }));
-      }
-    };
-
-    for (const [kbId, batchIds] of byKbId) {
-      await runBatch(batchIds, kbId);
-    }
-    if (noKbId.length > 0) {
-      await runBatch(noKbId, undefined, agentIdForBatch);
-    }
-    if (allNewFiles.length > 0) {
-      fileList.value = [...fileList.value, ...allNewFiles];
-    }
-  } catch (e) {
-    console.error("Failed to load files", e);
+const fileAgentSourceTenantId = computed(() => {
+  if (settingsStore.selectedAgentSourceTenantId) {
+    return selectedSharedAgent.value ? String(selectedSharedAgent.value.source_tenant_id) : undefined;
   }
+  // Older histories did not store the source. A custom agent ID can identify
+  // an unambiguous share; built-in IDs are reused across workspaces.
+  const id = selectedAgentId.value;
+  if (settingsStore._legacySessionAgentId !== id || isBuiltinAgent(id) || agents.value.some(agent => agent.id === id)) {
+    return undefined;
+  }
+  const tenants = new Set(orgStore.sharedAgents.filter(share => share.agent.id === id)
+    .map(share => String(share.source_tenant_id)));
+  return tenants.size === 1 ? tenants.values().next().value : undefined;
+});
+
+watch([selectedAgentId, fileAgentSourceTenantId], ([agentId, sourceTenantId]) => {
+  if (sourceTenantId) settingsStore.resolveLegacySessionAgentSource(agentId, sourceTenantId);
+}, { immediate: true });
+
+const loadFiles = async (signal: AbortSignal) => {
+  const cached = new Map(fileList.value.map(file => [file.id, file]));
+  const kbByFile = fileIdToKbId.value;
+  const missingIds = selectedFileIds.value.filter(id => {
+    const file = cached.get(id);
+    return !file || (!!kbByFile[id] && !!file.kbId && file.kbId !== kbByFile[id]);
+  });
+  if (!missingIds.length) return;
+  const sourceTenantId = fileAgentSourceTenantId.value;
+  const scope = sourceTenantId ? { agentId: selectedAgentId.value, sourceTenantId } : undefined;
+  const files = await restoreMentionFileNames(missingIds, kbByFile, scope, batchQueryKnowledge, signal);
+  if (signal.aborted || !files.length) return;
+  const restoredIds = new Set(files.map(file => file.id));
+  fileList.value = [...fileList.value.filter(file => !restoredIds.has(file.id)), ...files];
+  settingsStore.reconcileRestoredFileKbMap(files);
 };
 
 // A shared agent @mentions its OWNER's MCP services; this workspace's service
@@ -1001,8 +1002,13 @@ watch(currentAgentScope, () => {
   void loadMCPServices();
 });
 
-watch(selectedFileIds, () => {
-  loadFiles();
+watch([
+  selectedFileIds, () => selectedFileIds.value.map(id => fileIdToKbId.value[id]).join(','), selectedAgentId, fileAgentSourceTenantId,
+  () => props.sessionId, () => mentionAuth.user?.id, () => mentionAuth.selectedTenantId,
+], (_current, _previous, onCleanup) => {
+  const controller = new AbortController();
+  onCleanup(() => controller.abort());
+  void loadFiles(controller.signal);
 }, { immediate: true });
 
 const isWebSearchConfigured = computed(() => {
@@ -2026,12 +2032,11 @@ const onMentionSelect = (item: any) => {
   } else if (item.type === 'file') {
     settingsStore.addFile(item.id);
     if (item.kbId) {
-      fileIdToKbId.value[item.id] = item.kbId;
       settingsStore.setFileKbMap({ [item.id]: item.kbId });
     }
     // Add to local cache immediately
     if (!fileList.value.find(f => f.id === item.id)) {
-      fileList.value.push({ id: item.id, name: item.name });
+      fileList.value.push({ id: item.id, name: item.name, kbId: item.kbId, folderPath: item.folderPath });
     }
   } else if (item.type === 'tag') {
     if (item.kbId) {
@@ -2043,6 +2048,23 @@ const onMentionSelect = (item: any) => {
     settingsStore.addSkill(item.skillName || item.id);
   }
 
+  finishMentionSelection();
+};
+
+const applyMentionFileSelection = ({ contextKey, files, replaceWholeKbIds }: FileSelection) => {
+  if (!showMention.value || contextKey !== mentionBrowserContext.value.key) return;
+  try {
+    settingsStore.applyFileSelection(files, replaceWholeKbIds);
+  } catch {
+    MessagePlugin.error(t('common.saveFailed'));
+    return;
+  }
+  const applied = new Map(files.map(file => [file.id, file]));
+  fileList.value = [...fileList.value.filter(file => !applied.has(file.id)), ...applied.values()];
+  finishMentionSelection();
+};
+
+const finishMentionSelection = () => {
   const textarea = getTextareaEl();
   if (textarea) {
     // 如果是通过输入 @ 触发的，需要删除 @ 和后面的查询文字
@@ -2080,7 +2102,6 @@ const onMentionSelect = (item: any) => {
 
 const removeFile = (id: string) => {
   settingsStore.removeFile(id);
-  delete fileIdToKbId.value[id];
 };
 
 const toggleModelSelector = () => {
@@ -2170,17 +2191,6 @@ onMounted(() => {
     loadMCPServices(),
   ]);
   window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
-
-  // 从持久化恢复 fileId -> kbId，刷新后共享知识库文件可带 kb_id 拉取（仅保留当前仍选中的文件）
-  const persisted = settingsStore.settings.selectedFileKbMap;
-  const ids = settingsStore.settings.selectedFiles || [];
-  if (persisted && typeof persisted === 'object' && ids.length > 0) {
-    const next: Record<string, string> = {};
-    ids.forEach((id: string) => {
-      if (persisted[id]) next[id] = persisted[id];
-    });
-    fileIdToKbId.value = next;
-  }
 
   // 如果从知识库内部进入，自动选中该知识库
   const kbId = (route.params as any)?.kbId as string;
@@ -3021,9 +3031,18 @@ defineExpose({
         @update:files="uploadedAttachments = $event" />
 
       <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
-      <div v-if="$slots.chips || (!embeddedMode && allSelectedItems.length > 0)" class="selected-tags-inline">
+      <div v-if="$slots.chips || (!embeddedMode && allSelectedItems.length > 0)" class="selected-tags-inline"
+        :class="{ 'selected-tags-inline--expanded': !embeddedMode && expandedFileChips }">
         <slot name="chips" />
-        <span v-for="item in (embeddedMode ? [] : allSelectedItems)" :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
+        <button v-if="!embeddedMode && selectedFileIds.length > 6" type="button"
+          class="mention-chip mention-chip--file file-chip-summary" :aria-expanded="expandedFileChips"
+          @click="expandedFileChips = !expandedFileChips">
+          <t-icon name="file" />
+          {{ t('mentionBrowser.selectedFileCount', { count: selectedFileIds.length }) }}
+          <t-icon :name="expandedFileChips ? 'chevron-up' : 'chevron-down'" />
+        </button>
+        <span v-for="item in (embeddedMode ? [] : allSelectedItems.filter(item => !collapseFileChips || item.type !== 'file'))"
+          :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
           getMentionChipClass(item),
           { 'mention-chip--agent': item.isAgentConfigured }
         ]">
@@ -3355,10 +3374,10 @@ defineExpose({
         :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :searchable="isMentionTriggeredByButton"
         :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
         :browser-knowledge-bases="mentionBrowserKbs" :browser-context="mentionBrowserContext"
-        :browser-file-types="agentSupportedFileTypes" :browser-selected-ids="selectedFileIds"
+        :browser-file-types="agentSupportedFileTypes" :browser-selected-files="browserSelectedFiles"
         :browser-whole-kb-ids="settingsStore.getSelectedKnowledgeBases()" :browser-tag-kb-ids="selectedTags.map(tag => tag.kbId)"
         @update:query="onMentionSearchInput" @close="closeMentionFromPopup" @focus-input="getTextareaEl()?.focus()"
-        @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
+        @select="onMentionSelect" @apply-files="applyMentionFileSelection" @loadMore="loadMoreMentionItems" />
     </Teleport>
 
     <!-- 知识库选择下拉（使用 Teleport 传送到 body，避免父容器定位影响） -->
@@ -3496,6 +3515,17 @@ const getImgSrc = (url: string) => {
 
 .rich-input-container:has(.selected-tags-inline) :deep(.t-textarea__inner) {
   padding-top: 8px;
+}
+
+.selected-tags-inline--expanded {
+  max-height: 120px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.file-chip-summary {
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .mention-chip {

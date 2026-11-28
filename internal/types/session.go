@@ -354,6 +354,7 @@ func (c *SummaryConfig) Scan(value interface{}) error {
 // model, KB scope, etc. the user had selected last time.
 type SessionLastRequestState struct {
 	AgentID             string         `json:"agent_id,omitempty"`
+	AgentSourceTenantID uint64         `json:"agent_source_tenant_id,string,omitempty"`
 	AgentEnabled        bool           `json:"agent_enabled"`
 	ModelID             string         `json:"model_id,omitempty"`
 	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`

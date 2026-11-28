@@ -214,6 +214,18 @@ export default {
     }
   },
   mentionBrowser: {
+    selectMultiple: 'Select multiple',
+    selectionCount: '{count} selected',
+    noSelection: 'No files selected.',
+    applySelection: 'Apply',
+    wholeConflict: 'A whole knowledge base is selected for {names}. Keep the KB selection or replace it with the selected files. Other bases and tags stay selected.',
+    keepWhole: 'Keep KB selection',
+    taggedWholeConflict: 'For bases with selected tags, only selected files that match the tags are retrieved, even if you keep the KB selection. If none match, that base returns no results.',
+    useFiles: 'Use selected files',
+    unavailable: 'Some files are no longer available. Remove them from the selection or cancel.',
+    checkFailed: 'Could not verify the selected files. Try again.',
+    unavailableFile: 'Unavailable file',
+    selectedFileCount: '{count} selected files',
     browse: 'Browse by folder',
     path: 'Folder path',
     root: 'Root',

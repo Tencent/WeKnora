@@ -77,18 +77,20 @@ export function adaptFilePage(response: unknown, kb: BrowserKnowledgeBase) {
   if (!record(response) || response.success !== true || !Array.isArray(response.data) ||
     !count(response.total) || !count(response.page) || response.page < 1 ||
     !count(response.page_size) || response.page_size < 1) throw new Error('Invalid file page');
-  const items: BrowserFile[] = response.data.map((file: unknown) => {
-    if (!record(file) || typeof file.id !== 'string' || !file.id || file.knowledge_base_id !== kb.id ||
-      typeof file.folder_path !== 'string' || typeof (file.title || file.file_name) !== 'string') throw new Error('Invalid file');
-    return {
-      id: file.id, name: file.title || file.file_name, type: 'file', kbId: kb.id, kbName: kb.name,
-      orgName: kb.orgName, folderPath: file.folder_path, fileName: typeof file.file_name === 'string' ? file.file_name : '',
-      fileType: file.file_type || '',
-      sourceType: file.type || '', parseStatus: file.parse_status || '',
-    };
-  });
+  const items = response.data.map((file: unknown) => adaptBrowserFile(file, kb));
   return { items: [...new Map(items.map(item => [item.id, item])).values()], total: response.total,
     page: response.page, pageSize: response.page_size, hasMore: response.page * response.page_size < response.total };
+}
+
+export function adaptBrowserFile(file: unknown, kb: BrowserKnowledgeBase): BrowserFile {
+  if (!record(file) || typeof file.id !== 'string' || !file.id || file.knowledge_base_id !== kb.id ||
+    typeof file.folder_path !== 'string' || typeof (file.title || file.file_name) !== 'string') throw new Error('Invalid file');
+  return {
+    id: file.id, name: file.title || file.file_name, type: 'file', kbId: kb.id, kbName: kb.name,
+    orgName: kb.orgName, folderPath: file.folder_path, fileName: typeof file.file_name === 'string' ? file.file_name : '',
+    fileType: file.file_type || '',
+    sourceType: file.type || '', parseStatus: file.parse_status || '',
+  };
 }
 
 /** Match the extension aliases used by the existing global file search. */
