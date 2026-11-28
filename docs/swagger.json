@@ -29637,10 +29637,6 @@
                     "x-agent": true,
                     "x-agent-detail": true
                 },
-                "parallel_tool_calls": {
-                    "description": "Whether independent tool calls returned in the same ReAct round execute concurrently.",
-                    "type": "boolean"
-                },
                 "query_understand_model_id": {
                     "description": "Dedicated chat model ID for the query-understanding (rewrite + intent) step.\nWhen empty, the main conversation ModelID is used as a fallback.",
                     "type": "string"
