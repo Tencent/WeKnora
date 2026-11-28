@@ -2,6 +2,7 @@ import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -51,6 +52,36 @@ def _mask_secret(v: str) -> str:
     if len(v) <= 6:
         return "***"
     return f"{v[:2]}***{v[-2:]}"
+
+
+def _mask_proxy_credentials(v: str) -> str:
+    """Replace the password of a proxy URL with ``***`` and keep the rest.
+
+    ``http://user:pass@host:port`` is the usual way to hand a proxy its
+    credentials, so the host has to stay readable for the log to be useful
+    while the password must not survive it. Values without userinfo come back
+    unchanged, and anything urlsplit refuses falls back to ``_mask_secret``.
+    """
+    if not v or "@" not in v:
+        return v
+    # urlsplit needs a scheme to parse the netloc; a bare `user:pass@host:port`
+    # would otherwise be read as `scheme:path`.
+    candidate = v if "://" in v else f"//{v}"
+    try:
+        parts = urlsplit(candidate)
+        port = parts.port
+    except ValueError:
+        return _mask_secret(v)
+    if parts.password is None and parts.username is None:
+        return v
+    host = parts.hostname or ""
+    if port is not None:
+        host = f"{host}:{port}"
+    netloc = f"{parts.username}:***@{host}" if parts.username else f":***@{host}"
+    masked = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    # urlunsplit prefixes the netloc with `//`; the bare form we parsed did not
+    # have one, so drop it again.
+    return masked if "://" in v else masked[2:]
 
 
 @dataclass(frozen=True)
@@ -194,6 +225,11 @@ CONFIG = load_config()
 
 def dump_config(mask_secrets: bool = True) -> Dict[str, Any]:
     cfg = CONFIG
+    http_proxy = cfg.external_http_proxy
+    https_proxy = cfg.external_https_proxy
+    if mask_secrets:
+        http_proxy = _mask_proxy_credentials(http_proxy)
+        https_proxy = _mask_proxy_credentials(https_proxy)
     d: Dict[str, Any] = {
         "DOCREADER_GRPC_MAX_WORKERS": cfg.grpc_max_workers,
         "DOCREADER_GRPC_MAX_FILE_SIZE_MB": cfg.grpc_max_file_size_mb // (1024 * 1024),
@@ -219,8 +255,8 @@ def dump_config(mask_secrets: bool = True) -> Dict[str, Any]:
         "DOCREADER_PREPROCESS_MAX_PIXELS": cfg.preprocess_max_pixels,
         "DOCREADER_PREPROCESS_MAX_EDGE": cfg.preprocess_max_edge,
         "DOCREADER_PREPROCESS_PROBE_EDGE": cfg.preprocess_probe_edge,
-        "DOCREADER_EXTERNAL_HTTP_PROXY": cfg.external_http_proxy,
-        "DOCREADER_EXTERNAL_HTTPS_PROXY": cfg.external_https_proxy,
+        "DOCREADER_EXTERNAL_HTTP_PROXY": http_proxy,
+        "DOCREADER_EXTERNAL_HTTPS_PROXY": https_proxy,
         "DOCREADER_IMAGE_OUTPUT_DIR": cfg.image_output_dir,
     }
     return d

@@ -108,5 +108,63 @@ class FileSizeConfigTest(unittest.TestCase):
         self.assertIn("INFO:docreader.config:DOCREADER_GRPC_MAX_FILE_SIZE_MB=7", logs.output)
 
 
+class ProxySecretDumpTest(unittest.TestCase):
+    """The startup dump is logged, so a proxy password must not survive it."""
+
+    ENV = {
+        "DOCREADER_EXTERNAL_HTTP_PROXY": "http://alice:s3cret@proxy.local:8080",
+        "DOCREADER_EXTERNAL_HTTPS_PROXY": "http://bob:hunter2pass@secure.local:8443",
+    }
+
+    def _dumped(self, **kwargs):
+        with patch.dict(os.environ, self.ENV, clear=True):
+            cfg = config.load_config()
+        with patch.object(config, "CONFIG", cfg):
+            return config.dump_config(**kwargs)
+
+    def test_dump_hides_the_proxy_password_but_keeps_the_host(self):
+        dumped = self._dumped()
+
+        for key in ("DOCREADER_EXTERNAL_HTTP_PROXY", "DOCREADER_EXTERNAL_HTTPS_PROXY"):
+            self.assertNotIn("s3cret", dumped[key])
+            self.assertNotIn("hunter2pass", dumped[key])
+        self.assertEqual(
+            dumped["DOCREADER_EXTERNAL_HTTP_PROXY"], "http://alice:***@proxy.local:8080"
+        )
+        self.assertEqual(
+            dumped["DOCREADER_EXTERNAL_HTTPS_PROXY"], "http://bob:***@secure.local:8443"
+        )
+
+    def test_dump_can_still_return_the_raw_values_on_request(self):
+        dumped = self._dumped(mask_secrets=False)
+
+        self.assertEqual(
+            dumped["DOCREADER_EXTERNAL_HTTP_PROXY"], self.ENV["DOCREADER_EXTERNAL_HTTP_PROXY"]
+        )
+
+    def test_dump_leaves_a_proxy_without_credentials_alone(self):
+        with patch.dict(
+            os.environ, {"DOCREADER_EXTERNAL_HTTP_PROXY": "http://proxy.local:8080"}, clear=True
+        ):
+            cfg = config.load_config()
+        with patch.object(config, "CONFIG", cfg):
+            dumped = config.dump_config()
+
+        self.assertEqual(dumped["DOCREADER_EXTERNAL_HTTP_PROXY"], "http://proxy.local:8080")
+
+    def test_startup_log_does_not_carry_the_proxy_password(self):
+        with patch.dict(os.environ, self.ENV, clear=True):
+            cfg = config.load_config()
+        with patch.object(config, "CONFIG", cfg), self.assertLogs(
+            config.logger, level="INFO"
+        ) as logs:
+            config.print_config()
+
+        logged = "\n".join(logs.output)
+        self.assertIn("DOCREADER_EXTERNAL_HTTP_PROXY=http://alice:***@proxy.local:8080", logged)
+        self.assertNotIn("s3cret", logged)
+        self.assertNotIn("hunter2pass", logged)
+
+
 if __name__ == "__main__":
     unittest.main()
