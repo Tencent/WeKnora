@@ -859,6 +859,12 @@
                         "description": "创建者过滤，仅 mine 与 others 生效",
                         "name": "creator",
                         "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Include per-agent activity in the current workspace over the last 30 days",
+                        "name": "include_usage_summary",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -17362,6 +17368,12 @@
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Include per-agent activity in the current workspace over the last 30 days",
+                        "name": "include_usage_summary",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -20158,6 +20170,14 @@
                     "组织"
                 ],
                 "summary": "获取我可访问的共享智能体",
+                "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "Include per-agent activity in the current workspace over the last 30 days",
+                        "name": "include_usage_summary",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "智能体列表 + total",
@@ -27716,6 +27736,20 @@
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.AgentUsageSummary": {
+            "type": "object",
+            "properties": {
+                "answers": {
+                    "type": "integer"
+                },
+                "sessions": {
+                    "type": "integer"
+                },
+                "users": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.AnswerStrategy": {
             "type": "string",
             "enum": [
@@ -29406,6 +29440,9 @@
                 "updated_at": {
                     "type": "string",
                     "x-agent": true
+                },
+                "usage_summary": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AgentUsageSummary"
                 }
             }
         },

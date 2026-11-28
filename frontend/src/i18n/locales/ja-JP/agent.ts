@@ -717,6 +717,7 @@ export default {
     disabled: '無効',
     disable: '無効化',
     enable: '有効化',
+    usage30Days: '過去30日間 · 回答 {answers} 件 · セッション {sessions} 件 · 識別済みユーザー {users} 人',
     noDescription: '説明なし',
     selectAgent: 'エージェントを選択',
     noAgents: 'エージェントがありません',

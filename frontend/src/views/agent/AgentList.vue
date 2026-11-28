@@ -219,6 +219,7 @@
               <div class="card-content">
                 <div class="card-description" :class="{ 'is-empty': !agent.description }" :title="agent.description || $t('agent.noDescription')">
                   {{ agent.description || $t('agent.noDescription') }}</div>
+                <small class="agent-usage" v-if="agent.usage_summary">{{ $t('agent.usage30Days', agent.usage_summary) }}</small>
               </div>
               <div class="card-bottom">
                 <div class="bottom-left">
@@ -386,6 +387,7 @@
                 <div class="card-description" :class="{ 'is-empty': !agent.description }" :title="agent.description || $t('agent.noDescription')">
                   {{ agent.description || $t('agent.noDescription') }}
                 </div>
+                <small class="agent-usage" v-if="agent.usage_summary">{{ $t('agent.usage30Days', agent.usage_summary) }}</small>
               </div>
 
               <!-- 卡片底部 -->
@@ -523,6 +525,7 @@
               <div class="card-content">
                 <div class="card-description" :class="{ 'is-empty': !shared.agent?.description }" :title="shared.agent?.description || $t('agent.noDescription')">
                   {{ shared.agent?.description || $t('agent.noDescription') }}</div>
+                <small class="agent-usage" v-if="shared.agent?.usage_summary">{{ $t('agent.usage30Days', shared.agent.usage_summary) }}</small>
               </div>
               <div class="card-bottom">
                 <div class="bottom-left">
@@ -1080,9 +1083,9 @@ const applyAgentListData = (res: { data: CustomAgent[]; disabled_own_agent_ids: 
 const fetchList = (force = false) => {
   loading.value = true
   return Promise.all([
-    chatResources.fetchAgentsForList({ creator: creatorFilter.value }, force).then(applyAgentListData),
+    chatResources.fetchAgentsForList({ creator: creatorFilter.value, include_usage_summary: true }, force).then(applyAgentListData),
     orgStore.fetchOrganizations({ force }),
-    orgStore.fetchSharedAgents({ force }),
+    orgStore.fetchSharedAgents({ force, includeUsage: true }),
   ]).finally(() => { loading.value = false }).then(() => {
     void checkAndOpenEditModal()
     // 各空间智能体数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
@@ -1190,7 +1193,7 @@ watch(spaceSelection, (val) => {
   }
   spaceAgentsList.value = []
   spaceAgentsLoading.value = true
-  listOrganizationSharedAgents(val).then((res) => {
+  listOrganizationSharedAgents(val, true).then((res) => {
     if (requestSeq !== spaceAgentsRequestSeq) return
     if (res.success && res.data) {
       spaceAgentsList.value = res.data
@@ -1729,6 +1732,12 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
   .resource-card();
 
   .resource-card-quiet();
+}
+
+.agent-usage {
+  display: block;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-xs);
 }
 
 .builtin-badge {

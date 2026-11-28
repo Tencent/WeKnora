@@ -692,9 +692,9 @@ export async function removeAgentShare(agentId: string, shareId: string): Promis
   }
 }
 
-export async function listSharedAgents(): Promise<ApiResponse<SharedAgentInfo[]>> {
+export async function listSharedAgents(includeUsage = false): Promise<ApiResponse<SharedAgentInfo[]>> {
   try {
-    const response = await get('/api/v1/shared-agents')
+    const response = await get('/api/v1/shared-agents' + (includeUsage ? '?include_usage_summary=true' : ''))
     return response as unknown as ApiResponse<SharedAgentInfo[]>
   } catch (error: any) {
     return { success: false, message: error.message || 'Failed to list shared agents' }
@@ -704,9 +704,9 @@ export async function listSharedAgents(): Promise<ApiResponse<SharedAgentInfo[]>
 /**
  * List all agents in an organization (including those shared by current tenant), for list page when a space is selected.
  */
-export async function listOrganizationSharedAgents(orgId: string): Promise<ApiResponse<OrganizationSharedAgentItem[]>> {
+export async function listOrganizationSharedAgents(orgId: string, includeUsage = false): Promise<ApiResponse<OrganizationSharedAgentItem[]>> {
   try {
-    const response = await get(`/api/v1/organizations/${orgId}/shared-agents`)
+    const response = await get(`/api/v1/organizations/${orgId}/shared-agents` + (includeUsage ? '?include_usage_summary=true' : ''))
     return response as unknown as ApiResponse<OrganizationSharedAgentItem[]>
   } catch (error: any) {
     return { success: false, message: error.message || 'Failed to list organization shared agents' }

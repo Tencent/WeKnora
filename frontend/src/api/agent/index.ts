@@ -148,6 +148,7 @@ export interface CustomAgentConfig {
 
 // 智能体
 export interface CustomAgent {
+  usage_summary?: { answers: number; sessions: number; users: number };
   id: string;
   name: string;
   description?: string;
@@ -202,8 +203,12 @@ export function listAgents(params?: {
    * smart-reasoning when a user picks "Created by me".
    */
   creator?: 'all' | 'mine' | 'others';
+  include_usage_summary?: boolean;
 }) {
-  const qs = params?.creator && params.creator !== 'all' ? `?creator=${params.creator}` : '';
+  const query = new URLSearchParams();
+  if (params?.creator && params.creator !== 'all') query.set('creator', params.creator);
+  if (params?.include_usage_summary) query.set('include_usage_summary', 'true');
+  const qs = query.size ? `?${query}` : '';
   return get<{ data: CustomAgent[]; disabled_own_agent_ids?: string[] }>(`/api/v1/agents${qs}`);
 }
 

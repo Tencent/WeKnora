@@ -1573,6 +1573,7 @@ func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 // @Description  返回所有共享给当前用户所在组织的智能体
 // @Tags         组织
 // @Produce      json
+// @Param include_usage_summary query bool false "Include per-agent activity in the current workspace over the last 30 days"
 // @Success      200  {object}  handler.ListSharedAgentsResponse  "智能体列表 + total"
 // @Failure      500  {object}  apperrors.AppError         "服务器错误"
 // @Security     Bearer
@@ -1587,6 +1588,17 @@ func (h *OrganizationHandler) ListSharedAgents(c *gin.Context) {
 		logger.Errorf(ctx, "Failed to list shared agents: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to list shared agents"))
 		return
+	}
+	if c.Query("include_usage_summary") == "true" {
+		agents := make([]*types.CustomAgent, 0, len(list))
+		for _, item := range list {
+			agents = append(agents, item.Agent)
+		}
+		if err := h.customAgentService.PopulateUsageSummaries(ctx, agents); err != nil {
+			logger.Errorf(ctx, "Failed to load shared agent usage: %v", err)
+			_ = c.Error(apperrors.NewInternalServerError("Failed to load agent usage"))
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": list, "total": len(list)})
 }
@@ -1770,6 +1782,7 @@ func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Contex
 // @Tags         组织管理
 // @Produce      json
 // @Param        id  path  string  true  "组织ID"
+// @Param include_usage_summary query bool false "Include per-agent activity in the current workspace over the last 30 days"
 // @Success      200  {object}  handler.ListOrganizationSharedAgentsResponse
 // @Security     Bearer
 // @Router       /organizations/{id}/shared-agents [get]
@@ -1788,6 +1801,17 @@ func (h *OrganizationHandler) ListOrganizationSharedAgents(c *gin.Context) {
 		logger.Errorf(ctx, "Failed to list organization shared agents: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to list shared agents"))
 		return
+	}
+	if c.Query("include_usage_summary") == "true" {
+		agents := make([]*types.CustomAgent, 0, len(list))
+		for _, item := range list {
+			agents = append(agents, item.Agent)
+		}
+		if err := h.customAgentService.PopulateUsageSummaries(ctx, agents); err != nil {
+			logger.Errorf(ctx, "Failed to load shared agent usage: %v", err)
+			_ = c.Error(apperrors.NewInternalServerError("Failed to load agent usage"))
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": list, "total": len(list)})
 }

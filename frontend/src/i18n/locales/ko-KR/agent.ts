@@ -1795,6 +1795,7 @@ export default {
     disabled: '비활성화됨',
     disable: '비활성화',
     enable: '활성화',
+    usage30Days: '최근 30일 · 답변 {answers}개 · 세션 {sessions}개 · 식별된 사용자 {users}명',
     noDescription: '아직 설명이 없습니다',
     selectAgent: '에이전트 선택',
     noAgents: '아직 에이전트가 없습니다.',

@@ -3127,6 +3127,7 @@ type installAgentService struct {
 }
 
 type installCustomAgentService struct {
+	interfaces.CustomAgentService
 	fx *installFixture
 }
 

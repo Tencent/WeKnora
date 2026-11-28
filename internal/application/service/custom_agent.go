@@ -1281,3 +1281,40 @@ func (s *customAgentService) groupKBIDsByEffectiveTenant(
 	}
 	return out
 }
+
+// PopulateUsageSummaries enriches the list after the caller's visibility filters.
+func (s *customAgentService) PopulateUsageSummaries(ctx context.Context, agents []*types.CustomAgent) error {
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return ErrInvalidTenantID
+	}
+	ids := make([]string, 0, len(agents))
+	for _, a := range agents {
+		if a != nil {
+			ids = append(ids, a.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	end := time.Now().UTC()
+	rows, err := s.repo.AgentUsage(ctx, tenantID, ids, end.AddDate(0, 0, -30), end)
+	if err != nil {
+		return err
+	}
+	type key struct {
+		tenant uint64
+		id     string
+	}
+	summaries := make(map[key]types.AgentUsageSummary, len(rows))
+	for _, row := range rows {
+		summaries[key{row.AgentTenantID, row.AgentID}] = row.AgentUsageSummary
+	}
+	for _, a := range agents {
+		if a != nil {
+			summary := summaries[key{a.TenantID, a.ID}]
+			a.UsageSummary = &summary
+		}
+	}
+	return nil
+}
