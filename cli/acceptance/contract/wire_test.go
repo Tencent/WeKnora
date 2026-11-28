@@ -380,7 +380,12 @@ func TestSessionResumeRequiresCompletion(t *testing.T) {
 	}{
 		{name: "EOF after answer", wantExit: 1, wantCode: "local.sse_stream_aborted"},
 		{name: "complete", terminal: "data: {\"response_type\":\"complete\",\"done\":true}\n\n"},
-		{name: "terminal error", terminal: "data: {\"response_type\":\"error\",\"content\":\"generation failed\",\"done\":true}\n\n", wantExit: 7, wantCode: "server.error"},
+		{
+			name:     "terminal error",
+			terminal: `data: {"response_type":"error","content":"generation failed","done":true}` + "\n\n",
+			wantExit: 7,
+			wantCode: "server.error",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -390,12 +395,14 @@ func TestSessionResumeRequiresCompletion(t *testing.T) {
 					return
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
-				_, _ = w.Write([]byte("data: {\"response_type\":\"answer\",\"content\":\"partial answer\",\"done\":true}\n\n" + tc.terminal))
+				answer := `data: {"response_type":"answer","content":"partial answer","done":true}` + "\n\n"
+				_, _ = w.Write([]byte(answer + tc.terminal))
 			}))
 			defer srv.Close()
 
 			f := newTestFactory(t, srv, sdk.NewClient(srv.URL))
-			stdout, stderr, code := runCmd(t, f, "session", "resume", "session-1", "--message", "message-1", "--format", "ndjson")
+			stdout, stderr, code := runCmd(t, f,
+				"session", "resume", "session-1", "--message", "message-1", "--format", "ndjson")
 			if !strings.Contains(stdout, `"message_id":"message-1"`) ||
 				!strings.Contains(stdout, `"content":"partial answer"`) {
 				t.Fatalf("resume must emit the init and received answer on stdout, got %q (stderr %q)", stdout, stderr)
