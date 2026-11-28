@@ -8311,6 +8311,9 @@ definitions:
         type: boolean
       agent_id:
         type: string
+      agent_source_tenant_id:
+        example: "0"
+        type: string
       knowledge_base_ids:
         items:
           type: string

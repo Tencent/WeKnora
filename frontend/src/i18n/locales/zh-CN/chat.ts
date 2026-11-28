@@ -458,6 +458,18 @@ export default {
     }
   },
   mentionBrowser: {
+    selectMultiple: '多选文件',
+    selectionCount: '已选 {count} 项',
+    noSelection: '尚未选择文件。',
+    applySelection: '应用',
+    wholeConflict: '已整库选择 {names}。可保留知识库选择，或改用所选文件。其他知识库和标签仍保留。',
+    keepWhole: '保留知识库选择',
+    taggedWholeConflict: '同库已有标签时，即使保留知识库选择，也只会检索符合标签的所选文件。如果没有文件符合，该库不会返回结果。',
+    useFiles: '改用所选文件',
+    unavailable: '部分文件已不可用。请从选择中移除这些文件，或取消本次操作。',
+    checkFailed: '无法验证所选文件，请重试。',
+    unavailableFile: '文件不可用',
+    selectedFileCount: '已选 {count} 个文件',
     browse: '按目录浏览',
     path: '目录路径',
     root: '根目录',

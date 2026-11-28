@@ -46,6 +46,124 @@ function selectDefaults(store: ReturnType<typeof useSettingsStore>) {
   store.selectKnowledgeBases(['default-kb'])
 }
 
+test('applying a file selection writes a deduplicated scope once and replaces only confirmed conflicting KBs', (t) => {
+  const store = useSettingsStore(createPinia())
+  selectDefaults(store)
+  store.selectKnowledgeBases(['default-kb', 'other-kb', 'keep-whole-kb'])
+  store.settings.selectedFiles.push('removed-file', 'legacy-unmapped')
+  store.settings.selectedFileKbMap['removed-file'] = 'other-kb'
+  const write = t.mock.method(localStorage, 'setItem')
+
+  store.applyFileSelection([
+    { id: 'default-file' },
+    { id: 'new-file', kbId: 'keep-whole-kb' },
+    { id: 'same-name-different-id', kbId: 'keep-whole-kb' },
+    { id: 'new-file' },
+    { id: 'legacy-unmapped' },
+  ], ['default-kb', 'other-kb'])
+
+  const expectedIds = ['default-file', 'new-file', 'same-name-different-id', 'legacy-unmapped']
+  const expectedMap = {
+    'default-file': 'default-kb',
+    'new-file': 'keep-whole-kb',
+    'same-name-different-id': 'keep-whole-kb',
+  }
+  assert.deepEqual(store.getSelectedFiles(), expectedIds)
+  assert.deepEqual(store.settings.selectedFileKbMap, expectedMap)
+  assert.deepEqual(store.getSelectedKnowledgeBases(), ['other-kb', 'keep-whole-kb'])
+  assert.deepEqual(store.settings.selectedTags, [{ id: 'default-tag', name: 'Default tag', kbId: 'default-kb' }])
+  assert.deepEqual(store.settings.selectedMCPServices, ['default-mcp'])
+  assert.deepEqual(store.settings.selectedSkills, ['default-skill'])
+  assert.equal(write.mock.callCount(), 1)
+  assert.deepEqual(JSON.parse(items.get('WeKnora_settings')!), JSON.parse(JSON.stringify(store.settings)))
+})
+
+test('a failed bulk file selection write keeps the previous selection and whole-KB scope', (t) => {
+  const store = useSettingsStore(createPinia())
+  selectDefaults(store)
+  const before = JSON.stringify(store.settings)
+  const persistedBefore = items.get('WeKnora_settings')
+  t.mock.method(localStorage, 'setItem', () => { throw new Error('Storage unavailable') })
+
+  assert.throws(
+    () => store.applyFileSelection([{ id: 'new-file', kbId: 'default-kb' }], ['default-kb']),
+    /Storage unavailable/,
+  )
+  assert.equal(JSON.stringify(store.settings), before)
+  assert.equal(items.get('WeKnora_settings'), persistedBefore)
+})
+
+test('history restores file ownership from selected file mentions and keeps the legacy mapping fallback', () => {
+  const store = useSettingsStore(createPinia())
+  selectDefaults(store)
+  const persistedBefore = items.get('WeKnora_settings')
+
+  store.hydrateSessionInputState({
+    knowledge_ids: ['default-file', 'shared-file', 'unmapped'],
+    mentioned_items: [
+      { id: 'shared-file', type: 'file', kb_id: 'shared-kb' },
+      { id: 'unselected', type: 'file', kb_id: 'unselected-kb' },
+      { id: 'unmapped', type: 'tag', kb_id: 'tag-kb' },
+    ],
+  })
+
+  assert.deepEqual(store.getSelectedFiles(), ['default-file', 'shared-file', 'unmapped'])
+  assert.deepEqual(store.settings.selectedFileKbMap, { 'default-file': 'default-kb', 'shared-file': 'shared-kb' })
+  assert.deepEqual(store.getSelectedKnowledgeBases(), [])
+  assert.equal(items.get('WeKnora_settings'), persistedBefore)
+})
+
+test('history restores the session agent and source tenant without changing browser defaults', () => {
+  const store = useSettingsStore(createPinia())
+  store.selectAgent('default-shared', '12')
+  const storedDefaults = items.get('WeKnora_settings')
+
+  store.hydrateSessionInputState({ agent_id: 'session-shared', agent_source_tenant_id: '42' })
+
+  assert.equal(store.selectedAgentId, 'session-shared')
+  assert.equal(store.selectedAgentSourceTenantId, '42')
+  assert.equal(items.get('WeKnora_settings'), storedDefaults)
+  store.restoreDefaultsIfSnapshotted()
+  assert.equal(store.selectedAgentId, 'default-shared')
+  assert.equal(store.selectedAgentSourceTenantId, '12')
+})
+
+test('history without an Agent ID restores the local mode instead of the shared browser default', () => {
+  for (const enabled of [false, true]) {
+    const store = useSettingsStore(createPinia())
+    store.selectAgent('default-shared', '12')
+    store.hydrateSessionInputState({ agent_enabled: enabled, knowledge_ids: ['file'] })
+    assert.equal(store.selectedAgentId, enabled ? 'builtin-smart-reasoning' : 'builtin-quick-answer')
+    assert.equal(store.selectedAgentSourceTenantId, null)
+    assert.deepEqual(store.settings.selectedFiles, ['file'])
+    store.restoreDefaultsIfSnapshotted()
+    assert.equal(store.selectedAgentSourceTenantId, '12')
+  }
+})
+
+test('verified legacy share updates only the matching hydrated session agent', () => {
+  const store = useSettingsStore(createPinia())
+  store.selectAgent('default-shared', '12')
+  store.hydrateSessionInputState({ agent_id: 'legacy-shared', knowledge_ids: ['file'] })
+  store.resolveLegacySessionAgentSource('other-agent', '77')
+  assert.equal(store.selectedAgentSourceTenantId, null)
+  store.resolveLegacySessionAgentSource('legacy-shared', '42')
+  assert.equal(store.selectedAgentSourceTenantId, '42')
+  assert.deepEqual(store.settings.selectedFiles, ['file'])
+  store.restoreDefaultsIfSnapshotted()
+  assert.equal(store.selectedAgentSourceTenantId, '12')
+})
+
+test('legacy history without a source tenant does not reuse the default shared tenant', () => {
+  const store = useSettingsStore(createPinia())
+  store.selectAgent('default-shared', '12')
+
+  store.hydrateSessionInputState({ agent_id: 'local-session-agent' })
+
+  assert.equal(store.selectedAgentId, 'local-session-agent')
+  assert.equal(store.selectedAgentSourceTenantId, null)
+})
+
 test('a new chat clears prior KB and file mentions while keeping unrelated composer settings', () => {
   const store = useSettingsStore(createPinia())
   selectDefaults(store)

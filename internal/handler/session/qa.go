@@ -2106,6 +2106,9 @@ func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaR
 		WebSearchEnabled:    reqCtx.webSearchEnabled,
 		LocalBrowserEnabled: reqCtx.localBrowserEnabled,
 	}
+	if reqCtx.sharedAgentReadOnly {
+		state.AgentSourceTenantID = reqCtx.effectiveTenantID
+	}
 
 	if err := h.sessionService.UpdateSessionLastRequestState(ctx, reqCtx.sessionID, state); err != nil {
 		logger.Warnf(ctx, "persist last_request_state failed for session %s: %v", reqCtx.sessionID, err)

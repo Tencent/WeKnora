@@ -76,3 +76,28 @@ func TestQAReasoningEffortPropagationAndRestore(t *testing.T) {
 		})
 	}
 }
+
+func TestQAPersistsOnlyResolvedSharedAgentSource(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		sessions := &reasoningSessionStub{}
+		h := &Handler{sessionService: sessions}
+		const tenantID uint64 = 9007199254740993
+		rc := &qaRequestContext{
+			sessionID: "session", reqAgentID: "builtin-smart-reasoning",
+			effectiveTenantID: tenantID, sharedAgentReadOnly: shared,
+		}
+		h.persistLastRequestState(context.Background(), rc, qaModeAgent)
+		raw, err := sessions.state.Value()
+		require.NoError(t, err)
+		var restored types.SessionLastRequestState
+		require.NoError(t, restored.Scan(raw))
+		require.Equal(t, rc.reqAgentID, restored.AgentID)
+		if shared {
+			require.Equal(t, tenantID, restored.AgentSourceTenantID)
+			require.Contains(t, string(raw.([]byte)), `"agent_source_tenant_id":"9007199254740993"`)
+		} else {
+			require.Zero(t, restored.AgentSourceTenantID)
+			require.NotContains(t, string(raw.([]byte)), "agent_source_tenant_id")
+		}
+	}
+}

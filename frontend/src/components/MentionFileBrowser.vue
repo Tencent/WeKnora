@@ -1,30 +1,142 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { listKnowledgeFiles, listKnowledgeFolders } from '@/api/knowledge-base';
+import { batchQueryKnowledge, listKnowledgeFiles, listKnowledgeFolders } from '@/api/knowledge-base';
 import { useMentionFileBrowser, type FileBrowserContext } from '@/composables/useMentionFileBrowser';
 import { folderBreadcrumbs } from '@/views/knowledge/folderTree';
 import { fileDisabledReason, type BrowserFile, type BrowserKnowledgeBase } from '@/utils/mentionFileBrowser';
+import { UnavailableFilesError, validateFileDraft, type DraftFile, type FileSelection } from '@/utils/mentionFileSelection';
 
 const props = defineProps<{
   knowledgeBases: BrowserKnowledgeBase[];
   context: FileBrowserContext;
   supportedFileTypes: string[];
-  selectedFileIds: string[];
+  selectedFiles: DraftFile[];
   wholeKbIds: string[];
   tagKbIds: string[];
 }>();
-const emit = defineEmits<{ select: [file: BrowserFile]; back: [] }>();
+const emit = defineEmits<{ select: [file: BrowserFile]; apply: [selection: FileSelection]; back: []; cancel: [] }>();
 const { t } = useI18n();
 const browser = useMentionFileBrowser(() => props.context, { folders: listKnowledgeFolders, files: listKnowledgeFiles });
 const { state, folders } = browser;
 const searchInput = ref<HTMLInputElement>();
 const list = ref<HTMLElement>();
+const keepWholeButton = ref<HTMLButtonElement>();
+const selectionCountButton = ref<HTMLButtonElement>();
 const query = ref('');
 const composing = ref(false);
 const active = ref(0);
 const crumbs = computed(() => folderBreadcrumbs(state.path));
 const kbRows = computed(() => props.knowledgeBases.filter(kb => kb.name.toLowerCase().includes(query.value.trim().toLowerCase())));
+
+const draft = shallowRef<Map<string, DraftFile> | null>(null);
+const isMulti = computed(() => draft.value !== null);
+const reviewing = ref(false);
+const confirmingConflict = ref(false);
+const validating = ref(false);
+const selectionError = ref<'unavailable' | 'checkFailed' | ''>('');
+const unavailableIds = ref<string[]>([]);
+let pendingValidation: AbortController | undefined;
+let validationDecision: 'keep' | 'replace' | undefined;
+
+const selectedIds = computed(() => props.selectedFiles.map(file => file.id));
+const selectedIdSet = computed(() => new Set(selectedIds.value));
+const draftChanged = computed(() => draft.value !== null && (
+  draft.value.size !== selectedIdSet.value.size ||
+  [...draft.value.keys()].some(id => !selectedIdSet.value.has(id))
+));
+const conflictingKbIds = computed(() => {
+  const whole = new Set(props.wholeKbIds);
+  const conflicts = new Set<string>();
+  for (const file of draft.value?.values() || []) {
+    if (file.kbId && whole.has(file.kbId)) conflicts.add(file.kbId);
+  }
+  return [...conflicts].sort();
+});
+const conflictNames = computed(() => conflictingKbIds.value.map(id =>
+  props.knowledgeBases.find(kb => kb.id === id)?.name || id).join(', '));
+const draftHasTags = computed(() => [...(draft.value?.values() || [])]
+  .some(file => file.kbId && props.tagKbIds.includes(file.kbId)));
+
+function startSelection() {
+  draft.value = new Map(props.selectedFiles.map(file => [file.id, file]));
+  focusSearch();
+}
+function cancelSelection() {
+  pendingValidation?.abort();
+  emit('cancel');
+}
+function toggleFile(file: DraftFile) {
+  if (!draft.value || validating.value) return;
+  const next = new Map(draft.value);
+  if (next.has(file.id)) {
+    next.delete(file.id);
+    if (reviewing.value) {
+      const index = Math.min(active.value, next.size - 1);
+      void nextTick(() => {
+        const row = list.value?.querySelectorAll<HTMLElement>('.browser-row')[index];
+        (row || selectionCountButton.value)?.focus();
+      });
+    }
+  } else next.set(file.id, file);
+  draft.value = next;
+  confirmingConflict.value = false;
+  selectionError.value = '';
+}
+function toggleReview() {
+  reviewing.value = !reviewing.value;
+  if (reviewing.value) void nextTick(() => list.value?.scrollTo(0, 0));
+  else focusSearch();
+}
+async function applySelection(decision?: 'keep' | 'replace') {
+  if (!draft.value || !draftChanged.value || validating.value) return;
+  if (!decision && conflictingKbIds.value.length) {
+    confirmingConflict.value = true;
+    return;
+  }
+
+  const chosenConflicts = conflictingKbIds.value.join(',');
+  const context = props.context;
+  const controller = new AbortController();
+  pendingValidation = controller;
+  validationDecision = decision;
+  validating.value = true;
+  selectionError.value = '';
+  unavailableIds.value = [];
+  try {
+    const files = await validateFileDraft([...draft.value.values()], props.knowledgeBases, props.supportedFileTypes,
+      (ids, kbId, options) => {
+        const params = new URLSearchParams();
+        for (const id of ids) params.append('ids', id);
+        return batchQueryKnowledge(params.toString(), kbId, options.agent_id, options.agent_source_tenant_id, options.signal);
+      }, { ...context, signal: controller.signal });
+    if (controller.signal.aborted || props.context.key !== context.key) return;
+    // Authorization resolved legacy IDs without cached KB metadata. Any newly
+    // discovered conflict requires a fresh decision before committing.
+    draft.value = new Map(files.map(file => [file.id, file]));
+    if (conflictingKbIds.value.length && (!decision || conflictingKbIds.value.join(',') !== chosenConflicts)) {
+      confirmingConflict.value = true;
+      return;
+    }
+    emit('apply', { contextKey: context.key, files, replaceWholeKbIds: decision === 'replace' ? conflictingKbIds.value : [] });
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    confirmingConflict.value = false;
+    if (error instanceof UnavailableFilesError) {
+      unavailableIds.value = error.ids;
+      reviewing.value = true;
+      selectionError.value = 'unavailable';
+    } else {
+      selectionError.value = 'checkFailed';
+    }
+  } finally {
+    if (pendingValidation === controller) {
+      pendingValidation = undefined;
+      validationDecision = undefined;
+      validating.value = false;
+    }
+  }
+}
 
 interface BrowserRow {
   key: string;
@@ -37,7 +149,23 @@ interface BrowserRow {
   action: () => void;
 }
 
-const rows = computed<BrowserRow[]>(() => !state.kb
+const rows = computed<BrowserRow[]>(() => reviewing.value && draft.value
+  ? [...draft.value.values()].map(file => {
+    const kbName = props.knowledgeBases.find(kb => kb.id === file.kbId)?.name;
+    const path = file.folderPath === '' ? t('mentionBrowser.root') : file.folderPath;
+    const location = [kbName, path].filter(Boolean).join(' / ');
+    return {
+      key: file.id,
+      name: file.name,
+      subtext: unavailableIds.value.includes(file.id) ? t('mentionBrowser.unavailableFile') : location,
+      meta: '',
+      title: [file.name, location].filter(Boolean).join(' — '),
+      icon: 'file',
+      disabled: '',
+      action: () => toggleFile(file),
+    };
+  })
+  : !state.kb
   ? kbRows.value.map(kb => ({
     key: kb.id,
     name: kb.name,
@@ -63,7 +191,7 @@ const rows = computed<BrowserRow[]>(() => !state.kb
       };
     }),
     ...state.items.map(file => {
-      const disabled = fileDisabledReason(file, props.supportedFileTypes, props.selectedFileIds);
+      const disabled = fileDisabledReason(file, props.supportedFileTypes, isMulti.value ? [] : selectedIds.value);
       const location = file.folderPath || t('mentionBrowser.root');
       const disabledText = disabled ? t(`mentionBrowser.${disabled}`) : '';
       const subtext = disabledText || (query.value.trim() ? location : '');
@@ -85,8 +213,10 @@ function openKb(kb: BrowserKnowledgeBase) { query.value = ''; void browser.selec
 function navigate(path: string) { query.value = ''; void browser.navigate(path); focusSearch(); }
 function selectFile(file: BrowserFile) {
   if (!state.loading && !state.error && props.knowledgeBases.some(kb => kb.id === file.kbId) &&
-    state.items.some(item => item.id === file.id) && !fileDisabledReason(file, props.supportedFileTypes, props.selectedFileIds)) {
-    emit('select', file);
+    state.items.some(item => item.id === file.id) &&
+    !fileDisabledReason(file, props.supportedFileTypes, draft.value ? [] : selectedIds.value)) {
+    if (draft.value) toggleFile(file);
+    else emit('select', file);
   }
 }
 function search() { if (!composing.value && state.kb) void browser.search(query.value); }
@@ -96,7 +226,8 @@ function clearQuery() {
   focusSearch();
 }
 function back() {
-  if (query.value) { query.value = ''; if (state.kb) void browser.search(''); }
+  if (reviewing.value) reviewing.value = false;
+  else if (query.value) { query.value = ''; if (state.kb) void browser.search(''); }
   else if (state.path) navigate(crumbs.value.at(-2)?.path || '');
   else if (state.kb) browser.reset();
   else { emit('back'); return; }
@@ -123,8 +254,19 @@ function moveActive(delta: number) {
 function confirmActive() { const row = rows.value[active.value]; if (row && !row.disabled) row.action(); }
 function onKeydown(event: KeyboardEvent) {
   if (composing.value || event.isComposing || event.keyCode === 229) return;
-  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); back(); }
-  else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); moveActive(event.key === 'ArrowDown' ? 1 : -1); }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (draft.value) cancelSelection();
+    else back();
+  }
+  else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    const fromRow = event.target instanceof HTMLElement && event.target.classList.contains('browser-row');
+    if (event.target !== searchInput.value && !fromRow) return;
+    event.preventDefault();
+    moveActive(event.key === 'ArrowDown' ? 1 : -1);
+    if (fromRow) list.value?.querySelectorAll<HTMLElement>('.browser-row')[active.value]?.focus();
+  }
   else if (event.key === 'Enter' && event.target === searchInput.value) { event.preventDefault(); confirmActive(); }
   else if (event.key === 'Backspace' && event.target === searchInput.value && !query.value && state.kb) {
     event.preventDefault();
@@ -132,11 +274,57 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 watch(rows, () => { active.value = 0; });
-watch(() => props.context.key, () => { query.value = ''; emit('back'); }, { flush: 'sync' });
+watch(confirmingConflict, open => {
+  if (open) void nextTick(() => keepWholeButton.value?.focus());
+});
+watch(() => props.context.key, () => {
+  pendingValidation?.abort();
+  query.value = '';
+  emit('back');
+}, { flush: 'sync' });
+watch(() => props.selectedFiles, (files, previousFiles) => {
+  if (!draft.value) return;
+  if (files.length !== previousFiles.length || files.some((file, index) => file.id !== previousFiles[index].id)) {
+    cancelSelection();
+    return;
+  }
+
+  const next = new Map(draft.value);
+  const refreshed = new Set<string>();
+  for (const [index, file] of files.entries()) {
+    const previous = previousFiles[index];
+    // History can resolve a moved file while the picker is already open.
+    // Refresh retained entries without adding back files the user removed.
+    if (next.has(file.id) && (file.kbId !== previous.kbId || file.name !== previous.name ||
+        file.folderPath !== previous.folderPath)) {
+      next.set(file.id, file);
+      refreshed.add(file.id);
+    }
+  }
+  if (!refreshed.size) return;
+  const previousConflicts = conflictingKbIds.value.join(',');
+  draft.value = next;
+  const conflictsChanged = conflictingKbIds.value.join(',') !== previousConflicts;
+  if (conflictsChanged) confirmingConflict.value = false;
+  unavailableIds.value = unavailableIds.value.filter(id => !refreshed.has(id));
+  if (selectionError.value === 'unavailable' && !unavailableIds.value.length) selectionError.value = '';
+
+  if (pendingValidation && !pendingValidation.signal.aborted) {
+    const decision = conflictsChanged ? undefined : validationDecision;
+    pendingValidation.abort();
+    pendingValidation = undefined;
+    validationDecision = undefined;
+    validating.value = false;
+    // An old request may have used the previous KB. Recheck the current draft,
+    // and ask for a fresh decision if retaining the draft now affects other KBs.
+    void applySelection(decision);
+  }
+});
 watch(() => props.knowledgeBases.map(kb => kb.id).join(','), () => {
   if (state.kb && !props.knowledgeBases.some(kb => kb.id === state.kb?.id)) browser.reset();
 });
 onMounted(focusSearch);
+onBeforeUnmount(() => pendingValidation?.abort());
 defineExpose({ back, moveActive, confirmActive });
 </script>
 
@@ -154,9 +342,12 @@ defineExpose({ back, moveActive, confirmActive });
         <t-icon name="chevron-left" />
         <span class="browser-title">{{ state.kb ? state.kb.name : t('mentionBrowser.browse') }}</span>
       </button>
+      <button v-if="!draft" type="button" class="browser-multi-toggle" @click="startSelection">
+        {{ t('mentionBrowser.selectMultiple') }}
+      </button>
     </div>
 
-    <nav v-if="state.kb" class="browser-crumbs" :aria-label="t('mentionBrowser.path')">
+    <nav v-if="state.kb && !reviewing" class="browser-crumbs" :aria-label="t('mentionBrowser.path')">
       <button type="button" class="browser-crumb" @click="query = ''; browser.reset()">
         {{ t('common.knowledgeBase') }}
       </button>
@@ -182,7 +373,7 @@ defineExpose({ back, moveActive, confirmActive });
       </template>
     </nav>
 
-    <div class="browser-search-wrap">
+    <div v-if="!reviewing" class="browser-search-wrap">
       <span class="browser-search-icon">
         <t-loading v-if="state.loading" size="12px" />
         <t-icon v-else name="search" />
@@ -213,20 +404,20 @@ defineExpose({ back, moveActive, confirmActive });
     </div>
 
     <div
-      v-if="state.kb && (query.trim() || wholeKbIds.includes(state.kb.id) || tagKbIds.includes(state.kb.id))"
+      v-if="!reviewing && state.kb && (query.trim() || (!draft && (wholeKbIds.includes(state.kb.id) || tagKbIds.includes(state.kb.id))))"
       class="browser-hints"
     >
       <p v-if="query.trim()" class="browser-hint">{{ t('mentionBrowser.subtree') }}</p>
-      <p v-if="wholeKbIds.includes(state.kb.id) && !tagKbIds.includes(state.kb.id)" class="browser-hint">{{ t('mentionBrowser.wholeKb') }}</p>
-      <p v-if="tagKbIds.includes(state.kb.id)" class="browser-hint">{{ t('mentionBrowser.tags') }}</p>
+      <p v-if="!draft && wholeKbIds.includes(state.kb.id) && !tagKbIds.includes(state.kb.id)" class="browser-hint">{{ t('mentionBrowser.wholeKb') }}</p>
+      <p v-if="!draft && tagKbIds.includes(state.kb.id)" class="browser-hint">{{ t('mentionBrowser.tags') }}</p>
     </div>
 
-    <div ref="list" class="browser-list" :aria-busy="state.loading">
-      <div v-if="state.loading" class="browser-status" role="status">
+    <div ref="list" class="browser-list" :aria-busy="(!reviewing && state.loading) || validating">
+      <div v-if="!reviewing && state.loading" class="browser-status" role="status">
         <t-loading size="small" />
         <span>{{ t('common.loading') }}</span>
       </div>
-      <div v-else-if="state.error" class="browser-status browser-status--error" role="alert">
+      <div v-else-if="!reviewing && state.error" class="browser-status browser-status--error" role="alert">
         <p>{{ t(`mentionBrowser.${state.error}`) }}</p>
         <button type="button" class="browser-retry" @click="browser.retry">{{ t('mentionBrowser.retry') }}</button>
       </div>
@@ -237,13 +428,18 @@ defineExpose({ back, moveActive, confirmActive });
           type="button"
           class="browser-row"
           :class="{ active: active === index, 'is-disabled': !!row.disabled }"
-          :aria-disabled="!!row.disabled"
+          :role="draft && row.icon === 'file' ? 'checkbox' : undefined"
+          :aria-checked="draft && row.icon === 'file' ? draft.has(row.key) : undefined"
+          :aria-disabled="!!row.disabled || (validating && row.icon === 'file')"
           :title="row.title"
           @mouseenter="active = index"
           @focus="active = index"
           @click="!row.disabled && row.action()"
         >
-          <span class="browser-row__icon">
+          <span v-if="draft && row.icon === 'file'" class="browser-check" :class="{ 'is-checked': draft.has(row.key) }" aria-hidden="true">
+            <t-icon v-if="draft.has(row.key)" name="check" />
+          </span>
+          <span v-else class="browser-row__icon">
             <t-icon :name="row.icon" />
           </span>
           <span class="browser-label">
@@ -254,12 +450,12 @@ defineExpose({ back, moveActive, confirmActive });
           <t-icon v-if="row.icon === 'folder'" class="browser-row__arrow" name="chevron-right" />
         </button>
         <p v-if="!rows.length" class="browser-status">
-          {{ t(state.kb ? 'mentionBrowser.empty' : 'common.noResult') }}
+          {{ t(reviewing ? 'mentionBrowser.noSelection' : state.kb ? 'mentionBrowser.empty' : 'common.noResult') }}
         </p>
       </template>
     </div>
 
-    <div v-if="state.kb && !state.error && state.page" class="browser-pages">
+    <div v-if="!reviewing && state.kb && !state.error && state.page" class="browser-pages">
       <button type="button" class="browser-page-btn" :disabled="state.loading || state.page <= 1" @click="browser.previous">
         <t-icon name="chevron-left" />
         <span>{{ t('mentionBrowser.previous') }}</span>
@@ -269,6 +465,37 @@ defineExpose({ back, moveActive, confirmActive });
         <span>{{ t('mentionBrowser.next') }}</span>
         <t-icon name="chevron-right" />
       </button>
+    </div>
+    <div v-if="draft" class="browser-selection">
+      <p v-if="selectionError" class="browser-hint browser-selection-error" role="alert">
+        {{ t(`mentionBrowser.${selectionError}`) }}
+      </p>
+      <p v-if="draftHasTags" class="browser-hint">{{ t('mentionBrowser.tags') }}</p>
+      <p v-if="confirmingConflict" class="browser-hint" role="status">
+        {{ t('mentionBrowser.wholeConflict', { names: conflictNames }) }}
+      </p>
+      <p v-if="confirmingConflict && conflictingKbIds.some(id => tagKbIds.includes(id))"
+        class="browser-hint browser-tagged-conflict" role="status">
+        {{ t('mentionBrowser.taggedWholeConflict') }}
+      </p>
+      <div class="browser-selection-actions">
+        <button ref="selectionCountButton" type="button" class="browser-selection-count" :aria-pressed="reviewing" @click="toggleReview">
+          {{ t('mentionBrowser.selectionCount', { count: draft.size }) }}
+          <t-icon :name="reviewing ? 'chevron-down' : 'chevron-up'" />
+        </button>
+        <button type="button" class="browser-cancel" @click="cancelSelection">{{ t('common.cancel') }}</button>
+        <template v-if="confirmingConflict">
+          <button ref="keepWholeButton" type="button" class="browser-keep-whole" :disabled="validating" @click="applySelection('keep')">
+            {{ t('mentionBrowser.keepWhole') }}
+          </button>
+          <button type="button" class="browser-replace-whole browser-primary" :disabled="validating" @click="applySelection('replace')">
+            {{ t('mentionBrowser.useFiles') }}
+          </button>
+        </template>
+        <button v-else type="button" class="browser-apply browser-primary" :disabled="!draftChanged || validating" @click="applySelection()">
+          {{ t(validating ? 'common.loading' : 'mentionBrowser.applySelection') }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -287,7 +514,8 @@ defineExpose({ back, moveActive, confirmActive });
 .browser-crumbs,
 .browser-search-wrap,
 .browser-hints,
-.browser-pages {
+.browser-pages,
+.browser-selection {
   flex-shrink: 0;
 }
 
@@ -308,7 +536,84 @@ button:focus-visible {
 .browser-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 4px;
   padding: 2px 2px 4px;
+}
+
+.browser-multi-toggle {
+  flex-shrink: 0;
+  padding: 4px 6px;
+  font-size: var(--app-text-xs);
+  color: var(--td-brand-color);
+}
+
+.browser-multi-toggle:hover,
+.browser-selection-actions button:hover:not(:disabled):not(.browser-primary) {
+  background: var(--td-bg-color-secondarycontainer-hover);
+}
+
+.browser-check {
+  display: inline-flex;
+  flex: 0 0 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--app-radius-sm);
+}
+
+.browser-check.is-checked,
+.browser-primary {
+  border-color: var(--td-brand-color);
+  background: var(--td-brand-color);
+  color: var(--td-text-color-anti);
+}
+
+.browser-primary:hover:not(:disabled) {
+  background: var(--td-brand-color-hover);
+}
+
+.browser-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 4px 2px;
+  border-top: .5px solid var(--td-component-stroke);
+}
+
+.browser-selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.browser-selection .browser-hint:not(.browser-tagged-conflict) {
+  max-height: 52px;
+  overflow-y: auto;
+}
+
+.browser-selection-actions button {
+  min-height: 26px;
+  padding: 3px 6px;
+  font-size: var(--app-text-xs);
+}
+
+.browser-selection-actions button:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+.browser-selection-count {
+  margin-inline-end: auto;
+  color: var(--td-brand-color);
+}
+
+.browser-selection-error {
+  color: var(--td-error-color);
 }
 
 .browser-back {

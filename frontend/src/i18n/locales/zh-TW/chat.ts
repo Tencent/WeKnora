@@ -458,6 +458,18 @@ export default {
     }
   },
   mentionBrowser: {
+    selectMultiple: '多選檔案',
+    selectionCount: '已選 {count} 項',
+    noSelection: '尚未選取檔案。',
+    applySelection: '套用',
+    wholeConflict: '已整庫選取 {names}。可保留知識庫選取，或改用選取的檔案。其他知識庫和標籤仍會保留。',
+    keepWhole: '保留知識庫選取',
+    taggedWholeConflict: '同一知識庫已有標籤時，即使保留知識庫選取，也只會檢索符合標籤的已選檔案。如果沒有符合的檔案，該庫不會回傳結果。',
+    useFiles: '改用選取的檔案',
+    unavailable: '部分檔案已無法存取。請從選取中移除這些檔案，或取消本次操作。',
+    checkFailed: '無法驗證選取的檔案，請再試一次。',
+    unavailableFile: '檔案無法存取',
+    selectedFileCount: '已選 {count} 個檔案',
     browse: '按目錄瀏覽',
     path: '目錄路徑',
     root: '根目錄',

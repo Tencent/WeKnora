@@ -7,6 +7,13 @@ import test from 'node:test'
 const here = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(join(here, 'MentionSelector.vue'), 'utf8')
 
+test('whole-KB confirmation warns when a conflicting KB also has a tag', () => {
+  const browser = readFileSync(join(here, 'MentionFileBrowser.vue'), 'utf8')
+  assert.match(browser, /v-if="confirmingConflict && conflictingKbIds\.some\(id => tagKbIds\.includes\(id\)\)"[^>]*>\s*\{\{ t\('mentionBrowser\.taggedWholeConflict'\) \}\}/)
+  const locale = readFileSync(join(here, '../i18n/locales/en-US/chat.ts'), 'utf8')
+  assert.match(locale, /taggedWholeConflict: '.*only selected files that match the tags.*returns no results/)
+})
+
 test('MCP mention hover shows catalog summary instead of a bare name', () => {
   assert.match(source, /mentionDetail.mcpToolCount/)
   assert.match(source, /mentionDetail.mcpNotSynced/)

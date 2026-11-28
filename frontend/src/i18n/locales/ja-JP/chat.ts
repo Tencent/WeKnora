@@ -214,6 +214,18 @@ export default {
     }
   },
   mentionBrowser: {
+    selectMultiple: '複数選択',
+    selectionCount: '{count} 件を選択中',
+    noSelection: 'ファイルが選択されていません。',
+    applySelection: '適用',
+    wholeConflict: '{names} 全体が選択されています。ナレッジベースの選択を維持するか、選択したファイルに切り替えます。他のナレッジベースとタグは維持されます。',
+    keepWhole: 'ナレッジベース選択を維持',
+    taggedWholeConflict: 'タグを選択したナレッジベースでは、選択を維持しても、タグに一致する選択済みファイルだけを検索します。一致するファイルがなければ、そのナレッジベースから結果は返りません。',
+    useFiles: '選択ファイルを使用',
+    unavailable: '利用できなくなったファイルがあります。選択から外すか、操作をキャンセルしてください。',
+    checkFailed: 'ファイルを確認できませんでした。再試行してください。',
+    unavailableFile: '利用できないファイル',
+    selectedFileCount: '選択済みファイル {count} 件',
     browse: 'フォルダーで参照',
     path: 'フォルダーパス',
     root: 'ルート',
