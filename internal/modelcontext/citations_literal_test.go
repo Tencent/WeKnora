@@ -129,6 +129,21 @@ func TestRegisteredCitationInsideCodeStaysLiteral(t *testing.T) {
 	)
 }
 
+func TestRegisteredNonCitableLegacyRefIsRemoved(t *testing.T) {
+	registry := newSourceRegistry()
+	registry.registerChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"}, false)
+	text := `历史 <ref id="c1"/>。`
+
+	require.Equal(t, "历史 。", registry.ExpandText(text))
+	var streamed strings.Builder
+	decoder := newCitationStreamExpander(registry)
+	for i := range len(text) {
+		streamed.WriteString(decoder.Feed(text[i : i+1]))
+	}
+	streamed.WriteString(decoder.Flush())
+	require.Equal(t, "历史 。", streamed.String())
+}
+
 func TestDisabledCitationsStillDropProtocolRefs(t *testing.T) {
 	registry := newSourceRegistry(false)
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-1", DocumentTitle: "Doc"})
