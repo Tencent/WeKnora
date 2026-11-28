@@ -190,12 +190,8 @@ func (c *client) downloadAttachment(ctx context.Context, a attachment) ([]byte, 
 }
 
 func (c *client) syncPageAttachments(
-	ctx context.Context, root string, p page, next *cursor, h datasource.StreamHandler,
+	ctx context.Context, root string, p page, files []attachment, next *cursor, h datasource.StreamHandler,
 ) error {
-	files, err := c.attachments(ctx, p.ID)
-	if err != nil {
-		return fmt.Errorf("list attachments for Confluence page %s: %w", p.ID, err)
-	}
 	if next.Attachments == nil {
 		next.Attachments = map[string]map[string]string{}
 	}
@@ -248,7 +244,8 @@ func (c *client) syncPageAttachments(
 			stamp = a.Version.CreatedAt
 		}
 		item.UpdatedAt, _ = time.Parse(time.RFC3339, stamp)
-		item.Content, err = c.downloadAttachment(ctx, a)
+		content, err := c.downloadAttachment(ctx, a)
+		item.Content = content
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

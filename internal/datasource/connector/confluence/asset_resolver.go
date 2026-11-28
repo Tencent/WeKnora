@@ -61,7 +61,8 @@ const (
 // only performs the one step that pipeline cannot do on its own: an
 // authenticated fetch of Confluence-private bytes.
 type assetResolver struct {
-	client *client
+	client         *client
+	downloadFailed bool
 }
 
 func newAssetResolver(c *client) *assetResolver { return &assetResolver{client: c} }
@@ -77,6 +78,7 @@ func (r *assetResolver) Resolve(ctx context.Context, content string) string {
 	if r == nil || r.client == nil {
 		return content
 	}
+	r.downloadFailed = false
 	// Data URI images already in the page consume the same downstream budget as the
 	// ones we generate, so reserve room for them before inlining any private image.
 	available := maxPageImages - countDataURIImages(content)
@@ -192,6 +194,9 @@ func (r *assetResolver) downloadAll(ctx context.Context, urls []string) map[stri
 			data, mime, err := r.client.downloadImage(ctx, abs)
 			if err != nil {
 				logImageFailure(ctx, abs, err)
+				mu.Lock()
+				r.downloadFailed = true
+				mu.Unlock()
 				return
 			}
 			uri := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)

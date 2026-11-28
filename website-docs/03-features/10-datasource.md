@@ -217,7 +217,17 @@ Server/DC PAT 适用于 Confluence 7.9 及以上版本，可在个人设置的 P
 
 **可选附件同步**：在数据源配置的 `settings` 中设置 `"sync_attachments": true`（默认关闭；目前通过数据源 API 配置，没有新增 UI 开关）。连接器使用 [Server/DC 附件列表](https://developer.atlassian.com/server/confluence/rest/v951/api-group-attachments/) 或 [Cloud v2 附件列表](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-attachment/#api-pages-id-attachments-get)，将 `.pdf`、`.doc`、`.docx`、`.ppt`、`.pptx`、`.xls`、`.xlsx` 文件分别作为知识条目交给现有文件入库/解析流水线。其它扩展名不在此同步范围；内联图片继续沿用页面图片处理。
 
-**正文增量同步范围**：连接器根据页面自身的版本判断是否重新抓取正文。只更新正文里引用的附件图片，或只编辑被 `include` / `excerpt-include` 引用的其他页面时，如果当前页面的版本号未变，增量同步会跳过正文。这与上面的独立附件同步不同。要刷新受影响的正文，可以在 Confluence 保存该页面的新版本，或在 WeKnora 手动触发一次全量同步。
+**可选图片附件变更检查**：在数据源 API 的 `settings` 中设置 `"refresh_on_image_attachment_change": true`（默认关闭，无需开启 `sync_attachments`）。每轮同步会完整列举所选页面的附件，按图片附件的 ID、名称、类型和版本保存独立指纹。图片新增、替换、改名或删除时，即使页面正文版本不变，也会重新抓取该页面及其内联图片，并交给现有解析流水线。开启后的首次同步会刷新有图片附件的页面，建立基线。
+
+- **请求成本**：每个页面增加一次附件列表查询，附件较多时需要分页。与 `sync_attachments` 同时开启时复用同一份列表，不重复列举。图片未变化时不重新抓取正文或下载图片；无法取得图片版本时，每轮重新抓取，避免将未知版本误判为未变。
+- **失败恢复**：附件列表分页失败会中断同步；正文读取、同源图片下载或页面入库失败时，不确认该页面的新图片指纹，下次同步会重试。既有图片数量、字节预算及同源下载边界继续生效。
+- **范围限制**：检查的是附件所属页面。它不追踪其他页面对该附件的引用，也不追踪 `include` / `excerpt-include` 依赖；外部图片和原有图片预算以外的图片仍沿用现有处理。上述情况或未开启此选项时，可保存受影响页面的新版本，或在 WeKnora 手动触发全量同步。
+
+图片检查的非机密设置示例（合并到现有 `settings`，保留其它配置）：
+
+```json
+{"settings":{"refresh_on_image_attachment_change":true}}
+```
 
 - 单附件上限为 20 MiB，既检查声明大小，也限制实际读取字节数。文件 metadata 保留来源页面标题/URL、附件 ID/版本与更新时间。下载沿用现有 Confluence 同源及上下文路径边界；跨域下载重定向会明确失败，不放宽凭据转发规则。依赖跨域 CDN 重定向的 Cloud 文件目前不支持下载。
 - 附件独立于页面正文版本检查。页面不变但附件更新时，只重新导入变更附件；稳定子项 ID 保持来源身份，复用已有文件替换逻辑。入库确认不代表异步解析已完成，解析进度仍在文档任务中查看。

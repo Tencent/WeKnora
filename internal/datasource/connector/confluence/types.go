@@ -3,6 +3,7 @@ package confluence
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"strings"
 	"time"
@@ -243,6 +244,8 @@ type pageBody struct {
 // deletion baseline has to travel inside the checkpoint or retries would either
 // re-fetch everything or treat unprocessed pages as deletions.
 type cursor struct {
+	// PageImageVersions acknowledges images only after their page was ingested.
+	PageImageVersions       map[string]string            `json:"page_image_versions,omitempty"`
 	Attachments             map[string]map[string]string `json:"attachments,omitempty"`
 	AttachmentOwners        map[string]string            `json:"attachment_owners,omitempty"`
 	FullAttachmentsBaseline map[string]map[string]string `json:"full_attachments_baseline,omitempty"`
@@ -281,6 +284,7 @@ func (c cursor) clone() cursor {
 		owners[id] = owner
 	}
 	return cursor{
+		PageImageVersions:       maps.Clone(c.PageImageVersions),
 		Attachments:             clonePageMap(c.Attachments),
 		AttachmentOwners:        owners,
 		FullAttachmentsBaseline: clonePageMap(c.FullAttachmentsBaseline),
@@ -326,6 +330,7 @@ func prepareSyncCursors(old *types.SyncCursor, forceFull bool) (baseline, next c
 // rebuilt from scratch), so both maps must record the completed tombstone for
 // a retry to resume with the remaining candidates only.
 func removePageOwnership(c *cursor, pageID string) {
+	delete(c.PageImageVersions, pageID)
 	removeFromPageMap(c.SpacePages, pageID)
 	if c.FullSync {
 		removeFromPageMap(c.FullSyncBaseline, pageID)
